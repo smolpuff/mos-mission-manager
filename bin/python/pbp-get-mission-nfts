@@ -1,0 +1,93 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+PBP_MCP="${PROJECT_ROOT}/bin/pbp-mcp"
+
+ASSIGNED_MISSION_ID=""
+COOLDOWN_FILTER=""
+LIMIT=""
+OFFSET=""
+
+usage() {
+  cat <<USAGE
+Usage: $(basename "$0") [options]
+
+Calls get_mission_nfts via pbp-mcp (direct MCP, no LLM loop).
+
+Options:
+  --assigned-mission-id <id>  Filter NFTs valid for a specific assigned mission
+  --cooldown-filter <value>   Server cooldown filter value
+  --limit <n>                 Max NFTs to return
+  --offset <n>                Pagination offset
+  -h, --help                  Show this help
+USAGE
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --assigned-mission-id)
+      ASSIGNED_MISSION_ID="${2:-}"
+      shift 2
+      ;;
+    --cooldown-filter)
+      COOLDOWN_FILTER="${2:-}"
+      shift 2
+      ;;
+    --limit)
+      LIMIT="${2:-}"
+      shift 2
+      ;;
+    --offset)
+      OFFSET="${2:-}"
+      shift 2
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "Unknown argument: $1" >&2
+      usage >&2
+      exit 1
+      ;;
+  esac
+done
+
+JQ_EXPR='{}'
+if [[ -n "$ASSIGNED_MISSION_ID" ]]; then
+  JQ_EXPR+=' | .assignedMissionId = $assignedMissionId'
+fi
+if [[ -n "$COOLDOWN_FILTER" ]]; then
+  JQ_EXPR+=' | .cooldownFilter = $cooldownFilter'
+fi
+if [[ -n "$LIMIT" ]]; then
+  JQ_EXPR+=' | .limit = ($limit | tonumber)'
+fi
+if [[ -n "$OFFSET" ]]; then
+  JQ_EXPR+=' | .offset = ($offset | tonumber)'
+fi
+
+ARGS_JSON=$(jq -cn \
+  --arg assignedMissionId "$ASSIGNED_MISSION_ID" \
+  --arg cooldownFilter "$COOLDOWN_FILTER" \
+  --arg limit "$LIMIT" \
+  --arg offset "$OFFSET" \
+  "$JQ_EXPR")
+
+RESP="$("$PBP_MCP" call get_mission_nfts --args "$ARGS_JSON")"
+
+echo "$RESP" | jq '
+  if (.isError // false) == true then
+    error((.content[0].text // "get_mission_nfts failed"))
+  else
+    (
+      .structuredContent.nfts //
+      .structuredContent.walletNfts //
+      .structuredContent.items //
+      (if (.structuredContent | type) == "array" then .structuredContent else empty end) //
+      []
+    )
+  end
+'

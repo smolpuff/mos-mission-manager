@@ -1,0 +1,15 @@
+{
+  "name": "missions-mcp",
+  "version": "0.1.0",
+  "private": true,
+  "description": "MCP-first mission automation app bootstrap",
+  "main": "app.js",
+  "type": "commonjs",
+  "scripts": {
+    "dev": "nodemon app.js",
+    "dev:debug": "nodemon app.js --debug",
+    "start": "node app.js",
+    "start:debug": "node app.js --debug",
+    "build": "node -e \"const fs=require('fs');fs.mkdirSync('dist',{recursive:true});for(const f of ['app.js','config.json']){if(fs.existsSync(f))fs.copyFileSync(f,'dist/'+f);}console.log('Build complete: dist/');\""
+  }
+}

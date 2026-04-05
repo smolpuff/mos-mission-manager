@@ -1,0 +1,81 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Usage: choose the mission slot (1-based), then auto-pick an eligible NFT.
+if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+  echo "Usage: $0 <mission_slot_number>"
+  exit 0
+fi
+
+if [[ $# -ne 1 ]]; then
+  echo "Usage: $0 <mission_slot_number>" >&2
+  exit 1
+fi
+
+MISSION_SLOT="$1"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+PBP_MCP="${PROJECT_ROOT}/bin/pbp-mcp"
+cd "$PROJECT_ROOT"
+
+# Pull missions directly from MCP and normalize to a mission array.
+MISSIONS_RESP="$("$PBP_MCP" call get_user_missions --args '{}')"
+MISSIONS_JSON="$(echo "$MISSIONS_RESP" | jq -c '
+  if (.isError // false) == true then
+    error((.content[0].text // "get_user_missions failed"))
+  else
+    .structuredContent.missions.missions
+    // (if (.structuredContent.missions | type) == "array" then .structuredContent.missions else empty end)
+    // (if (.structuredContent | type) == "array" then .structuredContent else empty end)
+    // []
+  end
+')"
+
+# Mission slots are 1-based for users, but arrays are 0-based.
+INDEX=$((MISSION_SLOT - 1))
+MISSION_OBJ=$(echo "$MISSIONS_JSON" | jq -c ".[$INDEX]")
+if [[ -z "$MISSION_OBJ" || "$MISSION_OBJ" == "null" ]]; then
+  echo "No mission found in slot $MISSION_SLOT" >&2
+  exit 2
+fi
+
+MISSION_NAME=$(echo "$MISSION_OBJ" | jq -r '.name // .title // "(unnamed)"')
+ASSIGNED_MISSION_ID=$(echo "$MISSION_OBJ" | jq -r '.assignedMissionId // .assigned_mission_id // .id')
+
+if [[ -z "$ASSIGNED_MISSION_ID" || "$ASSIGNED_MISSION_ID" == "null" ]]; then
+  echo "Mission in slot $MISSION_SLOT does not have an assigned mission id." >&2
+  exit 3
+fi
+
+# Query mission-filtered wallet NFTs for this assigned mission.
+NFTS_RESP="$("$PBP_MCP" call get_mission_nfts --args "$(jq -cn --arg id "$ASSIGNED_MISSION_ID" '{assignedMissionId:$id}')")"
+NFTS_JSON="$(echo "$NFTS_RESP" | jq -c '
+  if (.isError // false) == true then
+    error((.content[0].text // "get_mission_nfts failed"))
+  else
+    (
+      .structuredContent.nfts //
+      .structuredContent.walletNfts //
+      .structuredContent.items //
+      (if (.structuredContent | type) == "array" then .structuredContent else empty end) //
+      []
+    )
+  end
+')"
+
+# Pick the first NFT that is not on cooldown; fallback to first if cooldown data is absent.
+NFT_TO_USE=$(echo "$NFTS_JSON" | jq -r '
+  def acct: .nftAccount // .tokenAddress // .mintAddress // .mint // .id // empty;
+  ([ .[] | select((.onCooldown // false) != true) | acct | select(length > 0) ] | first)
+  // ([ .[] | acct | select(length > 0) ] | first)
+  // empty
+')
+
+if [[ -z "$NFT_TO_USE" || "$NFT_TO_USE" == "null" ]]; then
+  echo "No assignable NFT found for mission '$MISSION_NAME' (slot $MISSION_SLOT)." >&2
+  exit 4
+fi
+
+echo "Assigning NFT $NFT_TO_USE to mission '$MISSION_NAME' (slot $MISSION_SLOT)"
+# Execute the actual assignment call.
+"$PBP_MCP" call assign_nft_to_mission --args "$(jq -cn --arg id "$ASSIGNED_MISSION_ID" --arg nft "$NFT_TO_USE" '{assignedMissionId:$id,nftAccount:$nft}')"

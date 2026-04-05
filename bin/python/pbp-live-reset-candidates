@@ -1,0 +1,278 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+PBP_MCP="${PROJECT_ROOT}/bin/pbp-mcp"
+
+INTERVAL=60
+TOP_N=5
+COLLECTION=""
+ASSIGNED_MISSION_ID=""
+CACHE_TTL=600
+ONCE=0
+NO_CLEAR=0
+CACHE_FILE="${TMPDIR:-/tmp}/pbp-reset-cost-cache.json"
+
+usage() {
+  cat <<USAGE
+Usage: $(basename "$0") [options]
+
+Live-watch cooldown NFTs and rank cheapest reset candidates (pbp-mcp direct calls only).
+
+Options:
+  --interval <sec>              Poll interval (default: 60)
+  --top <n>                     Number of candidates to print (default: 5)
+  --collection <name>           Exact collection filter
+  --assigned-mission-id <id>    Restrict NFT query to one assigned mission
+  --cache-ttl <sec>             Reuse reset quote per NFT for this many seconds (default: 600)
+  --cache-file <path>           Cache file path (default: /tmp/pbp-reset-cost-cache.json)
+  --once                        Run one poll and exit
+  --no-clear                    Do not clear terminal between polls
+  -h, --help                    Show this help
+USAGE
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --interval)
+      INTERVAL="${2:-}"
+      shift 2
+      ;;
+    --top)
+      TOP_N="${2:-}"
+      shift 2
+      ;;
+    --collection)
+      COLLECTION="${2:-}"
+      shift 2
+      ;;
+    --assigned-mission-id)
+      ASSIGNED_MISSION_ID="${2:-}"
+      shift 2
+      ;;
+    --cache-ttl)
+      CACHE_TTL="${2:-}"
+      shift 2
+      ;;
+    --cache-file)
+      CACHE_FILE="${2:-}"
+      shift 2
+      ;;
+    --once)
+      ONCE=1
+      shift
+      ;;
+    --no-clear)
+      NO_CLEAR=1
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "Unknown argument: $1" >&2
+      usage >&2
+      exit 1
+      ;;
+  esac
+done
+
+[[ -f "$CACHE_FILE" ]] || echo '{}' > "$CACHE_FILE"
+
+call_tool() {
+  local tool_name="$1"
+  local args_json="${2:-{}}"
+  "$PBP_MCP" call "$tool_name" --args "$args_json"
+}
+
+cache_get() {
+  local nft_id="$1"
+  local now_epoch="$2"
+  jq -r \
+    --arg id "$nft_id" \
+    --argjson now "$now_epoch" \
+    --argjson ttl "$CACHE_TTL" \
+    '
+    if has($id) and (($now - (.[$id].ts // 0)) < $ttl)
+      then .[$id].cost
+      else empty
+    end
+    ' "$CACHE_FILE"
+}
+
+cache_set() {
+  local nft_id="$1"
+  local cost="$2"
+  local now_epoch="$3"
+  local tmp
+  tmp="$(mktemp)"
+  jq \
+    --arg id "$nft_id" \
+    --argjson cost "$cost" \
+    --argjson ts "$now_epoch" \
+    '.[$id] = {cost: $cost, ts: $ts}' "$CACHE_FILE" > "$tmp"
+  mv "$tmp" "$CACHE_FILE"
+}
+
+quote_cost() {
+  local nft_id="$1"
+  local now_epoch="$2"
+  local cached
+  cached="$(cache_get "$nft_id" "$now_epoch" || true)"
+  if [[ -n "${cached}" ]]; then
+    printf '%s' "$cached"
+    return 0
+  fi
+
+  local args_json
+  args_json="$(jq -cn --arg nftId "$nft_id" '{nftId: $nftId}')"
+  local resp
+  if ! resp="$(call_tool prepare_nft_cooldown_reset "$args_json" 2>/dev/null)"; then
+    printf ''
+    return 0
+  fi
+
+  local cost
+  cost="$(echo "$resp" | jq -r '
+    .structuredContent.costPbp
+    // .structuredContent.resetCostPbp
+    // .structuredContent.resetCost
+    // .structuredContent.requiredPbp
+    // .structuredContent.price
+    // .structuredContent.fee
+    // .structuredContent.quote.totalPbp
+    // empty
+  ')"
+
+  if [[ -z "$cost" || "$cost" == "null" ]]; then
+    printf ''
+    return 0
+  fi
+
+  if jq -en --arg v "$cost" '$v|tonumber' >/dev/null 2>&1; then
+    local numeric
+    numeric="$(jq -nr --arg v "$cost" '$v|tonumber')"
+    cache_set "$nft_id" "$numeric" "$now_epoch"
+    printf '%s' "$numeric"
+    return 0
+  fi
+
+  printf ''
+}
+
+print_cycle() {
+  local now_epoch
+  now_epoch="$(date +%s)"
+  local now_human
+  now_human="$(date)"
+
+  if [[ "$NO_CLEAR" -eq 0 ]]; then
+    clear
+  fi
+
+  echo "$now_human"
+  echo "Source: pbp-mcp direct (llm_tokens=0)"
+  echo
+
+  local mission_args='{}'
+  local missions_raw=''
+  if missions_raw="$(call_tool get_user_missions "$mission_args" 2>/dev/null)"; then
+    echo "$missions_raw" | jq -r '
+      def missions: (.structuredContent.missions // .structuredContent // []);
+      "Missions: " + ((missions|length)|tostring)
+      + " | Claimable: "
+      + ((missions | map(select((.claimable // .isClaimable // false)==true)) | length)|tostring)
+    ' 2>/dev/null || true
+  else
+    echo "Missions: unavailable"
+  fi
+
+  local nft_args
+  nft_args="$(jq -cn --arg mid "$ASSIGNED_MISSION_ID" '
+    if ($mid|length) > 0 then {assignedMissionId: $mid} else {} end
+  ')"
+
+  local nfts_raw
+  if ! nfts_raw="$(call_tool get_mission_nfts "$nft_args")"; then
+    echo
+    echo "Failed to fetch NFTs. Re-auth may be required: ./bin/pbp-connect.sh"
+    return 1
+  fi
+
+  local cooldowned
+  cooldowned="$(echo "$nfts_raw" | jq -c --arg collection "$COLLECTION" '
+    (
+      .structuredContent.nfts //
+      .structuredContent.walletNfts //
+      .structuredContent.items //
+      .structuredContent //
+      []
+    )
+    | if type == "array" then . else [] end
+    | map({
+        nftId: (.id // .nftId // .nftAccount // .mintAddress // .tokenAddress // .mint // ""),
+        name: (.name // .nftName // .displayName // "unknown"),
+        collection: (.collection // .collectionName // .collectionKey // ""),
+        cooldown: (.cooldownSeconds // .cooldown // 0)
+      })
+    | map(select(.nftId != "" and (.cooldown|tonumber) > 0))
+    | if ($collection|length) > 0 then map(select(.collection == $collection)) else . end
+  ')"
+
+  local total
+  total="$(echo "$cooldowned" | jq 'length')"
+  echo "Cooldown NFTs matched: $total"
+  if [[ -n "$COLLECTION" ]]; then
+    echo "Collection filter: $COLLECTION"
+  fi
+  if [[ -n "$ASSIGNED_MISSION_ID" ]]; then
+    echo "Mission filter: $ASSIGNED_MISSION_ID"
+  fi
+  echo
+
+  if [[ "$total" -eq 0 ]]; then
+    echo "No cooldown NFTs match current filters."
+    return 0
+  fi
+
+  local table_file
+  table_file="$(mktemp)"
+  while IFS= read -r row; do
+    local nft_id name collection cooldown cost cost_sort
+    nft_id="$(echo "$row" | jq -r '.nftId')"
+    name="$(echo "$row" | jq -r '.name')"
+    collection="$(echo "$row" | jq -r '.collection')"
+    cooldown="$(echo "$row" | jq -r '.cooldown')"
+    cost="$(quote_cost "$nft_id" "$now_epoch")"
+    if [[ -z "$cost" ]]; then
+      cost_sort="999999999"
+      cost="N/A"
+    else
+      cost_sort="$cost"
+    fi
+    printf "%s\t%s\t%s\t%s\t%s\t%s\n" "$cost_sort" "$cooldown" "$nft_id" "$name" "$collection" "$cost" >> "$table_file"
+  done < <(echo "$cooldowned" | jq -c '.[]')
+
+  echo "Cheapest reset candidates:"
+  sort -n -k1,1 -k2,2 "$table_file" \
+    | head -n "$TOP_N" \
+    | awk -F '\t' '
+      BEGIN {
+        printf "%-10s %-10s %-24s %-28s %s\n", "Cost", "Cooldown", "NFT ID", "Name", "Collection"
+        printf "%-10s %-10s %-24s %-28s %s\n", "----------", "----------", "------------------------", "----------------------------", "----------"
+      }
+      {
+        printf "%-10s %-10s %-24s %-28s %s\n", $6, $2, substr($3,1,24), substr($4,1,28), $5
+      }
+    '
+
+  rm -f "$table_file"
+}
+
+while true; do
+  print_cycle || true
+  [[ "$ONCE" -eq 1 ]] && exit 0
+  sleep "$INTERVAL"
+done

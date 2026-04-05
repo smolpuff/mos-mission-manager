@@ -1,0 +1,60 @@
+#!/usr/bin/env node
+"use strict";
+
+const { callTool } = require("../lib/mcp");
+const { normalizeMissionsResponse } = require("../lib/pbp");
+
+async function safe(toolName, args) {
+  try {
+    const r = await callTool(toolName, args || {});
+    return { data: r.structuredContent ?? null, error: null };
+  } catch (e) {
+    return { data: null, error: e.message };
+  }
+}
+
+(async () => {
+  const now = new Date().toISOString();
+  const auth = await safe("who_am_i", {});
+  const missions = await safe("get_user_missions", {});
+  const wallet = await safe("get_wallet_summary", {});
+  const orders = await safe("get_user_orders", { page: 1 });
+  const catalog = await safe("get_mission_catalog", {});
+  const shop = await safe("get_shop_catalog", {});
+
+  const list = normalizeMissionsResponse({ structuredContent: missions.data });
+  const claimable = list.filter((m) => (m.claimable ?? m.isClaimable) === true).length;
+  const nearComplete = list.filter((m) => {
+    const p = Number(m.progress ?? m.currentProgress ?? 0) || 0;
+    const g = Number(m.goal ?? m.task_amount ?? 0) || 0;
+    return g > 0 && p < g && p >= g - 1;
+  }).length;
+  const cooldownBlocked = list.filter((m) => {
+    const c = Number(m.cooldownSeconds ?? m.cooldown ?? m.cooldown_minutes ?? 0) || 0;
+    return m.onCooldown === true || c > 0;
+  }).length;
+
+  const notes = [];
+  for (const [k, v] of Object.entries({ auth, missions, wallet, orders, catalog, shop })) {
+    if (v.error) notes.push(`${k}: ${v.error}`);
+  }
+
+  const out = {
+    ok: notes.length === 0,
+    generated_at: now,
+    auth: { connected: !auth.error, user: auth.data, error: auth.error },
+    missions,
+    wallet,
+    orders,
+    catalog,
+    shop,
+    summary: {
+      claimable_count: claimable,
+      near_complete_count: nearComplete,
+      cooldown_blocked_count: cooldownBlocked,
+      notes,
+    },
+  };
+
+  console.log(JSON.stringify(out, null, 2));
+})();

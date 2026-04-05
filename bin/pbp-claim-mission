@@ -1,0 +1,31 @@
+#!/usr/bin/env node
+"use strict";
+
+const { callTool } = require("../lib/mcp");
+const { getUserMissions, assignedMissionId } = require("../lib/pbp");
+
+function usage() {
+  console.log("Usage: pbp-claim-mission <mission_slot_number>");
+}
+
+(async () => {
+  try {
+    const arg = process.argv[2];
+    if (!arg || arg === "-h" || arg === "--help") {
+      usage();
+      process.exit(arg ? 0 : 1);
+    }
+    const slot = Number(arg);
+    if (!Number.isInteger(slot) || slot < 1) throw new Error("slot must be integer >= 1");
+    const missions = await getUserMissions();
+    const m = missions[slot - 1];
+    if (!m) throw new Error(`No mission found for slot ${slot}`);
+    const id = assignedMissionId(m);
+    if (!id) throw new Error(`Mission in slot ${slot} has no assigned mission id`);
+    const res = await callTool("claim_mission_reward", { assignedMissionId: id });
+    console.log(JSON.stringify(res, null, 2));
+  } catch (e) {
+    console.error(`error: ${e.message}`);
+    process.exit(2);
+  }
+})();

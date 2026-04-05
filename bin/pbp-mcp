@@ -1,0 +1,182 @@
+#!/usr/bin/env node
+"use strict";
+
+const {
+  DEFAULT_TOKEN_FILE,
+  discover,
+  toolsList,
+  callTool,
+  login,
+  audit,
+  readTokenFile,
+  clearTokenFile,
+  saveTokenFile,
+  getAccessToken,
+} = require("../lib/mcp");
+
+function usage() {
+  console.log(`Usage: pbp-mcp [--url <mcp_url>] [--token-file <path>] [--timeout <sec>] <command> [options]
+
+Commands:
+  tools [--json]
+  call <tool_name> [--args <json_object>]
+  whoami
+  login [--no-browser] [--login-timeout <sec>]
+  logout
+  token-set <access_token> [--scope <scope>] [--expires-in <sec>]
+  token-show [--reveal]
+  token-clear
+  audit
+`);
+}
+
+function parseArgs(argv) {
+  const out = {
+    url: process.env.PBP_MCP_URL,
+    tokenFile: process.env.PBP_TOKEN_FILE || DEFAULT_TOKEN_FILE,
+    timeoutMs: 30000,
+    rest: [],
+  };
+  for (let i = 0; i < argv.length; i += 1) {
+    const a = argv[i];
+    if (a === "--url") out.url = argv[++i];
+    else if (a === "--token-file") out.tokenFile = argv[++i];
+    else if (a === "--timeout") out.timeoutMs = Number(argv[++i]) * 1000;
+    else out.rest.push(a);
+  }
+  return out;
+}
+
+function parseJsonObject(raw, flagName = "--args") {
+  if (!raw) return {};
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error(`${flagName} must be valid JSON object`);
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error(`${flagName} must decode to JSON object`);
+  }
+  return parsed;
+}
+
+(async () => {
+  try {
+    const { url, tokenFile, timeoutMs, rest } = parseArgs(
+      process.argv.slice(2),
+    );
+    if (rest.length === 0 || rest[0] === "-h" || rest[0] === "--help") {
+      usage();
+      process.exit(0);
+    }
+
+    const cmd = rest[0];
+
+    if (cmd === "tools") {
+      const asJson = rest.includes("--json");
+      const discovered = await discover({ url, timeoutMs });
+      const tools = Array.isArray(discovered?.tools) ? discovered.tools : [];
+      if (asJson) {
+        console.log(JSON.stringify({ tools }, null, 2));
+      } else {
+        for (const t of tools) if (t?.name) console.log(t.name);
+      }
+      return;
+    }
+
+    if (cmd === "call") {
+      const toolName = rest[1];
+      if (!toolName) throw new Error("call requires <tool_name>");
+      let argsRaw = "{}";
+      for (let i = 2; i < rest.length; i += 1) {
+        if (rest[i] === "--args") argsRaw = rest[i + 1] ?? "{}";
+      }
+      const args = parseJsonObject(argsRaw);
+      const result = await callTool(toolName, args, {
+        url,
+        tokenFile,
+        timeoutMs,
+      });
+      console.log(JSON.stringify(result, null, 2));
+      return;
+    }
+
+    if (cmd === "whoami") {
+      const result = await callTool(
+        "who_am_i",
+        {},
+        { url, tokenFile, timeoutMs },
+      );
+      console.log(JSON.stringify(result, null, 2));
+      return;
+    }
+
+    if (cmd === "login") {
+      const noBrowser = rest.includes("--no-browser");
+      let loginTimeoutMs = 180000;
+      for (let i = 1; i < rest.length; i += 1) {
+        if (rest[i] === "--login-timeout")
+          loginTimeoutMs = Number(rest[i + 1]) * 1000;
+      }
+      const result = await login({
+        url,
+        tokenFile,
+        timeoutMs,
+        loginTimeoutMs,
+        noBrowser,
+      });
+      console.log(`Saved token to ${result.tokenFile}`);
+      return;
+    }
+
+    if (cmd === "logout" || cmd === "token-clear") {
+      clearTokenFile(tokenFile);
+      console.log(`Removed token file: ${tokenFile}`);
+      return;
+    }
+
+    if (cmd === "token-set") {
+      const token = rest[1];
+      if (!token) throw new Error("token-set requires <access_token>");
+      let scope = null;
+      let expiresIn = null;
+      for (let i = 2; i < rest.length; i += 1) {
+        if (rest[i] === "--scope") scope = rest[i + 1];
+        if (rest[i] === "--expires-in") expiresIn = Number(rest[i + 1]);
+      }
+      const payload = { access_token: token, token_type: "Bearer" };
+      if (scope) payload.scope = scope;
+      if (Number.isFinite(expiresIn)) payload.expires_in = expiresIn;
+      saveTokenFile(payload, tokenFile);
+      console.log(`Saved token to ${tokenFile}`);
+      return;
+    }
+
+    if (cmd === "token-show") {
+      const reveal = rest.includes("--reveal");
+      const record = readTokenFile(tokenFile);
+      if (!record) throw new Error(`no token file found at ${tokenFile}`);
+      if (!reveal && typeof record.access_token === "string") {
+        const t = record.access_token;
+        record.access_token =
+          t.length > 12 ? `${t.slice(0, 6)}...${t.slice(-4)}` : "***";
+      }
+      console.log(JSON.stringify(record, null, 2));
+      return;
+    }
+
+    if (cmd === "audit") {
+      const report = await audit({ url, tokenFile, timeoutMs });
+      console.log(JSON.stringify(report, null, 2));
+      return;
+    }
+
+    usage();
+    throw new Error(`unknown command ${cmd}`);
+  } catch (error) {
+    const msg = error && error.message ? error.message : String(error);
+    console.error(`error: ${msg}`);
+    process.exit(2);
+  }
+})();

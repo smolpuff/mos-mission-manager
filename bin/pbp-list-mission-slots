@@ -1,0 +1,30 @@
+#!/usr/bin/env node
+"use strict";
+
+const { getUserMissions, assignedMissionId } = require("../lib/pbp");
+
+(async () => {
+  try {
+    const missions = await getUserMissions();
+    if (!missions.length) {
+      console.error("No missions found.");
+      process.exit(1);
+    }
+    missions.forEach((m, i) => {
+      const slot = i + 1;
+      const name = m.name || m.title || "(unnamed)";
+      const id = assignedMissionId(m) || "-";
+      const progress = m.progress ?? m.current_progress ?? m.currentProgress ?? 0;
+      const goal = m.goal ?? m.task_amount ?? m.taskAmount ?? 0;
+      const reward = m.reward_value ?? m.rewardValue ?? m.prize_amount ?? 0;
+      console.log(`Slot ${slot}: ${name}`);
+      console.log(`  Assigned Mission ID: ${id}`);
+      console.log(`  Progress: ${progress} / ${goal}`);
+      console.log(`  Reward: ${reward} PBP`);
+      console.log("");
+    });
+  } catch (e) {
+    console.error(`error: ${e.message}`);
+    process.exit(2);
+  }
+})();

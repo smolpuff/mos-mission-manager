@@ -1,0 +1,2519 @@
+{
+  "generatedAt": "2026-04-04T22:40:53.065Z",
+  "sourceGeneratedAt": "2026-04-04T22:40:30.774Z",
+  "total": 8,
+  "missions": [
+    {
+      "missionId": "14d9329a-3d70-45b4-839b-1fc462ce7e3e",
+      "name": "Race!",
+      "game": "marbles",
+      "gameMode": "race",
+      "task": "complete",
+      "taskEvent": "races",
+      "location": "",
+      "platform": "twitch",
+      "description": "Complete Races",
+      "levels": [
+        {
+          "level": 1,
+          "taskAmount": 5,
+          "prize": "pbp_token",
+          "prizeAmount": 50,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "any"
+          ]
+        },
+        {
+          "level": 2,
+          "taskAmount": 5,
+          "prize": "pbp_token",
+          "prizeAmount": 50,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "any"
+          ]
+        },
+        {
+          "level": 3,
+          "taskAmount": 5,
+          "prize": "pbp_token",
+          "prizeAmount": 50,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "any"
+          ]
+        },
+        {
+          "level": 4,
+          "taskAmount": 5,
+          "prize": "pbp_token",
+          "prizeAmount": 50,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "any"
+          ]
+        },
+        {
+          "level": 5,
+          "taskAmount": 5,
+          "prize": "pbp_token",
+          "prizeAmount": 50,
+          "prizeType": "spl_token",
+          "refreshTime": 168,
+          "validCollections": [
+            "any"
+          ]
+        },
+        {
+          "level": 6,
+          "taskAmount": 7,
+          "prize": "pbp_token",
+          "prizeAmount": 75,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "any"
+          ]
+        },
+        {
+          "level": 7,
+          "taskAmount": 7,
+          "prize": "pbp_token",
+          "prizeAmount": 75,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "any"
+          ]
+        },
+        {
+          "level": 8,
+          "taskAmount": 7,
+          "prize": "pbp_token",
+          "prizeAmount": 75,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "any"
+          ]
+        },
+        {
+          "level": 9,
+          "taskAmount": 7,
+          "prize": "pbp_token",
+          "prizeAmount": 75,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "any"
+          ]
+        },
+        {
+          "level": 10,
+          "taskAmount": 7,
+          "prize": "pbp_token",
+          "prizeAmount": 75,
+          "prizeType": "spl_token",
+          "refreshTime": 168,
+          "validCollections": [
+            "any"
+          ]
+        },
+        {
+          "level": 11,
+          "taskAmount": 10,
+          "prize": "pbp_token",
+          "prizeAmount": 100,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "any"
+          ]
+        },
+        {
+          "level": 12,
+          "taskAmount": 10,
+          "prize": "pbp_token",
+          "prizeAmount": 100,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "any"
+          ]
+        },
+        {
+          "level": 13,
+          "taskAmount": 10,
+          "prize": "pbp_token",
+          "prizeAmount": 100,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "any"
+          ]
+        },
+        {
+          "level": 14,
+          "taskAmount": 10,
+          "prize": "pbp_token",
+          "prizeAmount": 100,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "any"
+          ]
+        },
+        {
+          "level": 15,
+          "taskAmount": 10,
+          "prize": "pbp_token",
+          "prizeAmount": 100,
+          "prizeType": "spl_token",
+          "refreshTime": 168,
+          "validCollections": [
+            "any"
+          ]
+        },
+        {
+          "level": 16,
+          "taskAmount": 15,
+          "prize": "pbp_token",
+          "prizeAmount": 125,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "any"
+          ]
+        },
+        {
+          "level": 17,
+          "taskAmount": 15,
+          "prize": "pbp_token",
+          "prizeAmount": 125,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "any"
+          ]
+        },
+        {
+          "level": 18,
+          "taskAmount": 15,
+          "prize": "pbp_token",
+          "prizeAmount": 125,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "any"
+          ]
+        },
+        {
+          "level": 19,
+          "taskAmount": 15,
+          "prize": "pbp_token",
+          "prizeAmount": 125,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "any"
+          ]
+        },
+        {
+          "level": 20,
+          "taskAmount": 15,
+          "prize": "pbp_token",
+          "prizeAmount": 250,
+          "prizeType": "spl_token",
+          "refreshTime": 168,
+          "validCollections": [
+            "iook",
+            "sook"
+          ]
+        }
+      ]
+    },
+    {
+      "missionId": "3a4abb5c-9ab1-416c-bf36-6b3ff28fb477",
+      "name": "Fight!",
+      "game": "marbles",
+      "gameMode": "royale",
+      "task": "complete",
+      "taskEvent": "royales",
+      "location": "",
+      "platform": "twitch",
+      "description": "Battle in Royales",
+      "levels": [
+        {
+          "level": 1,
+          "taskAmount": 7,
+          "prize": "pbp_token",
+          "prizeAmount": 50,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "any"
+          ]
+        },
+        {
+          "level": 2,
+          "taskAmount": 7,
+          "prize": "pbp_token",
+          "prizeAmount": 50,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "any"
+          ]
+        },
+        {
+          "level": 3,
+          "taskAmount": 7,
+          "prize": "pbp_token",
+          "prizeAmount": 50,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "any"
+          ]
+        },
+        {
+          "level": 4,
+          "taskAmount": 7,
+          "prize": "pbp_token",
+          "prizeAmount": 50,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "any"
+          ]
+        },
+        {
+          "level": 5,
+          "taskAmount": 7,
+          "prize": "pbp_token",
+          "prizeAmount": 50,
+          "prizeType": "spl_token",
+          "refreshTime": 168,
+          "validCollections": [
+            "any"
+          ]
+        },
+        {
+          "level": 6,
+          "taskAmount": 10,
+          "prize": "pbp_token",
+          "prizeAmount": 75,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "any"
+          ]
+        },
+        {
+          "level": 7,
+          "taskAmount": 10,
+          "prize": "pbp_token",
+          "prizeAmount": 75,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "any"
+          ]
+        },
+        {
+          "level": 8,
+          "taskAmount": 10,
+          "prize": "pbp_token",
+          "prizeAmount": 75,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "any"
+          ]
+        },
+        {
+          "level": 9,
+          "taskAmount": 10,
+          "prize": "pbp_token",
+          "prizeAmount": 75,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "any"
+          ]
+        },
+        {
+          "level": 10,
+          "taskAmount": 10,
+          "prize": "pbp_token",
+          "prizeAmount": 75,
+          "prizeType": "spl_token",
+          "refreshTime": 168,
+          "validCollections": [
+            "any"
+          ]
+        },
+        {
+          "level": 11,
+          "taskAmount": 13,
+          "prize": "pbp_token",
+          "prizeAmount": 100,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "any"
+          ]
+        },
+        {
+          "level": 12,
+          "taskAmount": 13,
+          "prize": "pbp_token",
+          "prizeAmount": 100,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "any"
+          ]
+        },
+        {
+          "level": 13,
+          "taskAmount": 13,
+          "prize": "pbp_token",
+          "prizeAmount": 100,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "any"
+          ]
+        },
+        {
+          "level": 14,
+          "taskAmount": 13,
+          "prize": "pbp_token",
+          "prizeAmount": 100,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "any"
+          ]
+        },
+        {
+          "level": 15,
+          "taskAmount": 13,
+          "prize": "pbp_token",
+          "prizeAmount": 100,
+          "prizeType": "spl_token",
+          "refreshTime": 168,
+          "validCollections": [
+            "any"
+          ]
+        },
+        {
+          "level": 16,
+          "taskAmount": 15,
+          "prize": "pbp_token",
+          "prizeAmount": 125,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "any"
+          ]
+        },
+        {
+          "level": 17,
+          "taskAmount": 15,
+          "prize": "pbp_token",
+          "prizeAmount": 125,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "any"
+          ]
+        },
+        {
+          "level": 18,
+          "taskAmount": 15,
+          "prize": "pbp_token",
+          "prizeAmount": 125,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "any"
+          ]
+        },
+        {
+          "level": 19,
+          "taskAmount": 15,
+          "prize": "pbp_token",
+          "prizeAmount": 125,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "any"
+          ]
+        },
+        {
+          "level": 20,
+          "taskAmount": 15,
+          "prize": "pbp_token",
+          "prizeAmount": 250,
+          "prizeType": "spl_token",
+          "refreshTime": 168,
+          "validCollections": [
+            "iook",
+            "sook"
+          ]
+        }
+      ]
+    },
+    {
+      "missionId": "3c8c693f-79b7-4545-9292-34ccb9e220ff",
+      "name": "Give da hurt!",
+      "game": "marbles",
+      "gameMode": "royale",
+      "task": "get",
+      "taskEvent": "Damage",
+      "location": "",
+      "platform": "twitch",
+      "description": "Deal damage to marbles in Royale",
+      "levels": [
+        {
+          "level": 1,
+          "taskAmount": 700,
+          "prize": "pbp_token",
+          "prizeAmount": 75,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "cndy",
+            "drip",
+            "greatgoats",
+            "iook",
+            "known",
+            "morb",
+            "morbie",
+            "mvone",
+            "sook",
+            "tonya",
+            "ug"
+          ]
+        },
+        {
+          "level": 2,
+          "taskAmount": 700,
+          "prize": "pbp_token",
+          "prizeAmount": 75,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "cndy",
+            "drip",
+            "greatgoats",
+            "iook",
+            "known",
+            "morb",
+            "morbie",
+            "mvone",
+            "sook",
+            "tonya",
+            "ug"
+          ]
+        },
+        {
+          "level": 3,
+          "taskAmount": 700,
+          "prize": "pbp_token",
+          "prizeAmount": 75,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "cndy",
+            "drip",
+            "greatgoats",
+            "iook",
+            "known",
+            "morb",
+            "morbie",
+            "mvone",
+            "sook",
+            "tonya",
+            "ug"
+          ]
+        },
+        {
+          "level": 4,
+          "taskAmount": 700,
+          "prize": "pbp_token",
+          "prizeAmount": 75,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "cndy",
+            "drip",
+            "greatgoats",
+            "iook",
+            "known",
+            "morb",
+            "morbie",
+            "mvone",
+            "sook",
+            "tonya",
+            "ug"
+          ]
+        },
+        {
+          "level": 5,
+          "taskAmount": 700,
+          "prize": "cc",
+          "prizeAmount": 15,
+          "prizeType": "vc",
+          "refreshTime": 168,
+          "validCollections": [
+            "any"
+          ]
+        },
+        {
+          "level": 6,
+          "taskAmount": 1400,
+          "prize": "pbp_token",
+          "prizeAmount": 100,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "cndy",
+            "drip",
+            "greatgoats",
+            "iook",
+            "known",
+            "morb",
+            "morbie",
+            "mvone",
+            "sook",
+            "tonya",
+            "ug"
+          ]
+        },
+        {
+          "level": 7,
+          "taskAmount": 1400,
+          "prize": "pbp_token",
+          "prizeAmount": 100,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "cndy",
+            "drip",
+            "greatgoats",
+            "iook",
+            "known",
+            "morb",
+            "morbie",
+            "mvone",
+            "sook",
+            "tonya",
+            "ug"
+          ]
+        },
+        {
+          "level": 8,
+          "taskAmount": 1400,
+          "prize": "pbp_token",
+          "prizeAmount": 100,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "cndy",
+            "drip",
+            "greatgoats",
+            "iook",
+            "known",
+            "morb",
+            "morbie",
+            "mvone",
+            "sook",
+            "tonya",
+            "ug"
+          ]
+        },
+        {
+          "level": 9,
+          "taskAmount": 1400,
+          "prize": "pbp_token",
+          "prizeAmount": 100,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "cndy",
+            "drip",
+            "greatgoats",
+            "iook",
+            "known",
+            "morb",
+            "morbie",
+            "mvone",
+            "sook",
+            "tonya",
+            "ug"
+          ]
+        },
+        {
+          "level": 10,
+          "taskAmount": 1400,
+          "prize": "tc",
+          "prizeAmount": 30,
+          "prizeType": "vc",
+          "refreshTime": 168,
+          "validCollections": [
+            "any"
+          ]
+        },
+        {
+          "level": 11,
+          "taskAmount": 2100,
+          "prize": "pbp_token",
+          "prizeAmount": 125,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "cndy",
+            "drip",
+            "greatgoats",
+            "iook",
+            "known",
+            "morb",
+            "morbie",
+            "mvone",
+            "sook",
+            "tonya",
+            "ug"
+          ]
+        },
+        {
+          "level": 12,
+          "taskAmount": 2100,
+          "prize": "pbp_token",
+          "prizeAmount": 125,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "cndy",
+            "drip",
+            "greatgoats",
+            "iook",
+            "known",
+            "morb",
+            "morbie",
+            "mvone",
+            "sook",
+            "tonya",
+            "ug"
+          ]
+        },
+        {
+          "level": 13,
+          "taskAmount": 2100,
+          "prize": "pbp_token",
+          "prizeAmount": 125,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "cndy",
+            "drip",
+            "greatgoats",
+            "iook",
+            "known",
+            "morb",
+            "morbie",
+            "mvone",
+            "sook",
+            "tonya",
+            "ug"
+          ]
+        },
+        {
+          "level": 14,
+          "taskAmount": 2100,
+          "prize": "pbp_token",
+          "prizeAmount": 125,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "cndy",
+            "drip",
+            "greatgoats",
+            "iook",
+            "known",
+            "morb",
+            "morbie",
+            "mvone",
+            "sook",
+            "tonya",
+            "ug"
+          ]
+        },
+        {
+          "level": 15,
+          "taskAmount": 2100,
+          "prize": "pbp_token",
+          "prizeAmount": 125,
+          "prizeType": "spl_token",
+          "refreshTime": 168,
+          "validCollections": [
+            "any"
+          ]
+        },
+        {
+          "level": 16,
+          "taskAmount": 2800,
+          "prize": "pbp_token",
+          "prizeAmount": 150,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "cndy",
+            "drip",
+            "greatgoats",
+            "iook",
+            "known",
+            "morb",
+            "morbie",
+            "mvone",
+            "sook",
+            "tonya",
+            "ug"
+          ]
+        },
+        {
+          "level": 17,
+          "taskAmount": 2800,
+          "prize": "pbp_token",
+          "prizeAmount": 150,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "cndy",
+            "drip",
+            "greatgoats",
+            "iook",
+            "known",
+            "morb",
+            "morbie",
+            "mvone",
+            "sook",
+            "tonya",
+            "ug"
+          ]
+        },
+        {
+          "level": 18,
+          "taskAmount": 2800,
+          "prize": "pbp_token",
+          "prizeAmount": 150,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "cndy",
+            "drip",
+            "greatgoats",
+            "iook",
+            "known",
+            "morb",
+            "morbie",
+            "mvone",
+            "sook",
+            "tonya",
+            "ug"
+          ]
+        },
+        {
+          "level": 19,
+          "taskAmount": 2800,
+          "prize": "pbp_token",
+          "prizeAmount": 150,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "cndy",
+            "drip",
+            "greatgoats",
+            "iook",
+            "known",
+            "morb",
+            "morbie",
+            "mvone",
+            "sook",
+            "tonya",
+            "ug"
+          ]
+        },
+        {
+          "level": 20,
+          "taskAmount": 2800,
+          "prize": "pbp_token",
+          "prizeAmount": 250,
+          "prizeType": "spl_token",
+          "refreshTime": 168,
+          "validCollections": [
+            "iook",
+            "sook"
+          ]
+        }
+      ]
+    },
+    {
+      "missionId": "a30513ab-27b2-4571-ab43-9b41c235843c",
+      "name": "Get Tilted for Points!",
+      "game": "marbles",
+      "gameMode": "tilted",
+      "task": "get",
+      "taskEvent": "Points",
+      "location": "",
+      "platform": "twitch",
+      "description": "Tilt for Points",
+      "levels": [
+        {
+          "level": 1,
+          "taskAmount": 300,
+          "prize": "pbp_token",
+          "prizeAmount": 75,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "cndy",
+            "drip",
+            "greatgoats",
+            "iook",
+            "known",
+            "morb",
+            "morbie",
+            "mvone",
+            "sook",
+            "tonya",
+            "ug"
+          ]
+        },
+        {
+          "level": 2,
+          "taskAmount": 300,
+          "prize": "pbp_token",
+          "prizeAmount": 75,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "cndy",
+            "drip",
+            "greatgoats",
+            "iook",
+            "known",
+            "morb",
+            "morbie",
+            "mvone",
+            "sook",
+            "tonya",
+            "ug"
+          ]
+        },
+        {
+          "level": 3,
+          "taskAmount": 300,
+          "prize": "pbp_token",
+          "prizeAmount": 75,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "cndy",
+            "drip",
+            "greatgoats",
+            "iook",
+            "known",
+            "morb",
+            "morbie",
+            "mvone",
+            "sook",
+            "tonya",
+            "ug"
+          ]
+        },
+        {
+          "level": 4,
+          "taskAmount": 300,
+          "prize": "pbp_token",
+          "prizeAmount": 75,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "cndy",
+            "drip",
+            "greatgoats",
+            "iook",
+            "known",
+            "morb",
+            "morbie",
+            "mvone",
+            "sook",
+            "tonya",
+            "ug"
+          ]
+        },
+        {
+          "level": 5,
+          "taskAmount": 300,
+          "prize": "cc",
+          "prizeAmount": 15,
+          "prizeType": "vc",
+          "refreshTime": 168,
+          "validCollections": [
+            "any"
+          ]
+        },
+        {
+          "level": 6,
+          "taskAmount": 325,
+          "prize": "pbp_token",
+          "prizeAmount": 100,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "cndy",
+            "drip",
+            "greatgoats",
+            "iook",
+            "known",
+            "morb",
+            "morbie",
+            "mvone",
+            "sook",
+            "tonya",
+            "ug"
+          ]
+        },
+        {
+          "level": 7,
+          "taskAmount": 325,
+          "prize": "pbp_token",
+          "prizeAmount": 100,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "cndy",
+            "drip",
+            "greatgoats",
+            "iook",
+            "known",
+            "morb",
+            "morbie",
+            "mvone",
+            "sook",
+            "tonya",
+            "ug"
+          ]
+        },
+        {
+          "level": 8,
+          "taskAmount": 325,
+          "prize": "pbp_token",
+          "prizeAmount": 100,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "cndy",
+            "drip",
+            "greatgoats",
+            "iook",
+            "known",
+            "morb",
+            "morbie",
+            "mvone",
+            "sook",
+            "tonya",
+            "ug"
+          ]
+        },
+        {
+          "level": 9,
+          "taskAmount": 325,
+          "prize": "pbp_token",
+          "prizeAmount": 100,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "cndy",
+            "drip",
+            "greatgoats",
+            "iook",
+            "known",
+            "morb",
+            "morbie",
+            "mvone",
+            "sook",
+            "tonya",
+            "ug"
+          ]
+        },
+        {
+          "level": 10,
+          "taskAmount": 325,
+          "prize": "tc",
+          "prizeAmount": 30,
+          "prizeType": "vc",
+          "refreshTime": 168,
+          "validCollections": [
+            "any"
+          ]
+        },
+        {
+          "level": 11,
+          "taskAmount": 350,
+          "prize": "pbp_token",
+          "prizeAmount": 125,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "cndy",
+            "drip",
+            "greatgoats",
+            "iook",
+            "known",
+            "morb",
+            "morbie",
+            "mvone",
+            "sook",
+            "tonya",
+            "ug"
+          ]
+        },
+        {
+          "level": 12,
+          "taskAmount": 350,
+          "prize": "pbp_token",
+          "prizeAmount": 125,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "cndy",
+            "drip",
+            "greatgoats",
+            "iook",
+            "known",
+            "morb",
+            "morbie",
+            "mvone",
+            "sook",
+            "tonya",
+            "ug"
+          ]
+        },
+        {
+          "level": 13,
+          "taskAmount": 350,
+          "prize": "pbp_token",
+          "prizeAmount": 125,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "cndy",
+            "drip",
+            "greatgoats",
+            "iook",
+            "known",
+            "morb",
+            "morbie",
+            "mvone",
+            "sook",
+            "tonya",
+            "ug"
+          ]
+        },
+        {
+          "level": 14,
+          "taskAmount": 350,
+          "prize": "pbp_token",
+          "prizeAmount": 125,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "cndy",
+            "drip",
+            "greatgoats",
+            "iook",
+            "known",
+            "morb",
+            "morbie",
+            "mvone",
+            "sook",
+            "tonya",
+            "ug"
+          ]
+        },
+        {
+          "level": 15,
+          "taskAmount": 350,
+          "prize": "pbp_token",
+          "prizeAmount": 125,
+          "prizeType": "spl_token",
+          "refreshTime": 168,
+          "validCollections": [
+            "any"
+          ]
+        },
+        {
+          "level": 16,
+          "taskAmount": 375,
+          "prize": "pbp_token",
+          "prizeAmount": 150,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "cndy",
+            "drip",
+            "greatgoats",
+            "iook",
+            "known",
+            "morb",
+            "morbie",
+            "mvone",
+            "sook",
+            "tonya",
+            "ug"
+          ]
+        },
+        {
+          "level": 17,
+          "taskAmount": 375,
+          "prize": "pbp_token",
+          "prizeAmount": 150,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "cndy",
+            "drip",
+            "greatgoats",
+            "iook",
+            "known",
+            "morb",
+            "morbie",
+            "mvone",
+            "sook",
+            "tonya",
+            "ug"
+          ]
+        },
+        {
+          "level": 18,
+          "taskAmount": 375,
+          "prize": "pbp_token",
+          "prizeAmount": 150,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "cndy",
+            "drip",
+            "greatgoats",
+            "iook",
+            "known",
+            "morb",
+            "morbie",
+            "mvone",
+            "sook",
+            "tonya",
+            "ug"
+          ]
+        },
+        {
+          "level": 19,
+          "taskAmount": 375,
+          "prize": "pbp_token",
+          "prizeAmount": 150,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "cndy",
+            "drip",
+            "greatgoats",
+            "iook",
+            "known",
+            "morb",
+            "morbie",
+            "mvone",
+            "sook",
+            "tonya",
+            "ug"
+          ]
+        },
+        {
+          "level": 20,
+          "taskAmount": 375,
+          "prize": "pbp_token",
+          "prizeAmount": 250,
+          "prizeType": "spl_token",
+          "refreshTime": 168,
+          "validCollections": [
+            "iook",
+            "sook"
+          ]
+        }
+      ]
+    },
+    {
+      "missionId": "b514851e-521e-4216-babb-2f357d9e5832",
+      "name": "Crumble da Ballz",
+      "game": "marbles",
+      "gameMode": "royale",
+      "task": "get",
+      "taskEvent": "Kills",
+      "location": "",
+      "platform": "twitch",
+      "description": "Kill in Royale",
+      "levels": [
+        {
+          "level": 1,
+          "taskAmount": 15,
+          "prize": "pbp_token",
+          "prizeAmount": 75,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "cndy",
+            "drip",
+            "greatgoats",
+            "iook",
+            "known",
+            "morb",
+            "morbie",
+            "mvone",
+            "sook",
+            "tonya",
+            "ug"
+          ]
+        },
+        {
+          "level": 2,
+          "taskAmount": 15,
+          "prize": "pbp_token",
+          "prizeAmount": 75,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "cndy",
+            "drip",
+            "greatgoats",
+            "iook",
+            "known",
+            "morb",
+            "morbie",
+            "mvone",
+            "sook",
+            "tonya",
+            "ug"
+          ]
+        },
+        {
+          "level": 3,
+          "taskAmount": 15,
+          "prize": "pbp_token",
+          "prizeAmount": 75,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "cndy",
+            "drip",
+            "greatgoats",
+            "iook",
+            "known",
+            "morb",
+            "morbie",
+            "mvone",
+            "sook",
+            "tonya",
+            "ug"
+          ]
+        },
+        {
+          "level": 4,
+          "taskAmount": 15,
+          "prize": "pbp_token",
+          "prizeAmount": 75,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "cndy",
+            "drip",
+            "greatgoats",
+            "iook",
+            "known",
+            "morb",
+            "morbie",
+            "mvone",
+            "sook",
+            "tonya",
+            "ug"
+          ]
+        },
+        {
+          "level": 5,
+          "taskAmount": 15,
+          "prize": "cc",
+          "prizeAmount": 15,
+          "prizeType": "vc",
+          "refreshTime": 168,
+          "validCollections": [
+            "any"
+          ]
+        },
+        {
+          "level": 6,
+          "taskAmount": 20,
+          "prize": "pbp_token",
+          "prizeAmount": 100,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "cndy",
+            "drip",
+            "greatgoats",
+            "iook",
+            "known",
+            "morb",
+            "morbie",
+            "mvone",
+            "sook",
+            "tonya",
+            "ug"
+          ]
+        },
+        {
+          "level": 7,
+          "taskAmount": 20,
+          "prize": "pbp_token",
+          "prizeAmount": 100,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "cndy",
+            "drip",
+            "greatgoats",
+            "iook",
+            "known",
+            "morb",
+            "morbie",
+            "mvone",
+            "sook",
+            "tonya",
+            "ug"
+          ]
+        },
+        {
+          "level": 8,
+          "taskAmount": 20,
+          "prize": "pbp_token",
+          "prizeAmount": 100,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "cndy",
+            "drip",
+            "greatgoats",
+            "iook",
+            "known",
+            "morb",
+            "morbie",
+            "mvone",
+            "sook",
+            "tonya",
+            "ug"
+          ]
+        },
+        {
+          "level": 9,
+          "taskAmount": 20,
+          "prize": "pbp_token",
+          "prizeAmount": 100,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "cndy",
+            "drip",
+            "greatgoats",
+            "iook",
+            "known",
+            "morb",
+            "morbie",
+            "mvone",
+            "sook",
+            "tonya",
+            "ug"
+          ]
+        },
+        {
+          "level": 10,
+          "taskAmount": 20,
+          "prize": "tc",
+          "prizeAmount": 30,
+          "prizeType": "vc",
+          "refreshTime": 168,
+          "validCollections": [
+            "any"
+          ]
+        },
+        {
+          "level": 11,
+          "taskAmount": 25,
+          "prize": "pbp_token",
+          "prizeAmount": 125,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "cndy",
+            "drip",
+            "greatgoats",
+            "iook",
+            "known",
+            "morb",
+            "morbie",
+            "mvone",
+            "sook",
+            "tonya",
+            "ug"
+          ]
+        },
+        {
+          "level": 12,
+          "taskAmount": 25,
+          "prize": "pbp_token",
+          "prizeAmount": 125,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "cndy",
+            "drip",
+            "greatgoats",
+            "iook",
+            "known",
+            "morb",
+            "morbie",
+            "mvone",
+            "sook",
+            "tonya",
+            "ug"
+          ]
+        },
+        {
+          "level": 13,
+          "taskAmount": 25,
+          "prize": "pbp_token",
+          "prizeAmount": 125,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "cndy",
+            "drip",
+            "greatgoats",
+            "iook",
+            "known",
+            "morb",
+            "morbie",
+            "mvone",
+            "sook",
+            "tonya",
+            "ug"
+          ]
+        },
+        {
+          "level": 14,
+          "taskAmount": 25,
+          "prize": "pbp_token",
+          "prizeAmount": 125,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "cndy",
+            "drip",
+            "greatgoats",
+            "iook",
+            "known",
+            "morb",
+            "morbie",
+            "mvone",
+            "sook",
+            "tonya",
+            "ug"
+          ]
+        },
+        {
+          "level": 15,
+          "taskAmount": 25,
+          "prize": "pbp_token",
+          "prizeAmount": 125,
+          "prizeType": "spl_token",
+          "refreshTime": 168,
+          "validCollections": [
+            "any"
+          ]
+        },
+        {
+          "level": 16,
+          "taskAmount": 30,
+          "prize": "pbp_token",
+          "prizeAmount": 150,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "cndy",
+            "drip",
+            "greatgoats",
+            "iook",
+            "known",
+            "morb",
+            "morbie",
+            "mvone",
+            "sook",
+            "tonya",
+            "ug"
+          ]
+        },
+        {
+          "level": 17,
+          "taskAmount": 30,
+          "prize": "pbp_token",
+          "prizeAmount": 150,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "cndy",
+            "drip",
+            "greatgoats",
+            "iook",
+            "known",
+            "morb",
+            "morbie",
+            "mvone",
+            "sook",
+            "tonya",
+            "ug"
+          ]
+        },
+        {
+          "level": 18,
+          "taskAmount": 30,
+          "prize": "pbp_token",
+          "prizeAmount": 150,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "cndy",
+            "drip",
+            "greatgoats",
+            "iook",
+            "known",
+            "morb",
+            "morbie",
+            "mvone",
+            "sook",
+            "tonya",
+            "ug"
+          ]
+        },
+        {
+          "level": 19,
+          "taskAmount": 30,
+          "prize": "pbp_token",
+          "prizeAmount": 150,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "cndy",
+            "drip",
+            "greatgoats",
+            "iook",
+            "known",
+            "morb",
+            "morbie",
+            "mvone",
+            "sook",
+            "tonya",
+            "ug"
+          ]
+        },
+        {
+          "level": 20,
+          "taskAmount": 30,
+          "prize": "pbp_token",
+          "prizeAmount": 250,
+          "prizeType": "spl_token",
+          "refreshTime": 168,
+          "validCollections": [
+            "iook",
+            "sook"
+          ]
+        }
+      ]
+    },
+    {
+      "missionId": "c807d32b-4342-4ad5-8b0e-00ed82d7cc7b",
+      "name": "Survive the Tilt!",
+      "game": "marbles",
+      "gameMode": "tilted",
+      "task": "complete",
+      "taskEvent": "tilts",
+      "location": "",
+      "platform": "twitch",
+      "description": "Be a Tiltee",
+      "levels": [
+        {
+          "level": 1,
+          "taskAmount": 20,
+          "prize": "pbp_token",
+          "prizeAmount": 50,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "any"
+          ]
+        },
+        {
+          "level": 2,
+          "taskAmount": 20,
+          "prize": "pbp_token",
+          "prizeAmount": 50,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "any"
+          ]
+        },
+        {
+          "level": 3,
+          "taskAmount": 20,
+          "prize": "pbp_token",
+          "prizeAmount": 50,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "any"
+          ]
+        },
+        {
+          "level": 4,
+          "taskAmount": 20,
+          "prize": "pbp_token",
+          "prizeAmount": 50,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "any"
+          ]
+        },
+        {
+          "level": 5,
+          "taskAmount": 20,
+          "prize": "pbp_token",
+          "prizeAmount": 50,
+          "prizeType": "spl_token",
+          "refreshTime": 168,
+          "validCollections": [
+            "any"
+          ]
+        },
+        {
+          "level": 6,
+          "taskAmount": 40,
+          "prize": "pbp_token",
+          "prizeAmount": 75,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "any"
+          ]
+        },
+        {
+          "level": 7,
+          "taskAmount": 40,
+          "prize": "pbp_token",
+          "prizeAmount": 75,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "any"
+          ]
+        },
+        {
+          "level": 8,
+          "taskAmount": 40,
+          "prize": "pbp_token",
+          "prizeAmount": 75,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "any"
+          ]
+        },
+        {
+          "level": 9,
+          "taskAmount": 40,
+          "prize": "pbp_token",
+          "prizeAmount": 75,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "any"
+          ]
+        },
+        {
+          "level": 10,
+          "taskAmount": 40,
+          "prize": "pbp_token",
+          "prizeAmount": 75,
+          "prizeType": "spl_token",
+          "refreshTime": 168,
+          "validCollections": [
+            "any"
+          ]
+        },
+        {
+          "level": 11,
+          "taskAmount": 60,
+          "prize": "pbp_token",
+          "prizeAmount": 100,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "any"
+          ]
+        },
+        {
+          "level": 12,
+          "taskAmount": 60,
+          "prize": "pbp_token",
+          "prizeAmount": 100,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "any"
+          ]
+        },
+        {
+          "level": 13,
+          "taskAmount": 60,
+          "prize": "pbp_token",
+          "prizeAmount": 100,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "any"
+          ]
+        },
+        {
+          "level": 14,
+          "taskAmount": 60,
+          "prize": "pbp_token",
+          "prizeAmount": 100,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "any"
+          ]
+        },
+        {
+          "level": 15,
+          "taskAmount": 60,
+          "prize": "pbp_token",
+          "prizeAmount": 100,
+          "prizeType": "spl_token",
+          "refreshTime": 168,
+          "validCollections": [
+            "any"
+          ]
+        },
+        {
+          "level": 16,
+          "taskAmount": 80,
+          "prize": "pbp_token",
+          "prizeAmount": 125,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "any"
+          ]
+        },
+        {
+          "level": 17,
+          "taskAmount": 80,
+          "prize": "pbp_token",
+          "prizeAmount": 125,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "any"
+          ]
+        },
+        {
+          "level": 18,
+          "taskAmount": 80,
+          "prize": "pbp_token",
+          "prizeAmount": 125,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "any"
+          ]
+        },
+        {
+          "level": 19,
+          "taskAmount": 80,
+          "prize": "pbp_token",
+          "prizeAmount": 125,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "any"
+          ]
+        },
+        {
+          "level": 20,
+          "taskAmount": 80,
+          "prize": "pbp_token",
+          "prizeAmount": 250,
+          "prizeType": "spl_token",
+          "refreshTime": 168,
+          "validCollections": [
+            "iook",
+            "sook"
+          ]
+        }
+      ]
+    },
+    {
+      "missionId": "d543522a-5b37-40ed-8307-6568db70ac54",
+      "name": "Race for Points",
+      "game": "marbles",
+      "gameMode": "race",
+      "task": "earn",
+      "taskEvent": "Points",
+      "location": "",
+      "platform": "twitch",
+      "description": "Earn Points in Season Races",
+      "levels": [
+        {
+          "level": 1,
+          "taskAmount": 50,
+          "prize": "pbp_token",
+          "prizeAmount": 75,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "cndy",
+            "drip",
+            "greatgoats",
+            "iook",
+            "known",
+            "morb",
+            "morbie",
+            "mvone",
+            "sook",
+            "tonya",
+            "ug"
+          ]
+        },
+        {
+          "level": 2,
+          "taskAmount": 50,
+          "prize": "pbp_token",
+          "prizeAmount": 75,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "cndy",
+            "drip",
+            "greatgoats",
+            "iook",
+            "known",
+            "morb",
+            "morbie",
+            "mvone",
+            "sook",
+            "tonya",
+            "ug"
+          ]
+        },
+        {
+          "level": 3,
+          "taskAmount": 50,
+          "prize": "pbp_token",
+          "prizeAmount": 75,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "cndy",
+            "drip",
+            "greatgoats",
+            "iook",
+            "known",
+            "morb",
+            "morbie",
+            "mvone",
+            "sook",
+            "tonya",
+            "ug"
+          ]
+        },
+        {
+          "level": 4,
+          "taskAmount": 50,
+          "prize": "pbp_token",
+          "prizeAmount": 75,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "cndy",
+            "drip",
+            "greatgoats",
+            "iook",
+            "known",
+            "morb",
+            "morbie",
+            "mvone",
+            "sook",
+            "tonya",
+            "ug"
+          ]
+        },
+        {
+          "level": 5,
+          "taskAmount": 50,
+          "prize": "cc",
+          "prizeAmount": 15,
+          "prizeType": "vc",
+          "refreshTime": 168,
+          "validCollections": [
+            "any"
+          ]
+        },
+        {
+          "level": 6,
+          "taskAmount": 75,
+          "prize": "pbp_token",
+          "prizeAmount": 100,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "cndy",
+            "drip",
+            "greatgoats",
+            "iook",
+            "known",
+            "morb",
+            "morbie",
+            "mvone",
+            "sook",
+            "tonya",
+            "ug"
+          ]
+        },
+        {
+          "level": 7,
+          "taskAmount": 75,
+          "prize": "pbp_token",
+          "prizeAmount": 100,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "cndy",
+            "drip",
+            "greatgoats",
+            "iook",
+            "known",
+            "morb",
+            "morbie",
+            "mvone",
+            "sook",
+            "tonya",
+            "ug"
+          ]
+        },
+        {
+          "level": 8,
+          "taskAmount": 75,
+          "prize": "pbp_token",
+          "prizeAmount": 100,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "cndy",
+            "drip",
+            "greatgoats",
+            "iook",
+            "known",
+            "morb",
+            "morbie",
+            "mvone",
+            "sook",
+            "tonya",
+            "ug"
+          ]
+        },
+        {
+          "level": 9,
+          "taskAmount": 75,
+          "prize": "pbp_token",
+          "prizeAmount": 100,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "cndy",
+            "drip",
+            "greatgoats",
+            "iook",
+            "known",
+            "morb",
+            "morbie",
+            "mvone",
+            "sook",
+            "tonya",
+            "ug"
+          ]
+        },
+        {
+          "level": 10,
+          "taskAmount": 75,
+          "prize": "tc",
+          "prizeAmount": 30,
+          "prizeType": "vc",
+          "refreshTime": 168,
+          "validCollections": [
+            "any"
+          ]
+        },
+        {
+          "level": 11,
+          "taskAmount": 100,
+          "prize": "pbp_token",
+          "prizeAmount": 125,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "cndy",
+            "drip",
+            "greatgoats",
+            "iook",
+            "known",
+            "morb",
+            "morbie",
+            "mvone",
+            "sook",
+            "tonya",
+            "ug"
+          ]
+        },
+        {
+          "level": 12,
+          "taskAmount": 100,
+          "prize": "pbp_token",
+          "prizeAmount": 125,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "cndy",
+            "drip",
+            "greatgoats",
+            "iook",
+            "known",
+            "morb",
+            "morbie",
+            "mvone",
+            "sook",
+            "tonya",
+            "ug"
+          ]
+        },
+        {
+          "level": 13,
+          "taskAmount": 100,
+          "prize": "pbp_token",
+          "prizeAmount": 125,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "cndy",
+            "drip",
+            "greatgoats",
+            "iook",
+            "known",
+            "morb",
+            "morbie",
+            "mvone",
+            "sook",
+            "tonya",
+            "ug"
+          ]
+        },
+        {
+          "level": 14,
+          "taskAmount": 100,
+          "prize": "pbp_token",
+          "prizeAmount": 125,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "cndy",
+            "drip",
+            "greatgoats",
+            "iook",
+            "known",
+            "morb",
+            "morbie",
+            "mvone",
+            "sook",
+            "tonya",
+            "ug"
+          ]
+        },
+        {
+          "level": 15,
+          "taskAmount": 100,
+          "prize": "pbp_token",
+          "prizeAmount": 125,
+          "prizeType": "spl_token",
+          "refreshTime": 168,
+          "validCollections": [
+            "any"
+          ]
+        },
+        {
+          "level": 16,
+          "taskAmount": 125,
+          "prize": "pbp_token",
+          "prizeAmount": 150,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "cndy",
+            "drip",
+            "greatgoats",
+            "iook",
+            "known",
+            "morb",
+            "morbie",
+            "mvone",
+            "sook",
+            "tonya",
+            "ug"
+          ]
+        },
+        {
+          "level": 17,
+          "taskAmount": 125,
+          "prize": "pbp_token",
+          "prizeAmount": 150,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "cndy",
+            "drip",
+            "greatgoats",
+            "iook",
+            "known",
+            "morb",
+            "morbie",
+            "mvone",
+            "sook",
+            "tonya",
+            "ug"
+          ]
+        },
+        {
+          "level": 18,
+          "taskAmount": 125,
+          "prize": "pbp_token",
+          "prizeAmount": 150,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "cndy",
+            "drip",
+            "greatgoats",
+            "iook",
+            "known",
+            "morb",
+            "morbie",
+            "mvone",
+            "sook",
+            "tonya",
+            "ug"
+          ]
+        },
+        {
+          "level": 19,
+          "taskAmount": 125,
+          "prize": "pbp_token",
+          "prizeAmount": 150,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "cndy",
+            "drip",
+            "greatgoats",
+            "iook",
+            "known",
+            "morb",
+            "morbie",
+            "mvone",
+            "sook",
+            "tonya",
+            "ug"
+          ]
+        },
+        {
+          "level": 20,
+          "taskAmount": 125,
+          "prize": "pbp_token",
+          "prizeAmount": 250,
+          "prizeType": "spl_token",
+          "refreshTime": 168,
+          "validCollections": [
+            "iook",
+            "sook"
+          ]
+        }
+      ]
+    },
+    {
+      "missionId": "d56d1849-d6d2-4b23-895b-5086a6543de4",
+      "name": "Do it All!",
+      "game": "marbles",
+      "gameMode": "",
+      "task": "earn",
+      "taskEvent": "Points",
+      "location": "",
+      "platform": "twitch",
+      "description": "Earn Points in Races, Royales or Tilts!",
+      "levels": [
+        {
+          "level": 1,
+          "taskAmount": 500,
+          "prize": "pbp_token",
+          "prizeAmount": 50,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "any"
+          ]
+        },
+        {
+          "level": 2,
+          "taskAmount": 500,
+          "prize": "pbp_token",
+          "prizeAmount": 50,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "any"
+          ]
+        },
+        {
+          "level": 3,
+          "taskAmount": 500,
+          "prize": "pbp_token",
+          "prizeAmount": 50,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "any"
+          ]
+        },
+        {
+          "level": 4,
+          "taskAmount": 500,
+          "prize": "pbp_token",
+          "prizeAmount": 50,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "any"
+          ]
+        },
+        {
+          "level": 5,
+          "taskAmount": 500,
+          "prize": "pbp_token",
+          "prizeAmount": 50,
+          "prizeType": "spl_token",
+          "refreshTime": 168,
+          "validCollections": [
+            "any"
+          ]
+        },
+        {
+          "level": 6,
+          "taskAmount": 550,
+          "prize": "pbp_token",
+          "prizeAmount": 75,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "any"
+          ]
+        },
+        {
+          "level": 7,
+          "taskAmount": 550,
+          "prize": "pbp_token",
+          "prizeAmount": 75,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "any"
+          ]
+        },
+        {
+          "level": 8,
+          "taskAmount": 550,
+          "prize": "pbp_token",
+          "prizeAmount": 75,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "any"
+          ]
+        },
+        {
+          "level": 9,
+          "taskAmount": 550,
+          "prize": "pbp_token",
+          "prizeAmount": 75,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "any"
+          ]
+        },
+        {
+          "level": 10,
+          "taskAmount": 550,
+          "prize": "pbp_token",
+          "prizeAmount": 75,
+          "prizeType": "spl_token",
+          "refreshTime": 168,
+          "validCollections": [
+            "any"
+          ]
+        },
+        {
+          "level": 11,
+          "taskAmount": 600,
+          "prize": "pbp_token",
+          "prizeAmount": 100,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "any"
+          ]
+        },
+        {
+          "level": 12,
+          "taskAmount": 600,
+          "prize": "pbp_token",
+          "prizeAmount": 100,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "any"
+          ]
+        },
+        {
+          "level": 13,
+          "taskAmount": 600,
+          "prize": "pbp_token",
+          "prizeAmount": 100,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "any"
+          ]
+        },
+        {
+          "level": 14,
+          "taskAmount": 600,
+          "prize": "pbp_token",
+          "prizeAmount": 100,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "any"
+          ]
+        },
+        {
+          "level": 15,
+          "taskAmount": 600,
+          "prize": "pbp_token",
+          "prizeAmount": 100,
+          "prizeType": "spl_token",
+          "refreshTime": 168,
+          "validCollections": [
+            "any"
+          ]
+        },
+        {
+          "level": 16,
+          "taskAmount": 650,
+          "prize": "pbp_token",
+          "prizeAmount": 125,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "any"
+          ]
+        },
+        {
+          "level": 17,
+          "taskAmount": 650,
+          "prize": "pbp_token",
+          "prizeAmount": 125,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "any"
+          ]
+        },
+        {
+          "level": 18,
+          "taskAmount": 650,
+          "prize": "pbp_token",
+          "prizeAmount": 125,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "any"
+          ]
+        },
+        {
+          "level": 19,
+          "taskAmount": 650,
+          "prize": "pbp_token",
+          "prizeAmount": 125,
+          "prizeType": "spl_token",
+          "refreshTime": 24,
+          "validCollections": [
+            "any"
+          ]
+        },
+        {
+          "level": 20,
+          "taskAmount": 650,
+          "prize": "pbp_token",
+          "prizeAmount": 250,
+          "prizeType": "spl_token",
+          "refreshTime": 168,
+          "validCollections": [
+            "iook",
+            "sook"
+          ]
+        }
+      ]
+    }
+  ]
+}

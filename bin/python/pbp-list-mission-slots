@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+PBP_MCP="${PROJECT_ROOT}/bin/pbp-mcp"
+cd "$PROJECT_ROOT"
+
+# Fetch missions directly from MCP and normalize to a plain mission array.
+RESP="$("$PBP_MCP" call get_user_missions --args '{}')"
+MISSIONS_JSON="$(echo "$RESP" | jq -c '
+  if (.isError // false) == true then
+    error((.content[0].text // "get_user_missions failed"))
+  else
+    .structuredContent.missions.missions
+    // (if (.structuredContent.missions | type) == "array" then .structuredContent.missions else empty end)
+    // (if (.structuredContent | type) == "array" then .structuredContent else empty end)
+    // []
+  end
+')"
+
+if [[ "$MISSIONS_JSON" == "null" ]]; then
+  echo "No missions found." >&2
+  exit 1
+fi
+
+COUNT=$(echo "$MISSIONS_JSON" | jq 'length')
+for ((i=0; i<COUNT; i++)); do
+  SLOT=$((i+1))
+  NAME=$(echo "$MISSIONS_JSON" | jq -r ".[$i].name // .[$i].title // \"(unnamed)\"")
+  ID=$(echo "$MISSIONS_JSON" | jq -r ".[$i].assignedMissionId // .[$i].assigned_mission_id // .[$i].id // \"-\"")
+  PROGRESS=$(echo "$MISSIONS_JSON" | jq -r ".[$i].progress // .[$i].current_progress // .[$i].currentProgress // 0")
+  GOAL=$(echo "$MISSIONS_JSON" | jq -r ".[$i].goal // .[$i].task_amount // .[$i].taskAmount // 0")
+  REWARD=$(echo "$MISSIONS_JSON" | jq -r ".[$i].reward_value // .[$i].rewardValue // .[$i].prize_amount // 0")
+  echo "Slot $SLOT: $NAME"
+  echo "  Assigned Mission ID: $ID"
+  echo "  Progress: $PROGRESS / $GOAL"
+  echo "  Reward: $REWARD PBP"
+  echo
+done

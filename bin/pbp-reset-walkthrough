@@ -1,0 +1,45 @@
+#!/usr/bin/env node
+"use strict";
+
+const { callTool } = require("../lib/mcp");
+
+(async () => {
+  try {
+    const nftId = process.argv[2];
+    if (!nftId || nftId === "-h" || nftId === "--help") {
+      console.log("Usage: pbp-reset-walkthrough <nftId>");
+      process.exit(nftId ? 0 : 1);
+    }
+
+    console.log(`1) Preparing reset transaction for nftId=${nftId}`);
+    const prep = await callTool("prepare_nft_cooldown_reset", { nftId });
+    console.log(JSON.stringify(prep, null, 2));
+
+    const sc = prep?.structuredContent || {};
+    const keys = Object.keys(sc);
+    const tokenKey = keys.find((k) => /token/i.test(k));
+    const txKey = keys.find((k) => /tx|transaction/i.test(k));
+
+    console.log("\n2) Detected fields:");
+    console.log(`Transaction field: ${txKey || "<not found>"}`);
+    console.log(`Token field: ${tokenKey || "<not found>"}`);
+
+    console.log("\n3) Sign unsigned tx with your wallet.");
+    console.log("4) Submit signed tx with:");
+
+    const template = {
+      tool: "submit_signed_nft_cooldown_reset",
+      args: {
+        [tokenKey || "<token_field_from_prepare>"]: tokenKey ? sc[tokenKey] : "<token_value_from_prepare>",
+        signedTx: "<SIGNED_TX_BASE64>",
+      },
+    };
+
+    console.log(JSON.stringify(template, null, 2));
+    console.log("\nRun submit:");
+    console.log("  ./bin/pbp-mcp call submit_signed_nft_cooldown_reset --args '<JSON_ARGS>'");
+  } catch (e) {
+    console.error(`error: ${e.message}`);
+    process.exit(2);
+  }
+})();

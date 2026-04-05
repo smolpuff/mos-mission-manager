@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+  echo "Usage: $0 <mission_slot_number>"
+  exit 0
+fi
+
+if [[ $# -ne 1 ]]; then
+  echo "Usage: $0 <mission_slot_number>" >&2
+  exit 1
+fi
+
+MISSION_NUM="$1"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+PBP_MCP="${PROJECT_ROOT}/bin/pbp-mcp"
+cd "$PROJECT_ROOT"
+
+# Pull missions directly and normalize to a mission array.
+RESP="$("$PBP_MCP" call get_user_missions --args '{}')"
+MISSIONS_JSON="$(echo "$RESP" | jq -c '
+  if (.isError // false) == true then
+    error((.content[0].text // "get_user_missions failed"))
+  else
+    .structuredContent.missions.missions
+    // (if (.structuredContent.missions | type) == "array" then .structuredContent.missions else empty end)
+    // (if (.structuredContent | type) == "array" then .structuredContent else empty end)
+    // []
+  end
+')"
+
+# Get assigned mission ID for the given number (1-based)
+ASSIGNED_MISSION_ID=$(echo "$MISSIONS_JSON" | jq -r ".[$((MISSION_NUM-1))].assignedMissionId // .[$((MISSION_NUM-1))].assigned_mission_id // .[$((MISSION_NUM-1))].id")
+
+if [[ -z "$ASSIGNED_MISSION_ID" || "$ASSIGNED_MISSION_ID" == "null" ]]; then
+  echo "No mission found for slot $MISSION_NUM" >&2
+  exit 2
+fi
+
+"$PBP_MCP" call claim_mission_reward --args "$(jq -cn --arg id "$ASSIGNED_MISSION_ID" '{assignedMissionId:$id}')"
