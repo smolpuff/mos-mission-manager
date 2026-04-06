@@ -20,6 +20,10 @@ Signed transaction flows like mission reset, swap, reroll, and cooldown resets a
 
 Entirely vibe-coded after .5g dabs because why not. My dead grandmother probably has less slop in her grave.
 
+## Pre-compiled Binaries
+
+Download them from the /binaries folder. will be moved to releases.
+
 ## Features
 
 - MCP-first runtime with local token persistence
@@ -67,7 +71,7 @@ The app reads runtime settings from `config.json`.
 Common keys:
 
 - `targetMissions`: mission names or mission IDs to manage
-- `watchLoopEnabled`: starts the watcher automatically
+- `watchLoopEnabled`: optional; set to `false` to start with the watcher disabled
 - `watchPollIntervalSeconds`: polling interval for live checks
 - `level20ResetEnabled`: enables level-20 reset detection mode
 - `missionModeEnabled`: enables custom reset-threshold mode
@@ -80,7 +84,6 @@ Example:
 {
   "totalClaimed": 710,
   "targetMissions": ["Do it All!", "Race for Points"],
-  "watchLoopEnabled": true,
   "watchPollIntervalSeconds": 30,
   "level20ResetEnabled": false,
   "missionModeEnabled": false,

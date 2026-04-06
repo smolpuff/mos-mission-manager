@@ -4,7 +4,6 @@ rentals.md
 sea-config.mac.json
 sea-config.win.json
 v2-missions.js
-package-lock.json
 data/
 bin/dev/
 
@@ -149,9 +148,3 @@ dist
 # Stores VSCode versions used for testing VSCode extensions
 .vscode-test
 
-# yarn v2
-.yarn/cache
-.yarn/unplugged
-.yarn/build-state.yml
-.yarn/install-state.gz
-.pnp.*
