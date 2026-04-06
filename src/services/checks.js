@@ -98,15 +98,6 @@ function createChecksService(ctx, logger, mcp) {
       .filter(Boolean);
   }
 
-  function shouldRetryAssignmentSync(reason = "") {
-    const value = String(reason || "");
-    return (
-      value === "post_claim" ||
-      value === "post_claim_state_fallback" ||
-      value.startsWith("post_claim_")
-    );
-  }
-
   function buildAssignCandidates(missions, resolved) {
     return missions.filter((m) => {
       const name = missionName(m).toLowerCase();
@@ -139,11 +130,7 @@ function createChecksService(ctx, logger, mcp) {
       }));
   }
 
-  async function loadAssignableCandidatesWithSyncWait(
-    reason,
-    resolved,
-    initialMissionResult = null,
-  ) {
+  async function loadAssignableCandidates(reason, resolved, initialMissionResult = null) {
     let result =
       initialMissionResult || (await mcp.mcpToolCall("get_user_missions", {}));
     let missions = normalizeMissionList(result);
@@ -160,36 +147,6 @@ function createChecksService(ctx, logger, mcp) {
         level: missionLevel(m),
       })),
     });
-    if (candidates.length > 0 || !shouldRetryAssignmentSync(reason)) {
-      return { result, missions, candidates };
-    }
-
-    const retryDelaysMs = [1200, 2500, 5000];
-    for (let i = 0; i < retryDelaysMs.length; i += 1) {
-      const delayMs = retryDelaysMs[i];
-      logWithTimestamp(
-        `[ASSIGN] ⏳ Waiting ${delayMs}ms for mission state sync before recheck ${i + 1}/${retryDelaysMs.length}...`,
-      );
-      await new Promise((resolve) => setTimeout(resolve, delayMs));
-      result = await mcp.mcpToolCall("get_user_missions", {});
-      missions = normalizeMissionList(result);
-      candidates = buildAssignCandidates(missions, resolved);
-      logDebug("assign", "sync_wait_snapshot", {
-        reason,
-        attempt: i + 1,
-        delayMs,
-        selected: summarizeSelectedMissionState(missions, resolved),
-        candidates: candidates.map((m) => ({
-          name: missionName(m),
-          assignedMissionId: assignedMissionId(m),
-          catalogMissionId: catalogMissionId(m),
-          slot: m?.slot ?? null,
-          level: missionLevel(m),
-        })),
-      });
-      if (candidates.length > 0) break;
-    }
-
     return { result, missions, candidates };
   }
 
@@ -354,7 +311,7 @@ function createChecksService(ctx, logger, mcp) {
     ctx.autoAssignRunning = true;
     try {
       const { missions, candidates } =
-        await loadAssignableCandidatesWithSyncWait(
+        await loadAssignableCandidates(
           reason,
           resolved,
           missionsResult,

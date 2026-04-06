@@ -18,7 +18,6 @@ function createWatchService(ctx, logger, mcp, checks, configApi) {
   const MISSION_PLAY_URL = "https://pixelbypixel.studio/missions/play";
   let cycleInFlight = null;
   let cycleAbortController = null;
-  let lastResetPopupKey = "";
   let traceSequence = 0;
 
   function nextTraceId(kind = "cycle") {
@@ -41,22 +40,6 @@ function createWatchService(ctx, logger, mcp, checks, configApi) {
 
   function trace(scope, action, meta = {}) {
     logDebug(scope, `trace_${action}`, meta);
-  }
-
-  function resetHitIdentity(hit) {
-    const name = String(hit?.name || "")
-      .trim()
-      .toLowerCase();
-    const slot = hit?.slot ?? "na";
-    const level = Number(hit?.level || 0);
-    return `${name}|slot=${slot}|lvl=${Number.isFinite(level) ? level : 0}`;
-  }
-
-  function buildResetPopupKey(label, threshold, resetHits) {
-    return `${label}|${Math.floor(Number(threshold) || 0)}|${resetHits
-      .map((m) => resetHitIdentity(m))
-      .sort()
-      .join(",")}`;
   }
 
   function summarizeWatchPayload(result) {
@@ -447,12 +430,16 @@ function createWatchService(ctx, logger, mcp, checks, configApi) {
     return merged;
   }
 
-  async function loadSelectedMissionSnapshot(missionResult = null) {
+  async function loadMissionSnapshot(
+    missionResult = null,
+    { selectedOnly = true } = {},
+  ) {
     const result =
       missionResult || (await mcp.mcpToolCall("get_user_missions", {}));
-    const missions = checks.filterSelectedMissions(
-      normalizeMissionList(result),
-    );
+    const allMissions = normalizeMissionList(result);
+    const missions = selectedOnly
+      ? checks.filterSelectedMissions(allMissions)
+      : allMissions;
     const byAssignedMissionId = new Map();
     for (const m of missions) {
       const rawAssignedMissionId =
@@ -488,6 +475,10 @@ function createWatchService(ctx, logger, mcp, checks, configApi) {
       });
     }
     return byAssignedMissionId;
+  }
+
+  async function loadSelectedMissionSnapshot(missionResult = null) {
+    return loadMissionSnapshot(missionResult, { selectedOnly: true });
   }
 
   function deriveStateTransitions(beforeMap, afterMap) {
@@ -902,20 +893,8 @@ function createWatchService(ctx, logger, mcp, checks, configApi) {
       threshold,
     );
     if (resetHits.length === 0) {
-      lastResetPopupKey = "";
       return false;
     }
-    const popupKey = buildResetPopupKey(label, threshold, resetHits);
-    if (popupKey && popupKey === lastResetPopupKey) {
-      logDebug("reset", "popup_duplicate_suppressed", {
-        reason,
-        label,
-        threshold,
-        popupKey,
-      });
-      return true;
-    }
-    lastResetPopupKey = popupKey;
     const names = resetHits
       .map((m) => `${m.name} lvl=${Number(m.level || 0)}`)
       .join(", ");
@@ -923,7 +902,6 @@ function createWatchService(ctx, logger, mcp, checks, configApi) {
     logWithTimestamp("[RESET] 🌐 Opening missions page for manual reset...");
     const opened = await openMissionPlayPage();
     if (!opened) {
-      lastResetPopupKey = "";
       logWithTimestamp(
         `[RESET] ❌ Failed to auto-open browser. Open manually: ${MISSION_PLAY_URL}`,
       );
@@ -939,7 +917,9 @@ function createWatchService(ctx, logger, mcp, checks, configApi) {
     if (!resetPolicy.enabled) return false;
     const resolvedMissionResult =
       missionResult || (await mcp.mcpToolCall("get_user_missions", {}));
-    const snapshot = await loadSelectedMissionSnapshot(resolvedMissionResult);
+    const snapshot = await loadMissionSnapshot(resolvedMissionResult, {
+      selectedOnly: false,
+    });
     const openedFromSnapshot = await handleLevelResetIfNeeded(snapshot, {
       reason,
       threshold: resetPolicy.threshold,
@@ -984,6 +964,18 @@ function createWatchService(ctx, logger, mcp, checks, configApi) {
     });
   }
 
+  async function runResetCheckSafely(reason, missionResult, debugAction) {
+    try {
+      return await runResetCheckIfEnabled(reason, missionResult);
+    } catch (error) {
+      logDebug("watch", debugAction, {
+        error: error.message,
+        stack: error.stack,
+      });
+      return false;
+    }
+  }
+
   async function runWatchCycle() {
     const traceId = nextTraceId("cycle");
     const opts = watchConfig();
@@ -994,10 +986,14 @@ function createWatchService(ctx, logger, mcp, checks, configApi) {
     let preCycleMissionResult = null;
     try {
       preCycleMissionResult = await mcp.mcpToolCall("get_user_missions", {});
-      await runResetCheckIfEnabled("cycle_start", preCycleMissionResult);
     } catch (error) {
       logDebug("watch", "pre_cycle_missions_failed", { error: error.message });
     }
+    await runResetCheckSafely(
+      "cycle_start",
+      preCycleMissionResult,
+      "pre_cycle_reset_check_failed",
+    );
 
     let beforeSnapshot = new Map();
     try {
@@ -1092,7 +1088,13 @@ function createWatchService(ctx, logger, mcp, checks, configApi) {
       pollPromise
         .then((updated) => {
           return Promise.resolve()
-            .then(() => runResetCheckIfEnabled(reason, updated))
+            .then(() =>
+              runResetCheckSafely(
+                reason,
+                updated,
+                "poll_tick_reset_check_failed",
+              ),
+            )
             .then(() => maybeRunLiveStateRecovery(updated, reason));
         })
         .catch((error) => {
@@ -1346,13 +1348,11 @@ function createWatchService(ctx, logger, mcp, checks, configApi) {
     postClaimAssignRan = claimed > 0;
     postCycleMissionResult = claimFollowup.missionResult;
     trace("watch", "cycle_post_followup", { traceId, postClaimAssigned });
-    try {
-      await runResetCheckIfEnabled("cycle_end", postCycleMissionResult);
-    } catch (error) {
-      logDebug("watch", "snapshot_after_for_reset_failed", {
-        error: error.message,
-      });
-    }
+    await runResetCheckSafely(
+      "cycle_end",
+      postCycleMissionResult,
+      "cycle_end_reset_check_failed",
+    );
     if (postClaimAssignRan && postClaimAssigned > 0) {
       logDebug("watch", "cycle_end_assign_skipped", {
         reason: "post_claim_assign_succeeded",
@@ -1434,16 +1434,17 @@ function createWatchService(ctx, logger, mcp, checks, configApi) {
         traceId,
         beforeSnapshot: snapshotTraceSummary(beforeSnapshot),
       });
-      manualResetOpened = await runResetCheckIfEnabled(
-        "manual_pre",
-        preManualMissionResult,
-      );
     } catch (error) {
-      logDebug("watch", "manual_reset_precheck_failed", {
+      logDebug("watch", "manual_before_snapshot_failed", {
         error: error.message,
         stack: error.stack,
       });
     }
+    manualResetOpened = await runResetCheckSafely(
+      "manual_pre",
+      preManualMissionResult,
+      "manual_reset_precheck_failed",
+    );
     try {
       const claimResult = await checks.claimClaimableMissions({
         maxClaims: WATCH_MAX_CLAIMS,
@@ -1463,9 +1464,12 @@ function createWatchService(ctx, logger, mcp, checks, configApi) {
         allowStateFallback: true,
         finalTraceAction: "manual_final_snapshot",
       });
-      if (!manualResetOpened) {
-        await runResetCheckIfEnabled("manual_post", followup.missionResult);
-      }
+      if (!manualResetOpened)
+        await runResetCheckSafely(
+          "manual_post",
+          followup.missionResult,
+          "manual_reset_postcheck_failed",
+        );
       return { claimed: followup.claimed, assigned: followup.assigned };
     } catch (error) {
       logDebug("watch", "manual_reset_check_failed", {
@@ -1566,17 +1570,13 @@ function createWatchService(ctx, logger, mcp, checks, configApi) {
       });
     }
 
-    try {
-      const startupResetMissionResult =
-        startupMissionResult ||
-        (await mcp.mcpToolCall("get_user_missions", {}));
-      await runResetCheckIfEnabled("startup", startupResetMissionResult);
-    } catch (error) {
-      logDebug("watch", "startup_reset_check_failed", {
-        error: error.message,
-        stack: error.stack,
-      });
-    }
+    const startupResetMissionResult =
+      startupMissionResult || (await mcp.mcpToolCall("get_user_missions", {}));
+    await runResetCheckSafely(
+      "startup",
+      startupResetMissionResult,
+      "startup_reset_check_failed",
+    );
 
     while (ctx.watchLoopEnabled) {
       try {

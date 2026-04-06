@@ -14,6 +14,8 @@
 
 This project is actively in development. Core watch, claim, assign, auth recovery, and reset-threshold detection flows are implemented.
 
+Auto-assign now trusts the MCP mission state directly. The old post-claim assignment sync-wait fallback has been removed, so assign checks no longer do delayed `1200ms / 2500ms / 5000ms` rechecks before deciding whether a target mission is available.
+
 CURRENTLY IMMEDIATELY OPENS UP A BROWSER TAB FOR ANY RESET USER INTERACTIONS, UNTIL SINGING IS ADDED. YOU WILL BE SPAMMED WITH TABS EVERY TICK IF YOU HAVE RESETS ENABLED AND THE THRESHOLD IS MET.
 
 Signed transaction flows like mission reset, swap, reroll, and cooldown resets are not implemented yet.
@@ -31,13 +33,13 @@ Entirely vibe-coded after .5g dabs because why not. My dead grandmother probably
 ## TO DO
 
 - 'get*wallet*\*' to pull related balances to header
-- tx singing (a&b)
-  - mission reroll
-  - nft cooldown reset
-  - mission level reset
-  - unlock misison slot
+- signed tx flows
+- mission reroll
+- nft cooldown reset
+- mission level reset
+- unlock mission slot
 - rental support when payload returns a way
-  - modes: mmX, 7day, troll
+- rental modes: mmX, 7day, troll
 - electron wraper for the lulz
 
 ## Limitations

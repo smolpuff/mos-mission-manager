@@ -10,7 +10,7 @@
     "build:mac": "npm run bundle && npm run build:mac:arm64 && npm run build:mac:x64",
     "build:mac:arm64": "node scripts/build-sea.js mac arm64 && node scripts/build-mac-app.js arm64",
     "build:mac:x64": "node scripts/build-sea.js mac x64 && node scripts/build-mac-app.js x64",
-    "build:mac:verify": "codesign -dv binaries/missions-mcp-macos-arm64-3.0.3.app",
+    "build:mac:verify": "codesign -dv binaries/missions-mcp-macos-arm64-$npm_package_version.app",
     "build:win": "npm run bundle && node scripts/build-sea.js win x64",
     "zip:builds": "node scripts/zip-builds.js"
   },
