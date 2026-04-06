@@ -20,10 +20,6 @@ Signed transaction flows like mission reset, swap, reroll, and cooldown resets a
 
 Entirely vibe-coded after .5g dabs because why not. My dead grandmother probably has less slop in her grave.
 
-## Pre-compiled Binaries
-
-Download them from the /binaries folder. will be moved to releases.
-
 ## Features
 
 - MCP-first runtime with local token persistence
@@ -105,6 +101,12 @@ Run with nodemon for development:
 npm run dev
 ```
 
+## Pre-compiled Binaries
+
+Download them from the /binaries folder... but really just use the sr
+
+- run `node app.js` from your terminal. Node 24+ required.
+
 ## Commands
 
 | Command                 | Description                                                                                                                                                                                   |
@@ -118,18 +120,6 @@ npm run dev
 | `pause`                 | Pauses the active watch/claim loop.                                                                                                                                                           |
 | `resume`                | Resumes the active watch/claim loop.                                                                                                                                                          |
 | `q`                     | Quits the application.                                                                                                                                                                        |
-
-## Project Structure
-
-- `app.js`: application bootstrap
-- `src/context.js`: shared runtime state
-- `src/logger.js`: terminal header and logging
-- `src/config.js`: config load and save
-- `src/mcp/client.js`: auth and MCP tool client
-- `src/missions/normalize.js`: mission and NFT normalization helpers
-- `src/services/checks.js`: startup checks, stats, claims, and assignment
-- `src/services/watch.js`: watch loop and reset detection
-- `src/commands.js`: interactive command handling
 
 ## License
 

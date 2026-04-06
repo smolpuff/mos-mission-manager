@@ -6,6 +6,12 @@ sea-config.win.json
 v2-missions.js
 data/
 bin/dev/
+binaries/app.bundle.cjs
+binaries/node.exe
+binaries/sea-prep.*
+binaries/missions-v3-mcp.app/
+binaries/missions-v3-mcp_*.exe
+scripts/
 
 # macOS junk
 .DS_Store

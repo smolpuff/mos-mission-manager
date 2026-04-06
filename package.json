@@ -4,11 +4,12 @@
     "dev:debug": "nodemon app.js --debug",
     "start": "node app.js",
     "start:debug": "node app.js --debug",
-    "build": "npm run build:mac && npm run build:win",
+    "build": "npm run build:mac && npm run build:win && npm run zip:builds",
     "bundle": "mkdir -p binaries && npx esbuild app.js --bundle --platform=node --format=cjs --target=node22 --outfile=binaries/app.bundle.cjs",
-    "build:mac": "npm run bundle && node scripts/build-sea.js mac",
-    "build:mac:verify": "codesign -dv binaries/missions-v3-mcp_3.0.3",
-    "build:win": "npm run bundle && node scripts/build-sea.js win"
+    "build:mac": "npm run bundle && node scripts/build-sea.js mac && node scripts/build-mac-app.js",
+    "build:mac:verify": "codesign -dv binaries/missions-v3-mcp.app",
+    "build:win": "npm run bundle && node scripts/build-sea.js win",
+    "zip:builds": "node scripts/zip-builds.js"
   },
   "devDependencies": {
     "esbuild": "^0.25.0",
