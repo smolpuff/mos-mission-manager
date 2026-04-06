@@ -376,9 +376,11 @@ function createChecksService(ctx, logger, mcp) {
           logDebug("assign", "nft_list_failed", { missionId: id, name, error: error.message });
           continue;
         }
-
-        const nft = nfts.find((x) => nftAccountId(x));
-        const account = nft ? nftAccountId(nft) : null;
+        const ownNft = nfts.find((x) => nftAccountId(x));
+        const ownAccount = ownNft ? nftAccountId(ownNft) : null;
+        const account = ownAccount;
+        const selectedFrom = ownAccount ? "owned" : "none";
+        const nft = ownNft;
         if (!account) {
           logWithTimestamp(`[ASSIGN] ℹ️ No eligible NFT available for: ${name}`);
           continue;
@@ -395,6 +397,7 @@ function createChecksService(ctx, logger, mcp) {
             missionId: id,
             slot,
             nftAccount: account,
+            selectedFrom,
           });
           const assignResult = await mcp.mcpToolCall("assign_nft_to_mission", {
             assignedMissionId: id,
@@ -406,6 +409,7 @@ function createChecksService(ctx, logger, mcp) {
             missionId: id,
             nftAccount: account,
             success: toolCallSucceeded(assignResult),
+            selectedFrom,
             result: assignResult?.structuredContent || assignResult,
           });
           if (!toolCallSucceeded(assignResult)) {

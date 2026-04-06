@@ -141,7 +141,9 @@ function createCommandHandler(ctx, logger, actions, configApi) {
       }
       if (cmd === "mm" || cmd.startsWith("mm ")) {
         const arg = cmd.slice(2).trim();
-        if (!arg || arg === "on") {
+        if (!arg) {
+          ctx.missionModeEnabled = !ctx.missionModeEnabled;
+        } else if (arg === "on") {
           ctx.missionModeEnabled = true;
         } else if (arg === "off") {
           ctx.missionModeEnabled = false;

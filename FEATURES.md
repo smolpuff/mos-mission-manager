@@ -60,6 +60,7 @@ Purpose: single source of truth for implemented and planned features, used for R
   - watch loop emits explicit `[AUTH]` error lines on session/token/auth failures.
   - auth failure recovery: auto re-login and retry watch cycle after successful reauth.
   - normal auth logs stay concise (`✅` success / `❌` errors); login mode details are debug-only.
+- Rental automation was intentionally removed from runtime code pending a confirmed renter-side MCP/API flow.
 
 ## Config Keys In Use
 

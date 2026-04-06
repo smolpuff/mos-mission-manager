@@ -12,5 +12,6 @@
   "watchPollIntervalSeconds": 30,
   "level20ResetEnabled": false,
   "missionModeEnabled": false,
-  "missionResetLevel": "6"
+  "missionResetLevel": "6",
+  "watchCycleSeconds": 0
 }
