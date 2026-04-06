@@ -1,3 +1,4 @@
+// because... i wanna be teej. i wanna code. i wanna code. I wanna dance, i dont wanna go home.
 "use strict";
 
 const {
@@ -42,8 +43,9 @@ function createChecksService(ctx, logger, mcp) {
   }
 
   function missionName(mission) {
-    return String(mission?.name || mission?.missionName || mission?.mission_name || "")
-      .trim();
+    return String(
+      mission?.name || mission?.missionName || mission?.mission_name || "",
+    ).trim();
   }
   function missionLevel(mission) {
     const raw = mission?.current_level ?? mission?.level ?? null;
@@ -91,7 +93,9 @@ function createChecksService(ctx, logger, mcp) {
 
   function configuredTargetEntries() {
     if (!Array.isArray(ctx.config.targetMissions)) return [];
-    return ctx.config.targetMissions.map((v) => String(v || "").trim()).filter(Boolean);
+    return ctx.config.targetMissions
+      .map((v) => String(v || "").trim())
+      .filter(Boolean);
   }
 
   function shouldRetryAssignmentSync(reason = "") {
@@ -119,7 +123,10 @@ function createChecksService(ctx, logger, mcp) {
       .filter((m) => {
         const name = canonicalNameKey(missionName(m));
         const id = catalogMissionId(m);
-        return (id && resolved.targetIds.has(id)) || (name && resolved.targetNames.has(name));
+        return (
+          (id && resolved.targetIds.has(id)) ||
+          (name && resolved.targetNames.has(name))
+        );
       })
       .map((m) => ({
         name: missionName(m) || null,
@@ -132,8 +139,13 @@ function createChecksService(ctx, logger, mcp) {
       }));
   }
 
-  async function loadAssignableCandidatesWithSyncWait(reason, resolved, initialMissionResult = null) {
-    let result = initialMissionResult || (await mcp.mcpToolCall("get_user_missions", {}));
+  async function loadAssignableCandidatesWithSyncWait(
+    reason,
+    resolved,
+    initialMissionResult = null,
+  ) {
+    let result =
+      initialMissionResult || (await mcp.mcpToolCall("get_user_missions", {}));
     let missions = normalizeMissionList(result);
     let candidates = buildAssignCandidates(missions, resolved);
     logDebug("assign", "sync_wait_snapshot", {
@@ -181,13 +193,17 @@ function createChecksService(ctx, logger, mcp) {
     return { result, missions, candidates };
   }
 
-  function resolveConfiguredTargets(catalogMissions = ctx.missionCatalogEntries || []) {
+  function resolveConfiguredTargets(
+    catalogMissions = ctx.missionCatalogEntries || [],
+  ) {
     const configured = configuredTargetEntries();
     if (catalogMissions.length === 0) {
       return {
         configured,
         targetIds: new Set(),
-        targetNames: new Set(configured.map((x) => canonicalNameKey(x)).filter(Boolean)),
+        targetNames: new Set(
+          configured.map((x) => canonicalNameKey(x)).filter(Boolean),
+        ),
         invalid: [],
       };
     }
@@ -241,7 +257,8 @@ function createChecksService(ctx, logger, mcp) {
 
   function filterSelectedMissions(missions = []) {
     const resolved = resolveConfiguredTargets();
-    if (resolved.targetIds.size === 0 && resolved.targetNames.size === 0) return missions;
+    if (resolved.targetIds.size === 0 && resolved.targetNames.size === 0)
+      return missions;
     return missions.filter((m) => isConfiguredTargetMission(m, resolved));
   }
 
@@ -253,7 +270,9 @@ function createChecksService(ctx, logger, mcp) {
       logWithTimestamp(`[CATALOG] ✅ Loaded ${missions.length} missions`);
       return { ok: true, total: missions.length };
     } catch (error) {
-      logWithTimestamp(`[CATALOG] ❌ Failed to load mission catalog: ${error.message}`);
+      logWithTimestamp(
+        `[CATALOG] ❌ Failed to load mission catalog: ${error.message}`,
+      );
       logDebug("catalog", "load_failed", { error: error.message });
       return { ok: false, total: 0 };
     }
@@ -269,7 +288,9 @@ function createChecksService(ctx, logger, mcp) {
     }
     const validNames = Array.from(resolved.targetNames);
     if (validNames.length > 0) {
-      logWithTimestamp(`[CONFIG] ✅ targetMissions resolved: ${validNames.join(", ")}`);
+      logWithTimestamp(
+        `[CONFIG] ✅ targetMissions resolved: ${validNames.join(", ")}`,
+      );
     }
     return resolved;
   }
@@ -277,12 +298,16 @@ function createChecksService(ctx, logger, mcp) {
   function selectedTargetsForDisplay(resolved = resolveConfiguredTargets()) {
     const out = [];
     const added = new Set();
-    const catalog = Array.isArray(ctx.missionCatalogEntries) ? ctx.missionCatalogEntries : [];
+    const catalog = Array.isArray(ctx.missionCatalogEntries)
+      ? ctx.missionCatalogEntries
+      : [];
     for (const m of catalog) {
       const id = catalogMissionId(m);
       const name = missionName(m);
       const byId = id ? resolved.targetIds.has(id) : false;
-      const byName = name ? resolved.targetNames.has(name.toLowerCase()) : false;
+      const byName = name
+        ? resolved.targetNames.has(name.toLowerCase())
+        : false;
       if (!(byId || byName)) continue;
       const label = name || id;
       if (!label || added.has(label)) continue;
@@ -306,7 +331,10 @@ function createChecksService(ctx, logger, mcp) {
     }
   }
 
-  async function autoAssignConfiguredMissions({ reason = "periodic", missionsResult = null } = {}) {
+  async function autoAssignConfiguredMissions({
+    reason = "periodic",
+    missionsResult = null,
+  } = {}) {
     const resolved = resolveConfiguredTargets();
     logDebug("assign", "check", {
       reason,
@@ -317,17 +345,20 @@ function createChecksService(ctx, logger, mcp) {
       return { ok: true, attempted: 0, assigned: 0 };
     }
     if (ctx.autoAssignRunning) {
-      logWithTimestamp(`[ASSIGN] ℹ️ Assign check skipped (already running) reason=${reason}`);
+      logWithTimestamp(
+        `[ASSIGN] ℹ️ Assign check skipped (already running) reason=${reason}`,
+      );
       return { ok: true, attempted: 0, assigned: 0, skipped: true };
     }
 
     ctx.autoAssignRunning = true;
     try {
-      const { missions, candidates } = await loadAssignableCandidatesWithSyncWait(
-        reason,
-        resolved,
-        missionsResult,
-      );
+      const { missions, candidates } =
+        await loadAssignableCandidatesWithSyncWait(
+          reason,
+          resolved,
+          missionsResult,
+        );
       logDebug("assign", "candidates_built", {
         reason,
         candidates: candidates.map((m) => ({
@@ -337,7 +368,10 @@ function createChecksService(ctx, logger, mcp) {
           slot: m?.slot ?? null,
         })),
       });
-      logDebug("assign", "check_result", { reason, candidates: candidates.length });
+      logDebug("assign", "check_result", {
+        reason,
+        candidates: candidates.length,
+      });
 
       if (candidates.length === 0) {
         if (
@@ -345,13 +379,18 @@ function createChecksService(ctx, logger, mcp) {
           reason === "post_claim" ||
           String(reason || "").startsWith("post_claim_")
         ) {
-          logWithTimestamp("[ASSIGN] ℹ️ No unassigned target mission to start right now.");
+          logWithTimestamp(
+            "[ASSIGN] ℹ️ No unassigned target mission to start right now.",
+          );
         }
         logDebug("assign", "no_candidates", {
           reason,
           targetCount: resolved.targetIds.size || resolved.targetNames.size,
           configuredTargets: resolved.configured,
-          selectedMissionState: summarizeSelectedMissionState(missions, resolved),
+          selectedMissionState: summarizeSelectedMissionState(
+            missions,
+            resolved,
+          ),
         });
         return { ok: true, attempted: 0, assigned: 0 };
       }
@@ -380,7 +419,9 @@ function createChecksService(ctx, logger, mcp) {
 
         let nfts = [];
         try {
-          const nftResult = await mcp.mcpToolCall("get_mission_nfts", { assignedMissionId: id });
+          const nftResult = await mcp.mcpToolCall("get_mission_nfts", {
+            assignedMissionId: id,
+          });
           nfts = normalizeNftList(nftResult).filter(nftIsAvailable);
           logDebug("assign", "eligible_nfts_loaded", {
             reason,
@@ -389,7 +430,11 @@ function createChecksService(ctx, logger, mcp) {
             eligibleCount: nfts.length,
           });
         } catch (error) {
-          logDebug("assign", "nft_list_failed", { missionId: id, name, error: error.message });
+          logDebug("assign", "nft_list_failed", {
+            missionId: id,
+            name,
+            error: error.message,
+          });
           continue;
         }
         const assignableNfts = nfts
@@ -397,7 +442,9 @@ function createChecksService(ctx, logger, mcp) {
           .filter((entry) => entry.account)
           .slice(0, 3);
         if (assignableNfts.length === 0) {
-          logWithTimestamp(`[ASSIGN] ℹ️ No eligible NFT available for: ${name}`);
+          logWithTimestamp(
+            `[ASSIGN] ℹ️ No eligible NFT available for: ${name}`,
+          );
           continue;
         }
 
@@ -418,10 +465,13 @@ function createChecksService(ctx, logger, mcp) {
               maxAttempts: assignableNfts.length,
               selectedFrom: "owned",
             });
-            const assignResult = await mcp.mcpToolCall("assign_nft_to_mission", {
-              assignedMissionId: id,
-              nftAccount: account,
-            });
+            const assignResult = await mcp.mcpToolCall(
+              "assign_nft_to_mission",
+              {
+                assignedMissionId: id,
+                nftAccount: account,
+              },
+            );
             logDebug("assign", "assign_call_done", {
               reason,
               missionName: name,
@@ -437,18 +487,24 @@ function createChecksService(ctx, logger, mcp) {
               const message = assignFailureMessage(assignResult);
               const details = assignFailureDetails(assignResult);
               throw new Error(
-                details ? `${message} details=${JSON.stringify(details)}` : message,
+                details
+                  ? `${message} details=${JSON.stringify(details)}`
+                  : message,
               );
             }
             assigned += 1;
             missionAssigned = true;
             startedMissionNames.push(name);
             startedMissionDetails.push({ name, level, slot });
-            logWithTimestamp(`[ASSIGN] ✅ Started mission: ${name}${levelText}`);
+            logWithTimestamp(
+              `[ASSIGN] ✅ Started mission: ${name}${levelText}`,
+            );
             break;
           } catch (error) {
             lastError = error;
-            const retryable = isRetryableActiveMissionAssignError(error.message);
+            const retryable = isRetryableActiveMissionAssignError(
+              error.message,
+            );
             const hasNext = index + 1 < assignableNfts.length;
             logDebug("assign", "assign_failed", {
               missionName: name,
@@ -494,7 +550,13 @@ function createChecksService(ctx, logger, mcp) {
         startedMissionNames,
         startedMissionDetails,
       });
-      return { ok: true, attempted: candidates.length, assigned, startedMissionNames, startedMissionDetails };
+      return {
+        ok: true,
+        attempted: candidates.length,
+        assigned,
+        startedMissionNames,
+        startedMissionDetails,
+      };
     } finally {
       ctx.autoAssignRunning = false;
     }
@@ -508,9 +570,12 @@ function createChecksService(ctx, logger, mcp) {
   } = {}) {
     const limit = Math.max(1, Number(maxClaims || 10));
     try {
-      const result = missionsResult || (await mcp.mcpToolCall("get_user_missions", {}));
+      const result =
+        missionsResult || (await mcp.mcpToolCall("get_user_missions", {}));
       const missionsAll = normalizeMissionList(result);
-      const missions = onlySelected ? filterSelectedMissions(missionsAll) : missionsAll;
+      const missions = onlySelected
+        ? filterSelectedMissions(missionsAll)
+        : missionsAll;
       const candidates = missions
         .filter((m) => missionIsClaimable(m))
         .map((m) => ({
@@ -538,11 +603,15 @@ function createChecksService(ctx, logger, mcp) {
             throw new Error(message);
           }
           claimed += 1;
-          const levelText = mission.level === null ? "" : ` lvl=${mission.level}`;
+          const levelText =
+            mission.level === null ? "" : ` lvl=${mission.level}`;
           const slotText = mission.slot === null ? "" : ` slot=${mission.slot}`;
-          logWithTimestamp(`[WATCH] ✅ Claimed (fallback): ${mission.name}${slotText}${levelText}`);
+          logWithTimestamp(
+            `[WATCH] ✅ Claimed (fallback): ${mission.name}${slotText}${levelText}`,
+          );
         } catch (error) {
-          const levelText = mission.level === null ? "" : ` lvl=${mission.level}`;
+          const levelText =
+            mission.level === null ? "" : ` lvl=${mission.level}`;
           const slotText = mission.slot === null ? "" : ` slot=${mission.slot}`;
           logWithTimestamp(
             `[WATCH] ❌ Claim failed (fallback) for ${mission.name}${slotText}${levelText}: ${error.message}`,
@@ -556,7 +625,10 @@ function createChecksService(ctx, logger, mcp) {
       }
       return { ok: true, claimed };
     } catch (error) {
-      logDebug("watch", "fallback_claim_scan_failed", { reason, error: error.message });
+      logDebug("watch", "fallback_claim_scan_failed", {
+        reason,
+        error: error.message,
+      });
       return { ok: false, claimed: 0 };
     }
   }
@@ -565,7 +637,8 @@ function createChecksService(ctx, logger, mcp) {
     try {
       const json = await mcp.mcpToolCall("who_am_i", {});
       const info = json?.structuredContent || {};
-      const displayName = info.display_name || info.displayName || info.username || "unknown";
+      const displayName =
+        info.display_name || info.displayName || info.username || "unknown";
       const walletId = info.wallet_id || info.walletId || "unknown";
       logDebug("check", "whoami_ok", { displayName, walletId });
       return { ok: true, displayName, walletId };
@@ -578,7 +651,8 @@ function createChecksService(ctx, logger, mcp) {
   async function runMcpHealthCheck() {
     try {
       const json = await mcp.mcpToolCall("mcp_health", {});
-      const healthOk = json?.structuredContent?.success ?? json?.structuredContent?.ok ?? true;
+      const healthOk =
+        json?.structuredContent?.success ?? json?.structuredContent?.ok ?? true;
       logDebug("check", "mcp_health_ok", { healthOk });
       return { ok: true, healthOk };
     } catch (error) {
@@ -587,9 +661,13 @@ function createChecksService(ctx, logger, mcp) {
     }
   }
 
-  async function refreshMissionHeaderStats({ refreshNftCount = false, missionsResult = null } = {}) {
+  async function refreshMissionHeaderStats({
+    refreshNftCount = false,
+    missionsResult = null,
+  } = {}) {
     try {
-      const result = missionsResult || (await mcp.mcpToolCall("get_user_missions", {}));
+      const result =
+        missionsResult || (await mcp.mcpToolCall("get_user_missions", {}));
       const missions = normalizeMissionList(result);
       const computed = computeMissionStats(missions, ctx.sessionClaimedCount);
 

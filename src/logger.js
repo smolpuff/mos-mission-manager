@@ -3,6 +3,25 @@
 function createLogger(ctx) {
   let winkUntilMs = 0;
   let nextWinkAtMs = Date.now() + 2500 + Math.floor(Math.random() * 4500);
+  let winkTimer = null;
+
+  function clearWinkTimer() {
+    if (winkTimer) {
+      clearTimeout(winkTimer);
+      winkTimer = null;
+    }
+  }
+
+  function scheduleNextWinkFrame(delayMs) {
+    clearWinkTimer();
+    winkTimer = setTimeout(
+      () => {
+        winkTimer = null;
+        if (!ctx.startupFxActive) redrawHeaderAndLog(ctx.currentMissionStats);
+      },
+      Math.max(0, delayMs),
+    );
+  }
 
   function debugString(meta = {}) {
     const entries = Object.entries(meta).filter(
@@ -36,6 +55,9 @@ function createLogger(ctx) {
     if (now >= winkUntilMs && now >= nextWinkAtMs) {
       winkUntilMs = now + 500;
       nextWinkAtMs = now + 500 + Math.floor(Math.random() * 7000);
+      scheduleNextWinkFrame(500);
+    } else if (now < nextWinkAtMs) {
+      scheduleNextWinkFrame(Math.min(nextWinkAtMs - now, 2147483647));
     }
     const winking = now < winkUntilMs;
     return [
@@ -109,7 +131,7 @@ function createLogger(ctx) {
       ),
       composeHeaderLine("", giraffe[3], innerWidth),
       composeHeaderLine(
-        `🙀 ${ctx.currentUserDisplayName || "unknown user"}`,
+        `🙀 ${ctx.currentUserDisplayName || "unknown user"} | 💳 ${ctx.currentUserWalletId || "unknown"}`,
         giraffe[4],
         innerWidth,
       ),
