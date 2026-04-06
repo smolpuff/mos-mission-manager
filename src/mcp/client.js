@@ -98,7 +98,7 @@ function createMcpClient(ctx, logger) {
     return Boolean(bearerToken());
   }
 
-  async function mcpPost({ token, sessionId, body, timeoutMs }) {
+  async function mcpPost({ token, sessionId, body, timeoutMs, signal: externalSignal = null }) {
     const headers = {
       Accept: "application/json, text/event-stream",
       "Content-Type": "application/json",
@@ -109,6 +109,14 @@ function createMcpClient(ctx, logger) {
 
     const effectiveTimeoutMs = Number(timeoutMs ?? MCP_REQUEST_TIMEOUT_MS);
     const controller = new AbortController();
+    let externalAbortHandler = null;
+    if (externalSignal && typeof externalSignal.addEventListener === "function") {
+      if (externalSignal.aborted) controller.abort();
+      else {
+        externalAbortHandler = () => controller.abort();
+        externalSignal.addEventListener("abort", externalAbortHandler, { once: true });
+      }
+    }
     const timeout = setTimeout(() => controller.abort(), effectiveTimeoutMs);
     try {
       const response = await fetch(ctx.MCP_URL, {
@@ -128,10 +136,16 @@ function createMcpClient(ctx, logger) {
       };
     } catch (error) {
       if (error?.name === "AbortError") {
+        if (externalSignal?.aborted) {
+          throw new Error("request aborted");
+        }
         throw new Error(`request timeout after ${effectiveTimeoutMs}ms`);
       }
       throw error;
     } finally {
+      if (externalAbortHandler && externalSignal?.removeEventListener) {
+        externalSignal.removeEventListener("abort", externalAbortHandler);
+      }
       clearTimeout(timeout);
     }
   }
@@ -187,6 +201,7 @@ function createMcpClient(ctx, logger) {
         token,
         sessionId,
         timeoutMs: opts.timeoutMs,
+        signal: opts.signal,
         body: {
           jsonrpc: "2.0",
           id: 2,

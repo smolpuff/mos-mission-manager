@@ -57,8 +57,25 @@ function missionHasAssignedNft(mission) {
     mission?.nft?.mint_address,
     mission?.nftId,
     mission?.nft_id,
-  ].find((v) => isUsableIdValue(v));
-  return Boolean(nft);
+  ];
+  if (
+    mission?.assigned_nft === true ||
+    mission?.assignedNft === true ||
+    mission?.assigned_nft_active === true ||
+    mission?.assignedMissionActive === true
+  ) {
+    return true;
+  }
+  const explicitId = nft.find((v) => isUsableIdValue(v));
+  if (explicitId) return true;
+  const nestedNft = mission?.nft;
+  if (nestedNft && typeof nestedNft === "object") {
+    return Object.keys(nestedNft).length > 0;
+  }
+  if (mission?.assigned_nft && typeof mission.assigned_nft === "object") {
+    return Object.keys(mission.assigned_nft).length > 0;
+  }
+  return false;
 }
 
 function missionIsClaimable(mission) {

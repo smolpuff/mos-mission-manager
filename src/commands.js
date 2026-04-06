@@ -23,6 +23,7 @@ function createCommandHandler(ctx, logger, actions, configApi) {
   }
 
   function setupCommandHandler() {
+    let manualOverrideInFlight = false;
     const rl = readline.createInterface({
       input: process.stdin,
       output: process.stdout,
@@ -41,23 +42,36 @@ function createCommandHandler(ctx, logger, actions, configApi) {
           await runLoginFlow({ forceInteractive: true })
         ) {
           await runInitialChecks();
-          await startWatchLoop();
+          void startWatchLoop();
         }
       },
       check: async () => {
         await runInitialChecks();
       },
       c: async () => {
+        if (manualOverrideInFlight) {
+          logWithTimestamp("[WATCH] ℹ️ Manual override already running; ignoring duplicate 'c'.");
+          return;
+        }
         if (!ctx.isAuthenticated) {
           logWithTimestamp("[WATCH] ❌ Not authenticated. Run 'login' or 'check' first.");
           return;
         }
+        manualOverrideInFlight = true;
         if (ctx.watcherRunning) {
-          logWithTimestamp("[WATCH] ⏸️ Manual override: pausing watcher and forcing cycle now...");
-          await stopWatchLoop({ persist: false });
-          ctx.watchLoopEnabled = true;
-          logWithTimestamp("[WATCH] ▶️ Resuming watcher after manual override...");
-          await startWatchLoop();
+          try {
+            logWithTimestamp("[WATCH] ⏸️ Manual override: pausing watcher and forcing cycle now...");
+            await stopWatchLoop({ persist: false, waitForCycle: false });
+            const { claimed, assigned } = await runManualProcess({ waitForCycle: false });
+            logWithTimestamp(`[WATCH] ✅ Manual process complete: claimed=${claimed} assigned=${assigned}.`);
+          } catch (error) {
+            logWithTimestamp(`[WATCH] ❌ Manual process failed: ${error.message}`);
+          } finally {
+            ctx.watchLoopEnabled = true;
+            manualOverrideInFlight = false;
+            logWithTimestamp("[WATCH] ▶️ Resuming watcher after manual override...");
+            void startWatchLoop();
+          }
           return;
         }
         try {
@@ -65,6 +79,8 @@ function createCommandHandler(ctx, logger, actions, configApi) {
           logWithTimestamp(`[WATCH] ✅ Manual process complete: claimed=${claimed} assigned=${assigned}.`);
         } catch (error) {
           logWithTimestamp(`[WATCH] ❌ Manual process failed: ${error.message}`);
+        } finally {
+          manualOverrideInFlight = false;
         }
       },
       pause: async () => {
@@ -78,7 +94,7 @@ function createCommandHandler(ctx, logger, actions, configApi) {
         ctx.config.watchLoopEnabled = true;
         saveConfig(ctx, logger.logDebug);
         logWithTimestamp("[WATCH] ▶️ Resumed.");
-        await startWatchLoop();
+        void startWatchLoop();
       },
       status: async () => showStatus(),
       q: async () => {
@@ -96,6 +112,10 @@ function createCommandHandler(ctx, logger, actions, configApi) {
       const cmd = raw.toLowerCase();
       process.stdout.write("\x1b[2K\r");
       if (!cmd) return;
+      if (cmd === "xc" || cmd === "claim" || /^c+$/.test(cmd)) {
+        await handlers.c();
+        return;
+      }
       if (cmd === "20r" || cmd.startsWith("20r ")) {
         const arg = cmd.slice(3).trim();
         if (!arg) {

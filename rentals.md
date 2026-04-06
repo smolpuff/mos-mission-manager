@@ -1,0 +1,8 @@
+- add rental support get_rental_dashboard, list_rental_nfts
+- add toggle to enable and dsiable renting.
+  - 2 rental modes
+    - for 7day cooldowns (lvl 5, 10, 15); pick any nft from the rental list, idgaf. theyre nto ours haha
+    - mission mode (tieed to other mm); it will burn through rental nfts until none are left, THEN proceed to my own nfts because we can. hahahah. make this mode evil. i dont care who cries LOLOLOLOLOLO
+    - rental abuse mode; not tied to missionmode, but will just use rentals instead of my own nfts. ier just use them because we can hahaha
+    - be sure to make it evil. purple devil emotes, angry faces, troll mode :D.
+    - only 1 enmabled at a time, or none at all (just use nfts as currently is)

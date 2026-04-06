@@ -23,15 +23,12 @@ function evaluateResetCandidates(snapshotMap, threshold) {
   const t = Number(threshold);
   if (!Number.isFinite(t) || t <= 0) return { ready: [], blocked: [] };
   const ready = [];
-  const blocked = [];
   for (const mission of snapshotMap.values()) {
     const level = Number(mission?.level || 0);
-    const hasActiveNft = Boolean(mission?.assignedNft);
     if (!Number.isFinite(level) || level < t) continue;
-    if (!hasActiveNft) ready.push(mission);
-    else blocked.push(mission);
+    ready.push(mission);
   }
-  return { ready, blocked };
+  return { ready, blocked: [] };
 }
 
 module.exports = {

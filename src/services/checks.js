@@ -81,7 +81,6 @@ function createChecksService(ctx, logger, mcp) {
   function shouldRetryAssignmentSync(reason = "") {
     const value = String(reason || "");
     return (
-      value === "manual" ||
       value === "post_claim" ||
       value === "post_claim_state_fallback" ||
       value.startsWith("post_claim_")
@@ -99,10 +98,40 @@ function createChecksService(ctx, logger, mcp) {
     });
   }
 
-  async function loadAssignableCandidatesWithSyncWait(reason, resolved) {
-    let result = await mcp.mcpToolCall("get_user_missions", {});
+  function summarizeSelectedMissionState(missions, resolved) {
+    return missions
+      .filter((m) => {
+        const name = canonicalNameKey(missionName(m));
+        const id = catalogMissionId(m);
+        return (id && resolved.targetIds.has(id)) || (name && resolved.targetNames.has(name));
+      })
+      .map((m) => ({
+        name: missionName(m) || null,
+        assignedMissionId: assignedMissionId(m),
+        catalogMissionId: catalogMissionId(m),
+        slot: m?.slot ?? null,
+        level: missionLevel(m),
+        hasAssignedNft: missionHasAssignedNft(m),
+        claimable: missionIsClaimable(m),
+      }));
+  }
+
+  async function loadAssignableCandidatesWithSyncWait(reason, resolved, initialMissionResult = null) {
+    let result = initialMissionResult || (await mcp.mcpToolCall("get_user_missions", {}));
     let missions = normalizeMissionList(result);
     let candidates = buildAssignCandidates(missions, resolved);
+    logDebug("assign", "sync_wait_snapshot", {
+      reason,
+      attempt: 0,
+      selected: summarizeSelectedMissionState(missions, resolved),
+      candidates: candidates.map((m) => ({
+        name: missionName(m),
+        assignedMissionId: assignedMissionId(m),
+        catalogMissionId: catalogMissionId(m),
+        slot: m?.slot ?? null,
+        level: missionLevel(m),
+      })),
+    });
     if (candidates.length > 0 || !shouldRetryAssignmentSync(reason)) {
       return { result, missions, candidates };
     }
@@ -117,6 +146,19 @@ function createChecksService(ctx, logger, mcp) {
       result = await mcp.mcpToolCall("get_user_missions", {});
       missions = normalizeMissionList(result);
       candidates = buildAssignCandidates(missions, resolved);
+      logDebug("assign", "sync_wait_snapshot", {
+        reason,
+        attempt: i + 1,
+        delayMs,
+        selected: summarizeSelectedMissionState(missions, resolved),
+        candidates: candidates.map((m) => ({
+          name: missionName(m),
+          assignedMissionId: assignedMissionId(m),
+          catalogMissionId: catalogMissionId(m),
+          slot: m?.slot ?? null,
+          level: missionLevel(m),
+        })),
+      });
       if (candidates.length > 0) break;
     }
 
@@ -248,7 +290,7 @@ function createChecksService(ctx, logger, mcp) {
     }
   }
 
-  async function autoAssignConfiguredMissions({ reason = "periodic" } = {}) {
+  async function autoAssignConfiguredMissions({ reason = "periodic", missionsResult = null } = {}) {
     const resolved = resolveConfiguredTargets();
     logDebug("assign", "check", {
       reason,
@@ -265,7 +307,11 @@ function createChecksService(ctx, logger, mcp) {
 
     ctx.autoAssignRunning = true;
     try {
-      const { candidates } = await loadAssignableCandidatesWithSyncWait(reason, resolved);
+      const { missions, candidates } = await loadAssignableCandidatesWithSyncWait(
+        reason,
+        resolved,
+        missionsResult,
+      );
       logDebug("assign", "candidates_built", {
         reason,
         candidates: candidates.map((m) => ({
@@ -288,6 +334,8 @@ function createChecksService(ctx, logger, mcp) {
         logDebug("assign", "no_candidates", {
           reason,
           targetCount: resolved.targetIds.size || resolved.targetNames.size,
+          configuredTargets: resolved.configured,
+          selectedMissionState: summarizeSelectedMissionState(missions, resolved),
         });
         return { ok: true, attempted: 0, assigned: 0 };
       }
@@ -417,10 +465,11 @@ function createChecksService(ctx, logger, mcp) {
     maxClaims = 10,
     reason = "fallback",
     onlySelected = true,
+    missionsResult = null,
   } = {}) {
     const limit = Math.max(1, Number(maxClaims || 10));
     try {
-      const result = await mcp.mcpToolCall("get_user_missions", {});
+      const result = missionsResult || (await mcp.mcpToolCall("get_user_missions", {}));
       const missionsAll = normalizeMissionList(result);
       const missions = onlySelected ? filterSelectedMissions(missionsAll) : missionsAll;
       const candidates = missions

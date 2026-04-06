@@ -17,13 +17,16 @@
 
 ## TODO 04/5/26
 
+- [ ] Add rental abuse >:D
 - [x] If token refresh fails; retry 3 times, then login again with popup
-- [ ] See if get_wallet_summary will work better for knowing when claimed and not?
+- [x] See if get_wallet_summary will work better for knowing when claimed and not?
 - [-] Mission level detection for reset triggering
   - [x] Fix delay waiting until end of cycle to popup
 - [ ] Full Mission level reset flow (reset to level 1, sign, confirm)
   - [ ] A
   - [ ] B
+
+- [ ] currencies for header | get_wallet_summary
 
 ## TODO POST SINGING
 
