@@ -43,7 +43,11 @@ const STARTUP_FX_ENABLED = true;
 const STARTUP_FX_FRAME_MS = 95;
 const STARTUP_PROGRESS_PULSE_MS = 220;
 
-async function runWithProgressPulse(task, ctx, { floor = 0, ceiling = 95, step = 1 } = {}) {
+async function runWithProgressPulse(
+  task,
+  ctx,
+  { floor = 0, ceiling = 95, step = 1 } = {},
+) {
   let timer = null;
   try {
     timer = setInterval(() => {
@@ -85,7 +89,9 @@ async function runStartupSequence() {
     let loginOk = false;
 
     if (ctx.debugMode) {
-      logger.logWithTimestamp("[STARTUP] Debug mode: running interactive login (URL mode)...");
+      logger.logWithTimestamp(
+        "[STARTUP] Debug mode: running interactive login (URL mode)...",
+      );
       ctx.startupFxProgress = 35;
       loginOk = await runWithProgressPulse(
         () => mcp.runLoginFlow({ forceInteractive: true }),
@@ -129,7 +135,9 @@ async function runStartupSequence() {
 
     if (!ctx.isAuthenticated) {
       logger.logWithTimestamp("[STARTUP] Auth unavailable.");
-      logger.logWithTimestamp("[STARTUP] Attempting interactive login fallback...");
+      logger.logWithTimestamp(
+        "[STARTUP] Attempting interactive login fallback...",
+      );
       ctx.startupFxProgress = 90;
       const fallbackOk = await runWithProgressPulse(
         () => mcp.runLoginFlow({ forceInteractive: true }),
@@ -147,7 +155,9 @@ async function runStartupSequence() {
       }
     }
     ctx.isIdle = true;
-    ctx.currentMode = ctx.missionModeEnabled ? `mission-${ctx.currentMissionResetLevel}` : "normal";
+    ctx.currentMode = ctx.missionModeEnabled
+      ? `mission-${ctx.currentMissionResetLevel}`
+      : "normal";
     logger.logWithTimestamp("[READY] Startup complete.");
     ctx.startupComplete = true;
     ctx.startupFxProgress = 100;
@@ -157,7 +167,9 @@ async function runStartupSequence() {
         logger.logWithTimestamp("[READY] Watcher running.");
         shouldStartWatch = true;
       } else {
-        logger.logWithTimestamp("[READY] Watcher is disabled (`watchLoopEnabled=false`).");
+        logger.logWithTimestamp(
+          "[READY] Watcher is disabled (`watchLoopEnabled=false`).",
+        );
       }
     } else {
       logger.logWithTimestamp("[READY] Type 'login' then 'check'.");
@@ -192,7 +204,9 @@ process.on("SIGTERM", () => {
 });
 
 main().catch((err) => {
-  logger.logWithTimestamp(`[ERROR] Fatal startup error: ${err?.message || err}`);
+  logger.logWithTimestamp(
+    `[ERROR] Fatal startup error: ${err?.message || err}`,
+  );
   logger.logDebug("startup", "fatal", {
     error: err?.message || String(err),
     stack: err?.stack,

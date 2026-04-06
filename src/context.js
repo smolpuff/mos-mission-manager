@@ -3,9 +3,9 @@
 const path = require("path");
 const os = require("os");
 
-const APP_VERSION = "0.1.0";
-const APP_NAME = "missions-mcp";
-const DEFAULT_MISSION_RESET_LEVEL = "11";
+const APP_VERSION = "3.0.3";
+const APP_NAME = "missions-v3-mcp";
+const DEFAULT_MISSION_RESET_LEVEL = "20";
 const MCP_URL = "https://pixelbypixel.studio/mcp";
 const MCP_PROTOCOL_VERSION = "2025-03-26";
 const LOG_BUFFER_SIZE = 100;
@@ -26,6 +26,8 @@ function createContext() {
     config: {},
     isIdle: true,
     isAuthenticated: false,
+    currentUserDisplayName: "unknown",
+    currentUserWalletId: "unknown",
     currentMode: "normal",
     level20ResetEnabled: false,
     missionModeEnabled: false,

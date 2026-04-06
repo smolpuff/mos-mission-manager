@@ -73,6 +73,22 @@ function createChecksService(ctx, logger, mcp) {
     return isUsableIdValue(id) ? id.trim() : null;
   }
 
+  function assignFailureMessage(assignResult) {
+    return (
+      assignResult?.structuredContent?.details?.message ||
+      assignResult?.content?.[0]?.text ||
+      "assign_nft_to_mission failed"
+    );
+  }
+
+  function assignFailureDetails(assignResult) {
+    return assignResult?.structuredContent?.details || null;
+  }
+
+  function isRetryableActiveMissionAssignError(message = "") {
+    return /NFT is already in an active mission/i.test(String(message || ""));
+  }
+
   function configuredTargetEntries() {
     if (!Array.isArray(ctx.config.targetMissions)) return [];
     return ctx.config.targetMissions.map((v) => String(v || "").trim()).filter(Boolean);
@@ -376,67 +392,86 @@ function createChecksService(ctx, logger, mcp) {
           logDebug("assign", "nft_list_failed", { missionId: id, name, error: error.message });
           continue;
         }
-        const ownNft = nfts.find((x) => nftAccountId(x));
-        const ownAccount = ownNft ? nftAccountId(ownNft) : null;
-        const account = ownAccount;
-        const selectedFrom = ownAccount ? "owned" : "none";
-        const nft = ownNft;
-        if (!account) {
+        const assignableNfts = nfts
+          .map((nft) => ({ nft, account: nftAccountId(nft) }))
+          .filter((entry) => entry.account)
+          .slice(0, 3);
+        if (assignableNfts.length === 0) {
           logWithTimestamp(`[ASSIGN] ℹ️ No eligible NFT available for: ${name}`);
           continue;
         }
 
-        try {
-          const slot = mission?.slot ?? null;
-          logWithTimestamp(
-            `[ASSIGN] 🚀 Starting mission: ${name}${levelText}`,
-          );
-          logDebug("assign", "assign_call_start", {
-            reason,
-            missionName: name,
-            missionId: id,
-            slot,
-            nftAccount: account,
-            selectedFrom,
-          });
-          const assignResult = await mcp.mcpToolCall("assign_nft_to_mission", {
-            assignedMissionId: id,
-            nftAccount: account,
-          });
-          logDebug("assign", "assign_call_done", {
-            reason,
-            missionName: name,
-            missionId: id,
-            nftAccount: account,
-            success: toolCallSucceeded(assignResult),
-            selectedFrom,
-            result: assignResult?.structuredContent || assignResult,
-          });
-          if (!toolCallSucceeded(assignResult)) {
-            const message =
-              assignResult?.structuredContent?.details?.message ||
-              assignResult?.content?.[0]?.text ||
-              "assign_nft_to_mission failed";
-            const details = assignResult?.structuredContent?.details || null;
-            throw new Error(
-              details ? `${message} details=${JSON.stringify(details)}` : message,
-            );
+        const slot = mission?.slot ?? null;
+        let missionAssigned = false;
+        let lastError = null;
+        logWithTimestamp(`[ASSIGN] 🚀 Starting mission: ${name}${levelText}`);
+        for (let index = 0; index < assignableNfts.length; index += 1) {
+          const { nft, account } = assignableNfts[index];
+          try {
+            logDebug("assign", "assign_call_start", {
+              reason,
+              missionName: name,
+              missionId: id,
+              slot,
+              nftAccount: account,
+              attempt: index + 1,
+              maxAttempts: assignableNfts.length,
+              selectedFrom: "owned",
+            });
+            const assignResult = await mcp.mcpToolCall("assign_nft_to_mission", {
+              assignedMissionId: id,
+              nftAccount: account,
+            });
+            logDebug("assign", "assign_call_done", {
+              reason,
+              missionName: name,
+              missionId: id,
+              nftAccount: account,
+              attempt: index + 1,
+              maxAttempts: assignableNfts.length,
+              success: toolCallSucceeded(assignResult),
+              selectedFrom: "owned",
+              result: assignResult?.structuredContent || assignResult,
+            });
+            if (!toolCallSucceeded(assignResult)) {
+              const message = assignFailureMessage(assignResult);
+              const details = assignFailureDetails(assignResult);
+              throw new Error(
+                details ? `${message} details=${JSON.stringify(details)}` : message,
+              );
+            }
+            assigned += 1;
+            missionAssigned = true;
+            startedMissionNames.push(name);
+            startedMissionDetails.push({ name, level, slot });
+            logWithTimestamp(`[ASSIGN] ✅ Started mission: ${name}${levelText}`);
+            break;
+          } catch (error) {
+            lastError = error;
+            const retryable = isRetryableActiveMissionAssignError(error.message);
+            const hasNext = index + 1 < assignableNfts.length;
+            logDebug("assign", "assign_failed", {
+              missionName: name,
+              missionId: id,
+              nftAccount: account,
+              attempt: index + 1,
+              maxAttempts: assignableNfts.length,
+              error: error.message,
+              retryable,
+              willRetry: retryable && hasNext,
+              selectedNft: nft || null,
+            });
+            if (retryable && hasNext) {
+              continue;
+            }
+            break;
           }
-          assigned += 1;
-          startedMissionNames.push(name);
-          startedMissionDetails.push({ name, level, slot });
-          logWithTimestamp(`[ASSIGN] ✅ Started mission: ${name}${levelText}`);
-        } catch (error) {
+        }
+
+        if (!missionAssigned && lastError) {
           logWithTimestamp(
-            `[ASSIGN] ❌ Failed assign for ${name} (missionId=${id}, nft=${account}): ${error.message}`,
+            `[ASSIGN] ❌ Failed assign for ${name} (missionId=${id}): ${lastError.message}`,
           );
-          logDebug("assign", "assign_failed", {
-            missionName: name,
-            missionId: id,
-            nftAccount: account,
-            error: error.message,
-            selectedNft: nft || null,
-          });
         }
       }
 
@@ -615,6 +650,8 @@ function createChecksService(ctx, logger, mcp) {
     }
 
     ctx.isAuthenticated = true;
+    ctx.currentUserDisplayName = whoami.displayName || "unknown";
+    ctx.currentUserWalletId = whoami.walletId || "unknown";
     await refreshMissionCatalog();
     validateConfiguredTargets();
     logSelectedWatchTargetsAtStartup();

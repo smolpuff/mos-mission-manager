@@ -1,17 +1,9 @@
 {
-  "totalClaimed": 0,
-  "targetMissions": [
-    "Do it All!",
-    "Race!",
-    "Get Tilted for Points!",
-    "Race for Points"
-  ],
-  "interactiveAuth": true,
-  "debugMode": false,
-  "watchLoopEnabled": true,
+  "totalClaimed": 710,
+  "targetMissions": ["Do it All!", "Race!"],
   "watchPollIntervalSeconds": 30,
   "level20ResetEnabled": false,
   "missionModeEnabled": false,
-  "missionResetLevel": "6",
+  "missionResetLevel": "68",
   "watchCycleSeconds": 0
 }

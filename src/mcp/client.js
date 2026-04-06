@@ -161,7 +161,7 @@ function createMcpClient(ctx, logger) {
         params: {
           protocolVersion: ctx.MCP_PROTOCOL_VERSION,
           capabilities: {},
-          clientInfo: { name: "missions-mcp", version: ctx.APP_VERSION },
+          clientInfo: { name: "missions-v3-mcp", version: ctx.APP_VERSION },
         },
       },
     });

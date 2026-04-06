@@ -125,15 +125,14 @@ function renderFxFrame(
   );
   const statusByPhase =
     progress < 34
-      ? "missions-mcp :: bootstrapping channel"
-      : progress < 67
-        ? "missions-mcp :: authenticating session"
-        : "missions-mcp :: syncing missions + nft state";
+      ? "missions-v3-mcp :: bootstrapping channel"
+      : progress < 46
+        ? "missions-v3-mcp :: authenticating session"
+        : progress < 85
+          ? "missions-v3-mcp :: syncing mission and NFTs"
+          : "missions-v3-mcp :: ready";
 
   const movieLines = [
-    "[HACK THE PLANET!]",
-    "[THEY'RE TRASHING OUR RIGHTS!]",
-    "[I DON'T PLAY WELL WITH OTHERS.]",
     "[JOEY'S ON THE LINE.]",
     "[PROTECT JOEY. HOLD THE CHANNEL.]",
     "[JOEY LOCKED IN. TRACE COLD.]",
@@ -144,8 +143,8 @@ function renderFxFrame(
     "[ONE MORE PUSH AND WE'RE GHOST.]",
   ];
 
-  const title = "missions-mcp";
-  const line2 = "[H4x0ringt3h g1bs0n]";
+  const title = "missions-v3-mcp";
+  const line2 = "[r00ting the merbalznet]";
   const holdMs = 1800;
   const quote = movieLines[Math.floor(elapsedMs / holdMs) % movieLines.length];
   const scramblePct = Math.max(0, 0.12 * (1 - handoff));

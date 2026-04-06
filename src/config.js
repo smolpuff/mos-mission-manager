@@ -28,6 +28,9 @@ function loadConfig(ctx, logWithTimestamp) {
   if (typeof ctx.config.watchLoopEnabled === "boolean") {
     ctx.watchLoopEnabled = ctx.config.watchLoopEnabled;
   }
+  if (ctx.config.watchLoopEnabled === true) {
+    delete ctx.config.watchLoopEnabled;
+  }
   if (
     typeof ctx.config.interactiveAuth === "boolean" &&
     !process.argv.includes("--interactive-auth")

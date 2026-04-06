@@ -1,15 +1,15 @@
 {
-  "name": "missions-mcp",
-  "version": "0.1.0",
-  "private": true,
-  "description": "MCP-first mission automation app bootstrap",
-  "main": "app.js",
-  "type": "commonjs",
   "scripts": {
     "dev": "nodemon app.js",
     "dev:debug": "nodemon app.js --debug",
     "start": "node app.js",
     "start:debug": "node app.js --debug",
-    "build": "node -e \"const fs=require('fs');fs.mkdirSync('dist',{recursive:true});for(const f of ['app.js','config.json']){if(fs.existsSync(f))fs.copyFileSync(f,'dist/'+f);}console.log('Build complete: dist/');\""
+    "bundle": "mkdir -p dist && npx esbuild app.js --bundle --platform=node --format=cjs --target=node25 --outfile=dist/app.bundle.cjs",
+    "build:mac": "npm run bundle && node --build-sea sea-config.mac.json && codesign --force --sign - dist/missions-v3-mcp",
+    "build:mac:verify": "codesign -dv dist/missions-v3-mcp"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0",
+    "nodemon": "^3.1.0"
   }
 }

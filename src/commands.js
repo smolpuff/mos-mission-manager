@@ -91,7 +91,7 @@ function createCommandHandler(ctx, logger, actions, configApi) {
       },
       resume: async () => {
         ctx.watchLoopEnabled = true;
-        ctx.config.watchLoopEnabled = true;
+        delete ctx.config.watchLoopEnabled;
         saveConfig(ctx, logger.logDebug);
         logWithTimestamp("[WATCH] ▶️ Resumed.");
         void startWatchLoop();

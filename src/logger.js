@@ -1,8 +1,13 @@
 "use strict";
 
 function createLogger(ctx) {
+  let winkUntilMs = 0;
+  let nextWinkAtMs = Date.now() + 2500 + Math.floor(Math.random() * 4500);
+
   function debugString(meta = {}) {
-    const entries = Object.entries(meta).filter(([, v]) => v !== undefined && v !== null);
+    const entries = Object.entries(meta).filter(
+      ([, v]) => v !== undefined && v !== null,
+    );
     if (entries.length === 0) return "";
     return entries
       .map(([k, v]) => `${k}=${typeof v === "string" ? v : JSON.stringify(v)}`)
@@ -26,6 +31,57 @@ function createLogger(ctx) {
     return width;
   }
 
+  function nextGiraffeFrame() {
+    const now = Date.now();
+    if (now >= winkUntilMs && now >= nextWinkAtMs) {
+      winkUntilMs = now + 500;
+      nextWinkAtMs = now + 500 + Math.floor(Math.random() * 7000);
+    }
+    const winking = now < winkUntilMs;
+    return [
+      "(\\(\\     ",
+      winking ? "/.* )    " : "/.. )    ",
+      "(_. -'\\   ",
+      "  \\#\\  ",
+      "  \\#\\ ",
+      "",
+    ];
+  }
+
+  function padDisplayRight(str, width) {
+    const text = String(str || "");
+    const padLen = width - getDisplayWidth(text);
+    return text + " ".repeat(Math.max(0, padLen));
+  }
+
+  function composeHeaderLine(left, right, innerWidth) {
+    const leftText = String(left || "");
+    const rightText = String(right || "");
+    if (!rightText) return padDisplayRight(leftText, innerWidth);
+    const rightWidth = getDisplayWidth(rightText);
+    const leftMaxWidth = Math.max(0, innerWidth - rightWidth - 1);
+    let clippedLeft = leftText;
+    while (
+      getDisplayWidth(clippedLeft) > leftMaxWidth &&
+      clippedLeft.length > 0
+    ) {
+      clippedLeft = clippedLeft.slice(0, -1);
+    }
+    const leftWidth = getDisplayWidth(clippedLeft);
+    const gapWidth = Math.max(1, innerWidth - leftWidth - rightWidth);
+    return `${clippedLeft}${" ".repeat(gapWidth)}${rightText}`;
+  }
+
+  function padBlockRight(lines = []) {
+    const width = lines.reduce(
+      (max, line) => Math.max(max, getDisplayWidth(line)),
+      0,
+    );
+    return lines.map(
+      (line) => " ".repeat(Math.max(0, width - getDisplayWidth(line))) + line,
+    );
+  }
+
   function buildHeaderLines(stats = ctx.currentMissionStats) {
     const termWidth = process.stdout.columns || 78;
     const boxWidth = Math.max(termWidth, 40);
@@ -34,25 +90,40 @@ function createLogger(ctx) {
     const modeStatus = ctx.missionModeEnabled
       ? `mission (${ctx.currentMissionResetLevel} reset)`
       : "normal";
-    const status = ctx.isIdle ? "idle" : "running";
-    const totalClaimed = typeof ctx.config.totalClaimed === "number" ? ctx.config.totalClaimed : 0;
+    const status = ctx.watcherRunning ? "🟢 running" : "🔴 stopped";
+    const totalClaimed =
+      typeof ctx.config.totalClaimed === "number" ? ctx.config.totalClaimed : 0;
+    const giraffe = padBlockRight(nextGiraffeFrame());
 
     const lines = [
-      "",
-      `${ctx.APP_NAME} ${ctx.APP_VERSION}`,
-      "",
-      `🎯 ${stats.active} active | 🥞 ${stats.available} available | 🤑 ${stats.claimable} claimable | ✅ ${stats.claimed}(${totalClaimed}) claimed | 💎 ${stats.nftsAvailable ?? 0}/${stats.nftsTotal ?? stats.nfts ?? 0} NFT`,
-      `mode: ${modeStatus} | 20 reset: ${resetStatus} | status: ${status}`,
+      composeHeaderLine(
+        `${ctx.APP_NAME} ${ctx.APP_VERSION}`,
+        giraffe[0],
+        innerWidth,
+      ),
+      composeHeaderLine(status, giraffe[1], innerWidth),
+      composeHeaderLine(
+        `mode: ${modeStatus} | lvl20 reset: ${resetStatus}`,
+        giraffe[2],
+        innerWidth,
+      ),
+      composeHeaderLine("", giraffe[3], innerWidth),
+      composeHeaderLine(
+        `🙀 ${ctx.currentUserDisplayName || "unknown user"}`,
+        giraffe[4],
+        innerWidth,
+      ),
+      composeHeaderLine(
+        `✅ ${stats.claimed}(${totalClaimed}) claimed | 🤑 ${stats.claimable} claimable | 🎯 ${stats.active} active | 🥞 ${stats.available} ready | 💎 ${stats.nftsAvailable ?? 0} NFTs`,
+        giraffe[5],
+        innerWidth,
+      ),
     ];
-
-    while (lines.length < 6) lines.push("");
 
     const out = [];
     out.push("╔" + "═".repeat(boxWidth - 2) + "╗");
     for (const line of lines) {
-      const displayWidth = getDisplayWidth(line);
-      const padLen = innerWidth - displayWidth;
-      const padded = line + " ".repeat(Math.max(0, padLen));
+      const padded = padDisplayRight(line, innerWidth);
       out.push(`║ ${padded} ║`);
     }
     out.push("╚" + "═".repeat(boxWidth - 2) + "╝");
@@ -95,7 +166,9 @@ function createLogger(ctx) {
     const timestamp = new Date().toLocaleTimeString("en-GB", { hour12: false });
     const line = `[${timestamp}] ${message}`;
     ctx.logBuffer.push(line);
-    const maxSize = ctx.debugMode ? ctx.LOG_BUFFER_SIZE_DEBUG : ctx.LOG_BUFFER_SIZE;
+    const maxSize = ctx.debugMode
+      ? ctx.LOG_BUFFER_SIZE_DEBUG
+      : ctx.LOG_BUFFER_SIZE;
     if (ctx.logBuffer.length > maxSize) ctx.logBuffer.shift();
     if (ctx.startupFxActive) return;
     redrawHeaderAndLog(stats);
@@ -104,7 +177,8 @@ function createLogger(ctx) {
   function logDebug(scope, action, meta = {}) {
     if (!ctx.debugMode) return;
     const scopeKey = String(scope || "general").toLowerCase();
-    if (ctx.startupComplete && !["watch", "assign", "auth"].includes(scopeKey)) return;
+    if (ctx.startupComplete && !["watch", "assign", "auth"].includes(scopeKey))
+      return;
     const scopeTag = String(scope || "general").toUpperCase();
     const suffix = debugString(meta);
     const msg = suffix
