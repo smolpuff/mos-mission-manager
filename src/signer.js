@@ -345,11 +345,12 @@ function createSignerService(ctx, logger) {
   async function openUrl(url) {
     const target = String(url || '').trim();
     if (!target) return false;
+    const windowsTarget = `"${target.replace(/"/g, '\\"')}"`;
     const candidates =
       process.platform === 'darwin'
         ? [['open', [target]]]
         : process.platform === 'win32'
-          ? [['cmd', ['/c', 'start', '', target]]]
+          ? [['cmd', ['/c', 'start', '', windowsTarget]]]
           : [
               ['xdg-open', [target]],
               ['gio', ['open', target]],
