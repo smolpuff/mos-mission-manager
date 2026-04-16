@@ -5,7 +5,6 @@ sea-config.mac.json
 sea-config.win.json
 v2-missions.js
 data/
-bin/dev/
 binaries/
 scripts/
 debug-burner-env-reroll-proof.json
