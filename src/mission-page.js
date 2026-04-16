@@ -13,68 +13,28 @@ async function openMissionPlayPage() {
     return true;
   }
 
-  const url = MISSION_PLAY_URL;
-  const escapedUrl = String(url).replace(/\\/g, "\\\\").replace(/"/g, '\\"');
-  const macChromeScript = [
-    `tell application "Google Chrome"`,
-    `activate`,
-    `if (count of windows) is 0 then`,
-    `  make new window`,
-    `  set URL of active tab of front window to "${escapedUrl}"`,
-    `else`,
-    `  tell front window`,
-    `    make new tab at end of tabs with properties {URL:"${escapedUrl}"}`,
-    `    set active tab index to (count of tabs)`,
-    `  end tell`,
-    `end if`,
-    `end tell`,
-  ].join("\n");
-  const macEdgeScript = [
-    `tell application "Microsoft Edge"`,
-    `activate`,
-    `if (count of windows) is 0 then`,
-    `  make new window`,
-    `  set URL of active tab of front window to "${escapedUrl}"`,
-    `else`,
-    `  tell front window`,
-    `    make new tab at end of tabs with properties {URL:"${escapedUrl}"}`,
-    `    set active tab index to (count of tabs)`,
-    `  end tell`,
-    `end if`,
-    `end tell`,
-  ].join("\n");
+  const target = String(MISSION_PLAY_URL || '').trim();
+  if (!target) return false;
   const candidates =
-    process.platform === "darwin"
-      ? [
-          ["osascript", ["-e", macChromeScript]],
-          ["osascript", ["-e", macEdgeScript]],
-          ["open", ["-a", "Google Chrome", url]],
-          ["open", ["-a", "Microsoft Edge", url]],
-          ["open", [url]],
-        ]
-      : process.platform === "win32"
-        ? [
-            ["cmd", ["/c", "start", "", url]],
-          ]
+    process.platform === 'darwin'
+      ? [['open', [target]]]
+      : process.platform === 'win32'
+        ? [['cmd', ['/c', 'start', '', target]]]
         : [
-            ["google-chrome", [url]],
-            ["chromium-browser", [url]],
-            ["microsoft-edge", [url]],
-            ["firefox", [url]],
-            ["xdg-open", [url]],
-            ["gio", ["open", url]],
+            ['xdg-open', [target]],
+            ['gio', ['open', target]],
           ];
   for (const [cmd, args] of candidates) {
     const ok = await new Promise((resolve) => {
       let settled = false;
-      const child = spawn(cmd, args, { detached: true, stdio: "ignore" });
-      child.once("error", () => {
+      const child = spawn(cmd, args, { detached: true, stdio: 'ignore' });
+      child.once('error', () => {
         if (!settled) {
           settled = true;
           resolve(false);
         }
       });
-      child.once("exit", (code) => {
+      child.once('exit', (code) => {
         if (!settled) {
           settled = true;
           resolve(code === 0);

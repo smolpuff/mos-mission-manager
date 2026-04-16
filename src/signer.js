@@ -343,37 +343,29 @@ function createSignerService(ctx, logger) {
   }
 
   async function openUrl(url) {
-    const target = String(url || "").trim();
+    const target = String(url || '').trim();
     if (!target) return false;
     const candidates =
-      process.platform === "darwin"
-        ? [
-            ["open", [target]],
-            ["open", ["-a", "Google Chrome", target]],
-            ["open", ["-a", "Microsoft Edge", target]],
-          ]
-        : process.platform === "win32"
-          ? [["cmd", ["/c", "start", "", target]]]
+      process.platform === 'darwin'
+        ? [['open', [target]]]
+        : process.platform === 'win32'
+          ? [['cmd', ['/c', 'start', '', target]]]
           : [
-              ["google-chrome", [target]],
-              ["chromium-browser", [target]],
-              ["microsoft-edge", [target]],
-              ["firefox", [target]],
-              ["xdg-open", [target]],
-              ["gio", ["open", target]],
+              ['xdg-open', [target]],
+              ['gio', ['open', target]],
             ];
     for (const [cmd, args] of candidates) {
       // eslint-disable-next-line no-await-in-loop
       const ok = await new Promise((resolve) => {
         let settled = false;
-        const child = spawn(cmd, args, { detached: true, stdio: "ignore" });
-        child.once("error", () => {
+        const child = spawn(cmd, args, { detached: true, stdio: 'ignore' });
+        child.once('error', () => {
           if (!settled) {
             settled = true;
             resolve(false);
           }
         });
-        child.once("exit", (code) => {
+        child.once('exit', (code) => {
           if (!settled) {
             settled = true;
             resolve(code === 0);
@@ -393,6 +385,7 @@ function createSignerService(ctx, logger) {
   }
 
   function getBrowserBridgeUrl(structuredContent) {
+
     const sc = structuredContent && typeof structuredContent === "object"
       ? structuredContent
       : {};
