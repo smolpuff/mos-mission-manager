@@ -1,3 +1,4 @@
+// because... i wanna be teej. i wanna code. i wanna code. I wanna dance, i dont wanna go home.
 "use strict";
 
 const {
@@ -8,9 +9,22 @@ const {
   missionHasAssignedNft,
   missionIsClaimable,
 } = require("../missions/normalize");
+const { parseResetLevel } = require("./reset");
+const { openMissionPlayPage, MISSION_PLAY_URL } = require("../mission-page");
+const { createMissionActionExecutor } = require("../mission-actions");
 
-function createChecksService(ctx, logger, mcp) {
+function createChecksService(ctx, logger, mcp, services = {}) {
   const { logWithTimestamp, logDebug, redrawHeaderAndLog } = logger;
+  const { signer = null } = services;
+  const { executePreparedMissionAction } = createMissionActionExecutor(
+    logger,
+    mcp,
+    signer,
+  );
+  const TARGET_UNLOCK_SLOT = 4;
+  const SOLANA_RPC_URL = "https://api.mainnet-beta.solana.com";
+  const PBP_MINT = "3f7wfg9yHLtGKvy75MmqsVT1ueTFoqyySQbusrX1YAQ4";
+  const missionNftByAccount = new Map();
   const canonicalNameKey = (v) =>
     String(v || "")
       .toLowerCase()
@@ -33,6 +47,251 @@ function createChecksService(ctx, logger, mcp) {
     return true;
   }
 
+  function assignedNftLabelFromMission(mission) {
+    const directLabel = String(
+      mission?.currentAssignedNFT ||
+        mission?.current_assigned_nft ||
+        mission?.assignedNftName ||
+        mission?.assigned_nft_name ||
+        mission?.nftName ||
+        mission?.nft_name ||
+        (typeof mission?.assigned_nft === "string" ? mission.assigned_nft : "") ||
+        (typeof mission?.assignedNft === "string" ? mission.assignedNft : ""),
+    ).trim();
+    if (directLabel) return directLabel;
+
+    const nft =
+      mission?.assigned_nft && typeof mission.assigned_nft === "object"
+        ? mission.assigned_nft
+        : mission?.assignedNft && typeof mission.assignedNft === "object"
+          ? mission.assignedNft
+          : mission?.nft && typeof mission.nft === "object"
+            ? mission.nft
+            : null;
+    const name = String(nft?.name || nft?.nftName || nft?.symbol || "").trim();
+    if (name) return name;
+    const id = String(
+      mission?.nftAccount ||
+        mission?.nft_account ||
+        mission?.assignedNftAccount ||
+        mission?.assigned_nft_account ||
+        mission?.currentAssignedNftAccount ||
+        mission?.current_assigned_nft_account ||
+        mission?.nftId ||
+        mission?.nft_id ||
+        "",
+    ).trim();
+    if (id) return id;
+
+    return missionHasAssignedNft(mission) ? "assigned" : null;
+  }
+
+  function assignedNftFromMission(mission) {
+    if (!mission || typeof mission !== "object") return null;
+    if (mission.currentAssignedNft && typeof mission.currentAssignedNft === "object") return mission.currentAssignedNft;
+    if (mission.current_assigned_nft && typeof mission.current_assigned_nft === "object") return mission.current_assigned_nft;
+    if (mission.assigned_nft && typeof mission.assigned_nft === "object") return mission.assigned_nft;
+    if (mission.assignedNft && typeof mission.assignedNft === "object") return mission.assignedNft;
+    if (mission.nft && typeof mission.nft === "object") return mission.nft;
+    return null;
+  }
+
+  function assignedNftLevelFromMission(mission) {
+    const nft = assignedNftFromMission(mission);
+    const raw = nft?.level ?? nft?.current_level ?? nft?.nftLevel ?? null;
+    const n = Number(raw);
+    return Number.isFinite(n) ? n : null;
+  }
+
+  function assignedNftImageFromMission(mission) {
+    function normalizeImageUrl(raw) {
+      const value = String(raw || "").trim();
+      if (!value) return null;
+      if (/^https?:\/\//i.test(value)) return value;
+      if (/^ipfs:\/\//i.test(value)) return value;
+      if (/^data:image\//i.test(value)) return value;
+      if (/^\/\//.test(value)) return `https:${value}`;
+      if (/^gateway\.irys\.xyz\//i.test(value)) return `https://${value}`;
+      if (/^(Qm[1-9A-HJ-NP-Za-km-z]{44,}|bafy[0-9a-z]{20,})$/i.test(value)) {
+        return `ipfs://${value}`;
+      }
+      return null;
+    }
+
+    function deepFindImageUrl(node, depth = 0) {
+      if (!node || depth > 4) return null;
+      if (typeof node === "string") return normalizeImageUrl(node);
+      if (Array.isArray(node)) {
+        for (const item of node) {
+          const found = deepFindImageUrl(item, depth + 1);
+          if (found) return found;
+        }
+        return null;
+      }
+      if (typeof node !== "object") return null;
+
+      const preferredKeys = [
+        "image",
+        "imageUrl",
+        "image_url",
+        "imageURI",
+        "image_uri",
+        "thumbnail",
+        "thumbnailUrl",
+        "thumbnail_url",
+        "avatar",
+        "avatarUrl",
+        "avatar_url",
+      ];
+      for (const key of preferredKeys) {
+        if (!Object.prototype.hasOwnProperty.call(node, key)) continue;
+        const found = deepFindImageUrl(node[key], depth + 1);
+        if (found) return found;
+      }
+
+      for (const [key, value] of Object.entries(node)) {
+        if (/image|thumbnail|avatar|media|cdn|uri/i.test(String(key))) {
+          const found = deepFindImageUrl(value, depth + 1);
+          if (found) return found;
+        }
+      }
+      return null;
+    }
+
+    const nft = assignedNftFromMission(mission);
+    const candidates = [
+      nft?.image,
+      nft?.imageUrl,
+      nft?.image_url,
+      nft?.imageURI,
+      nft?.image_uri,
+      nft?.img,
+      nft?.thumbnail,
+      nft?.thumbnailUrl,
+      nft?.thumbnail_url,
+      nft?.metadata?.image,
+      nft?.metadata?.imageUrl,
+      nft?.metadata?.image_url,
+      mission?.nftImage,
+      mission?.nft_image,
+      mission?.assignedNftImage,
+      mission?.assigned_nft_image,
+      mission?.currentAssignedNftImage,
+      mission?.current_assigned_nft_image,
+      mission?.currentAssignedNFT?.image,
+      mission?.currentAssignedNFT?.imageUrl,
+      mission?.currentAssignedNFT?.image_url,
+      mission?.currentAssignedNFT?.imageURI,
+      mission?.currentAssignedNFT?.image_uri,
+      mission?.current_assigned_nft?.image,
+      mission?.current_assigned_nft?.imageUrl,
+      mission?.current_assigned_nft?.image_url,
+      mission?.current_assigned_nft?.imageURI,
+      mission?.current_assigned_nft?.image_uri,
+    ];
+
+    for (const value of candidates) {
+      const normalized = normalizeImageUrl(value);
+      if (normalized) return normalized;
+    }
+
+    return (
+      deepFindImageUrl(nft) ||
+      deepFindImageUrl(mission?.currentAssignedNFT) ||
+      deepFindImageUrl(mission?.current_assigned_nft) ||
+      deepFindImageUrl(mission?.metadata) ||
+      deepFindImageUrl(mission)
+    );
+  }
+
+  function missionProgressFromMission(mission, progressByAssignedMissionId = null) {
+    const assignedMissionId = String(
+      mission?.assigned_mission_id || mission?.assignedMissionId || "",
+    ).trim();
+    const mappedProgress =
+      assignedMissionId && progressByAssignedMissionId
+        ? progressByAssignedMissionId.get(assignedMissionId)
+        : null;
+    const rawProgress = mission?.progress ?? mission?.currentProgress ?? mission?.current_progress ?? null;
+    const rawGoal = mission?.goal ?? mission?.task_amount ?? mission?.target ?? mission?.targetProgress ?? null;
+    const progress = Number(mappedProgress ?? rawProgress);
+    const goal = Number(rawGoal);
+    return {
+      progress: Number.isFinite(progress) ? progress : null,
+      goal: Number.isFinite(goal) ? goal : null,
+    };
+  }
+
+  function missionProgressLookupFromResult(result) {
+    const map = new Map();
+    const stats = result?.structuredContent?.missions?.stats;
+    if (!stats || typeof stats !== "object") return map;
+    for (const [assignedMissionId, value] of Object.entries(stats)) {
+      const id = String(assignedMissionId || "").trim();
+      if (!id) continue;
+      const p = Number(value?.progress ?? value?.currentProgress ?? value?.current_progress);
+      if (Number.isFinite(p)) map.set(id, p);
+    }
+    return map;
+  }
+
+  function missionAssignedNftAccount(mission) {
+    const id = String(
+      mission?.assigned_nft ||
+        mission?.assignedNft ||
+        mission?.nftAccount ||
+        mission?.nft_account ||
+        mission?.assignedNftAccount ||
+        mission?.assigned_nft_account ||
+        mission?.currentAssignedNftAccount ||
+        mission?.current_assigned_nft_account ||
+        mission?.nftId ||
+        mission?.nft_id ||
+        "",
+    ).trim();
+    return id || null;
+  }
+
+  function computeGuiMissionSlots(missions, progressByAssignedMissionId = null) {
+    const slots = [];
+    for (let slot = 1; slot <= 4; slot += 1) {
+      const mission = missions.find((m) => Number(m?.slot) === slot) || null;
+      const missionLvl = missionLevel(mission);
+      const { progress, goal } = missionProgressFromMission(
+        mission,
+        progressByAssignedMissionId,
+      );
+      const assignedAccount = missionAssignedNftAccount(mission);
+      const nftFromLookup = assignedAccount
+        ? missionNftByAccount.get(assignedAccount) || null
+        : null;
+      const nftImage =
+        assignedNftImageFromMission(mission) ||
+        assignedNftImageFromMission({ nft: nftFromLookup }) ||
+        null;
+      const nftLabel =
+        assignedNftLabelFromMission(mission) ||
+        (nftFromLookup ? nftDisplayName(nftFromLookup) : null);
+      const nftLevel =
+        assignedNftLevelFromMission(mission) ||
+        (Number.isFinite(Number(nftFromLookup?.level))
+          ? Number(nftFromLookup.level)
+          : null);
+      slots.push({
+        slot,
+        missionId: mission?.assignedMissionId || mission?.assigned_mission_id || null,
+        missionName: missionName(mission) || null,
+        missionLevel: missionLvl,
+        progress,
+        goal,
+        assignedNft: nftLabel,
+        nftLevel,
+        nftImage,
+      });
+    }
+    return slots;
+  }
+
   function nftIsAvailable(n) {
     if (n?.onCooldown === true) return false;
     const cooldownSeconds = Number(
@@ -41,9 +300,17 @@ function createChecksService(ctx, logger, mcp) {
     return !Number.isFinite(cooldownSeconds) || cooldownSeconds <= 0;
   }
 
+  function nftCooldownSeconds(nft) {
+    const raw =
+      nft?.cooldownSeconds ?? nft?.cooldown_seconds ?? nft?.cooldown ?? 0;
+    const n = Number(raw);
+    return Number.isFinite(n) ? Math.max(0, n) : 0;
+  }
+
   function missionName(mission) {
-    return String(mission?.name || mission?.missionName || mission?.mission_name || "")
-      .trim();
+    return String(
+      mission?.name || mission?.missionName || mission?.mission_name || "",
+    ).trim();
   }
   function missionLevel(mission) {
     const raw = mission?.current_level ?? mission?.level ?? null;
@@ -73,6 +340,12 @@ function createChecksService(ctx, logger, mcp) {
     return isUsableIdValue(id) ? id.trim() : null;
   }
 
+  function nftDisplayName(nft) {
+    return String(
+      nft?.name || nft?.nftName || nft?.symbol || nft?.collection || "unknown nft",
+    ).trim();
+  }
+
   function assignFailureMessage(assignResult) {
     return (
       assignResult?.structuredContent?.details?.message ||
@@ -85,22 +358,536 @@ function createChecksService(ctx, logger, mcp) {
     return assignResult?.structuredContent?.details || null;
   }
 
+  function extractSlotUnlockSummary(result) {
+    const sc = result?.structuredContent || {};
+    return sc.slotUnlockSummary || sc?.missions?.slotUnlockSummary || null;
+  }
+
   function isRetryableActiveMissionAssignError(message = "") {
     return /NFT is already in an active mission/i.test(String(message || ""));
   }
 
-  function configuredTargetEntries() {
-    if (!Array.isArray(ctx.config.targetMissions)) return [];
-    return ctx.config.targetMissions.map((v) => String(v || "").trim()).filter(Boolean);
+  function parseBalanceNumber(value) {
+    const n = Number(value);
+    return Number.isFinite(n) ? n : null;
   }
 
-  function shouldRetryAssignmentSync(reason = "") {
-    const value = String(reason || "");
-    return (
-      value === "post_claim" ||
-      value === "post_claim_state_fallback" ||
-      value.startsWith("post_claim_")
+  function extractTokenBalance(entries, matcher) {
+    if (!Array.isArray(entries)) return null;
+    for (const entry of entries) {
+      const symbol = String(
+        entry?.symbol ||
+          entry?.tokenSymbol ||
+          entry?.ticker ||
+          entry?.assetSymbol ||
+          "",
+      )
+        .trim()
+        .toUpperCase();
+      const mint = String(entry?.mint || entry?.mintAddress || "").trim();
+      const name = String(entry?.name || entry?.tokenName || "").trim().toUpperCase();
+      if (!matcher({ symbol, mint, name, entry })) continue;
+      const direct =
+        parseBalanceNumber(entry?.uiAmount) ??
+        parseBalanceNumber(entry?.ui_amount) ??
+        parseBalanceNumber(entry?.balance) ??
+        parseBalanceNumber(entry?.amount) ??
+        parseBalanceNumber(entry?.tokenBalance);
+      if (direct !== null) return direct;
+      const nested =
+        parseBalanceNumber(entry?.amounts?.ui) ??
+        parseBalanceNumber(entry?.amounts?.balance);
+      if (nested !== null) return nested;
+    }
+    return null;
+  }
+
+  function parseWalletSummary(result, expectedAddress = "") {
+    const sc = result?.structuredContent || {};
+    const summary =
+      sc.walletSummary ||
+      sc.summary ||
+      sc.wallet ||
+      sc.data ||
+      sc;
+    const balances =
+      summary?.tokenBalances ||
+      summary?.balances ||
+      summary?.tokens ||
+      summary?.assets ||
+      sc?.tokenBalances ||
+      sc?.balances ||
+      [];
+    const walletAddress =
+      summary?.walletAddress ||
+      summary?.wallet_address ||
+      summary?.address ||
+      summary?.walletId ||
+      summary?.wallet_id ||
+      expectedAddress ||
+      "";
+    const sol =
+      parseBalanceNumber(summary?.solBalance) ??
+      parseBalanceNumber(summary?.sol_balance) ??
+      parseBalanceNumber(summary?.sol) ??
+      extractTokenBalance(
+        balances,
+        ({ symbol, name }) => symbol === "SOL" || name === "SOL",
+      );
+    const pbp = extractTokenBalance(
+      balances,
+      ({ symbol, name }) => symbol === "PBP" || name === "PBP",
     );
+    return {
+      address: walletAddress,
+      sol,
+      pbp,
+    };
+  }
+
+  async function rpcJsonCall(method, params) {
+    const response = await fetch(SOLANA_RPC_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method,
+        params,
+      }),
+    });
+    const payload = await response.json();
+    if (!response.ok) {
+      throw new Error(`RPC ${method} failed: HTTP ${response.status}`);
+    }
+    if (payload?.error) {
+      throw new Error(`RPC ${method} failed: ${JSON.stringify(payload.error)}`);
+    }
+    return payload.result;
+  }
+
+  async function fetchOnchainWalletSummary(walletAddress) {
+    const [solResult, tokenResult] = await Promise.all([
+      rpcJsonCall("getBalance", [walletAddress, { commitment: "confirmed" }]),
+      rpcJsonCall("getTokenAccountsByOwner", [
+        walletAddress,
+        { mint: PBP_MINT },
+        { encoding: "jsonParsed", commitment: "confirmed" },
+      ]),
+    ]);
+    const lamports =
+      typeof solResult?.value === "number" ? solResult.value : null;
+    let pbp = 0;
+    const tokenAccounts = Array.isArray(tokenResult?.value) ? tokenResult.value : [];
+    for (const entry of tokenAccounts) {
+      const amount =
+        entry?.account?.data?.parsed?.info?.tokenAmount?.uiAmount ??
+        entry?.account?.data?.parsed?.info?.tokenAmount?.uiAmountString;
+      const parsed = parseBalanceNumber(amount);
+      if (parsed !== null) pbp += parsed;
+    }
+    return {
+      address: walletAddress,
+      sol: lamports === null ? null : lamports / 1_000_000_000,
+      pbp,
+      status: "ok",
+      source: "rpc",
+    };
+  }
+
+  async function refreshFundingWalletSummary() {
+    const walletAddress = String(ctx.signerConfig?.walletAddress || "").trim();
+    if (ctx.signerMode !== "app_wallet" || !walletAddress) {
+      ctx.fundingWalletSummary = {
+        address: walletAddress,
+        sol: null,
+        pbp: null,
+        status:
+          ctx.signerMode === "manual" || ctx.signerMode === "dapp"
+            ? ctx.signerMode
+            : "missing",
+      };
+      redrawHeaderAndLog(ctx.currentMissionStats);
+      return { ok: true, skipped: true, summary: ctx.fundingWalletSummary };
+    }
+    try {
+      let result = null;
+      try {
+        result = await mcp.mcpToolCall("get_wallet_summary", { walletAddress });
+      } catch (error) {
+        logDebug("check", "funding_wallet_summary_with_address_failed", {
+          walletAddress,
+          error: error.message,
+        });
+        result = await mcp.mcpToolCall("get_wallet_summary", { wallet: walletAddress });
+      }
+      const parsed = parseWalletSummary(result, walletAddress);
+      if ((parsed.address && parsed.address !== walletAddress) || parsed.sol === null || parsed.pbp === null) {
+        throw new Error("MCP wallet summary did not return the requested funding wallet.");
+      }
+      ctx.fundingWalletSummary = {
+        address: parsed.address || walletAddress,
+        sol: parsed.sol,
+        pbp: parsed.pbp,
+        status: "ok",
+        source: "mcp",
+      };
+      redrawHeaderAndLog(ctx.currentMissionStats);
+      logDebug("check", "funding_wallet_summary_ok", ctx.fundingWalletSummary);
+      return { ok: true, skipped: false, summary: ctx.fundingWalletSummary };
+    } catch (error) {
+      logDebug("check", "funding_wallet_summary_mcp_failed", {
+        walletAddress,
+        error: error.message,
+      });
+      try {
+        ctx.fundingWalletSummary = await fetchOnchainWalletSummary(walletAddress);
+        redrawHeaderAndLog(ctx.currentMissionStats);
+        logDebug("check", "funding_wallet_summary_rpc_ok", ctx.fundingWalletSummary);
+        return { ok: true, skipped: false, summary: ctx.fundingWalletSummary };
+      } catch (rpcError) {
+        ctx.fundingWalletSummary = {
+          address: walletAddress,
+          sol: null,
+          pbp: null,
+          status: "error",
+          source: "rpc",
+        };
+        redrawHeaderAndLog(ctx.currentMissionStats);
+        logDebug("check", "funding_wallet_summary_failed", {
+          walletAddress,
+          error: error.message,
+          rpcError: rpcError.message,
+        });
+        return { ok: false, skipped: false, summary: ctx.fundingWalletSummary };
+      }
+    }
+  }
+
+  async function tryResetCooldownNft({
+    reason,
+    missionName,
+    missionId,
+    nft,
+  }) {
+    const nftId = nftAccountId(nft);
+    const nftName = nftDisplayName(nft);
+    const cooldownSeconds = nftCooldownSeconds(nft);
+    logDebug("assign", "cooldown_reset_check", {
+      reason,
+      missionName,
+      missionId,
+      nftId,
+      nftName,
+      cooldownSeconds,
+      signerMode: ctx.signerMode,
+      signerStatus: ctx.signerStatus,
+      signerReady: ctx.signerReady,
+      signerLocked: ctx.signerLocked,
+    });
+    if (!nftId) {
+      logDebug("assign", "cooldown_reset_skipped_missing_nft_id", {
+        reason,
+        missionName,
+        missionId,
+        nft: nft || null,
+      });
+      return { ok: false, attempted: false, reset: false, reason: "missing_nft_id" };
+    }
+    if (ctx.signerMode === "manual") {
+      logWithTimestamp(
+        `[RESET] 🌐 Manual mode: open the missions page and reset cooldown yourself for ${missionName}.`,
+      );
+      const opened = await openMissionPlayPage();
+      if (!opened) {
+        logWithTimestamp(
+          `[RESET] ❌ Failed to auto-open browser. Open manually: ${MISSION_PLAY_URL}`,
+        );
+      }
+      return { ok: true, attempted: true, reset: false, reason: "manual_mode" };
+    }
+    if (!signer) {
+      logWithTimestamp(
+        `[RESET] ⏸️ Cooldown reset unavailable for ${missionName}: signer service missing.`,
+      );
+      return { ok: false, attempted: false, reset: false, reason: "missing_signer" };
+    }
+
+    try {
+      signer.ensureMissionActionSupported("nft_cooldown_reset");
+    } catch (error) {
+      logWithTimestamp(
+        `[RESET] ⏸️ Cooldown reset unavailable for ${missionName}: ${error.message}`,
+      );
+      logDebug("assign", "cooldown_reset_blocked", {
+        reason,
+        missionName,
+        missionId,
+        nftId,
+        error: error.message,
+      });
+      return { ok: false, attempted: false, reset: false, reason: "signer_blocked" };
+    }
+
+    logWithTimestamp(
+      `[RESET] 🚀 Attempting cooldown reset: ${missionName} nft=${nftName} cooldown=${cooldownSeconds}s`,
+    );
+
+    try {
+      logWithTimestamp(
+        `[RESET] 🔎 Preparing cooldown reset tx: mission=${missionName} missionId=${missionId} nft=${nftId}`,
+      );
+      logDebug("assign", "cooldown_reset_prepare_start", {
+        reason,
+        missionName,
+        missionId,
+        nftId,
+        cooldownSeconds,
+      });
+      const resetArgs = {
+        nftId,
+        ...(ctx.signerMode === "dapp" ? { signingMode: "browser_bridge" } : {}),
+      };
+      logDebug("assign", "cooldown_reset_prepare_args", {
+        reason,
+        missionName,
+        missionId,
+        nftId,
+        signerMode: ctx.signerMode,
+        args: resetArgs,
+      });
+      const prepared = await mcp.mcpToolCall("prepare_nft_cooldown_reset", resetArgs);
+      logWithTimestamp(
+        `[RESET] 🧾 Prepared cooldown reset tx for ${missionName}; moving to sign and submit.`,
+      );
+      await executePreparedMissionAction({
+        actionName: "nft_cooldown_reset",
+        prepareResult: prepared,
+        expected: { nftId },
+        debugScope: "assign",
+        submitDebugAction: "cooldown_reset_submit",
+        debugMeta: {
+          reason,
+          missionName,
+          missionId,
+          nftId,
+          cooldownSeconds,
+        },
+      });
+      logWithTimestamp(
+        `[RESET] ✅ Cooldown reset complete: ${missionName} nft=${nftName}`,
+      );
+      logDebug("assign", "cooldown_reset_ok", {
+        reason,
+        missionName,
+        missionId,
+        nftId,
+        cooldownSeconds,
+      });
+      return { ok: true, attempted: true, reset: true, nftId };
+    } catch (error) {
+      logWithTimestamp(
+        `[RESET] ❌ Cooldown reset failed for ${missionName} nft=${nftName}: ${error.message}`,
+      );
+      logDebug("assign", "cooldown_reset_failed", {
+        reason,
+        missionName,
+        missionId,
+        nftId,
+        error: error.message,
+      });
+      return { ok: false, attempted: true, reset: false, reason: "reset_failed" };
+    }
+  }
+
+  async function tryUnlockNextMissionSlot({
+    reason,
+    missionsResult,
+  }) {
+    const summary = extractSlotUnlockSummary(missionsResult);
+    const canUnlockMore = summary?.canUnlockMore === true;
+    const nextUnlockSlot = Number(summary?.nextUnlockSlot);
+    const targetSlotNumber = TARGET_UNLOCK_SLOT;
+    logDebug("assign", "slot_unlock_check", {
+      reason,
+      summary: summary || null,
+      targetSlotNumber,
+      signerMode: ctx.signerMode,
+      signerStatus: ctx.signerStatus,
+      signerReady: ctx.signerReady,
+      signerLocked: ctx.signerLocked,
+    });
+    if (!canUnlockMore) {
+      return {
+        ok: false,
+        attempted: false,
+        unlocked: false,
+        reason: "not_unlockable",
+      };
+    }
+    if (ctx.signerMode === "manual") {
+      logWithTimestamp(
+        `[UNLOCK] 🌐 Manual mode: open the missions page and unlock slot ${targetSlotNumber} yourself.`,
+      );
+      const opened = await openMissionPlayPage();
+      if (!opened) {
+        logWithTimestamp(
+          `[UNLOCK] ❌ Failed to auto-open browser. Open manually: ${MISSION_PLAY_URL}`,
+        );
+      }
+      return {
+        ok: true,
+        attempted: true,
+        unlocked: false,
+        reason: "manual_mode",
+      };
+    }
+    if (
+      Number.isFinite(nextUnlockSlot) &&
+      nextUnlockSlot > 0 &&
+      nextUnlockSlot !== targetSlotNumber
+    ) {
+      logWithTimestamp(
+        `[UNLOCK] ⏸️ Slot unlock blocked: MCP nextUnlockSlot=${nextUnlockSlot}, expected slot ${targetSlotNumber}.`,
+      );
+      logDebug("assign", "slot_unlock_unexpected_target", {
+        reason,
+        targetSlotNumber,
+        nextUnlockSlot,
+        summary: summary || null,
+      });
+      return {
+        ok: false,
+        attempted: false,
+        unlocked: false,
+        reason: "unexpected_next_unlock_slot",
+      };
+    }
+    if (!signer) {
+      logWithTimestamp(
+        "[UNLOCK] ⏸️ Slot unlock unavailable: signer service missing.",
+      );
+      return {
+        ok: false,
+        attempted: false,
+        unlocked: false,
+        reason: "missing_signer",
+      };
+    }
+    try {
+      signer.ensureMissionActionSupported("mission_slot_unlock");
+    } catch (error) {
+      logWithTimestamp(
+        `[UNLOCK] ⏸️ Slot unlock unavailable: ${error.message}`,
+      );
+      logDebug("assign", "slot_unlock_blocked", {
+        reason,
+        nextUnlockSlot,
+        error: error.message,
+      });
+      return {
+        ok: false,
+        attempted: false,
+        unlocked: false,
+        reason: "signer_blocked",
+      };
+    }
+
+    logWithTimestamp(
+      `[UNLOCK] 🚀 Attempting to unlock mission slot ${targetSlotNumber}...`,
+    );
+    try {
+      logDebug("assign", "slot_unlock_prepare_start", {
+        reason,
+        targetSlotNumber,
+        nextUnlockSlot,
+      });
+      const unlockArgs = {
+        slotNumber: targetSlotNumber,
+        ...(ctx.signerMode === "dapp" ? { signingMode: "browser_bridge" } : {}),
+      };
+      logDebug("assign", "slot_unlock_prepare_args", {
+        reason,
+        targetSlotNumber,
+        signerMode: ctx.signerMode,
+        args: unlockArgs,
+      });
+      const prepared = await mcp.mcpToolCall("unlock_mission_slot", unlockArgs);
+      await executePreparedMissionAction({
+        actionName: "mission_slot_unlock",
+        prepareResult: prepared,
+        expected: { slotNumber: targetSlotNumber },
+        debugScope: "assign",
+        submitDebugAction: "slot_unlock_submit",
+        debugMeta: {
+          reason,
+          targetSlotNumber,
+          nextUnlockSlot,
+        },
+      });
+      logWithTimestamp(
+        `[UNLOCK] ✅ Mission slot ${targetSlotNumber} unlocked.`,
+      );
+      logDebug("assign", "slot_unlock_ok", {
+        reason,
+        targetSlotNumber,
+        nextUnlockSlot,
+      });
+      return {
+        ok: true,
+        attempted: true,
+        unlocked: true,
+        slotNumber: targetSlotNumber,
+      };
+    } catch (error) {
+      logWithTimestamp(
+        `[UNLOCK] ❌ Mission slot unlock failed for slot ${targetSlotNumber}: ${error.message}`,
+      );
+      logDebug("assign", "slot_unlock_failed", {
+        reason,
+        targetSlotNumber,
+        nextUnlockSlot,
+        error: error.message,
+      });
+      return {
+        ok: false,
+        attempted: true,
+        unlocked: false,
+        reason: "unlock_failed",
+      };
+    }
+  }
+
+  function configuredTargetEntries() {
+    if (!Array.isArray(ctx.config.targetMissions)) return [];
+    return ctx.config.targetMissions
+      .map((v) => String(v || "").trim())
+      .filter(Boolean);
+  }
+
+  function getResetPolicy() {
+    const mmEnabled =
+      ctx.missionModeEnabled || ctx.config.missionModeEnabled === true;
+    if (mmEnabled) {
+      const rawLevel =
+        ctx.currentMissionResetLevel || ctx.config.missionResetLevel || "11";
+      const threshold = Number(rawLevel);
+      if (Number.isFinite(threshold) && threshold > 0) {
+        return { enabled: true, threshold };
+      }
+      return { enabled: true, threshold: 11 };
+    }
+    if (ctx.level20ResetEnabled || ctx.config.level20ResetEnabled === true) {
+      return { enabled: true, threshold: 20 };
+    }
+    return { enabled: false, threshold: null };
+  }
+
+  function missionBlockedByResetThreshold(mission) {
+    const resetPolicy = getResetPolicy();
+    if (!resetPolicy.enabled) return false;
+    const level = Number(parseResetLevel(mission) || 0);
+    return Number.isFinite(level) && level >= Number(resetPolicy.threshold);
   }
 
   function buildAssignCandidates(missions, resolved) {
@@ -110,7 +897,11 @@ function createChecksService(ctx, logger, mcp) {
       const id = catalogMissionId(m);
       const selectedById = id ? resolved.targetIds.has(id) : false;
       const selectedByName = key ? resolved.targetNames.has(key) : false;
-      return (selectedById || selectedByName) && !missionHasAssignedNft(m);
+      return (
+        (selectedById || selectedByName) &&
+        !missionHasAssignedNft(m) &&
+        !missionBlockedByResetThreshold(m)
+      );
     });
   }
 
@@ -119,7 +910,10 @@ function createChecksService(ctx, logger, mcp) {
       .filter((m) => {
         const name = canonicalNameKey(missionName(m));
         const id = catalogMissionId(m);
-        return (id && resolved.targetIds.has(id)) || (name && resolved.targetNames.has(name));
+        return (
+          (id && resolved.targetIds.has(id)) ||
+          (name && resolved.targetNames.has(name))
+        );
       })
       .map((m) => ({
         name: missionName(m) || null,
@@ -129,17 +923,40 @@ function createChecksService(ctx, logger, mcp) {
         level: missionLevel(m),
         hasAssignedNft: missionHasAssignedNft(m),
         claimable: missionIsClaimable(m),
+        resetBlocked: missionBlockedByResetThreshold(m),
       }));
   }
 
-  async function loadAssignableCandidatesWithSyncWait(reason, resolved, initialMissionResult = null) {
-    let result = initialMissionResult || (await mcp.mcpToolCall("get_user_missions", {}));
+  async function loadAssignableCandidates(reason, resolved, initialMissionResult = null) {
+    let result =
+      initialMissionResult || (await mcp.mcpToolCall("get_user_missions", {}));
     let missions = normalizeMissionList(result);
     let candidates = buildAssignCandidates(missions, resolved);
+    const resetBlocked = missions
+      .filter((m) => {
+        const name = missionName(m).toLowerCase();
+        const key = canonicalNameKey(name);
+        const id = catalogMissionId(m);
+        const selectedById = id ? resolved.targetIds.has(id) : false;
+        const selectedByName = key ? resolved.targetNames.has(key) : false;
+        return (
+          (selectedById || selectedByName) &&
+          !missionHasAssignedNft(m) &&
+          missionBlockedByResetThreshold(m)
+        );
+      })
+      .map((m) => ({
+        name: missionName(m),
+        assignedMissionId: assignedMissionId(m),
+        catalogMissionId: catalogMissionId(m),
+        slot: m?.slot ?? null,
+        level: missionLevel(m),
+      }));
     logDebug("assign", "sync_wait_snapshot", {
       reason,
       attempt: 0,
       selected: summarizeSelectedMissionState(missions, resolved),
+      resetBlocked,
       candidates: candidates.map((m) => ({
         name: missionName(m),
         assignedMissionId: assignedMissionId(m),
@@ -148,46 +965,28 @@ function createChecksService(ctx, logger, mcp) {
         level: missionLevel(m),
       })),
     });
-    if (candidates.length > 0 || !shouldRetryAssignmentSync(reason)) {
-      return { result, missions, candidates };
-    }
-
-    const retryDelaysMs = [1200, 2500, 5000];
-    for (let i = 0; i < retryDelaysMs.length; i += 1) {
-      const delayMs = retryDelaysMs[i];
+    if (resetBlocked.length > 0) {
+      const names = resetBlocked
+        .map((m) => `${m.name} lvl=${m.level ?? "?"}`)
+        .join(", ");
       logWithTimestamp(
-        `[ASSIGN] ⏳ Waiting ${delayMs}ms for mission state sync before recheck ${i + 1}/${retryDelaysMs.length}...`,
+        `[ASSIGN] ⏸️ Holding mission(s) for reset threshold; not assigning NFT: ${names}`,
       );
-      await new Promise((resolve) => setTimeout(resolve, delayMs));
-      result = await mcp.mcpToolCall("get_user_missions", {});
-      missions = normalizeMissionList(result);
-      candidates = buildAssignCandidates(missions, resolved);
-      logDebug("assign", "sync_wait_snapshot", {
-        reason,
-        attempt: i + 1,
-        delayMs,
-        selected: summarizeSelectedMissionState(missions, resolved),
-        candidates: candidates.map((m) => ({
-          name: missionName(m),
-          assignedMissionId: assignedMissionId(m),
-          catalogMissionId: catalogMissionId(m),
-          slot: m?.slot ?? null,
-          level: missionLevel(m),
-        })),
-      });
-      if (candidates.length > 0) break;
     }
-
     return { result, missions, candidates };
   }
 
-  function resolveConfiguredTargets(catalogMissions = ctx.missionCatalogEntries || []) {
+  function resolveConfiguredTargets(
+    catalogMissions = ctx.missionCatalogEntries || [],
+  ) {
     const configured = configuredTargetEntries();
     if (catalogMissions.length === 0) {
       return {
         configured,
         targetIds: new Set(),
-        targetNames: new Set(configured.map((x) => canonicalNameKey(x)).filter(Boolean)),
+        targetNames: new Set(
+          configured.map((x) => canonicalNameKey(x)).filter(Boolean),
+        ),
         invalid: [],
       };
     }
@@ -241,8 +1040,18 @@ function createChecksService(ctx, logger, mcp) {
 
   function filterSelectedMissions(missions = []) {
     const resolved = resolveConfiguredTargets();
-    if (resolved.targetIds.size === 0 && resolved.targetNames.size === 0) return missions;
+    if (resolved.targetIds.size === 0 && resolved.targetNames.size === 0)
+      return missions;
     return missions.filter((m) => isConfiguredTargetMission(m, resolved));
+  }
+
+  function findMissionByAssignedMissionId(missions = [], assignedId = "") {
+    const wanted = String(assignedId || "").trim();
+    if (!wanted) return null;
+    for (const mission of missions) {
+      if (assignedMissionId(mission) === wanted) return mission;
+    }
+    return null;
   }
 
   async function refreshMissionCatalog() {
@@ -253,7 +1062,9 @@ function createChecksService(ctx, logger, mcp) {
       logWithTimestamp(`[CATALOG] ✅ Loaded ${missions.length} missions`);
       return { ok: true, total: missions.length };
     } catch (error) {
-      logWithTimestamp(`[CATALOG] ❌ Failed to load mission catalog: ${error.message}`);
+      logWithTimestamp(
+        `[CATALOG] ❌ Failed to load mission catalog: ${error.message}`,
+      );
       logDebug("catalog", "load_failed", { error: error.message });
       return { ok: false, total: 0 };
     }
@@ -269,7 +1080,9 @@ function createChecksService(ctx, logger, mcp) {
     }
     const validNames = Array.from(resolved.targetNames);
     if (validNames.length > 0) {
-      logWithTimestamp(`[CONFIG] ✅ targetMissions resolved: ${validNames.join(", ")}`);
+      logWithTimestamp(
+        `[CONFIG] ✅ targetMissions resolved: ${validNames.join(", ")}`,
+      );
     }
     return resolved;
   }
@@ -277,12 +1090,16 @@ function createChecksService(ctx, logger, mcp) {
   function selectedTargetsForDisplay(resolved = resolveConfiguredTargets()) {
     const out = [];
     const added = new Set();
-    const catalog = Array.isArray(ctx.missionCatalogEntries) ? ctx.missionCatalogEntries : [];
+    const catalog = Array.isArray(ctx.missionCatalogEntries)
+      ? ctx.missionCatalogEntries
+      : [];
     for (const m of catalog) {
       const id = catalogMissionId(m);
       const name = missionName(m);
       const byId = id ? resolved.targetIds.has(id) : false;
-      const byName = name ? resolved.targetNames.has(name.toLowerCase()) : false;
+      const byName = name
+        ? resolved.targetNames.has(name.toLowerCase())
+        : false;
       if (!(byId || byName)) continue;
       const label = name || id;
       if (!label || added.has(label)) continue;
@@ -306,7 +1123,10 @@ function createChecksService(ctx, logger, mcp) {
     }
   }
 
-  async function autoAssignConfiguredMissions({ reason = "periodic", missionsResult = null } = {}) {
+  async function autoAssignConfiguredMissions({
+    reason = "periodic",
+    missionsResult = null,
+  } = {}) {
     const resolved = resolveConfiguredTargets();
     logDebug("assign", "check", {
       reason,
@@ -317,17 +1137,20 @@ function createChecksService(ctx, logger, mcp) {
       return { ok: true, attempted: 0, assigned: 0 };
     }
     if (ctx.autoAssignRunning) {
-      logWithTimestamp(`[ASSIGN] ℹ️ Assign check skipped (already running) reason=${reason}`);
+      logWithTimestamp(
+        `[ASSIGN] ℹ️ Assign check skipped (already running) reason=${reason}`,
+      );
       return { ok: true, attempted: 0, assigned: 0, skipped: true };
     }
 
     ctx.autoAssignRunning = true;
     try {
-      const { missions, candidates } = await loadAssignableCandidatesWithSyncWait(
-        reason,
-        resolved,
-        missionsResult,
-      );
+      let { result: currentMissionResult, missions, candidates } =
+        await loadAssignableCandidates(
+          reason,
+          resolved,
+          missionsResult,
+        );
       logDebug("assign", "candidates_built", {
         reason,
         candidates: candidates.map((m) => ({
@@ -337,7 +1160,34 @@ function createChecksService(ctx, logger, mcp) {
           slot: m?.slot ?? null,
         })),
       });
-      logDebug("assign", "check_result", { reason, candidates: candidates.length });
+      logDebug("assign", "check_result", {
+        reason,
+        candidates: candidates.length,
+      });
+
+      if (candidates.length === 0) {
+        const slotUnlockResult = await tryUnlockNextMissionSlot({
+          reason,
+          missionsResult: currentMissionResult,
+        });
+        if (slotUnlockResult.unlocked) {
+          const refreshed =
+            await loadAssignableCandidates(reason, resolved, null);
+          currentMissionResult = refreshed.result;
+          missions = refreshed.missions;
+          candidates = refreshed.candidates;
+          logDebug("assign", "candidates_rebuilt_after_slot_unlock", {
+            reason,
+            slotNumber: slotUnlockResult.slotNumber,
+            candidates: candidates.map((m) => ({
+              name: missionName(m),
+              assignedMissionId: assignedMissionId(m),
+              catalogMissionId: catalogMissionId(m),
+              slot: m?.slot ?? null,
+            })),
+          });
+        }
+      }
 
       if (candidates.length === 0) {
         if (
@@ -345,13 +1195,18 @@ function createChecksService(ctx, logger, mcp) {
           reason === "post_claim" ||
           String(reason || "").startsWith("post_claim_")
         ) {
-          logWithTimestamp("[ASSIGN] ℹ️ No unassigned target mission to start right now.");
+          logWithTimestamp(
+            "[ASSIGN] ℹ️ No unassigned target mission to start right now.",
+          );
         }
         logDebug("assign", "no_candidates", {
           reason,
           targetCount: resolved.targetIds.size || resolved.targetNames.size,
           configuredTargets: resolved.configured,
-          selectedMissionState: summarizeSelectedMissionState(missions, resolved),
+          selectedMissionState: summarizeSelectedMissionState(
+            missions,
+            resolved,
+          ),
         });
         return { ok: true, attempted: 0, assigned: 0 };
       }
@@ -378,26 +1233,90 @@ function createChecksService(ctx, logger, mcp) {
           continue;
         }
 
+        try {
+          const freshMissionResult = await mcp.mcpToolCall("get_user_missions", {});
+          const freshMission = findMissionByAssignedMissionId(
+            normalizeMissionList(freshMissionResult),
+            id,
+          );
+          if (freshMission && missionBlockedByResetThreshold(freshMission)) {
+            const freshLevel = missionLevel(freshMission);
+            logWithTimestamp(
+              `[ASSIGN] ⏸️ Skipping mission held for reset threshold: ${name}${freshLevel === null ? "" : ` lvl=${freshLevel}`}`,
+            );
+            logDebug("assign", "assign_blocked_by_fresh_reset_threshold", {
+              reason,
+              missionName: name,
+              missionId: id,
+              level: freshLevel,
+            });
+            continue;
+          }
+        } catch (error) {
+          logDebug("assign", "fresh_mission_recheck_failed", {
+            reason,
+            missionName: name,
+            missionId: id,
+            error: error.message,
+          });
+        }
+
         let nfts = [];
         try {
-          const nftResult = await mcp.mcpToolCall("get_mission_nfts", { assignedMissionId: id });
-          nfts = normalizeNftList(nftResult).filter(nftIsAvailable);
+          const nftResult = await mcp.mcpToolCall("get_mission_nfts", {
+            assignedMissionId: id,
+          });
+          nfts = normalizeNftList(nftResult);
           logDebug("assign", "eligible_nfts_loaded", {
             reason,
             missionName: name,
             missionId: id,
-            eligibleCount: nfts.length,
+            nftCount: nfts.length,
+            eligibleCount: nfts.filter(nftIsAvailable).length,
+            cooldownCount: nfts.filter((nft) => !nftIsAvailable(nft)).length,
           });
         } catch (error) {
-          logDebug("assign", "nft_list_failed", { missionId: id, name, error: error.message });
+          logDebug("assign", "nft_list_failed", {
+            missionId: id,
+            name,
+            error: error.message,
+          });
           continue;
         }
-        const assignableNfts = nfts
+        let assignableNfts = nfts
           .map((nft) => ({ nft, account: nftAccountId(nft) }))
+          .filter((entry) => nftIsAvailable(entry.nft))
           .filter((entry) => entry.account)
           .slice(0, 3);
         if (assignableNfts.length === 0) {
-          logWithTimestamp(`[ASSIGN] ℹ️ No eligible NFT available for: ${name}`);
+          const cooldownCandidates = nfts
+            .map((nft) => ({ nft, account: nftAccountId(nft) }))
+            .filter((entry) => entry.account)
+            .filter((entry) => !nftIsAvailable(entry.nft))
+            .sort(
+              (a, b) =>
+                nftCooldownSeconds(a.nft) - nftCooldownSeconds(b.nft),
+            );
+          logDebug("assign", "no_eligible_nfts", {
+            reason,
+            missionName: name,
+            missionId: id,
+            cooldownCandidates: cooldownCandidates.map((entry) => ({
+              nftId: entry.account,
+              nftName: nftDisplayName(entry.nft),
+              cooldownSeconds: nftCooldownSeconds(entry.nft),
+            })),
+          });
+          if (cooldownCandidates.length > 0) {
+            logWithTimestamp(
+              `[ASSIGN] ⏸️ ${name}: candidate NFTs are on cooldown. Skipping implicit NFT cooldown reset.`,
+            );
+          }
+        }
+        if (assignableNfts.length === 0) {
+          logWithTimestamp(
+            `[ASSIGN] ℹ️ No eligible NFT available for: ${name}`,
+          );
           continue;
         }
 
@@ -418,10 +1337,13 @@ function createChecksService(ctx, logger, mcp) {
               maxAttempts: assignableNfts.length,
               selectedFrom: "owned",
             });
-            const assignResult = await mcp.mcpToolCall("assign_nft_to_mission", {
-              assignedMissionId: id,
-              nftAccount: account,
-            });
+            const assignResult = await mcp.mcpToolCall(
+              "assign_nft_to_mission",
+              {
+                assignedMissionId: id,
+                nftAccount: account,
+              },
+            );
             logDebug("assign", "assign_call_done", {
               reason,
               missionName: name,
@@ -437,18 +1359,63 @@ function createChecksService(ctx, logger, mcp) {
               const message = assignFailureMessage(assignResult);
               const details = assignFailureDetails(assignResult);
               throw new Error(
-                details ? `${message} details=${JSON.stringify(details)}` : message,
+                details
+                  ? `${message} details=${JSON.stringify(details)}`
+                  : message,
               );
             }
             assigned += 1;
             missionAssigned = true;
             startedMissionNames.push(name);
             startedMissionDetails.push({ name, level, slot });
-            logWithTimestamp(`[ASSIGN] ✅ Started mission: ${name}${levelText}`);
+            logWithTimestamp(
+              `[ASSIGN] ✅ Started mission: ${name}${levelText}`,
+            );
+            try {
+              const slotNumber = Number(slot);
+              if (Number.isFinite(slotNumber) && slotNumber >= 1 && slotNumber <= 4) {
+                const label = nftDisplayName(nft);
+                const existing = Array.isArray(ctx.guiMissionSlots) ? ctx.guiMissionSlots : [];
+                if (existing.length === 4) {
+                  const next = existing.slice();
+                  const nftLevel =
+                    Number.isFinite(Number(nft?.level)) ? Number(nft.level) : null;
+                  const nftImage =
+                    assignedNftImageFromMission({ nft }) ||
+                    assignedNftImageFromMission({ assignedNft: nft }) ||
+                    null;
+                  next[slotNumber - 1] = {
+                    ...next[slotNumber - 1],
+                    slot: slotNumber,
+                    missionId: id,
+                    missionName: name,
+                    assignedNft: label,
+                    missionLevel: level ?? null,
+                    nftLevel,
+                    nftImage,
+                  };
+                  ctx.guiMissionSlots = next;
+                }
+              }
+            } catch {}
+            if (ctx.guiBridge && typeof ctx.guiBridge.sendEvent === "function") {
+              ctx.guiBridge.sendEvent("assigned", {
+                missionId: id,
+                missionName: name,
+                slot,
+                nftAccount: account,
+                reason,
+              });
+            }
+            if (ctx.guiBridge && typeof ctx.guiBridge.emitNow === "function") {
+              ctx.guiBridge.emitNow();
+            }
             break;
           } catch (error) {
             lastError = error;
-            const retryable = isRetryableActiveMissionAssignError(error.message);
+            const retryable = isRetryableActiveMissionAssignError(
+              error.message,
+            );
             const hasNext = index + 1 < assignableNfts.length;
             logDebug("assign", "assign_failed", {
               missionName: name,
@@ -494,7 +1461,13 @@ function createChecksService(ctx, logger, mcp) {
         startedMissionNames,
         startedMissionDetails,
       });
-      return { ok: true, attempted: candidates.length, assigned, startedMissionNames, startedMissionDetails };
+      return {
+        ok: true,
+        attempted: candidates.length,
+        assigned,
+        startedMissionNames,
+        startedMissionDetails,
+      };
     } finally {
       ctx.autoAssignRunning = false;
     }
@@ -508,9 +1481,12 @@ function createChecksService(ctx, logger, mcp) {
   } = {}) {
     const limit = Math.max(1, Number(maxClaims || 10));
     try {
-      const result = missionsResult || (await mcp.mcpToolCall("get_user_missions", {}));
+      const result =
+        missionsResult || (await mcp.mcpToolCall("get_user_missions", {}));
       const missionsAll = normalizeMissionList(result);
-      const missions = onlySelected ? filterSelectedMissions(missionsAll) : missionsAll;
+      const missions = onlySelected
+        ? filterSelectedMissions(missionsAll)
+        : missionsAll;
       const candidates = missions
         .filter((m) => missionIsClaimable(m))
         .map((m) => ({
@@ -538,11 +1514,15 @@ function createChecksService(ctx, logger, mcp) {
             throw new Error(message);
           }
           claimed += 1;
-          const levelText = mission.level === null ? "" : ` lvl=${mission.level}`;
+          const levelText =
+            mission.level === null ? "" : ` lvl=${mission.level}`;
           const slotText = mission.slot === null ? "" : ` slot=${mission.slot}`;
-          logWithTimestamp(`[WATCH] ✅ Claimed (fallback): ${mission.name}${slotText}${levelText}`);
+          logWithTimestamp(
+            `[WATCH] ✅ Claimed (fallback): ${mission.name}${slotText}${levelText}`,
+          );
         } catch (error) {
-          const levelText = mission.level === null ? "" : ` lvl=${mission.level}`;
+          const levelText =
+            mission.level === null ? "" : ` lvl=${mission.level}`;
           const slotText = mission.slot === null ? "" : ` slot=${mission.slot}`;
           logWithTimestamp(
             `[WATCH] ❌ Claim failed (fallback) for ${mission.name}${slotText}${levelText}: ${error.message}`,
@@ -556,7 +1536,10 @@ function createChecksService(ctx, logger, mcp) {
       }
       return { ok: true, claimed };
     } catch (error) {
-      logDebug("watch", "fallback_claim_scan_failed", { reason, error: error.message });
+      logDebug("watch", "fallback_claim_scan_failed", {
+        reason,
+        error: error.message,
+      });
       return { ok: false, claimed: 0 };
     }
   }
@@ -565,7 +1548,8 @@ function createChecksService(ctx, logger, mcp) {
     try {
       const json = await mcp.mcpToolCall("who_am_i", {});
       const info = json?.structuredContent || {};
-      const displayName = info.display_name || info.displayName || info.username || "unknown";
+      const displayName =
+        info.display_name || info.displayName || info.username || "unknown";
       const walletId = info.wallet_id || info.walletId || "unknown";
       logDebug("check", "whoami_ok", { displayName, walletId });
       return { ok: true, displayName, walletId };
@@ -578,7 +1562,8 @@ function createChecksService(ctx, logger, mcp) {
   async function runMcpHealthCheck() {
     try {
       const json = await mcp.mcpToolCall("mcp_health", {});
-      const healthOk = json?.structuredContent?.success ?? json?.structuredContent?.ok ?? true;
+      const healthOk =
+        json?.structuredContent?.success ?? json?.structuredContent?.ok ?? true;
       logDebug("check", "mcp_health_ok", { healthOk });
       return { ok: true, healthOk };
     } catch (error) {
@@ -587,24 +1572,39 @@ function createChecksService(ctx, logger, mcp) {
     }
   }
 
-  async function refreshMissionHeaderStats({ refreshNftCount = false, missionsResult = null } = {}) {
+  async function refreshMissionHeaderStats({
+    refreshNftCount = false,
+    missionsResult = null,
+  } = {}) {
     try {
-      const result = missionsResult || (await mcp.mcpToolCall("get_user_missions", {}));
+      const result =
+        missionsResult || (await mcp.mcpToolCall("get_user_missions", {}));
       const missions = normalizeMissionList(result);
+      const progressByAssignedMissionId = missionProgressLookupFromResult(result);
       const computed = computeMissionStats(missions, ctx.sessionClaimedCount);
 
       let nftCount = ctx.currentMissionStats.nfts || 0;
       let nftAvailable = ctx.currentMissionStats.nftsAvailable || 0;
-      if (refreshNftCount) {
+      if (refreshNftCount || missionNftByAccount.size === 0) {
         try {
           const nftResult = await mcp.mcpToolCall("get_mission_nfts", {});
           const nfts = normalizeNftList(nftResult);
+          missionNftByAccount.clear();
+          for (const nft of nfts) {
+            const key = nftAccountId(nft);
+            if (key) missionNftByAccount.set(key, nft);
+          }
           nftCount = nfts.length;
           nftAvailable = nfts.filter(nftIsAvailable).length;
         } catch (error) {
           logDebug("check", "nft_count_failed", { error: error.message });
         }
       }
+
+      ctx.guiMissionSlots = computeGuiMissionSlots(
+        missions,
+        progressByAssignedMissionId,
+      );
 
       ctx.currentMissionStats = {
         ...ctx.currentMissionStats,
@@ -615,6 +1615,9 @@ function createChecksService(ctx, logger, mcp) {
         totalClaimed: Number(ctx.config.totalClaimed || 0),
       };
       redrawHeaderAndLog(ctx.currentMissionStats);
+      if (ctx.guiBridge && typeof ctx.guiBridge.emitNow === "function") {
+        ctx.guiBridge.emitNow();
+      }
       logDebug("check", "missions_loaded", {
         total: computed.total,
         active: computed.active,
@@ -652,6 +1655,7 @@ function createChecksService(ctx, logger, mcp) {
     ctx.isAuthenticated = true;
     ctx.currentUserDisplayName = whoami.displayName || "unknown";
     ctx.currentUserWalletId = whoami.walletId || "unknown";
+    await refreshFundingWalletSummary();
     await refreshMissionCatalog();
     validateConfiguredTargets();
     logSelectedWatchTargetsAtStartup();
@@ -675,6 +1679,7 @@ function createChecksService(ctx, logger, mcp) {
     refreshMissionCatalog,
     validateConfiguredTargets,
     runMcpHealthCheck,
+    refreshFundingWalletSummary,
     refreshMissionHeaderStats,
     claimClaimableMissions,
     isConfiguredTargetMission,

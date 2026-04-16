@@ -3,6 +3,26 @@
 function createLogger(ctx) {
   let winkUntilMs = 0;
   let nextWinkAtMs = Date.now() + 2500 + Math.floor(Math.random() * 4500);
+  let winkTimer = null;
+  let inputRenderer = null;
+
+  function clearWinkTimer() {
+    if (winkTimer) {
+      clearTimeout(winkTimer);
+      winkTimer = null;
+    }
+  }
+
+  function scheduleNextWinkFrame(delayMs) {
+    clearWinkTimer();
+    winkTimer = setTimeout(
+      () => {
+        winkTimer = null;
+        if (!ctx.startupFxActive) redrawHeaderAndLog(ctx.currentMissionStats);
+      },
+      Math.max(0, delayMs),
+    );
+  }
 
   function debugString(meta = {}) {
     const entries = Object.entries(meta).filter(
@@ -36,6 +56,9 @@ function createLogger(ctx) {
     if (now >= winkUntilMs && now >= nextWinkAtMs) {
       winkUntilMs = now + 500;
       nextWinkAtMs = now + 500 + Math.floor(Math.random() * 7000);
+      scheduleNextWinkFrame(500);
+    } else if (now < nextWinkAtMs) {
+      scheduleNextWinkFrame(Math.min(nextWinkAtMs - now, 2147483647));
     }
     const winking = now < winkUntilMs;
     return [
@@ -82,6 +105,36 @@ function createLogger(ctx) {
     );
   }
 
+  function fundingWalletLabel() {
+    if (ctx.signerMode === "manual") return "MANUAL";
+    if (ctx.signerMode === "dapp") return "DAPP";
+    const wallet = String(ctx.signerConfig?.walletAddress || "").trim();
+    if (wallet) return wallet;
+    if (ctx.signerMode === "app_wallet") return "not set";
+    return "unknown";
+  }
+
+  function fundingWalletBalanceLabel() {
+    if (ctx.signerMode === "manual" || ctx.signerMode === "dapp") return "";
+    const summary = ctx.fundingWalletSummary || {};
+    const sol =
+      typeof summary.sol === "number" && Number.isFinite(summary.sol)
+        ? `${summary.sol} SOL`
+        : "SOL --";
+    const pbp =
+      typeof summary.pbp === "number" && Number.isFinite(summary.pbp)
+        ? `${summary.pbp} PBP`
+        : "PBP --";
+    return `${sol} | ${pbp}`;
+  }
+
+  function fundingModeLabel() {
+    if (ctx.signerMode === "manual") return "manual";
+    if (ctx.signerMode === "dapp") return "dapp";
+    if (ctx.signerMode === "app_wallet") return "app_wallet";
+    return String(ctx.signerMode || "unknown");
+  }
+
   function buildHeaderLines(stats = ctx.currentMissionStats) {
     const termWidth = process.stdout.columns || 78;
     const boxWidth = Math.max(termWidth, 40);
@@ -103,19 +156,24 @@ function createLogger(ctx) {
       ),
       composeHeaderLine(status, giraffe[1], innerWidth),
       composeHeaderLine(
-        `mode: ${modeStatus} | lvl20 reset: ${resetStatus}`,
+        `mode: ${modeStatus} | lvl20 reset: ${resetStatus} | funding mode: ${fundingModeLabel()}`,
         giraffe[2],
         innerWidth,
       ),
       composeHeaderLine("", giraffe[3], innerWidth),
       composeHeaderLine(
-        `🙀 ${ctx.currentUserDisplayName || "unknown user"}`,
+        `🙀 ${ctx.currentUserDisplayName || "unknown user"} | 💳 ${ctx.currentUserWalletId || "unknown"}`,
         giraffe[4],
         innerWidth,
       ),
       composeHeaderLine(
-        `✅ ${stats.claimed}(${totalClaimed}) claimed | 🤑 ${stats.claimable} claimable | 🎯 ${stats.active} active | 🥞 ${stats.available} ready | 💎 ${stats.nftsAvailable ?? 0} NFTs`,
+        `🔐 funding: ${fundingWalletLabel()}${fundingWalletBalanceLabel() ? ` | ${fundingWalletBalanceLabel()}` : ""}`,
         giraffe[5],
+        innerWidth,
+      ),
+      composeHeaderLine(
+        `✅ ${stats.claimed}(${totalClaimed}) claimed | 🤑 ${stats.claimable} claimable | 🎯 ${stats.active} active | 🥞 ${stats.available} ready | 💎 ${stats.nftsAvailable ?? 0} NFTs`,
+        "",
         innerWidth,
       ),
     ];
@@ -137,16 +195,20 @@ function createLogger(ctx) {
   }
 
   function getLogAreaLines() {
-    const HEADER_LINES = 12;
     const totalRows = process.stdout.rows || 24;
-    return Math.max(3, totalRows - HEADER_LINES);
+    const headerLines = buildHeaderLines(ctx.currentMissionStats).length;
+    return Math.max(3, totalRows - headerLines);
   }
 
   function redrawHeaderAndLog(stats = ctx.currentMissionStats) {
+    if (ctx.plainOutputMode) return;
     if (ctx.startupFxActive) return;
     process.stdout.write("\x1b[H\x1b[2J");
     const lines = getScreenLines(stats);
     for (const l of lines) process.stdout.write(l + "\n");
+    if (typeof inputRenderer === "function") {
+      inputRenderer();
+    }
   }
 
   function getScreenLines(stats = ctx.currentMissionStats) {
@@ -170,6 +232,10 @@ function createLogger(ctx) {
       ? ctx.LOG_BUFFER_SIZE_DEBUG
       : ctx.LOG_BUFFER_SIZE;
     if (ctx.logBuffer.length > maxSize) ctx.logBuffer.shift();
+    if (ctx.plainOutputMode) {
+      process.stdout.write(line + "\n");
+      return;
+    }
     if (ctx.startupFxActive) return;
     redrawHeaderAndLog(stats);
   }
@@ -177,7 +243,10 @@ function createLogger(ctx) {
   function logDebug(scope, action, meta = {}) {
     if (!ctx.debugMode) return;
     const scopeKey = String(scope || "general").toLowerCase();
-    if (ctx.startupComplete && !["watch", "assign", "auth"].includes(scopeKey))
+    if (
+      ctx.startupComplete &&
+      !["watch", "assign", "auth", "signer"].includes(scopeKey)
+    )
       return;
     const scopeTag = String(scope || "general").toUpperCase();
     const suffix = debugString(meta);
@@ -189,8 +258,13 @@ function createLogger(ctx) {
 
   function clearLogBuffer() {
     ctx.logBuffer = [];
+    if (ctx.plainOutputMode) return;
     if (ctx.startupFxActive) return;
     redrawHeaderAndLog(ctx.currentMissionStats);
+  }
+
+  function setInputRenderer(renderer) {
+    inputRenderer = typeof renderer === "function" ? renderer : null;
   }
 
   return {
@@ -202,6 +276,7 @@ function createLogger(ctx) {
     logWithTimestamp,
     logDebug,
     clearLogBuffer,
+    setInputRenderer,
   };
 }
 

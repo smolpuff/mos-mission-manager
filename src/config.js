@@ -22,8 +22,36 @@ function loadConfig(ctx, logWithTimestamp) {
   if (typeof ctx.config.missionModeEnabled === "boolean") {
     ctx.missionModeEnabled = ctx.config.missionModeEnabled;
   }
+  if (typeof ctx.config.nftCooldownResetEnabled === "boolean") {
+    ctx.nftCooldownResetEnabled = ctx.config.nftCooldownResetEnabled;
+  } else {
+    ctx.config.nftCooldownResetEnabled = false;
+  }
   if (typeof ctx.config.missionResetLevel === "string") {
     ctx.currentMissionResetLevel = ctx.config.missionResetLevel;
+  }
+  if (
+    ctx.config.signerMode === "app_wallet" ||
+    ctx.config.signerMode === "browser_wallet" ||
+    ctx.config.signerMode === "signing" ||
+    ctx.config.signerMode === "manual" ||
+    ctx.config.signerMode === "dapp"
+  ) {
+    ctx.signerMode =
+      ctx.config.signerMode === "signing"
+        ? "app_wallet"
+        : ctx.config.signerMode === "browser_wallet"
+          ? "manual"
+          : ctx.config.signerMode;
+  }
+  if (
+    ctx.config.signer &&
+    typeof ctx.config.signer === "object" &&
+    !Array.isArray(ctx.config.signer)
+  ) {
+    ctx.signerConfig = ctx.config.signer;
+  } else {
+    ctx.signerConfig = {};
   }
   if (typeof ctx.config.watchLoopEnabled === "boolean") {
     ctx.watchLoopEnabled = ctx.config.watchLoopEnabled;
@@ -40,6 +68,7 @@ function loadConfig(ctx, logWithTimestamp) {
   if (typeof ctx.config.debugMode === "boolean" && !process.argv.includes("--debug")) {
     ctx.debugMode = ctx.config.debugMode;
   }
+  ctx.config.signerMode = ctx.signerMode;
 }
 
 function saveConfig(ctx, logDebug) {

@@ -1,5 +1,7 @@
 "use strict";
 
+const { missionHasAssignedNft } = require("../missions/normalize");
+
 function parseResetLevel(mission) {
   const fields = [
     mission?.current_level,
@@ -23,12 +25,17 @@ function evaluateResetCandidates(snapshotMap, threshold) {
   const t = Number(threshold);
   if (!Number.isFinite(t) || t <= 0) return { ready: [], blocked: [] };
   const ready = [];
+  const blocked = [];
   for (const mission of snapshotMap.values()) {
-    const level = Number(mission?.level || 0);
+    const level = Number(parseResetLevel(mission) || 0);
     if (!Number.isFinite(level) || level < t) continue;
+    if (missionHasAssignedNft(mission) || mission?.assignedNft) {
+      blocked.push(mission);
+      continue;
+    }
     ready.push(mission);
   }
-  return { ready, blocked: [] };
+  return { ready, blocked };
 }
 
 module.exports = {

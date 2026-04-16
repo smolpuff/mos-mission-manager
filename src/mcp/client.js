@@ -59,14 +59,19 @@ function createMcpClient(ctx, logger) {
         timeoutMs: AUTH_REQUEST_TIMEOUT_MS,
       });
       ctx.authRefreshSignal = Number(ctx.authRefreshSignal || 0) + 1;
-      logWithTimestamp("[AUTH] ✅ Token refreshed.");
+      logWithTimestamp("[AUTH] 🔐 Token refreshed.");
       logDebug("auth", "refresh_ok", { reason });
       if (typeof ctx.onAuthRefresh === "function") {
         setTimeout(() => {
           try {
-            ctx.onAuthRefresh({ reason, signal: Number(ctx.authRefreshSignal || 0) });
+            ctx.onAuthRefresh({
+              reason,
+              signal: Number(ctx.authRefreshSignal || 0),
+            });
           } catch (callbackError) {
-            logDebug("auth", "refresh_callback_failed", { error: callbackError.message });
+            logDebug("auth", "refresh_callback_failed", {
+              error: callbackError.message,
+            });
           }
         }, 0);
       }
@@ -85,11 +90,15 @@ function createMcpClient(ctx, logger) {
         `[AUTH] ❌ Token refresh failed (${attempt}/${REFRESH_RETRY_ATTEMPTS}).`,
       );
       if (attempt < REFRESH_RETRY_ATTEMPTS) {
-        await new Promise((resolve) => setTimeout(resolve, REFRESH_RETRY_DELAY_MS));
+        await new Promise((resolve) =>
+          setTimeout(resolve, REFRESH_RETRY_DELAY_MS),
+        );
       }
     }
 
-    logWithTimestamp("[AUTH] 🔄 Refresh failed 3 times. Starting popup login...");
+    logWithTimestamp(
+      "[AUTH] 🔄 Refresh failed 3 times. Starting popup login...",
+    );
     const loginOk = await runLoginFlow({
       forceInteractive: true,
       forceBrowser: true,
@@ -98,7 +107,13 @@ function createMcpClient(ctx, logger) {
     return Boolean(bearerToken());
   }
 
-  async function mcpPost({ token, sessionId, body, timeoutMs, signal: externalSignal = null }) {
+  async function mcpPost({
+    token,
+    sessionId,
+    body,
+    timeoutMs,
+    signal: externalSignal = null,
+  }) {
     const headers = {
       Accept: "application/json, text/event-stream",
       "Content-Type": "application/json",
@@ -110,11 +125,16 @@ function createMcpClient(ctx, logger) {
     const effectiveTimeoutMs = Number(timeoutMs ?? MCP_REQUEST_TIMEOUT_MS);
     const controller = new AbortController();
     let externalAbortHandler = null;
-    if (externalSignal && typeof externalSignal.addEventListener === "function") {
+    if (
+      externalSignal &&
+      typeof externalSignal.addEventListener === "function"
+    ) {
       if (externalSignal.aborted) controller.abort();
       else {
         externalAbortHandler = () => controller.abort();
-        externalSignal.addEventListener("abort", externalAbortHandler, { once: true });
+        externalSignal.addEventListener("abort", externalAbortHandler, {
+          once: true,
+        });
       }
     }
     const timeout = setTimeout(() => controller.abort(), effectiveTimeoutMs);

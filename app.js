@@ -14,6 +14,7 @@
 const { createContext } = require("./src/context");
 const { createLogger } = require("./src/logger");
 const { loadConfig, saveConfig, flushConfig } = require("./src/config");
+const { createSignerService } = require("./src/signer");
 const { createMcpClient } = require("./src/mcp/client");
 const { createChecksService } = require("./src/services/checks");
 const { createWatchService } = require("./src/services/watch");
@@ -22,9 +23,10 @@ const { startStartupFx } = require("./src/ui/startup-fx");
 
 const ctx = createContext();
 const logger = createLogger(ctx);
+const signer = createSignerService(ctx, logger);
 const mcp = createMcpClient(ctx, logger);
-const checks = createChecksService(ctx, logger, mcp);
-const watch = createWatchService(ctx, logger, mcp, checks, { saveConfig });
+const checks = createChecksService(ctx, logger, mcp, { signer });
+const watch = createWatchService(ctx, logger, mcp, checks, { saveConfig }, { signer });
 const commands = createCommandHandler(
   ctx,
   logger,
@@ -34,14 +36,153 @@ const commands = createCommandHandler(
     startWatchLoop: watch.startWatchLoop,
     runWatchCycle: watch.runWatchCycle,
     runManualProcess: watch.runManualProcess,
+    runManualResetCheck: watch.runManualResetCheck,
     stopWatchLoop: watch.stopWatchLoop,
+    refreshFundingWalletSummary: checks.refreshFundingWalletSummary,
   },
   { saveConfig },
+  { signer },
 );
 
-const STARTUP_FX_ENABLED = true;
+const STARTUP_FX_ENABLED = !ctx.plainOutputMode;
 const STARTUP_FX_FRAME_MS = 95;
 const STARTUP_PROGRESS_PULSE_MS = 220;
+
+function createGuiStateEmitter(ctx) {
+  let last = null;
+  let pending = false;
+  let lastSentAt = 0;
+  const MIN_EMIT_INTERVAL_MS = 120;
+
+  function buildState() {
+    if (process.env.PBP_GUI_BRIDGE !== "1") return;
+    if (typeof process.send !== "function") return;
+    const state = {
+      appName: ctx.APP_NAME,
+      appVersion: ctx.APP_VERSION,
+      isAuthenticated: ctx.isAuthenticated,
+      watcherRunning: ctx.watcherRunning,
+      watchLoopEnabled: ctx.watchLoopEnabled,
+      currentUserDisplayName: ctx.currentUserDisplayName,
+      currentUserWalletId: ctx.currentUserWalletId,
+      currentMissionStats: ctx.currentMissionStats,
+      guiMissionSlots: ctx.guiMissionSlots,
+      currentMode: ctx.currentMode,
+      level20ResetEnabled: ctx.level20ResetEnabled,
+      missionModeEnabled: ctx.missionModeEnabled,
+      currentMissionResetLevel: ctx.currentMissionResetLevel,
+      signerLocked: ctx.signerLocked,
+      signerReady: ctx.signerReady,
+      signerMode: ctx.signerMode,
+      signerStatus: ctx.signerStatus,
+      signerWallet: ctx.signerConfig?.walletAddress || ctx.signerConfig?.walletRef || null,
+      fundingWalletSummary: ctx.fundingWalletSummary,
+    };
+    return state;
+  }
+
+  function emitNow() {
+    const state = buildState();
+    if (!state) return;
+    const json = JSON.stringify(state);
+    if (json === last) return;
+    last = json;
+    lastSentAt = Date.now();
+    process.send({ type: "pbp_state", state });
+  };
+
+  function emitSoon() {
+    if (pending) return;
+    pending = true;
+    const wait = Math.max(0, MIN_EMIT_INTERVAL_MS - (Date.now() - lastSentAt));
+    setTimeout(() => {
+      pending = false;
+      emitNow();
+    }, wait);
+  }
+
+  return { emitNow, emitSoon };
+}
+
+const guiEmitter = createGuiStateEmitter(ctx);
+const emitGuiState = guiEmitter.emitNow;
+const emitGuiStateSoon = guiEmitter.emitSoon;
+
+function sendGuiEvent(event, payload = {}) {
+  if (process.env.PBP_GUI_BRIDGE !== "1") return;
+  if (typeof process.send !== "function") return;
+  process.send({ type: "pbp_event", event, payload });
+}
+
+function wrapAsyncMethod(obj, name) {
+  if (!obj || typeof obj[name] !== "function") return;
+  const original = obj[name];
+  obj[name] = async (...args) => {
+    const result = await original(...args);
+    emitGuiState();
+    return result;
+  };
+}
+
+function wrapSyncMethod(obj, name) {
+  if (!obj || typeof obj[name] !== "function") return;
+  const original = obj[name];
+  obj[name] = (...args) => {
+    const result = original(...args);
+    emitGuiState();
+    return result;
+  };
+}
+
+if (process.env.PBP_GUI_BRIDGE === "1" && typeof process.send === "function") {
+  ctx.guiBridge = {
+    emitNow: emitGuiState,
+    emitSoon: emitGuiStateSoon,
+    sendEvent: sendGuiEvent,
+  };
+
+  // Mirror the same moments the CLI header updates: whenever we log or redraw,
+  // emit a deduped state snapshot for the desktop renderer.
+  if (logger && typeof logger.logWithTimestamp === "function") {
+    const original = logger.logWithTimestamp;
+    logger.logWithTimestamp = (...args) => {
+      const result = original(...args);
+      sendGuiEvent("tick", { reason: "log" });
+      emitGuiStateSoon();
+      return result;
+    };
+  }
+  if (logger && typeof logger.redrawHeaderAndLog === "function") {
+    const original = logger.redrawHeaderAndLog;
+    logger.redrawHeaderAndLog = (...args) => {
+      const result = original(...args);
+      sendGuiEvent("tick", { reason: "redraw" });
+      emitGuiStateSoon();
+      return result;
+    };
+  }
+
+  // Signer actions
+  wrapAsyncMethod(signer, "unlock");
+  wrapSyncMethod(signer, "lock");
+  wrapSyncMethod(signer, "setSignerMode");
+  wrapAsyncMethod(signer, "createGeneratedWallet");
+  wrapAsyncMethod(signer, "importFromText");
+  wrapAsyncMethod(signer, "replaceImportFromFile");
+  wrapAsyncMethod(signer, "removeImportedWallet");
+
+  // Auth / checks / stats
+  wrapAsyncMethod(mcp, "runLoginFlow");
+  wrapAsyncMethod(checks, "runInitialChecks");
+  wrapAsyncMethod(checks, "refreshFundingWalletSummary");
+
+  // Watcher loop / state changes
+  wrapAsyncMethod(watch, "startWatchLoop");
+  wrapAsyncMethod(watch, "stopWatchLoop");
+  wrapAsyncMethod(watch, "runWatchCycle");
+  wrapAsyncMethod(watch, "runManualProcess");
+  wrapAsyncMethod(watch, "runManualResetCheck");
+}
 
 async function runWithProgressPulse(
   task,
@@ -69,6 +210,8 @@ async function runStartupSequence() {
   ctx.startupFxProgress = 5;
 
   loadConfig(ctx, logger.logWithTimestamp);
+  signer.updateSignerState();
+  emitGuiState();
   ctx.currentMissionStats.totalClaimed = Number(ctx.config.totalClaimed || 0);
   ctx.startupFxProgress = 20;
   const stopFx = startStartupFx(ctx, {
@@ -84,7 +227,25 @@ async function runStartupSequence() {
       interactiveAuth: ctx.interactiveAuth,
       watchLoopEnabled: ctx.watchLoopEnabled,
       totalClaimed: ctx.config.totalClaimed,
+      signerMode: ctx.signerMode,
+      signerStatus: ctx.signerStatus,
     });
+    signer.logModeSelected("startup");
+
+    if (
+      ctx.signerMode === "app_wallet" &&
+      ctx.signerConfig?.walletRef &&
+      (ctx.signerLocked || !ctx.signerReady)
+    ) {
+      try {
+        logger.logWithTimestamp("[STARTUP] Unlocking app wallet signer...");
+        await signer.unlock();
+      } catch (error) {
+        logger.logWithTimestamp(
+          `[STARTUP] ⚠️ App wallet unlock failed: ${error.message}`,
+        );
+      }
+    }
 
     let loginOk = false;
 
@@ -188,10 +349,12 @@ async function main() {
   commands.setupCommandHandler();
   logger.redrawHeaderAndLog(ctx.currentMissionStats);
   await runStartupSequence();
+  await commands.maybeRunFirstTimeSignerSetup();
 }
 
 process.on("SIGINT", () => {
   ctx.watchLoopEnabled = false;
+  signer.shutdown();
   flushConfig(ctx, logger.logDebug);
   logger.logWithTimestamp("[INFO] Caught SIGINT, exiting...");
   process.exit(0);
@@ -199,11 +362,13 @@ process.on("SIGINT", () => {
 
 process.on("SIGTERM", () => {
   ctx.watchLoopEnabled = false;
+  signer.shutdown();
   flushConfig(ctx, logger.logDebug);
   process.exit(0);
 });
 
 main().catch((err) => {
+  signer.shutdown();
   logger.logWithTimestamp(
     `[ERROR] Fatal startup error: ${err?.message || err}`,
   );
