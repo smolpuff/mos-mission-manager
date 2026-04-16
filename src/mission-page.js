@@ -15,12 +15,11 @@ async function openMissionPlayPage() {
 
   const target = String(MISSION_PLAY_URL || '').trim();
   if (!target) return false;
-  const windowsTarget = `"${target.replace(/"/g, '\\"')}"`;
   const candidates =
     process.platform === 'darwin'
       ? [['open', [target]]]
       : process.platform === 'win32'
-        ? [['cmd', ['/c', 'start', '', windowsTarget]]]
+        ? [['rundll32', ['url.dll,FileProtocolHandler', target]]]
         : [
             ['xdg-open', [target]],
             ['gio', ['open', target]],
