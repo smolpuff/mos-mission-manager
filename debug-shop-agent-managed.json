@@ -1,0 +1,185 @@
+{
+  "generatedAt": "2026-04-17T00:19:28.157Z",
+  "action": "agent_managed_shop_checkout",
+  "itemId": "Cyan Zebra Tooth",
+  "walletPath": "/tmp/pbp-agent-wallet.json",
+  "requestArgs": {
+    "itemId": "Cyan Zebra Tooth",
+    "signingMode": "agent_managed"
+  },
+  "steps": [
+    {
+      "ts": "2026-04-17T00:19:29.890Z",
+      "label": "prepare_shop_checkout",
+      "data": {
+        "ok": true,
+        "raw": {
+          "content": [
+            {
+              "type": "text",
+              "text": "Prepared checkout for Cyan Zebra Tooth. Sign and submit with submit_signed_checkout."
+            }
+          ],
+          "structuredContent": {
+            "success": true,
+            "checkoutToken": "eyJhbGciOiJIUzI1NiJ9.eyJ0b2tlblR5cGUiOiJtY3BfY2hlY2tvdXQiLCJwbGF5RmFiSWQiOiJBM0ZEMzdCODY0RTBFQjgzIiwid2FsbGV0SWQiOiIzTGdpTnltRnlQQUM4TUhkeDhHalZnR3VHM2NhQ1J4czhyUmcycGl0cmJNViIsInBheWVyV2FsbGV0SWQiOiIzTGdpTnltRnlQQUM4TUhkeDhHalZnR3VHM2NhQ1J4czhyUmcycGl0cmJNViIsImdpZnRSZWNpcGllbnRVc2VySWQiOiJBM0ZEMzdCODY0RTBFQjgzIiwiZ2lmdFJlY2lwaWVudERpc3BsYXlOYW1lIjoicm1yZmtvcmVhIiwiY2hlY2tvdXQiOnsiY2hlY2tvdXRJZCI6ImNoa19lZmZkYWY4OGZiOWE5MmZkZmZjOWQzZTkiLCJpdGVtSWQiOiJDeWFuIFplYnJhIFRvb3RoIiwicXVhbnRpdHkiOjEsInJlZmVyZW5jZSI6IjEyV2Zrb0d0RUs2dWlKa3BHNkNLY1Y4b2VxVzRWYVNWaDFCNlJhOE5FU0U0Iiwib3JkZXJJZCI6Ik9yZGVyLUN5YW5fWmVicmFfVG9vdGgtMTc3NjM4NTE2OTcxMy1xdHktMS1tY3AiLCJpdGVtIjp7Ikl0ZW1JZCI6IkN5YW4gWmVicmEgVG9vdGgiLCJJdGVtQ2xhc3MiOiJNYXJibGVTa2luIiwiQ2F0YWxvZ1ZlcnNpb24iOiJNYWluIENhdGFsb2ciLCJEaXNwbGF5TmFtZSI6IkN5YW4gWmVicmEgVG9vdGgiLCJEZXNjcmlwdGlvbiI6IlJlbGVhc2VkIFNlYXNvbiAxIExhc3QgU2VlbiBEdXJpbmcgU2Vhc29uIDY4IiwiVmlydHVhbEN1cnJlbmN5UHJpY2VzIjp7IlJNIjoxMDAsIlBDIjoyNSwiUmVhbE1vbmV5RGlzcGxheSI6IiQxLjAwIiwiUmVhbE1vbmV5VmFsdWUiOjF9LCJSZWFsQ3VycmVuY3lQcmljZXMiOnt9LCJUYWdzIjpbXSwiQ29uc3VtYWJsZSI6e30sIkNhbkJlY29tZUNoYXJhY3RlciI6ZmFsc2UsIklzU3RhY2thYmxlIjp0cnVlLCJJc1RyYWRhYmxlIjpmYWxzZSwiSXRlbUltYWdlVXJsIjoiaHR0cHM6Ly9wYnAtd2Vic2l0ZS1zMy5zMy5hbWF6b25hd3MuY29tL3VwbG9hZHMvVFhfSFRfQldDeWFuLndlYnAiLCJJc0xpbWl0ZWRFZGl0aW9uIjpmYWxzZSwiSW5pdGlhbExpbWl0ZWRFZGl0aW9uQ291bnQiOjAsIkRpc3BsYXlQb3NpdGlvbiI6MCwiQ3VzdG9tRGF0YSI6e319LCJpdGVtVHlwZSI6InBsYXlmYWIifSwiaXNzIjoicGJwLXdlYjMtbWNwLXNob3AiLCJhdWQiOiJwYnAtd2ViMy1tY3AtY2xpZW50IiwiaWF0IjoxNzc2Mzg1MTY5LCJqdGkiOiIwZjY2OWRlMWNkYmFhNmIyNzNiOGQ4NjRiNWJhMDYyZSIsImV4cCI6MTc3NjM4Njk2OX0.WO3a1wxLgUhebQaOXp9dxojBU7r6_A9a1oHcEYAq_Sg",
+            "checkoutId": "chk_effdaf88fb9a92fdffc9d3e9",
+            "transaction": "mi8GKpJDrt85dhGn1LAri6ibdYUQdq7tqSogrDFm7UezxCZ6v6pYSBLMKvEsNyun7YuWetUNFyWE6t2EaDxK9yQbJytxYSv3T5dCfKcL2oDiQfG3vHYG1mZDLioMUFn8h9LZGt8FXXLoXjWcRzvcAF7EDUxirRDWAU7JSE2CYPhzWzWUuGUhTvC8RgMD9AFQxsocy9gDktNXNuRk6e8SPNNMYC9dZDxtTcCyY8GvZW2wjEXZbwY1ppEd6sj4DyG3MJt7oTevqfYjAQWFnQunpNptcchn2ma4ehgtNvDtA6ZsQoDR6yXvXXnkwhZsPdhkSAkjk6jUQeH8bygCKP92mysWZDJVHPribteFaUMtT6CQvVQuh4m6xSUydnPq2RGWH2uEUMY15CL2qEtYNSa3u42uYBVSY32rg1bvVe3bkZFSwWeVz4f42VxeB1XtRb9h",
+            "reference": "12WfkoGtEK6uiJkpG6CKcV8oeqW4VaSVh1B6Ra8NESE4",
+            "orderId": "Order-Cyan_Zebra_Tooth-1776385169713-qty-1-mcp",
+            "memo": "Order-Cyan_Zebra_Tooth-1776385169713-qty-1-mcp",
+            "signingMode": "agent_managed",
+            "payerWalletId": "3LgiNymFyPAC8MHdx8GjVgGuG3caCRxs8rRg2pitrbMV",
+            "recipient": {
+              "userId": "A3FD37B864E0EB83",
+              "displayName": "rmrfkorea",
+              "isGift": false
+            },
+            "signingBridgePath": "/mcp/sign-checkout?checkoutId=chk_effdaf88fb9a92fdffc9d3e9",
+            "signingBridgeUrl": "https://pixelbypixel.studio/mcp/sign-checkout?checkoutId=chk_effdaf88fb9a92fdffc9d3e9",
+            "expiresAt": "2026-04-17T00:49:29.849Z",
+            "item": {
+              "itemId": "Cyan Zebra Tooth",
+              "baseItemId": "Cyan Zebra Tooth",
+              "itemType": "playfab",
+              "name": "Cyan Zebra Tooth",
+              "priceUsd": 1,
+              "priceDisplay": "$1.00",
+              "quantity": 1
+            },
+            "signingMethods": {
+              "browserBridge": {
+                "supported": true,
+                "signingUrl": "https://pixelbypixel.studio/mcp/sign-checkout?checkoutId=chk_effdaf88fb9a92fdffc9d3e9"
+              },
+              "agentManagedWallet": {
+                "supported": true,
+                "note": "Agent may sign transaction directly and call submit_signed_checkout."
+              }
+            },
+            "note": "Check whether PBP_AGENT_WALLET_PATH is set. If it is, ask the user: \"do you want me to sign it or do you want a URL to sign it?\" If they choose agent-managed signing, sign locally and call submit_signed_checkout.",
+            "agentWalletGuide": {
+              "envVarName": "PBP_AGENT_WALLET_PATH",
+              "promptWhenConfigured": "If PBP_AGENT_WALLET_PATH is configured, ask the user: \"do you want me to sign it or do you want a URL to sign it?\"",
+              "steps": [
+                "Check whether PBP_AGENT_WALLET_PATH points to a local Solana keypair JSON file.",
+                "If the keypair is available, offer agent-managed signing before defaulting to a browser signing flow.",
+                "If the user chooses agent-managed signing, load that keypair locally and sign the returned transaction.",
+                "After signing, call submit_signed_checkout."
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "ts": "2026-04-17T00:19:29.898Z",
+      "label": "sign_transaction",
+      "data": {
+        "ok": false,
+        "error": "Attempted to sign a transaction with an address that is not a signer for it"
+      }
+    }
+  ],
+  "walletSecretLength": 32,
+  "walletAddress": "AxR7LYpRwRrWRu4uqSwjJcWf6JjFxKkNnsJT26qjtSHp",
+  "prepare": {
+    "checkoutId": "chk_effdaf88fb9a92fdffc9d3e9",
+    "checkoutToken": "eyJhbGciOiJIUzI1NiJ9.eyJ0b2tlblR5cGUiOiJtY3BfY2hlY2tvdXQiLCJwbGF5RmFiSWQiOiJBM0ZEMzdCODY0RTBFQjgzIiwid2FsbGV0SWQiOiIzTGdpTnltRnlQQUM4TUhkeDhHalZnR3VHM2NhQ1J4czhyUmcycGl0cmJNViIsInBheWVyV2FsbGV0SWQiOiIzTGdpTnltRnlQQUM4TUhkeDhHalZnR3VHM2NhQ1J4czhyUmcycGl0cmJNViIsImdpZnRSZWNpcGllbnRVc2VySWQiOiJBM0ZEMzdCODY0RTBFQjgzIiwiZ2lmdFJlY2lwaWVudERpc3BsYXlOYW1lIjoicm1yZmtvcmVhIiwiY2hlY2tvdXQiOnsiY2hlY2tvdXRJZCI6ImNoa19lZmZkYWY4OGZiOWE5MmZkZmZjOWQzZTkiLCJpdGVtSWQiOiJDeWFuIFplYnJhIFRvb3RoIiwicXVhbnRpdHkiOjEsInJlZmVyZW5jZSI6IjEyV2Zrb0d0RUs2dWlKa3BHNkNLY1Y4b2VxVzRWYVNWaDFCNlJhOE5FU0U0Iiwib3JkZXJJZCI6Ik9yZGVyLUN5YW5fWmVicmFfVG9vdGgtMTc3NjM4NTE2OTcxMy1xdHktMS1tY3AiLCJpdGVtIjp7Ikl0ZW1JZCI6IkN5YW4gWmVicmEgVG9vdGgiLCJJdGVtQ2xhc3MiOiJNYXJibGVTa2luIiwiQ2F0YWxvZ1ZlcnNpb24iOiJNYWluIENhdGFsb2ciLCJEaXNwbGF5TmFtZSI6IkN5YW4gWmVicmEgVG9vdGgiLCJEZXNjcmlwdGlvbiI6IlJlbGVhc2VkIFNlYXNvbiAxIExhc3QgU2VlbiBEdXJpbmcgU2Vhc29uIDY4IiwiVmlydHVhbEN1cnJlbmN5UHJpY2VzIjp7IlJNIjoxMDAsIlBDIjoyNSwiUmVhbE1vbmV5RGlzcGxheSI6IiQxLjAwIiwiUmVhbE1vbmV5VmFsdWUiOjF9LCJSZWFsQ3VycmVuY3lQcmljZXMiOnt9LCJUYWdzIjpbXSwiQ29uc3VtYWJsZSI6e30sIkNhbkJlY29tZUNoYXJhY3RlciI6ZmFsc2UsIklzU3RhY2thYmxlIjp0cnVlLCJJc1RyYWRhYmxlIjpmYWxzZSwiSXRlbUltYWdlVXJsIjoiaHR0cHM6Ly9wYnAtd2Vic2l0ZS1zMy5zMy5hbWF6b25hd3MuY29tL3VwbG9hZHMvVFhfSFRfQldDeWFuLndlYnAiLCJJc0xpbWl0ZWRFZGl0aW9uIjpmYWxzZSwiSW5pdGlhbExpbWl0ZWRFZGl0aW9uQ291bnQiOjAsIkRpc3BsYXlQb3NpdGlvbiI6MCwiQ3VzdG9tRGF0YSI6e319LCJpdGVtVHlwZSI6InBsYXlmYWIifSwiaXNzIjoicGJwLXdlYjMtbWNwLXNob3AiLCJhdWQiOiJwYnAtd2ViMy1tY3AtY2xpZW50IiwiaWF0IjoxNzc2Mzg1MTY5LCJqdGkiOiIwZjY2OWRlMWNkYmFhNmIyNzNiOGQ4NjRiNWJhMDYyZSIsImV4cCI6MTc3NjM4Njk2OX0.WO3a1wxLgUhebQaOXp9dxojBU7r6_A9a1oHcEYAq_Sg",
+    "signingMode": "agent_managed",
+    "payerWalletId": "3LgiNymFyPAC8MHdx8GjVgGuG3caCRxs8rRg2pitrbMV",
+    "item": {
+      "itemId": "Cyan Zebra Tooth",
+      "baseItemId": "Cyan Zebra Tooth",
+      "itemType": "playfab",
+      "name": "Cyan Zebra Tooth",
+      "priceUsd": 1,
+      "priceDisplay": "$1.00",
+      "quantity": 1
+    },
+    "requiredSignerAddresses": ["3LgiNymFyPAC8MHdx8GjVgGuG3caCRxs8rRg2pitrbMV"],
+    "walletMatchesRequiredSigner": false,
+    "signingMethods": {
+      "browserBridge": {
+        "supported": true,
+        "signingUrl": "https://pixelbypixel.studio/mcp/sign-checkout?checkoutId=chk_effdaf88fb9a92fdffc9d3e9"
+      },
+      "agentManagedWallet": {
+        "supported": true,
+        "note": "Agent may sign transaction directly and call submit_signed_checkout."
+      }
+    },
+    "note": "Check whether PBP_AGENT_WALLET_PATH is set. If it is, ask the user: \"do you want me to sign it or do you want a URL to sign it?\" If they choose agent-managed signing, sign locally and call submit_signed_checkout.",
+    "agentWalletGuide": {
+      "envVarName": "PBP_AGENT_WALLET_PATH",
+      "promptWhenConfigured": "If PBP_AGENT_WALLET_PATH is configured, ask the user: \"do you want me to sign it or do you want a URL to sign it?\"",
+      "steps": [
+        "Check whether PBP_AGENT_WALLET_PATH points to a local Solana keypair JSON file.",
+        "If the keypair is available, offer agent-managed signing before defaulting to a browser signing flow.",
+        "If the user chooses agent-managed signing, load that keypair locally and sign the returned transaction.",
+        "After signing, call submit_signed_checkout."
+      ]
+    },
+    "rawPrepareResponse": {
+      "content": [
+        {
+          "type": "text",
+          "text": "Prepared checkout for Cyan Zebra Tooth. Sign and submit with submit_signed_checkout."
+        }
+      ],
+      "structuredContent": {
+        "success": true,
+        "checkoutToken": "eyJhbGciOiJIUzI1NiJ9.eyJ0b2tlblR5cGUiOiJtY3BfY2hlY2tvdXQiLCJwbGF5RmFiSWQiOiJBM0ZEMzdCODY0RTBFQjgzIiwid2FsbGV0SWQiOiIzTGdpTnltRnlQQUM4TUhkeDhHalZnR3VHM2NhQ1J4czhyUmcycGl0cmJNViIsInBheWVyV2FsbGV0SWQiOiIzTGdpTnltRnlQQUM4TUhkeDhHalZnR3VHM2NhQ1J4czhyUmcycGl0cmJNViIsImdpZnRSZWNpcGllbnRVc2VySWQiOiJBM0ZEMzdCODY0RTBFQjgzIiwiZ2lmdFJlY2lwaWVudERpc3BsYXlOYW1lIjoicm1yZmtvcmVhIiwiY2hlY2tvdXQiOnsiY2hlY2tvdXRJZCI6ImNoa19lZmZkYWY4OGZiOWE5MmZkZmZjOWQzZTkiLCJpdGVtSWQiOiJDeWFuIFplYnJhIFRvb3RoIiwicXVhbnRpdHkiOjEsInJlZmVyZW5jZSI6IjEyV2Zrb0d0RUs2dWlKa3BHNkNLY1Y4b2VxVzRWYVNWaDFCNlJhOE5FU0U0Iiwib3JkZXJJZCI6Ik9yZGVyLUN5YW5fWmVicmFfVG9vdGgtMTc3NjM4NTE2OTcxMy1xdHktMS1tY3AiLCJpdGVtIjp7Ikl0ZW1JZCI6IkN5YW4gWmVicmEgVG9vdGgiLCJJdGVtQ2xhc3MiOiJNYXJibGVTa2luIiwiQ2F0YWxvZ1ZlcnNpb24iOiJNYWluIENhdGFsb2ciLCJEaXNwbGF5TmFtZSI6IkN5YW4gWmVicmEgVG9vdGgiLCJEZXNjcmlwdGlvbiI6IlJlbGVhc2VkIFNlYXNvbiAxIExhc3QgU2VlbiBEdXJpbmcgU2Vhc29uIDY4IiwiVmlydHVhbEN1cnJlbmN5UHJpY2VzIjp7IlJNIjoxMDAsIlBDIjoyNSwiUmVhbE1vbmV5RGlzcGxheSI6IiQxLjAwIiwiUmVhbE1vbmV5VmFsdWUiOjF9LCJSZWFsQ3VycmVuY3lQcmljZXMiOnt9LCJUYWdzIjpbXSwiQ29uc3VtYWJsZSI6e30sIkNhbkJlY29tZUNoYXJhY3RlciI6ZmFsc2UsIklzU3RhY2thYmxlIjp0cnVlLCJJc1RyYWRhYmxlIjpmYWxzZSwiSXRlbUltYWdlVXJsIjoiaHR0cHM6Ly9wYnAtd2Vic2l0ZS1zMy5zMy5hbWF6b25hd3MuY29tL3VwbG9hZHMvVFhfSFRfQldDeWFuLndlYnAiLCJJc0xpbWl0ZWRFZGl0aW9uIjpmYWxzZSwiSW5pdGlhbExpbWl0ZWRFZGl0aW9uQ291bnQiOjAsIkRpc3BsYXlQb3NpdGlvbiI6MCwiQ3VzdG9tRGF0YSI6e319LCJpdGVtVHlwZSI6InBsYXlmYWIifSwiaXNzIjoicGJwLXdlYjMtbWNwLXNob3AiLCJhdWQiOiJwYnAtd2ViMy1tY3AtY2xpZW50IiwiaWF0IjoxNzc2Mzg1MTY5LCJqdGkiOiIwZjY2OWRlMWNkYmFhNmIyNzNiOGQ4NjRiNWJhMDYyZSIsImV4cCI6MTc3NjM4Njk2OX0.WO3a1wxLgUhebQaOXp9dxojBU7r6_A9a1oHcEYAq_Sg",
+        "checkoutId": "chk_effdaf88fb9a92fdffc9d3e9",
+        "transaction": "mi8GKpJDrt85dhGn1LAri6ibdYUQdq7tqSogrDFm7UezxCZ6v6pYSBLMKvEsNyun7YuWetUNFyWE6t2EaDxK9yQbJytxYSv3T5dCfKcL2oDiQfG3vHYG1mZDLioMUFn8h9LZGt8FXXLoXjWcRzvcAF7EDUxirRDWAU7JSE2CYPhzWzWUuGUhTvC8RgMD9AFQxsocy9gDktNXNuRk6e8SPNNMYC9dZDxtTcCyY8GvZW2wjEXZbwY1ppEd6sj4DyG3MJt7oTevqfYjAQWFnQunpNptcchn2ma4ehgtNvDtA6ZsQoDR6yXvXXnkwhZsPdhkSAkjk6jUQeH8bygCKP92mysWZDJVHPribteFaUMtT6CQvVQuh4m6xSUydnPq2RGWH2uEUMY15CL2qEtYNSa3u42uYBVSY32rg1bvVe3bkZFSwWeVz4f42VxeB1XtRb9h",
+        "reference": "12WfkoGtEK6uiJkpG6CKcV8oeqW4VaSVh1B6Ra8NESE4",
+        "orderId": "Order-Cyan_Zebra_Tooth-1776385169713-qty-1-mcp",
+        "memo": "Order-Cyan_Zebra_Tooth-1776385169713-qty-1-mcp",
+        "signingMode": "agent_managed",
+        "payerWalletId": "3LgiNymFyPAC8MHdx8GjVgGuG3caCRxs8rRg2pitrbMV",
+        "recipient": {
+          "userId": "A3FD37B864E0EB83",
+          "displayName": "rmrfkorea",
+          "isGift": false
+        },
+        "signingBridgePath": "/mcp/sign-checkout?checkoutId=chk_effdaf88fb9a92fdffc9d3e9",
+        "signingBridgeUrl": "https://pixelbypixel.studio/mcp/sign-checkout?checkoutId=chk_effdaf88fb9a92fdffc9d3e9",
+        "expiresAt": "2026-04-17T00:49:29.849Z",
+        "item": {
+          "itemId": "Cyan Zebra Tooth",
+          "baseItemId": "Cyan Zebra Tooth",
+          "itemType": "playfab",
+          "name": "Cyan Zebra Tooth",
+          "priceUsd": 1,
+          "priceDisplay": "$1.00",
+          "quantity": 1
+        },
+        "signingMethods": {
+          "browserBridge": {
+            "supported": true,
+            "signingUrl": "https://pixelbypixel.studio/mcp/sign-checkout?checkoutId=chk_effdaf88fb9a92fdffc9d3e9"
+          },
+          "agentManagedWallet": {
+            "supported": true,
+            "note": "Agent may sign transaction directly and call submit_signed_checkout."
+          }
+        },
+        "note": "Check whether PBP_AGENT_WALLET_PATH is set. If it is, ask the user: \"do you want me to sign it or do you want a URL to sign it?\" If they choose agent-managed signing, sign locally and call submit_signed_checkout.",
+        "agentWalletGuide": {
+          "envVarName": "PBP_AGENT_WALLET_PATH",
+          "promptWhenConfigured": "If PBP_AGENT_WALLET_PATH is configured, ask the user: \"do you want me to sign it or do you want a URL to sign it?\"",
+          "steps": [
+            "Check whether PBP_AGENT_WALLET_PATH points to a local Solana keypair JSON file.",
+            "If the keypair is available, offer agent-managed signing before defaulting to a browser signing flow.",
+            "If the user chooses agent-managed signing, load that keypair locally and sign the returned transaction.",
+            "After signing, call submit_signed_checkout."
+          ]
+        }
+      }
+    }
+  },
+  "signing": {
+    "error": "Attempted to sign a transaction with an address that is not a signer for it",
+    "signed": null
+  }
+}

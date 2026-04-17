@@ -18,6 +18,11 @@ const {
   validatePreparedMissionAction,
   decodePreparedTransaction,
 } = require("./signer-prepare");
+const {
+  openMissionPlayPage,
+  MISSION_PLAY_URL: MISSION_PLAY_URL_SHARED,
+  MISSION_PAGE_OPEN_COOLDOWN_MS_DEFAULT,
+} = require("./mission-page");
 
 const VAULT_VERSION = 1;
 const VAULT_ALGORITHM = "aes-256-gcm";
@@ -60,6 +65,14 @@ const COMMON_MNEMONIC_DERIVATION_PATHS = [
   "m/44'/501'/0'/1'",
 ];
 const MISSION_PLAY_URL = "https://pixelbypixel.studio/missions/play";
+
+function missionPageCooldownMsFromConfig(ctx) {
+  const sec = Number(ctx?.config?.missionPageOpenCooldownSeconds);
+  if (Number.isFinite(sec) && sec > 0) return Math.floor(sec * 1000);
+  const ms = Number(ctx?.config?.missionPageOpenCooldownMs);
+  if (Number.isFinite(ms) && ms >= 0) return Math.floor(ms);
+  return MISSION_PAGE_OPEN_COOLDOWN_MS_DEFAULT;
+}
 
 function createSignerService(ctx, logger) {
   const { logWithTimestamp, logDebug } = logger;
@@ -342,48 +355,6 @@ function createSignerService(ctx, logger) {
     });
   }
 
-  async function openUrl(url) {
-    const target = String(url || '').trim();
-    if (!target) return false;
-    const candidates =
-      process.platform === 'darwin'
-        ? [['open', [target]]]
-        : process.platform === 'win32'
-          ? [['rundll32', ['url.dll,FileProtocolHandler', target]]]
-          : [
-              ['xdg-open', [target]],
-              ['gio', ['open', target]],
-            ];
-    for (const [cmd, args] of candidates) {
-      // eslint-disable-next-line no-await-in-loop
-      const ok = await new Promise((resolve) => {
-        let settled = false;
-        const child = spawn(cmd, args, { detached: true, stdio: 'ignore' });
-        child.once('error', () => {
-          if (!settled) {
-            settled = true;
-            resolve(false);
-          }
-        });
-        child.once('exit', (code) => {
-          if (!settled) {
-            settled = true;
-            resolve(code === 0);
-          }
-        });
-        setTimeout(() => {
-          if (!settled) {
-            settled = true;
-            child.unref();
-            resolve(true);
-          }
-        }, 250);
-      });
-      if (ok) return true;
-    }
-    return false;
-  }
-
   function getBrowserBridgeUrl(structuredContent) {
 
     const sc = structuredContent && typeof structuredContent === "object"
@@ -405,7 +376,7 @@ function createSignerService(ctx, logger) {
       action === "nft_cooldown_reset" ||
       action === "mission_slot_unlock"
     ) {
-      return MISSION_PLAY_URL;
+      return MISSION_PLAY_URL_SHARED || MISSION_PLAY_URL;
     }
     return null;
   }
@@ -1555,13 +1526,24 @@ function createSignerService(ctx, logger) {
       logWithTimestamp(
         `[DAPP] 🌐 Opening PbP signing page for ${normalizedAction}...`,
       );
-      const opened = await openUrl(targetUrl);
-      if (!opened) {
-        logWithTimestamp("[DAPP] ❌ Failed to open browser automatically.");
-        logWithTimestamp(`[DAPP] Open manually: ${targetUrl}`);
-      } else {
-        logWithTimestamp(`[DAPP] If nothing happens, open manually: ${targetUrl}`);
+      // DAPP mode currently can't reliably deep-link to the right signing URL,
+      // so behave like manual mode and open the generic missions page with a
+      // cooldown to avoid window spam. Still print the signing URL for copy/paste.
+      const openResult = await openMissionPlayPage({
+        cooldownMs: missionPageCooldownMsFromConfig(ctx),
+      });
+      if (openResult?.suppressed) {
+        logDebug("dapp", "mission_page_open_suppressed", {
+          actionName: normalizedAction,
+          cooldownMs:
+            openResult?.cooldownMs ?? MISSION_PAGE_OPEN_COOLDOWN_MS_DEFAULT,
+          nextAllowedInMs: openResult?.nextAllowedInMs ?? null,
+        });
       }
+      if (!openResult?.ok) {
+        logWithTimestamp("[DAPP] ❌ Failed to open browser automatically.");
+      }
+      logWithTimestamp(`[DAPP] Open manually: ${targetUrl}`);
       appendAudit("dapp_sign_opened", {
         actionName: normalizedAction,
         submitTool: validated.submitTool,

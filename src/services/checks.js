@@ -10,8 +10,13 @@ const {
   missionIsClaimable,
 } = require("../missions/normalize");
 const { parseResetLevel } = require("./reset");
-const { openMissionPlayPage, MISSION_PLAY_URL } = require("../mission-page");
+const {
+  openMissionPlayPage,
+  MISSION_PLAY_URL,
+  MISSION_PAGE_OPEN_COOLDOWN_MS_DEFAULT,
+} = require("../mission-page");
 const { createMissionActionExecutor } = require("../mission-actions");
+const { fetchOnchainFundingWalletSummary } = require("../wallet/onchain-summary");
 
 function createChecksService(ctx, logger, mcp, services = {}) {
   const { logWithTimestamp, logDebug, redrawHeaderAndLog } = logger;
@@ -21,10 +26,26 @@ function createChecksService(ctx, logger, mcp, services = {}) {
     mcp,
     signer,
   );
+  let walletRefreshTimer = null;
+  let walletRefreshPendingReason = null;
+
+  function missionPageCooldownMs() {
+    const sec = Number(ctx.config?.missionPageOpenCooldownSeconds);
+    if (Number.isFinite(sec) && sec > 0) return Math.floor(sec * 1000);
+    const ms = Number(ctx.config?.missionPageOpenCooldownMs);
+    if (Number.isFinite(ms) && ms >= 0) return Math.floor(ms);
+    return MISSION_PAGE_OPEN_COOLDOWN_MS_DEFAULT;
+  }
+
   const TARGET_UNLOCK_SLOT = 4;
   const SOLANA_RPC_URL = "https://api.mainnet-beta.solana.com";
   const PBP_MINT = "3f7wfg9yHLtGKvy75MmqsVT1ueTFoqyySQbusrX1YAQ4";
   const missionNftByAccount = new Map();
+  const DEFAULT_REWARD_TOTALS = {
+    pbp: 0,
+    tc: 0,
+    cc: 0,
+  };
   const canonicalNameKey = (v) =>
     String(v || "")
       .toLowerCase()
@@ -45,6 +66,94 @@ function createChecksService(ctx, logger, mcp, services = {}) {
     if (sc.success === false) return false;
     if (sc.details?.error === true) return false;
     return true;
+  }
+
+  function normalizeRewardBucket(prize) {
+    const value = String(prize || "")
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "_");
+    if (!value) return null;
+    if (value === "pbp" || value === "pbp_token" || value === "pixel_by_pixel") {
+      return "pbp";
+    }
+    if (
+      value === "tc" ||
+      value === "tc_token" ||
+      value === "tournament_coins" ||
+      value === "tournament_coin"
+    ) {
+      return "tc";
+    }
+    if (
+      value === "cc" ||
+      value === "cc_token" ||
+      value === "community_coins" ||
+      value === "community_coin"
+    ) {
+      return "cc";
+    }
+    return null;
+  }
+
+  function createEmptyRewardTotals() {
+    return { ...DEFAULT_REWARD_TOTALS };
+  }
+
+  function parseTokenBalancesArray(balances = []) {
+    const summary = [];
+    for (const entry of Array.isArray(balances) ? balances : []) {
+      if (!entry || typeof entry !== "object") continue;
+      const symbol = String(
+        entry.symbol || entry.tokenSymbol || entry.ticker || entry.assetSymbol || "",
+      )
+        .trim()
+        .toUpperCase();
+      const name = String(entry.name || entry.tokenName || "").trim();
+      const key = normalizeRewardBucket(symbol) || normalizeRewardBucket(name);
+      const balance =
+        parseBalanceNumber(entry.balance) ??
+        parseBalanceNumber(entry.displayBalance) ??
+        parseBalanceNumber(entry.uiAmount) ??
+        parseBalanceNumber(entry.ui_amount) ??
+        parseBalanceNumber(entry.amount) ??
+        parseBalanceNumber(entry.tokenBalance);
+      summary.push({
+        key: key || symbol.toLowerCase() || name.toLowerCase() || null,
+        symbol: symbol || null,
+        name: name || null,
+        mint: String(entry.mint || entry.mintAddress || "").trim() || null,
+        balance: balance === null ? null : balance,
+        displayBalance:
+          entry.displayBalance ??
+          (balance === null ? null : String(balance)),
+      });
+    }
+    return summary;
+  }
+
+  function parseVirtualCurrencyBalances(virtualCurrencies = {}) {
+    if (!virtualCurrencies || typeof virtualCurrencies !== "object") return [];
+    const rows = [];
+    for (const [symbolRaw, amountRaw] of Object.entries(virtualCurrencies)) {
+      const symbol = String(symbolRaw || "").trim().toUpperCase();
+      const key = normalizeRewardBucket(symbol) || String(symbolRaw || "")
+        .trim()
+        .toLowerCase();
+      const balance = parseBalanceNumber(amountRaw);
+      if (!symbol || balance === null) continue;
+      rows.push({
+        key,
+        symbol,
+        name: symbol,
+        mint: null,
+        balance,
+        displayBalance: balance.toLocaleString(undefined, {
+          maximumFractionDigits: 2,
+        }),
+      });
+    }
+    return rows;
   }
 
   function assignedNftLabelFromMission(mission) {
@@ -418,6 +527,12 @@ function createChecksService(ctx, logger, mcp, services = {}) {
       sc?.tokenBalances ||
       sc?.balances ||
       [];
+    const virtualCurrencies =
+      summary?.virtualCurrencies ||
+      summary?.virtual_currencies ||
+      sc?.virtualCurrencies ||
+      sc?.virtual_currencies ||
+      {};
     const walletAddress =
       summary?.walletAddress ||
       summary?.wallet_address ||
@@ -442,125 +557,169 @@ function createChecksService(ctx, logger, mcp, services = {}) {
       address: walletAddress,
       sol,
       pbp,
+      balances: mergeTokenBalanceEntries(
+        parseTokenBalancesArray(balances),
+        parseVirtualCurrencyBalances(virtualCurrencies),
+      ),
+      walletBalanceSummary: Array.isArray(summary?.walletBalanceSummary)
+        ? summary.walletBalanceSummary.slice()
+        : Array.isArray(summary?.wallet_balance_summary)
+          ? summary.wallet_balance_summary.slice()
+          : Array.isArray(sc?.walletBalanceSummary)
+            ? sc.walletBalanceSummary.slice()
+            : Array.isArray(sc?.wallet_balance_summary)
+              ? sc.wallet_balance_summary.slice()
+              : [],
     };
   }
 
-  async function rpcJsonCall(method, params) {
-    const response = await fetch(SOLANA_RPC_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        id: 1,
-        method,
-        params,
-      }),
+  function ensureSessionSpendTotals() {
+    if (!ctx.sessionSpendTotals || typeof ctx.sessionSpendTotals !== "object") {
+      ctx.sessionSpendTotals = createEmptyRewardTotals();
+    }
+    for (const key of Object.keys(DEFAULT_REWARD_TOTALS)) {
+      if (typeof ctx.sessionSpendTotals[key] !== "number") {
+        ctx.sessionSpendTotals[key] = 0;
+      }
+    }
+    return ctx.sessionSpendTotals;
+  }
+
+  function addSessionSpendTotals(cost, { actionName = "prepared_action" } = {}) {
+    const amount = Number(cost);
+    if (!Number.isFinite(amount) || amount <= 0) return null;
+    const totals = ensureSessionSpendTotals();
+    totals.pbp += amount;
+    logDebug("check", "session_spend_totals_updated", {
+      actionName,
+      cost: amount,
+      totals: { ...totals },
     });
-    const payload = await response.json();
-    if (!response.ok) {
-      throw new Error(`RPC ${method} failed: HTTP ${response.status}`);
+    if (ctx.guiBridge?.emitNow) ctx.guiBridge.emitNow();
+    logWithTimestamp(
+      `[SPEND] 💸 ${actionName}: -${amount} PBP (session spend ${totals.pbp})`,
+    );
+    scheduleFundingWalletRefresh(`spend_${actionName}`);
+    return totals;
+  }
+
+  function scheduleFundingWalletRefresh(reason = "token_change") {
+    if (ctx.signerMode !== "app_wallet") return;
+    walletRefreshPendingReason = reason;
+    if (walletRefreshTimer) return;
+    walletRefreshTimer = setTimeout(() => {
+      walletRefreshTimer = null;
+      const pending = walletRefreshPendingReason || "token_change";
+      walletRefreshPendingReason = null;
+      refreshFundingWalletSummary().catch((error) =>
+        logDebug("check", "funding_wallet_refresh_failed", {
+          reason: pending,
+          error: error.message,
+        }),
+      );
+    }, 250);
+  }
+
+  function mergeTokenBalanceEntries(primary = [], fallback = []) {
+    const merged = new Map();
+    const upsert = (entry) => {
+      if (!entry || typeof entry !== "object") return;
+      const key = String(entry.key || entry.symbol || entry.name || "")
+        .trim()
+        .toLowerCase();
+      if (!key) return;
+      const existing = merged.get(key) || {};
+      merged.set(key, {
+        ...existing,
+        ...entry,
+        balance:
+          entry.balance ?? existing.balance ?? existing.displayBalance ?? null,
+        displayBalance:
+          entry.displayBalance ?? existing.displayBalance ?? existing.balance ?? null,
+      });
+    };
+    for (const entry of Array.isArray(fallback) ? fallback : []) upsert(entry);
+    for (const entry of Array.isArray(primary) ? primary : []) upsert(entry);
+    return Array.from(merged.values());
+  }
+
+  async function fetchCurrentWalletSummary(walletAddress = "") {
+    const attempts = [
+      {},
+      walletAddress ? { walletAddress } : null,
+      walletAddress ? { wallet: walletAddress } : null,
+    ].filter(Boolean);
+    let lastError = null;
+    for (const args of attempts) {
+      try {
+        return await mcp.mcpToolCall("get_wallet_summary", args);
+      } catch (error) {
+        lastError = error;
+        logDebug("check", "current_wallet_summary_attempt_failed", {
+          walletAddress,
+          argsKeys: Object.keys(args),
+          error: error.message,
+        });
+      }
     }
-    if (payload?.error) {
-      throw new Error(`RPC ${method} failed: ${JSON.stringify(payload.error)}`);
+    if (lastError) {
+      logDebug("check", "current_wallet_summary_failed", {
+        walletAddress,
+        error: lastError.message,
+      });
     }
-    return payload.result;
+    return null;
   }
 
   async function fetchOnchainWalletSummary(walletAddress) {
-    const [solResult, tokenResult] = await Promise.all([
-      rpcJsonCall("getBalance", [walletAddress, { commitment: "confirmed" }]),
-      rpcJsonCall("getTokenAccountsByOwner", [
-        walletAddress,
-        { mint: PBP_MINT },
-        { encoding: "jsonParsed", commitment: "confirmed" },
-      ]),
-    ]);
-    const lamports =
-      typeof solResult?.value === "number" ? solResult.value : null;
-    let pbp = 0;
-    const tokenAccounts = Array.isArray(tokenResult?.value) ? tokenResult.value : [];
-    for (const entry of tokenAccounts) {
-      const amount =
-        entry?.account?.data?.parsed?.info?.tokenAmount?.uiAmount ??
-        entry?.account?.data?.parsed?.info?.tokenAmount?.uiAmountString;
-      const parsed = parseBalanceNumber(amount);
-      if (parsed !== null) pbp += parsed;
-    }
-    return {
-      address: walletAddress,
-      sol: lamports === null ? null : lamports / 1_000_000_000,
-      pbp,
-      status: "ok",
-      source: "rpc",
-    };
+    return await fetchOnchainFundingWalletSummary(walletAddress);
   }
 
   async function refreshFundingWalletSummary() {
     const walletAddress = String(ctx.signerConfig?.walletAddress || "").trim();
-    if (ctx.signerMode !== "app_wallet" || !walletAddress) {
-      ctx.fundingWalletSummary = {
-        address: walletAddress,
-        sol: null,
-        pbp: null,
-        status:
-          ctx.signerMode === "manual" || ctx.signerMode === "dapp"
-            ? ctx.signerMode
-            : "missing",
-      };
-      redrawHeaderAndLog(ctx.currentMissionStats);
-      return { ok: true, skipped: true, summary: ctx.fundingWalletSummary };
-    }
     try {
-      let result = null;
-      try {
-        result = await mcp.mcpToolCall("get_wallet_summary", { walletAddress });
-      } catch (error) {
-        logDebug("check", "funding_wallet_summary_with_address_failed", {
-          walletAddress,
-          error: error.message,
-        });
-        result = await mcp.mcpToolCall("get_wallet_summary", { wallet: walletAddress });
+      if (!walletAddress) {
+        // If we previously had a valid summary, keep it instead of flickering.
+        ctx.fundingWalletSummary =
+          ctx.fundingWalletSummary?.status === "ok" ? ctx.fundingWalletSummary : null;
+        redrawHeaderAndLog(ctx.currentMissionStats);
+        return { ok: true, skipped: true, summary: null };
       }
-      const parsed = parseWalletSummary(result, walletAddress);
-      if ((parsed.address && parsed.address !== walletAddress) || parsed.sol === null || parsed.pbp === null) {
-        throw new Error("MCP wallet summary did not return the requested funding wallet.");
-      }
-      ctx.fundingWalletSummary = {
-        address: parsed.address || walletAddress,
-        sol: parsed.sol,
-        pbp: parsed.pbp,
-        status: "ok",
-        source: "mcp",
-      };
+      // Always use on-chain lookup for the generated funding wallet address.
+      // MCP get_wallet_summary is identity-based and won't return arbitrary addresses.
+      ctx.fundingWalletSummary = await fetchOnchainWalletSummary(walletAddress);
       redrawHeaderAndLog(ctx.currentMissionStats);
-      logDebug("check", "funding_wallet_summary_ok", ctx.fundingWalletSummary);
+      logDebug("check", "funding_wallet_summary_rpc_ok", ctx.fundingWalletSummary);
       return { ok: true, skipped: false, summary: ctx.fundingWalletSummary };
-    } catch (error) {
-      logDebug("check", "funding_wallet_summary_mcp_failed", {
-        walletAddress,
-        error: error.message,
-      });
-      try {
-        ctx.fundingWalletSummary = await fetchOnchainWalletSummary(walletAddress);
+    } catch (rpcError) {
+      const previous = ctx.fundingWalletSummary;
+      const keepPrevious =
+        previous &&
+        typeof previous === "object" &&
+        previous.status === "ok" &&
+        String(previous.address || "").trim() === walletAddress;
+      if (!keepPrevious) {
+        ctx.fundingWalletSummary = walletAddress
+          ? {
+              address: walletAddress,
+              sol: null,
+              pbp: null,
+              status: "error",
+              source: "rpc",
+            }
+          : null;
         redrawHeaderAndLog(ctx.currentMissionStats);
-        logDebug("check", "funding_wallet_summary_rpc_ok", ctx.fundingWalletSummary);
-        return { ok: true, skipped: false, summary: ctx.fundingWalletSummary };
-      } catch (rpcError) {
-        ctx.fundingWalletSummary = {
-          address: walletAddress,
-          sol: null,
-          pbp: null,
-          status: "error",
-          source: "rpc",
-        };
-        redrawHeaderAndLog(ctx.currentMissionStats);
-        logDebug("check", "funding_wallet_summary_failed", {
-          walletAddress,
-          error: error.message,
-          rpcError: rpcError.message,
-        });
-        return { ok: false, skipped: false, summary: ctx.fundingWalletSummary };
       }
+      logDebug("check", "funding_wallet_summary_failed", {
+        walletAddress,
+        error: rpcError.message,
+        keptPrevious: keepPrevious ? "yes" : "no",
+      });
+      return {
+        ok: false,
+        skipped: false,
+        summary: keepPrevious ? previous : ctx.fundingWalletSummary,
+      };
     }
   }
 
@@ -598,8 +757,18 @@ function createChecksService(ctx, logger, mcp, services = {}) {
       logWithTimestamp(
         `[RESET] 🌐 Manual mode: open the missions page and reset cooldown yourself for ${missionName}.`,
       );
-      const opened = await openMissionPlayPage();
-      if (!opened) {
+      const openResult = await openMissionPlayPage({
+        cooldownMs: missionPageCooldownMs(),
+      });
+      if (openResult?.suppressed) {
+        logDebug("assign", "mission_page_open_suppressed", {
+          reason: "cooldown_reset_manual",
+          cooldownMs:
+            openResult?.cooldownMs ?? MISSION_PAGE_OPEN_COOLDOWN_MS_DEFAULT,
+          nextAllowedInMs: openResult?.nextAllowedInMs ?? null,
+        });
+      }
+      if (!openResult?.ok) {
         logWithTimestamp(
           `[RESET] ❌ Failed to auto-open browser. Open manually: ${MISSION_PLAY_URL}`,
         );
@@ -660,7 +829,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
       logWithTimestamp(
         `[RESET] 🧾 Prepared cooldown reset tx for ${missionName}; moving to sign and submit.`,
       );
-      await executePreparedMissionAction({
+      const actionResult = await executePreparedMissionAction({
         actionName: "nft_cooldown_reset",
         prepareResult: prepared,
         expected: { nftId },
@@ -674,6 +843,13 @@ function createChecksService(ctx, logger, mcp, services = {}) {
           cooldownSeconds,
         },
       });
+      if (actionResult?.submitted) {
+        addSessionSpendTotals(
+          actionResult?.signed?.cost ?? prepared?.structuredContent?.resetCost,
+          { actionName: "cooldown_reset" },
+        );
+        scheduleFundingWalletRefresh("cooldown_reset");
+      }
       logWithTimestamp(
         `[RESET] ✅ Cooldown reset complete: ${missionName} nft=${nftName}`,
       );
@@ -729,8 +905,18 @@ function createChecksService(ctx, logger, mcp, services = {}) {
       logWithTimestamp(
         `[UNLOCK] 🌐 Manual mode: open the missions page and unlock slot ${targetSlotNumber} yourself.`,
       );
-      const opened = await openMissionPlayPage();
-      if (!opened) {
+      const openResult = await openMissionPlayPage({
+        cooldownMs: missionPageCooldownMs(),
+      });
+      if (openResult?.suppressed) {
+        logDebug("assign", "mission_page_open_suppressed", {
+          reason: "slot_unlock_manual",
+          cooldownMs:
+            openResult?.cooldownMs ?? MISSION_PAGE_OPEN_COOLDOWN_MS_DEFAULT,
+          nextAllowedInMs: openResult?.nextAllowedInMs ?? null,
+        });
+      }
+      if (!openResult?.ok) {
         logWithTimestamp(
           `[UNLOCK] ❌ Failed to auto-open browser. Open manually: ${MISSION_PLAY_URL}`,
         );
@@ -813,7 +999,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
         args: unlockArgs,
       });
       const prepared = await mcp.mcpToolCall("unlock_mission_slot", unlockArgs);
-      await executePreparedMissionAction({
+      const actionResult = await executePreparedMissionAction({
         actionName: "mission_slot_unlock",
         prepareResult: prepared,
         expected: { slotNumber: targetSlotNumber },
@@ -825,6 +1011,13 @@ function createChecksService(ctx, logger, mcp, services = {}) {
           nextUnlockSlot,
         },
       });
+      if (actionResult?.submitted) {
+        addSessionSpendTotals(
+          actionResult?.signed?.cost ?? prepared?.structuredContent?.unlockCost,
+          { actionName: "mission_slot_unlock" },
+        );
+        scheduleFundingWalletRefresh("mission_slot_unlock");
+      }
       logWithTimestamp(
         `[UNLOCK] ✅ Mission slot ${targetSlotNumber} unlocked.`,
       );
@@ -1534,6 +1727,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
           });
         }
       }
+      if (claimed > 0) scheduleFundingWalletRefresh("claim_fallback");
       return { ok: true, claimed };
     } catch (error) {
       logDebug("watch", "fallback_claim_scan_failed", {
@@ -1551,10 +1745,40 @@ function createChecksService(ctx, logger, mcp, services = {}) {
       const displayName =
         info.display_name || info.displayName || info.username || "unknown";
       const walletId = info.wallet_id || info.walletId || "unknown";
+      const walletSummaryResult =
+        walletId && walletId !== "unknown"
+          ? await fetchCurrentWalletSummary(walletId)
+          : null;
+      const parsedWalletSummary = walletSummaryResult
+        ? parseWalletSummary(walletSummaryResult, walletId)
+        : null;
+      const fallbackBalances = parseTokenBalancesArray(
+        info.walletBalances || info.wallet_balances || [],
+      );
+      const fallbackWalletBalanceSummary = Array.isArray(
+        info.walletBalanceSummary,
+      )
+        ? info.walletBalanceSummary.slice()
+        : Array.isArray(info.wallet_balance_summary)
+          ? info.wallet_balance_summary.slice()
+          : [];
+      const walletSummary = {
+        walletId,
+        displayName,
+        balances: mergeTokenBalanceEntries(
+          parsedWalletSummary?.balances || [],
+          fallbackBalances,
+        ),
+        walletBalanceSummary: parsedWalletSummary?.walletBalanceSummary?.length
+          ? parsedWalletSummary.walletBalanceSummary
+          : fallbackWalletBalanceSummary,
+      };
+      ctx.currentUserWalletSummary = walletSummary;
       logDebug("check", "whoami_ok", { displayName, walletId });
-      return { ok: true, displayName, walletId };
+      return { ok: true, displayName, walletId, walletSummary };
     } catch (error) {
       logDebug("check", "whoami_failed", { error: error.message });
+      ctx.currentUserWalletSummary = null;
       return { ok: false, displayName: "unknown", walletId: "unknown" };
     }
   }

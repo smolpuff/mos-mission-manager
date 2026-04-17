@@ -28,8 +28,14 @@ function createContext() {
     config: {},
     isIdle: true,
     isAuthenticated: false,
+    mcpConnection: {
+      state: "disconnected", // connected | reconnecting | expired | disconnected
+      lastError: null,
+      updatedAt: 0,
+    },
     currentUserDisplayName: "unknown",
     currentUserWalletId: "unknown",
+    currentUserWalletSummary: null,
     currentMode: "normal",
     level20ResetEnabled: false,
     missionModeEnabled: false,
@@ -65,6 +71,16 @@ function createContext() {
     lastResetPromptAt: 0,
     missionCatalogEntries: [],
     sessionClaimedCount: 0,
+    sessionRewardTotals: {
+      pbp: 0,
+      tc: 0,
+      cc: 0,
+    },
+    sessionSpendTotals: {
+      pbp: 0,
+      tc: 0,
+      cc: 0,
+    },
     startupComplete: false,
     startupFxActive: false,
     startupFxProgress: 0,

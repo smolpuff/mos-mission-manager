@@ -11,6 +11,16 @@ function createMcpClient(ctx, logger) {
   const REFRESH_RETRY_ATTEMPTS = 3;
   const REFRESH_RETRY_DELAY_MS = 1000;
 
+  function setMcpConnection(state, { error = null } = {}) {
+    if (!ctx.mcpConnection || typeof ctx.mcpConnection !== "object") {
+      ctx.mcpConnection = { state: "disconnected", lastError: null, updatedAt: 0 };
+    }
+    ctx.mcpConnection.state = state;
+    ctx.mcpConnection.lastError = error ? String(error) : null;
+    ctx.mcpConnection.updatedAt = Date.now();
+    if (ctx.guiBridge?.emitSoon) ctx.guiBridge.emitSoon();
+  }
+
   function parseJsonOutput(raw, fallback = null) {
     const text = String(raw ?? "").trim();
     if (!text) return fallback;
@@ -52,6 +62,7 @@ function createMcpClient(ctx, logger) {
     const record = tokenRecord();
     if (!record?.refresh_token) return false;
     try {
+      setMcpConnection("reconnecting");
       logDebug("auth", "refresh_start", { reason });
       await refreshAccessToken({
         url: ctx.MCP_URL,
@@ -61,6 +72,7 @@ function createMcpClient(ctx, logger) {
       ctx.authRefreshSignal = Number(ctx.authRefreshSignal || 0) + 1;
       logWithTimestamp("[AUTH] 🔐 Token refreshed.");
       logDebug("auth", "refresh_ok", { reason });
+      setMcpConnection("connected");
       if (typeof ctx.onAuthRefresh === "function") {
         setTimeout(() => {
           try {
@@ -78,11 +90,13 @@ function createMcpClient(ctx, logger) {
       return true;
     } catch (error) {
       logDebug("auth", "refresh_failed", { reason, error: error.message });
+      setMcpConnection("expired", { error: error.message });
       return false;
     }
   }
 
   async function recoverAuthAfterRefreshFailure(reason = "proactive") {
+    setMcpConnection("reconnecting");
     for (let attempt = 1; attempt <= REFRESH_RETRY_ATTEMPTS; attempt += 1) {
       const refreshed = await tryRefresh(`${reason}_retry_${attempt}`);
       if (refreshed) return true;
@@ -103,8 +117,15 @@ function createMcpClient(ctx, logger) {
       forceInteractive: true,
       forceBrowser: true,
     });
-    if (!loginOk) return false;
-    return Boolean(bearerToken());
+    if (!loginOk) {
+      setMcpConnection("expired", { error: "login_failed" });
+      return false;
+    }
+    const ok = Boolean(bearerToken());
+    setMcpConnection(ok ? "connected" : "expired", {
+      error: ok ? null : "missing_token_after_login",
+    });
+    return ok;
   }
 
   async function mcpPost({
@@ -205,17 +226,24 @@ function createMcpClient(ctx, logger) {
   async function mcpToolCall(toolName, args = {}, opts = {}) {
     logDebug("tool", "call_start", { toolName, args });
     const record = tokenRecord();
-    if (!record?.access_token) throw new Error("Missing token. Run login.");
+    if (!record?.access_token) {
+      setMcpConnection("expired", { error: "missing_token" });
+      throw new Error("Missing token. Run login.");
+    }
     if (tokenExpiresSoon(record)) {
       const refreshed = await recoverAuthAfterRefreshFailure("expires_soon");
       if (!refreshed) {
+        setMcpConnection("expired", { error: "refresh_failed" });
         throw new Error("Authentication expired. Login required.");
       }
     }
 
     const runOnce = async () => {
       const token = bearerToken();
-      if (!token) throw new Error("Missing token. Run login.");
+      if (!token) {
+        setMcpConnection("expired", { error: "missing_token" });
+        throw new Error("Missing token. Run login.");
+      }
       const sessionId = await mcpInitialize(token);
       const call = await mcpPost({
         token,
@@ -238,13 +266,18 @@ function createMcpClient(ctx, logger) {
     try {
       const result = await runOnce();
       logDebug("tool", "call_ok", { toolName });
+      setMcpConnection("connected");
       return result;
     } catch (error) {
-      if (!isAuthHttpError(error?.message || "")) throw error;
+      if (!isAuthHttpError(error?.message || "")) {
+        setMcpConnection("disconnected", { error: error.message });
+        throw error;
+      }
       const refreshed = await recoverAuthAfterRefreshFailure("auth_failure");
       if (!refreshed) throw error;
       const result = await runOnce();
       logDebug("tool", "call_ok_after_refresh", { toolName });
+      setMcpConnection("connected");
       return result;
     }
   }
@@ -269,6 +302,7 @@ function createMcpClient(ctx, logger) {
     });
 
     try {
+      setMcpConnection("reconnecting");
       await mcpLogin({
         url: ctx.MCP_URL,
         tokenFile: ctx.tokenFilePath,
@@ -285,6 +319,7 @@ function createMcpClient(ctx, logger) {
         },
       });
       logWithTimestamp("[AUTH] ✅ Login completed.");
+      setMcpConnection("connected");
       return true;
     } catch (error) {
       logWithTimestamp(`[AUTH] ❌ Login failed: ${error.message}`);
@@ -292,6 +327,7 @@ function createMcpClient(ctx, logger) {
         error: error.message,
         stack: error.stack,
       });
+      setMcpConnection("expired", { error: error.message });
       return false;
     }
   }

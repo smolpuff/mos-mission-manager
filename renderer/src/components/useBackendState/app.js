@@ -19,12 +19,16 @@ export default function useBackendState() {
     watchLoopEnabled: null,
     currentUserDisplayName: null,
     currentUserWalletId: null,
+    currentUserWalletSummary: null,
     currentMissionStats: null,
     currentMode: null,
     level20ResetEnabled: null,
     missionModeEnabled: null,
     currentMissionResetLevel: null,
+    sessionRewardTotals: null,
+    sessionSpendTotals: null,
     fundingWalletSummary: null,
+    mcpConnection: null,
     cliWindowOpen: false,
   });
   const [logs, setLogs] = useState([]);
@@ -65,14 +69,14 @@ export default function useBackendState() {
 
   useEffect(() => {
     let cancelled = false;
-    bridge.getState().then((state) => {
+    bridge.getState().then(async (state) => {
       if (cancelled) return;
       setStatus(state.status);
     });
     return () => {
       cancelled = true;
     };
-  }, [bridge, eventTick]);
+  }, [bridge]);
 
   return { bridge, status, logs };
 }

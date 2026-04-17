@@ -4,6 +4,7 @@ const fs = require("fs");
 
 const SAVE_DEBOUNCE_MS = 350;
 const pendingSaves = new WeakMap();
+const DEFAULT_TARGET_MISSIONS = ["Do it All!", "Race!"];
 
 function loadConfig(ctx, logWithTimestamp) {
   try {
@@ -16,6 +17,26 @@ function loadConfig(ctx, logWithTimestamp) {
   }
 
   if (typeof ctx.config.totalClaimed !== "number") ctx.config.totalClaimed = 0;
+  if (
+    !Array.isArray(ctx.config.targetMissions) ||
+    ctx.config.targetMissions.length === 0
+  ) {
+    ctx.config.targetMissions = [...DEFAULT_TARGET_MISSIONS];
+    if (typeof logWithTimestamp === "function") {
+      logWithTimestamp(
+        `[CONFIG] Seeded default target missions: ${ctx.config.targetMissions.join(", ")}`,
+      );
+    }
+    try {
+      fs.writeFileSync(ctx.configPath, JSON.stringify(ctx.config, null, 2));
+    } catch (err) {
+      if (typeof logWithTimestamp === "function") {
+        logWithTimestamp(
+          `[ERROR] Failed to save default targetMissions to config.json: ${err.message}`,
+        );
+      }
+    }
+  }
   if (typeof ctx.config.level20ResetEnabled === "boolean") {
     ctx.level20ResetEnabled = ctx.config.level20ResetEnabled;
   }

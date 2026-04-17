@@ -2,8 +2,10 @@
 
 const fs = require("fs");
 const path = require("path");
-const { fork } = require("child_process");
-const { app, BrowserWindow, Menu, ipcMain } = require("electron");
+const { fork, execFile } = require("child_process");
+const { app, BrowserWindow, Menu, ipcMain, clipboard } = require("electron");
+const { fetchOnchainFundingWalletSummary } = require("../src/wallet/onchain-summary");
+const { scrapeLatestCompetition } = require("./scrapeCompetitions");
 
 const ROOT_DIR = path.resolve(__dirname, "..");
 const RENDERER_DEV_URL =
@@ -17,7 +19,20 @@ let splashWindow = null;
 let backend = null;
 let stopTimer = null;
 let logHistory = [];
+const pendingBackendRequests = new Map();
 const maxLogHistory = 1200;
+const execFileAsync = (file, args, options = {}) =>
+  new Promise((resolve, reject) => {
+    execFile(file, args, options, (error, stdout, stderr) => {
+      if (error) {
+        error.stdout = stdout;
+        error.stderr = stderr;
+        reject(error);
+        return;
+      }
+      resolve({ stdout, stderr });
+    });
+  });
 const backendStatus = {
   running: false,
   pid: null,
@@ -33,11 +48,14 @@ const backendStatus = {
   watchLoopEnabled: null,
   currentUserDisplayName: null,
   currentUserWalletId: null,
+  currentUserWalletSummary: null,
   currentMissionStats: null,
   currentMode: null,
   level20ResetEnabled: null,
   missionModeEnabled: null,
   currentMissionResetLevel: null,
+  sessionRewardTotals: null,
+  sessionSpendTotals: null,
   fundingWalletSummary: null,
   guiMissionSlots: null,
   cliWindowOpen: false,
@@ -125,6 +143,119 @@ function clearStopTimer() {
 
 function getBackendWorkingDirectory() {
   return app.isPackaged ? app.getPath("userData") : ROOT_DIR;
+}
+
+function getConfigPath() {
+  return path.join(getBackendWorkingDirectory(), "config.json");
+}
+
+function readDesktopConfig() {
+  try {
+    const raw = fs.readFileSync(getConfigPath(), "utf8");
+    return JSON.parse(raw);
+  } catch {
+    return {};
+  }
+}
+
+function applyDesktopConfigPatch(patch = {}) {
+  const next = {
+    ...readDesktopConfig(),
+    ...patch,
+  };
+  fs.writeFileSync(getConfigPath(), JSON.stringify(next, null, 2));
+  return next;
+}
+
+function hydrateBackendStatusFromConfig() {
+  const config = readDesktopConfig();
+  if (typeof config.level20ResetEnabled === "boolean") {
+    backendStatus.level20ResetEnabled = config.level20ResetEnabled;
+  }
+  if (typeof config.missionModeEnabled === "boolean") {
+    backendStatus.missionModeEnabled = config.missionModeEnabled;
+  }
+  if (typeof config.missionResetLevel === "string") {
+    backendStatus.currentMissionResetLevel = config.missionResetLevel;
+  }
+  backendStatus.currentMode = backendStatus.missionModeEnabled
+    ? `mission-${backendStatus.currentMissionResetLevel || "11"}`
+    : "normal";
+}
+
+// Note: MCP `get_wallet_summary` is identity-based (no args) and returns the
+// authenticated wallet. For the generated app-wallet funding address we always
+// use an on-chain lookup via `fetchOnchainFundingWalletSummary`.
+
+function extractBalanceNumber(balances, matcher) {
+  const entries = Array.isArray(balances) ? balances : [];
+  for (const entry of entries) {
+    if (!entry || typeof entry !== "object") continue;
+    const symbol = String(entry.symbol || entry.key || "").trim().toUpperCase();
+    const name = String(entry.name || "").trim().toUpperCase();
+    if (!matcher({ symbol, name, entry })) continue;
+    const raw = entry.displayBalance ?? entry.balance ?? null;
+    const n = typeof raw === "string" ? Number(raw.replace(/[, _]/g, "")) : Number(raw);
+    if (Number.isFinite(n)) return n;
+  }
+  return null;
+}
+
+function normalizeWalletBalanceEntries(raw = []) {
+  if (Array.isArray(raw)) {
+    return raw.filter((entry) => entry && typeof entry === "object");
+  }
+  if (!raw || typeof raw !== "object") return [];
+  return Object.entries(raw).map(([symbol, balance]) => {
+    const amount = Number(balance);
+    return {
+      key: String(symbol || "").trim().toLowerCase(),
+      symbol: String(symbol || "").trim().toUpperCase(),
+      name: String(symbol || "").trim().toUpperCase(),
+      mint: null,
+      balance: Number.isFinite(amount) ? amount : null,
+      displayBalance: Number.isFinite(amount)
+        ? amount.toLocaleString(undefined, { maximumFractionDigits: 2 })
+        : null,
+    };
+  });
+}
+
+function summarizeWalletPayload(payload) {
+  const sc = payload?.structuredContent || {};
+  const walletId = sc.walletId || sc.wallet_id || null;
+  const displayName = sc.displayName || sc.display_name || null;
+  const baseBalances = normalizeWalletBalanceEntries(
+    sc.balances || sc.walletBalances || sc.wallet_balances || [],
+  );
+  const virtualCurrencies =
+    sc.virtualCurrencies || sc.virtual_currencies || {};
+  const virtualCurrencyBalances = Object.entries(virtualCurrencies)
+    .map(([symbol, balance]) => ({
+      key: String(symbol || "").trim().toLowerCase(),
+      symbol: String(symbol || "").trim().toUpperCase(),
+      name: String(symbol || "").trim().toUpperCase(),
+      mint: null,
+      balance: Number(balance),
+      displayBalance: Number(balance).toLocaleString(undefined, {
+        maximumFractionDigits: 2,
+      }),
+    }))
+    .filter((entry) => entry.key && Number.isFinite(entry.balance));
+  const mergedBalances = [...baseBalances, ...virtualCurrencyBalances];
+  const sol = extractBalanceNumber(mergedBalances, ({ symbol, name }) => symbol === "SOL" || name === "SOL");
+  const pbp = extractBalanceNumber(mergedBalances, ({ symbol, name }) => symbol === "PBP" || name === "PBP");
+  return {
+    walletId,
+    displayName,
+    fundingWalletSummary: {
+      address: sc.walletAddress || sc.wallet_address || null,
+      sol,
+      pbp,
+      status: "ok",
+      source: "mcp",
+    },
+  };
 }
 
 function installMinimalApplicationMenu() {
@@ -314,11 +445,14 @@ function startBackend() {
   backendStatus.watchLoopEnabled = null;
   backendStatus.currentUserDisplayName = null;
   backendStatus.currentUserWalletId = null;
+  backendStatus.currentUserWalletSummary = null;
   backendStatus.currentMissionStats = null;
   backendStatus.currentMode = null;
   backendStatus.level20ResetEnabled = null;
   backendStatus.missionModeEnabled = null;
   backendStatus.currentMissionResetLevel = null;
+  backendStatus.sessionRewardTotals = null;
+  backendStatus.sessionSpendTotals = null;
   backendStatus.fundingWalletSummary = null;
   backendStatus.guiMissionSlots = null;
   publishStatus();
@@ -335,7 +469,29 @@ function startBackend() {
   backend.on("message", (message) => {
     updateBackendStateFromIpc(message);
     if (message && message.type === "pbp_event") {
+      if (message.event === "app_quit") {
+        try {
+          stopBackend();
+        } catch {}
+        // Quit the entire desktop app (not just the backend runner).
+        setTimeout(() => {
+          try {
+            app.quit();
+          } catch {}
+        }, 50);
+        return;
+      }
       publishEvent(message);
+    }
+    if (message && message.type === "pbp_response") {
+      const requestId = String(message.requestId || "");
+      const pending = requestId ? pendingBackendRequests.get(requestId) : null;
+      if (pending) {
+        pendingBackendRequests.delete(requestId);
+        try {
+          pending.resolve(message.payload);
+        } catch {}
+      }
     }
   });
 
@@ -396,6 +552,31 @@ function sendBackendCommand(command) {
   backend.stdin.write(`${trimmed}\n`);
   pushOutput("stdin", `> ${trimmed}\n`);
   return true;
+}
+
+function requestBackend(action, payload = {}) {
+  if (!backend || !backendStatus.running) {
+    throw new Error("Backend is not running.");
+  }
+  const requestId = `${Date.now()}_${Math.random().toString(16).slice(2)}`;
+  const timeoutMs = 5000;
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      pendingBackendRequests.delete(requestId);
+      reject(new Error(`backend request timeout: ${action}`));
+    }, timeoutMs);
+    pendingBackendRequests.set(requestId, {
+      resolve: (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      reject: (err) => {
+        clearTimeout(timer);
+        reject(err);
+      },
+    });
+    backend.send({ type: "pbp_request", requestId, action, payload });
+  });
 }
 
 async function createControlWindow() {
@@ -596,6 +777,79 @@ app.whenReady().then(async () => {
     status: { ...backendStatus },
     logs: logHistory,
   }));
+  ipcMain.handle("config:get", async () => ({
+    config: readDesktopConfig(),
+  }));
+  ipcMain.handle("config:update", async (_event, patch) => {
+    const next = applyDesktopConfigPatch(patch || {});
+    if (typeof next.level20ResetEnabled === "boolean") {
+      backendStatus.level20ResetEnabled = next.level20ResetEnabled;
+    }
+    if (typeof next.missionModeEnabled === "boolean") {
+      backendStatus.missionModeEnabled = next.missionModeEnabled;
+    }
+    if (typeof next.missionResetLevel === "string") {
+      backendStatus.currentMissionResetLevel = next.missionResetLevel;
+    }
+    if (next.currentUserWalletSummary !== undefined) {
+      backendStatus.currentUserWalletSummary = next.currentUserWalletSummary;
+    }
+    if (next.sessionRewardTotals !== undefined) {
+      backendStatus.sessionRewardTotals = next.sessionRewardTotals;
+    }
+    backendStatus.currentMode = backendStatus.missionModeEnabled
+      ? `mission-${backendStatus.currentMissionResetLevel || "11"}`
+      : "normal";
+    publishStatus();
+    return { config: next, status: { ...backendStatus } };
+  });
+  ipcMain.handle("wallet:refresh-summary", async () => {
+    const config = readDesktopConfig();
+    const walletAddress =
+      String(config?.signer?.walletAddress || config?.signer?.wallet || "").trim() ||
+      String(config?.walletAddress || "").trim() ||
+      null;
+    if (!walletAddress) {
+      backendStatus.fundingWalletSummary = null;
+      backendStatus.signerMode = config.signerMode || backendStatus.signerMode;
+      publishStatus();
+      return { walletId: null, displayName: null, fundingWalletSummary: null };
+    }
+    try {
+      const rpcSummary = await fetchOnchainFundingWalletSummary(walletAddress);
+      const summary = {
+        walletId: null,
+        displayName: null,
+        fundingWalletSummary: rpcSummary,
+      };
+      backendStatus.signerMode = config.signerMode || backendStatus.signerMode;
+      backendStatus.fundingWalletSummary = summary.fundingWalletSummary;
+      publishStatus();
+      return summary;
+    } catch (error) {
+      // Don't crash the renderer on RPC rate limits; keep the last known good summary.
+      publishStatus();
+      return {
+        walletId: null,
+        displayName: null,
+        fundingWalletSummary: backendStatus.fundingWalletSummary || null,
+        error: String(error?.message || error),
+      };
+    }
+  });
+  ipcMain.handle("signer:reveal-backup", async () => {
+    const payload = await requestBackend("signer_reveal_backup", {});
+    return payload;
+  });
+  ipcMain.handle("signer:create-generated-wallet", async () => {
+    const payload = await requestBackend("signer_create_generated_wallet", {});
+    return payload;
+  });
+  ipcMain.handle("clipboard:copy", async (_event, text) => {
+    const value = String(text || "");
+    clipboard.writeText(value);
+    return true;
+  });
   ipcMain.handle("window:open-cli", async () => {
     await createCliWindow();
     return true;
@@ -618,8 +872,43 @@ app.whenReady().then(async () => {
     return true;
   });
 
+  ipcMain.handle("pbp:get-latest-competition", async (_event, opts = {}) => {
+    try {
+      const competition = await scrapeLatestCompetition(opts || {});
+      return { ok: true, competition };
+    } catch (error) {
+      return { ok: false, error: String(error?.message || error) };
+    }
+  });
+
   createSplashWindow();
+  hydrateBackendStatusFromConfig();
+  publishStatus();
   await createControlWindow();
+  try {
+    const launchConfig = readDesktopConfig();
+    const walletAddress =
+      String(launchConfig?.signer?.walletAddress || launchConfig?.signer?.wallet || "").trim() ||
+      String(launchConfig?.walletAddress || "").trim() ||
+      null;
+    if (launchConfig.signerMode) {
+      backendStatus.signerMode = launchConfig.signerMode;
+    }
+    // One-time funding wallet load at desktop startup (do not poll).
+    if (walletAddress) {
+      try {
+        backendStatus.fundingWalletSummary =
+          await fetchOnchainFundingWalletSummary(walletAddress);
+      } catch {
+        // Keep it null; the user can trigger refresh later (or it will refresh
+        // after token-affecting actions).
+        backendStatus.fundingWalletSummary = null;
+      }
+    } else {
+      backendStatus.fundingWalletSummary = null;
+    }
+    publishStatus();
+  } catch {}
   const closeSplash = () => {
     if (splashWindow && !splashWindow.isDestroyed()) splashWindow.close();
     splashWindow = null;

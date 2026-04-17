@@ -7,6 +7,12 @@ contextBridge.exposeInMainWorld("missionsDesktop", {
   stopBackend: () => ipcRenderer.invoke("backend:stop"),
   sendCommand: (command) => ipcRenderer.invoke("backend:send-command", command),
   getState: () => ipcRenderer.invoke("backend:get-state"),
+  getConfig: () => ipcRenderer.invoke("config:get"),
+  updateConfig: (patch) => ipcRenderer.invoke("config:update", patch),
+  refreshWalletSummary: () => ipcRenderer.invoke("wallet:refresh-summary"),
+  revealSignerBackup: () => ipcRenderer.invoke("signer:reveal-backup"),
+  createGeneratedWallet: () => ipcRenderer.invoke("signer:create-generated-wallet"),
+  copyToClipboard: (text) => ipcRenderer.invoke("clipboard:copy", text),
   openCliWindow: () => ipcRenderer.invoke("window:open-cli"),
   isCliWindowOpen: () => ipcRenderer.invoke("window:is-cli-open"),
   minimizeWindow: () => ipcRenderer.invoke("window:minimize"),
@@ -26,4 +32,6 @@ contextBridge.exposeInMainWorld("missionsDesktop", {
     ipcRenderer.on("backend:event", listener);
     return () => ipcRenderer.removeListener("backend:event", listener);
   },
+  getLatestCompetition: (opts) =>
+    ipcRenderer.invoke("pbp:get-latest-competition", opts || {}),
 });

@@ -207,6 +207,7 @@
     }
   }
 
+
   @keyframes gradientShift {
     to {
       background-position: 200% 50%;
@@ -255,7 +256,7 @@
   }
 
   .chrome-title {
-    @apply text-[0.98rem] font-semibold tracking-[0.01em];
+    @apply text-[0.98rem] tracking-[0.01em];
   }
 
   .chrome-subtitle {
@@ -656,6 +657,17 @@ button.btn.btn-gradient {
         var(--color-accent) 80%);
     animation: gradientShift 3s linear infinite;
     transition: all 150ms linear;
+
+  }
+}
+
+.mission-modes {
+
+  button {
+    &.active {
+      @apply ring-2 ring-red-500 bg-red-500/100;
+      box-shadow: 0 0 0 1px rgba(239, 68, 68, 0.35);
+    }
 
   }
 }

@@ -1,0 +1,51 @@
+{
+  "generatedAt": "2026-04-17T00:14:51.011Z",
+  "requestArgs": {
+    "assignedMissionId": "f2e90307-2c38-4d53-8842-2a0f22745e4e",
+    "signingMode": "agent_managed"
+  },
+  "agentWalletPath": "/tmp/pbp-agent-wallet.json",
+  "attemptError": null,
+  "response": {
+    "assignedMissionId": "f2e90307-2c38-4d53-8842-2a0f22745e4e",
+    "rerollCost": 500,
+    "requiredSignerAddresses": ["3LgiNymFyPAC8MHdx8GjVgGuG3caCRxs8rRg2pitrbMV"],
+    "note": "Check whether PBP_AGENT_WALLET_PATH is set. If it is, ask the user: \"do you want me to sign it or do you want a URL to sign it?\" If they choose agent-managed signing, sign locally and call submit_signed_mission_reroll.",
+    "agentWalletGuide": {
+      "envVarName": "PBP_AGENT_WALLET_PATH",
+      "promptWhenConfigured": "If PBP_AGENT_WALLET_PATH is configured, ask the user: \"do you want me to sign it or do you want a URL to sign it?\"",
+      "steps": [
+        "Check whether PBP_AGENT_WALLET_PATH points to a local Solana keypair JSON file.",
+        "If the keypair is available, offer agent-managed signing before defaulting to a browser signing flow.",
+        "If the user chooses agent-managed signing, load that keypair locally and sign the returned transaction.",
+        "After signing, call submit_signed_mission_reroll."
+      ]
+    },
+    "rawPrepareResponse": {
+      "content": [
+        {
+          "type": "text",
+          "text": "Prepared mission reroll for f2e90307-2c38-4d53-8842-2a0f22745e4e."
+        }
+      ],
+      "structuredContent": {
+        "success": true,
+        "assignedMissionId": "f2e90307-2c38-4d53-8842-2a0f22745e4e",
+        "rerollCost": 500,
+        "transaction": "2o7WjzfD56SwBBTXQtaocjqN2AKW5vvsdamU6uzHMxcm5ndSdNCy5fpfPXszMRXSZxSpwJsYkivW8FQbHJ6vtcS2ubCnwfntNXTVYWbox75nCBCw3ov1yhbtxDzDS3zVYNKvL7yZwEMtSG7B6daiPwZVV8C79VrA9M9eLLaf79h6LNgCfvHykQ9WDdmCv5Q4n44H62adqA78E17siwBRGoyfMTUY1Ykfap1oAVtVfLKVUW5bFTesHVN6syUwivr56z1G7VzZzsbK1SCfSAW2Azz5JcWu38VneokPaBNzSyH1v8FYPs5o8Fde7ESvjxJLkt98fkLd1BZrziUSkL1f3MX45JwZAPAFoELFjm85iA1TghbwA4tfozkcWHfsnmBNsU84wUdhuDQQeKsytatjBMdb7o1b4Y8emq9pvqHwgZTaY3G6kGaKFrr9cRimNAoiUXngdte8fLuD3TsVuPgHrLkC85nBj7CQKFnroPfMmWdavBN7AR9uq2eEBiWaP1kNKAHF59pRE94qQ9QQ",
+        "rerollToken": "eyJhbGciOiJIUzI1NiJ9.eyJ0b2tlblR5cGUiOiJtY3BfbWlzc2lvbl9yZXJvbGwiLCJwbGF5RmFiSWQiOiJBM0ZEMzdCODY0RTBFQjgzIiwid2FsbGV0SWQiOiIzTGdpTnltRnlQQUM4TUhkeDhHalZnR3VHM2NhQ1J4czhyUmcycGl0cmJNViIsImFzc2lnbmVkTWlzc2lvbklkIjoiZjJlOTAzMDctMmMzOC00ZDUzLTg4NDItMmEwZjIyNzQ1ZTRlIiwicmVyb2xsQ29zdCI6NTAwLCJ0cmFuc2FjdGlvbiI6IjJvN1dqemZENTZTd0JCVFhRdGFvY2pxTjJBS1c1dnZzZGFtVTZ1ekhNeGNtNW5kU2ROQ3k1ZnBmUFhzek1SWFNaeFNwd0pzWWtpdlc4RlFiSEo2dnRjUzJ1YkNud2ZudE5YVFZZV2JveDc1bkNCQ3czb3YxeWhidHhEekRTM3pWWU5Ldkw3eVp3RU10U0c3QjZkYWlQd1pWVjhDNzlWckE5TTllTExhZjc5aDZMTmdDZnZIeWtROVdEZG1DdjVRNG40NEg2MmFkcUE3OEUxN3Npd0JSR295Zk1UVVkxWWtmYXAxb0FWdFZmTEtWVVc1YkZUZXNIVk42c3lVd2l2cjU2ejFHN1Z6WnpzYksxU0NmU0FXMkF6ejVKY1d1MzhWbmVva1BhQk56U3lIMXY4RllQczVvOEZkZTdFU3ZqeEpMa3Q5OGZrTGQxQlpyemlVU2tMMWYzTVg0NUp3WkFQQUZvRUxGam04NWlBMVRnaGJ3QTR0Zm96a2NXSGZzbm1CTnNVODR3VWRodURRUWVLc3l0YXRqQk1kYjdvMWI0WThlbXE5cHZxSHdnWlRhWTNHNmtHYUtGcnI5Y1JpbU5Bb2lVWG5nZHRlOGZMdUQzVHNWdVBnSHJMa0M4NW5CajdDUUtGbnJvUGZNbVdkYXZCTjdBUjl1cTJlRUJpV2FQMWtOS0FIRjU5cFJFOTRxUTlRUSIsImlzcyI6InBicC13ZWIzLW1jcC1taXNzaW9uLXJlcm9sbCIsImF1ZCI6InBicC13ZWIzLW1jcC1jbGllbnQiLCJpYXQiOjE3NzYzODQ4OTAsImp0aSI6ImJlYzUzZGU4OWI1OTk5ZTljMThhNGI1NjY0YzBiMjE4IiwiZXhwIjoxNzc2Mzg2NjkwfQ.ajRSENZaTmdXfAalmjsesou4u4nuDV1Fxaasr2ybsK4",
+        "note": "Check whether PBP_AGENT_WALLET_PATH is set. If it is, ask the user: \"do you want me to sign it or do you want a URL to sign it?\" If they choose agent-managed signing, sign locally and call submit_signed_mission_reroll.",
+        "agentWalletGuide": {
+          "envVarName": "PBP_AGENT_WALLET_PATH",
+          "promptWhenConfigured": "If PBP_AGENT_WALLET_PATH is configured, ask the user: \"do you want me to sign it or do you want a URL to sign it?\"",
+          "steps": [
+            "Check whether PBP_AGENT_WALLET_PATH points to a local Solana keypair JSON file.",
+            "If the keypair is available, offer agent-managed signing before defaulting to a browser signing flow.",
+            "If the user chooses agent-managed signing, load that keypair locally and sign the returned transaction.",
+            "After signing, call submit_signed_mission_reroll."
+          ]
+        }
+      }
+    }
+  }
+}

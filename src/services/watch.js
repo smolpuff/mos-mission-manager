@@ -6,7 +6,11 @@ const {
   missionIsClaimable,
 } = require("../missions/normalize");
 const { parseResetLevel, evaluateResetCandidates } = require("./reset");
-const { MISSION_PLAY_URL, openMissionPlayPage } = require("../mission-page");
+const {
+  MISSION_PLAY_URL,
+  openMissionPlayPage,
+  MISSION_PAGE_OPEN_COOLDOWN_MS_DEFAULT,
+} = require("../mission-page");
 const { createMissionActionExecutor } = require("../mission-actions");
 
 function createWatchService(ctx, logger, mcp, checks, configApi, services = {}) {
@@ -22,11 +26,44 @@ function createWatchService(ctx, logger, mcp, checks, configApi, services = {}) 
   const WATCH_MAX_CLAIMS = 3;
   const WATCH_FALLBACK_CLAIMS = true;
   const WATCH_MIN_CYCLE_SECONDS = 30;
-  const WATCH_DEFAULT_POLL_SECONDS = 10;
+  const WATCH_DEFAULT_POLL_SECONDS = 30;
   const RESET_PROMPT_REOPEN_COOLDOWN_MS = 60_000;
+  const DEFAULT_SESSION_REWARD_TOTALS = { pbp: 0, tc: 0, cc: 0 };
+  const DEFAULT_SESSION_SPEND_TOTALS = { pbp: 0, tc: 0, cc: 0 };
   let cycleInFlight = null;
   let cycleAbortController = null;
   let traceSequence = 0;
+  let walletRefreshTimer = null;
+  let walletRefreshPendingReason = null;
+
+  function missionPageCooldownMs() {
+    const sec = Number(ctx.config?.missionPageOpenCooldownSeconds);
+    if (Number.isFinite(sec) && sec > 0) return Math.floor(sec * 1000);
+    const ms = Number(ctx.config?.missionPageOpenCooldownMs);
+    if (Number.isFinite(ms) && ms >= 0) return Math.floor(ms);
+    return MISSION_PAGE_OPEN_COOLDOWN_MS_DEFAULT;
+  }
+
+  function scheduleFundingWalletRefresh(reason = "token_change") {
+    // If the funding wallet is not in use, skip. Avoid spamming summary calls
+    // when multiple token-affecting actions happen close together.
+    if (ctx.signerMode !== "app_wallet") return;
+    walletRefreshPendingReason = reason;
+    if (walletRefreshTimer) return;
+    walletRefreshTimer = setTimeout(() => {
+      walletRefreshTimer = null;
+      const pending = walletRefreshPendingReason || "token_change";
+      walletRefreshPendingReason = null;
+      Promise.resolve()
+        .then(() => checks.refreshFundingWalletSummary())
+        .catch((error) =>
+          logDebug("watch", "funding_wallet_refresh_failed", {
+            reason: pending,
+            error: error.message,
+          }),
+        );
+    }, 250);
+  }
 
   function nextTraceId(kind = "cycle") {
     traceSequence += 1;
@@ -48,6 +85,105 @@ function createWatchService(ctx, logger, mcp, checks, configApi, services = {}) 
 
   function trace(scope, action, meta = {}) {
     logDebug(scope, `trace_${action}`, meta);
+  }
+
+  function normalizeRewardBucket(prize) {
+    const value = String(prize || "")
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "_");
+    if (!value) return null;
+    if (value === "pbp" || value === "pbp_token" || value === "pixel_by_pixel") {
+      return "pbp";
+    }
+    if (
+      value === "tc" ||
+      value === "tc_token" ||
+      value === "tournament_coin" ||
+      value === "tournament_coins"
+    ) {
+      return "tc";
+    }
+    if (
+      value === "cc" ||
+      value === "cc_token" ||
+      value === "community_coin" ||
+      value === "community_coins"
+    ) {
+      return "cc";
+    }
+    return null;
+  }
+
+  function ensureSessionRewardTotals() {
+    if (!ctx.sessionRewardTotals || typeof ctx.sessionRewardTotals !== "object") {
+      ctx.sessionRewardTotals = { ...DEFAULT_SESSION_REWARD_TOTALS };
+    }
+    for (const key of Object.keys(DEFAULT_SESSION_REWARD_TOTALS)) {
+      if (typeof ctx.sessionRewardTotals[key] !== "number") {
+        ctx.sessionRewardTotals[key] = 0;
+      }
+    }
+    return ctx.sessionRewardTotals;
+  }
+
+  function resetSessionRewardTotals() {
+    ctx.sessionRewardTotals = { ...DEFAULT_SESSION_REWARD_TOTALS };
+  }
+
+  function ensureSessionSpendTotals() {
+    if (!ctx.sessionSpendTotals || typeof ctx.sessionSpendTotals !== "object") {
+      ctx.sessionSpendTotals = { ...DEFAULT_SESSION_SPEND_TOTALS };
+    }
+    for (const key of Object.keys(DEFAULT_SESSION_SPEND_TOTALS)) {
+      if (typeof ctx.sessionSpendTotals[key] !== "number") {
+        ctx.sessionSpendTotals[key] = 0;
+      }
+    }
+    return ctx.sessionSpendTotals;
+  }
+
+  function resetSessionSpendTotals() {
+    ctx.sessionSpendTotals = { ...DEFAULT_SESSION_SPEND_TOTALS };
+  }
+
+  function addSessionSpendTotals(cost, { actionName = "prepared_action" } = {}) {
+    const amount = Number(cost);
+    if (!Number.isFinite(amount) || amount <= 0) return null;
+    const totals = ensureSessionSpendTotals();
+    totals.pbp += amount;
+    logDebug("watch", "session_spend_totals_updated", {
+      actionName,
+      cost: amount,
+      totals: { ...totals },
+    });
+    if (ctx.guiBridge?.emitNow) ctx.guiBridge.emitNow();
+    logWithTimestamp(
+      `[SPEND] 💸 ${actionName}: -${amount} PBP (session spend ${totals.pbp})`,
+    );
+    scheduleFundingWalletRefresh(`spend_${actionName}`);
+    return totals;
+  }
+
+  function addSessionRewardTotals(deltas = {}, { logLabel = "Claimed" } = {}) {
+    const totals = ensureSessionRewardTotals();
+    let changed = false;
+    for (const [key, delta] of Object.entries(deltas || {})) {
+      const amount = Number(delta || 0);
+      if (!Number.isFinite(amount) || amount === 0) continue;
+      if (typeof totals[key] !== "number") totals[key] = 0;
+      totals[key] += amount;
+      changed = true;
+    }
+    if (changed) {
+      logDebug("watch", "session_reward_totals_updated", {
+        logLabel,
+        totals: { ...totals },
+      });
+      if (ctx.guiBridge?.emitNow) ctx.guiBridge.emitNow();
+      scheduleFundingWalletRefresh(`reward_${String(logLabel || "claim").toLowerCase()}`);
+    }
+    return totals;
   }
 
   function summarizeWatchPayload(result) {
@@ -216,6 +352,7 @@ function createWatchService(ctx, logger, mcp, checks, configApi, services = {}) 
         claim?.reward ??
         fromLookup?.reward ??
         null,
+      prize: claim?.prize ?? claim?.rewardToken ?? fromLookup?.prize ?? null,
       raw: claim,
     };
   }
@@ -245,13 +382,48 @@ function createWatchService(ctx, logger, mcp, checks, configApi, services = {}) 
     return successCount;
   }
 
+  function collectClaimRewardDeltas(claims, lookupByAssignedMissionId = null) {
+    const totals = { ...DEFAULT_SESSION_REWARD_TOTALS };
+    for (const c of Array.isArray(claims) ? claims : []) {
+      if (c?.success === false) continue;
+      const missionId =
+        c?.assignedMissionId || c?.assigned_mission_id || c?.missionId || c?.id || null;
+      const lookup =
+        missionId && lookupByAssignedMissionId instanceof Map
+          ? lookupByAssignedMissionId.get(missionId) || null
+          : null;
+      const bucket = normalizeRewardBucket(
+        c?.prize || c?.rewardToken || lookup?.prize,
+      );
+      const amountRaw =
+        c?.prizeAmount ??
+        c?.prize_amount ??
+        c?.rewardAmount ??
+        c?.reward_amount ??
+        c?.amount ??
+        c?.reward ??
+        lookup?.reward ??
+        lookup?.prizeAmount ??
+        null;
+      const amount = Number(amountRaw);
+      if (!bucket || !Number.isFinite(amount) || amount <= 0) continue;
+      totals[bucket] += amount;
+    }
+    return totals;
+  }
+
   function watchConfig() {
     const maxLimitSeconds = WATCH_MAX_LIMIT_SECONDS;
     const configuredPoll = Number(ctx.config.watchPollIntervalSeconds);
-    const pollIntervalSeconds =
+    const rawPollIntervalSeconds =
       Number.isFinite(configuredPoll) && configuredPoll > 0
         ? configuredPoll
         : WATCH_DEFAULT_POLL_SECONDS;
+    // Server-facing poll interval: keep this conservative by default.
+    const pollIntervalSeconds = Math.max(
+      WATCH_MIN_CYCLE_SECONDS,
+      Math.floor(rawPollIntervalSeconds),
+    );
     const maxClaims = WATCH_MAX_CLAIMS;
     const fallbackClaims = WATCH_FALLBACK_CLAIMS;
     const configuredCycleSeconds = Number(ctx.config.watchCycleSeconds);
@@ -423,6 +595,7 @@ function createWatchService(ctx, logger, mcp, checks, configApi, services = {}) 
           m?.rewardAmount ??
           m?.reward_amount ??
           null,
+        prize: m?.prize ?? m?.prizeToken ?? m?.rewardToken ?? null,
       });
     }
     return byAssignedMissionId;
@@ -439,6 +612,7 @@ function createWatchService(ctx, logger, mcp, checks, configApi, services = {}) 
           slot: existing.slot ?? value?.slot ?? null,
           level: existing.level ?? value?.level ?? null,
           reward: existing.reward ?? value?.reward ?? null,
+          prize: existing.prize ?? value?.prize ?? null,
         });
       }
     }
@@ -686,6 +860,10 @@ function createWatchService(ctx, logger, mcp, checks, configApi, services = {}) 
         claims,
         claimLookupByAssignedMissionId,
       );
+      addSessionRewardTotals(
+        collectClaimRewardDeltas(claims, claimLookupByAssignedMissionId),
+        { logLabel: claimLogLabel },
+      );
       const parsedClaimed = Math.max(currentClaimed, successFromClaimLines);
       if (
         parsedClaimed > 0 &&
@@ -844,6 +1022,13 @@ function createWatchService(ctx, logger, mcp, checks, configApi, services = {}) 
             transitions.claimed,
             "[WATCH] ✅ Claimed (state fallback)",
           );
+          addSessionRewardTotals(
+            collectClaimRewardDeltas(
+              transitions.claimed,
+              claimLookupByAssignedMissionId,
+            ),
+            { logLabel: claimLogLabel },
+          );
           logWithTimestamp(
             `[WATCH] ✅ Claim detected from mission state: ${currentClaimed}`,
           );
@@ -946,7 +1131,7 @@ function createWatchService(ctx, logger, mcp, checks, configApi, services = {}) 
       slot,
       structuredContent: prepared?.structuredContent || null,
     });
-    await executePreparedMissionAction({
+    const actionResult = await executePreparedMissionAction({
       actionName: "mission_reroll",
       prepareResult: prepared,
       expected: { assignedMissionId },
@@ -961,6 +1146,12 @@ function createWatchService(ctx, logger, mcp, checks, configApi, services = {}) 
         slot,
       },
     });
+    if (actionResult?.submitted) {
+      addSessionSpendTotals(
+        actionResult?.signed?.cost ?? prepared?.structuredContent?.rerollCost,
+        { actionName: "mission_reroll" },
+      );
+    }
     logWithTimestamp(
       `[RESET] ✅ Rerolled: ${name} lvl=${level}${slot === null ? "" : ` slot=${slot}`}`,
     );
@@ -1022,11 +1213,22 @@ function createWatchService(ctx, logger, mcp, checks, configApi, services = {}) 
         "[RESET] ℹ️ Waiting for the mission NFT to clear before opening manual reset.",
       );
       if (ctx.signerMode === "manual") {
-        logWithTimestamp(
-          "[RESET] 🌐 Manual mode: opening missions page so you can inspect/resolve the threshold-hit mission.",
-        );
-        const opened = await openMissionPlayPage();
-        if (!opened) {
+        const openResult = await openMissionPlayPage({
+          cooldownMs: missionPageCooldownMs(),
+        });
+        if (openResult?.suppressed) {
+          logDebug("watch", "mission_page_open_suppressed", {
+            reason: "blocked_threshold_hit",
+            cooldownMs:
+              openResult?.cooldownMs ?? MISSION_PAGE_OPEN_COOLDOWN_MS_DEFAULT,
+            nextAllowedInMs: openResult?.nextAllowedInMs ?? null,
+          });
+        } else {
+          logWithTimestamp(
+            "[RESET] 🌐 Manual mode: opening missions page so you can inspect/resolve the threshold-hit mission.",
+          );
+        }
+        if (!openResult?.ok) {
           logWithTimestamp(
             `[RESET] ❌ Failed to auto-open browser. Open manually: ${MISSION_PLAY_URL}`,
           );
@@ -1068,9 +1270,20 @@ function createWatchService(ctx, logger, mcp, checks, configApi, services = {}) 
     ctx.lastResetPromptKey = resetPromptKey;
     ctx.lastResetPromptAt = now;
     if (ctx.signerMode === "manual") {
-      logWithTimestamp("[RESET] 🌐 Manual mode: opening missions page...");
-      const opened = await openMissionPlayPage();
-      if (!opened) {
+      const openResult = await openMissionPlayPage({
+        cooldownMs: missionPageCooldownMs(),
+      });
+      if (openResult?.suppressed) {
+        logDebug("watch", "mission_page_open_suppressed", {
+          reason: "reset_threshold_hit",
+          cooldownMs:
+            openResult?.cooldownMs ?? MISSION_PAGE_OPEN_COOLDOWN_MS_DEFAULT,
+          nextAllowedInMs: openResult?.nextAllowedInMs ?? null,
+        });
+      } else {
+        logWithTimestamp("[RESET] 🌐 Manual mode: opening missions page...");
+      }
+      if (!openResult?.ok) {
         logWithTimestamp(
           `[RESET] ❌ Failed to auto-open browser. Open manually: ${MISSION_PLAY_URL}`,
         );
@@ -1272,25 +1485,30 @@ function createWatchService(ctx, logger, mcp, checks, configApi, services = {}) 
         liveStateRecoveryRunning = false;
       }
     };
+    const clientConfiguredPollSeconds = Number(
+      ctx.config.clientMissionPollIntervalSeconds,
+    );
+    const clientPollIntervalSeconds =
+      Number.isFinite(clientConfiguredPollSeconds) && clientConfiguredPollSeconds > 0
+        ? Math.max(WATCH_MIN_CYCLE_SECONDS, Math.floor(clientConfiguredPollSeconds))
+        : 0;
+    const clientPollingEnabled = ctx.debugMode || clientPollIntervalSeconds > 0;
+
     const runLiveMissionCheck = (reason) => {
       if (missionStatePollRunning) {
         refreshKickPending = true;
         return;
       }
       missionStatePollRunning = true;
-      const pollPromise = ctx.debugMode
-        ? (async () => {
-            const result = await mcp.mcpToolCall("get_user_missions", {});
-            missionStateById = await pollMissionStateChanges(
-              missionStateById,
-              reason,
-              {
-                missionResult: result,
-              },
-            );
-            return result;
-          })()
-        : mcp.mcpToolCall("get_user_missions", {});
+      const pollPromise = (async () => {
+        const result = await mcp.mcpToolCall("get_user_missions", {});
+        if (ctx.debugMode) {
+          missionStateById = await pollMissionStateChanges(missionStateById, reason, {
+            missionResult: result,
+          });
+        }
+        return result;
+      })();
       pollPromise
         .then((updated) => {
           return Promise.resolve()
@@ -1356,7 +1574,9 @@ function createWatchService(ctx, logger, mcp, checks, configApi, services = {}) 
       logWithTimestamp(
         "[WATCH][DEBUG] ✅ Token refresh detected; running immediate check...",
       );
-      runLiveMissionCheck("token_refresh");
+      // Token refresh usually implies state changes; only do an immediate
+      // server fetch if client-side polling is enabled.
+      if (clientPollingEnabled) runLiveMissionCheck("token_refresh");
     };
     if (ctx.debugMode) {
       try {
@@ -1372,26 +1592,32 @@ function createWatchService(ctx, logger, mcp, checks, configApi, services = {}) 
         });
       }
     }
-    const tickEveryMs = Math.max(1000, opts.pollIntervalSeconds * 1000);
-    const tickTimer = setInterval(() => {
-      watchTick += 1;
-      const snapshot = ctx.currentMissionStats || {};
-      const claimable = Number(snapshot.claimable || 0);
-      const available = Number(snapshot.available || 0);
-      const chance = claimable > 0 ? "high" : available > 0 ? "medium" : "low";
-      logDebug("watch", "poll_tick", {
-        tick: watchTick,
-        elapsedMs: Date.now() - startedAt,
-        watchSeconds: opts.watchSeconds,
-        pollIntervalSeconds: opts.pollIntervalSeconds,
-        chance,
-        claimable,
-        available,
-        active: Number(snapshot.active || 0),
-        sessionClaimedCount: Number(ctx.sessionClaimedCount || 0),
-      });
-      runLiveMissionCheck(`poll_tick_${watchTick}`);
-    }, tickEveryMs);
+    let tickTimer = null;
+    if (clientPollingEnabled) {
+      const tickEveryMs = Math.max(
+        1000,
+        (clientPollIntervalSeconds || opts.pollIntervalSeconds) * 1000,
+      );
+      tickTimer = setInterval(() => {
+        watchTick += 1;
+        const snapshot = ctx.currentMissionStats || {};
+        const claimable = Number(snapshot.claimable || 0);
+        const available = Number(snapshot.available || 0);
+        const chance = claimable > 0 ? "high" : available > 0 ? "medium" : "low";
+        logDebug("watch", "poll_tick", {
+          tick: watchTick,
+          elapsedMs: Date.now() - startedAt,
+          watchSeconds: opts.watchSeconds,
+          pollIntervalSeconds: clientPollIntervalSeconds || opts.pollIntervalSeconds,
+          chance,
+          claimable,
+          available,
+          active: Number(snapshot.active || 0),
+          sessionClaimedCount: Number(ctx.sessionClaimedCount || 0),
+        });
+        runLiveMissionCheck(`poll_tick_${watchTick}`);
+      }, tickEveryMs);
+    }
 
     let result;
     cycleAbortController = new AbortController();
@@ -1416,7 +1642,7 @@ function createWatchService(ctx, logger, mcp, checks, configApi, services = {}) 
         watch: result?.structuredContent?.watch || {},
       });
     } finally {
-      clearInterval(tickTimer);
+      if (tickTimer) clearInterval(tickTimer);
       ctx.onAuthRefresh = previousAuthRefreshHandler || null;
       cycleAbortController = null;
     }
@@ -1708,6 +1934,8 @@ function createWatchService(ctx, logger, mcp, checks, configApi, services = {}) 
     if (!ctx.watchLoopEnabled || !ctx.isAuthenticated || ctx.watcherRunning)
       return;
 
+    resetSessionRewardTotals();
+    resetSessionSpendTotals();
     ctx.watcherRunning = true;
     ctx.isIdle = false;
     redrawHeaderAndLog(ctx.currentMissionStats);

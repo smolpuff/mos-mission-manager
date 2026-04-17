@@ -3,18 +3,33 @@
 const { spawn } = require("child_process");
 
 const MISSION_PLAY_URL = "https://pixelbypixel.studio/missions/play";
-const MISSION_PAGE_OPEN_COOLDOWN_MS = 60_000;
+const MISSION_PAGE_OPEN_COOLDOWN_MS_DEFAULT = 60_000;
 
 let lastMissionPageOpenAt = 0;
 
-async function openMissionPlayPage() {
+function normalizeCooldownMs(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < 0) return MISSION_PAGE_OPEN_COOLDOWN_MS_DEFAULT;
+  // Clamp to a sane upper bound (1h) to avoid accidental "never open again".
+  return Math.min(Math.floor(n), 60 * 60 * 1000);
+}
+
+async function openMissionPlayPage({ cooldownMs } = {}) {
   const now = Date.now();
-  if (now - lastMissionPageOpenAt < MISSION_PAGE_OPEN_COOLDOWN_MS) {
-    return true;
+  const effectiveCooldownMs = normalizeCooldownMs(cooldownMs);
+  const elapsedMs = now - lastMissionPageOpenAt;
+  if (elapsedMs < effectiveCooldownMs) {
+    return {
+      ok: true,
+      opened: false,
+      suppressed: true,
+      cooldownMs: effectiveCooldownMs,
+      nextAllowedInMs: Math.max(0, effectiveCooldownMs - elapsedMs),
+    };
   }
 
   const target = String(MISSION_PLAY_URL || '').trim();
-  if (!target) return false;
+  if (!target) return { ok: false, opened: false, suppressed: false };
   const candidates =
     process.platform === 'darwin'
       ? [['open', [target]]]
@@ -50,13 +65,14 @@ async function openMissionPlayPage() {
     });
     if (ok) {
       lastMissionPageOpenAt = Date.now();
-      return true;
+      return { ok: true, opened: true, suppressed: false };
     }
   }
-  return false;
+  return { ok: false, opened: false, suppressed: false };
 }
 
 module.exports = {
   MISSION_PLAY_URL,
   openMissionPlayPage,
+  MISSION_PAGE_OPEN_COOLDOWN_MS_DEFAULT,
 };

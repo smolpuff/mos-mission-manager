@@ -40,7 +40,7 @@ const commands = createCommandHandler(
     stopWatchLoop: watch.stopWatchLoop,
     refreshFundingWalletSummary: checks.refreshFundingWalletSummary,
   },
-  { saveConfig },
+  { saveConfig, flushConfig },
   { signer },
 );
 
@@ -61,16 +61,20 @@ function createGuiStateEmitter(ctx) {
       appName: ctx.APP_NAME,
       appVersion: ctx.APP_VERSION,
       isAuthenticated: ctx.isAuthenticated,
+      mcpConnection: ctx.mcpConnection,
       watcherRunning: ctx.watcherRunning,
       watchLoopEnabled: ctx.watchLoopEnabled,
       currentUserDisplayName: ctx.currentUserDisplayName,
       currentUserWalletId: ctx.currentUserWalletId,
+      currentUserWalletSummary: ctx.currentUserWalletSummary,
       currentMissionStats: ctx.currentMissionStats,
       guiMissionSlots: ctx.guiMissionSlots,
       currentMode: ctx.currentMode,
       level20ResetEnabled: ctx.level20ResetEnabled,
       missionModeEnabled: ctx.missionModeEnabled,
       currentMissionResetLevel: ctx.currentMissionResetLevel,
+      sessionRewardTotals: ctx.sessionRewardTotals,
+      sessionSpendTotals: ctx.sessionSpendTotals,
       signerLocked: ctx.signerLocked,
       signerReady: ctx.signerReady,
       signerMode: ctx.signerMode,
@@ -114,6 +118,12 @@ function sendGuiEvent(event, payload = {}) {
   process.send({ type: "pbp_event", event, payload });
 }
 
+function sendGuiResponse(requestId, payload = {}) {
+  if (process.env.PBP_GUI_BRIDGE !== "1") return;
+  if (typeof process.send !== "function") return;
+  process.send({ type: "pbp_response", requestId, payload });
+}
+
 function wrapAsyncMethod(obj, name) {
   if (!obj || typeof obj[name] !== "function") return;
   const original = obj[name];
@@ -140,6 +150,42 @@ if (process.env.PBP_GUI_BRIDGE === "1" && typeof process.send === "function") {
     emitSoon: emitGuiStateSoon,
     sendEvent: sendGuiEvent,
   };
+
+  process.on("message", async (message) => {
+    if (!message || typeof message !== "object") return;
+    if (message.type !== "pbp_request") return;
+    const requestId = message.requestId;
+    const action = String(message.action || "");
+    if (!requestId) return;
+    try {
+      if (action === "signer_reveal_backup") {
+        if (!signer || typeof signer.revealWalletBackup !== "function") {
+          throw new Error("Signer service unavailable.");
+        }
+        const backup = await signer.revealWalletBackup();
+        sendGuiResponse(requestId, { ok: true, backup });
+        return;
+      }
+      if (action === "signer_create_generated_wallet") {
+        if (!signer || typeof signer.createGeneratedWallet !== "function") {
+          throw new Error("Signer service unavailable.");
+        }
+        signer.setSignerMode("app_wallet", "ui_create");
+        ctx.config.signerMode = ctx.signerMode;
+        flushConfig(ctx, logger.logDebug);
+        const created = await signer.createGeneratedWallet();
+        flushConfig(ctx, logger.logDebug);
+        sendGuiResponse(requestId, { ok: true, created });
+        return;
+      }
+      sendGuiResponse(requestId, {
+        ok: false,
+        error: `Unknown request action: ${action}`,
+      });
+    } catch (error) {
+      sendGuiResponse(requestId, { ok: false, error: error.message });
+    }
+  });
 
   // Mirror the same moments the CLI header updates: whenever we log or redraw,
   // emit a deduped state snapshot for the desktop renderer.
@@ -328,9 +374,7 @@ async function runStartupSequence() {
         logger.logWithTimestamp("[READY] Watcher running.");
         shouldStartWatch = true;
       } else {
-        logger.logWithTimestamp(
-          "[READY] Watcher is disabled (`watchLoopEnabled=false`).",
-        );
+        logger.logWithTimestamp("[READY] Ready. Click Start Missions to begin.");
       }
     } else {
       logger.logWithTimestamp("[READY] Type 'login' then 'check'.");

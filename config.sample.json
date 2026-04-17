@@ -6,6 +6,8 @@
   "missionModeEnabled": false,
   "missionResetLevel": "68",
   "watchCycleSeconds": 0,
+  "clientMissionPollIntervalSeconds": 0,
+  "missionPageOpenCooldownSeconds": 60,
   "signerMode": "app_wallet",
   "signer": {
     "enabled": true,

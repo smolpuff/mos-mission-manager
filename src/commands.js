@@ -15,8 +15,33 @@ function createCommandHandler(ctx, logger, actions, configApi, services = {}) {
     stopWatchLoop,
     refreshFundingWalletSummary,
   } = actions;
-  const { saveConfig } = configApi;
+  const { saveConfig, flushConfig } = configApi;
   const { signer = null } = services;
+
+  async function quitWholeApp({ reason = "user" } = {}) {
+    logWithTimestamp("[KILL -9] 🦒 Korea loves you! Goodbye! 👋");
+    try {
+      ctx.watchLoopEnabled = false;
+      ctx.config.watchLoopEnabled = false;
+      flushConfig(ctx, logger.logDebug);
+    } catch {}
+    try {
+      if (typeof stopWatchLoop === "function") {
+        await stopWatchLoop({ persist: false, waitForCycle: false });
+      }
+    } catch {}
+
+    // In the desktop app, the CLI is controlling a forked backend. Exiting the
+    // backend alone isn't enough; ask the Electron host to quit too.
+    try {
+      if (ctx.guiBridge?.sendEvent) {
+        ctx.guiBridge.sendEvent("app_quit", { reason });
+        return;
+      }
+    } catch {}
+
+    process.exit(0);
+  }
 
   function showHelp() {
     logWithTimestamp(
@@ -124,7 +149,7 @@ function createCommandHandler(ctx, logger, actions, configApi, services = {}) {
       try {
         signer.setSignerMode("app_wallet", "create");
         const created = await signer.createGeneratedWallet();
-        saveConfig(ctx, logger.logDebug);
+        flushConfig(ctx, logger.logDebug);
         await refreshFundingWalletHeader();
         logWithTimestamp(`[SIGNER] Address: ${created.walletAddress}`);
         logWithTimestamp(`[SIGNER] Recovery phrase: ${created.mnemonic}`);
@@ -170,7 +195,7 @@ function createCommandHandler(ctx, logger, actions, configApi, services = {}) {
             : null;
         signer.setSignerMode("app_wallet", "import");
         await signer.importFromText(pasted, { expectedWalletAddress });
-        saveConfig(ctx, logger.logDebug);
+        flushConfig(ctx, logger.logDebug);
         await refreshFundingWalletHeader();
       } catch (error) {
         logWithTimestamp(`[SIGNER] ❌ Import failed: ${error.message}`);
@@ -213,7 +238,7 @@ function createCommandHandler(ctx, logger, actions, configApi, services = {}) {
       signer.setSignerMode(selected, "first_run");
       ctx.config.signerMode = ctx.signerMode;
       ctx.config.signerSetupCompleted = true;
-      saveConfig(ctx, logger.logDebug);
+      flushConfig(ctx, logger.logDebug);
       await refreshFundingWalletHeader();
       if (selected === "app_wallet" && !ctx.signerConfig?.walletRef) {
         await runAppWalletOnboardingPrompt();
@@ -314,7 +339,7 @@ function createCommandHandler(ctx, logger, actions, configApi, services = {}) {
           ctx.missionModeEnabled = false;
           ctx.config.level20ResetEnabled = true;
           ctx.config.missionModeEnabled = false;
-          saveConfig(ctx, logger.logDebug);
+          flushConfig(ctx, logger.logDebug);
           const { triggered } = await runManualResetCheck();
           logWithTimestamp(
             triggered
@@ -328,19 +353,19 @@ function createCommandHandler(ctx, logger, actions, configApi, services = {}) {
           ctx.missionModeEnabled = previousMissionMode;
           ctx.config.level20ResetEnabled = previousLevel20;
           ctx.config.missionModeEnabled = previousMissionMode;
-          saveConfig(ctx, logger.logDebug);
+          flushConfig(ctx, logger.logDebug);
         }
       },
       pause: async () => {
         ctx.watchLoopEnabled = false;
         ctx.config.watchLoopEnabled = false;
-        saveConfig(ctx, logger.logDebug);
+        flushConfig(ctx, logger.logDebug);
         logWithTimestamp("[WATCH] ⏸️ Paused.");
       },
       resume: async () => {
         ctx.watchLoopEnabled = true;
         delete ctx.config.watchLoopEnabled;
-        saveConfig(ctx, logger.logDebug);
+        flushConfig(ctx, logger.logDebug);
         logWithTimestamp("[WATCH] ▶️ Resumed.");
         void startWatchLoop();
       },
@@ -410,7 +435,7 @@ function createCommandHandler(ctx, logger, actions, configApi, services = {}) {
           }
           try {
             await signer.removeImportedWallet();
-            saveConfig(ctx, logger.logDebug);
+            flushConfig(ctx, logger.logDebug);
           } catch (error) {
             logWithTimestamp(`[SIGNER] ❌ Remove failed: ${error.message}`);
           }
@@ -431,7 +456,7 @@ function createCommandHandler(ctx, logger, actions, configApi, services = {}) {
                   : null;
               signer.setSignerMode("app_wallet", "import");
               await signer.importFromText(importValue, { expectedWalletAddress });
-              saveConfig(ctx, logger.logDebug);
+              flushConfig(ctx, logger.logDebug);
               await refreshFundingWalletHeader();
             } catch (error) {
               logWithTimestamp(`[SIGNER] ❌ Import failed: ${error.message}`);
@@ -459,7 +484,7 @@ function createCommandHandler(ctx, logger, actions, configApi, services = {}) {
           try {
             signer.setSignerMode("app_wallet", "import");
             await signer.replaceImportFromFile(importPath);
-            saveConfig(ctx, logger.logDebug);
+            flushConfig(ctx, logger.logDebug);
             await refreshFundingWalletHeader();
           } catch (error) {
             logWithTimestamp(`[SIGNER] ❌ Import failed: ${error.message}`);
@@ -491,19 +516,20 @@ function createCommandHandler(ctx, logger, actions, configApi, services = {}) {
           return;
         }
         signer.setSignerMode(arg, "console");
-        saveConfig(ctx, logger.logDebug);
+        flushConfig(ctx, logger.logDebug);
         await refreshFundingWalletHeader();
         if (arg === "app_wallet" && !ctx.signerConfig?.walletRef) {
           await runAppWalletOnboardingPrompt();
         }
       },
       q: async () => {
-        logWithTimestamp("[KILL -9] 🦒 Korea loves you! Goodbye! 👋");
-        process.exit(0);
+        await quitWholeApp({ reason: "q" });
       },
       quit: async () => {
-        logWithTimestamp("[KILL -9] 🦒 Korea loves you! Goodbye! 👋");
-        process.exit(0);
+        await quitWholeApp({ reason: "quit" });
+      },
+      exit: async () => {
+        await quitWholeApp({ reason: "exit" });
       },
     };
 
@@ -526,6 +552,10 @@ function createCommandHandler(ctx, logger, actions, configApi, services = {}) {
         await handlers.reset20();
         return;
       }
+      if (cmd === "exit") {
+        await handlers.exit();
+        return;
+      }
       if (cmd === "20r" || cmd.startsWith("20r ")) {
         const arg = cmd.slice(3).trim();
         if (!arg) {
@@ -543,9 +573,17 @@ function createCommandHandler(ctx, logger, actions, configApi, services = {}) {
         }
         ctx.config.level20ResetEnabled = ctx.level20ResetEnabled;
         ctx.config.missionModeEnabled = ctx.missionModeEnabled;
-        saveConfig(ctx, logger.logDebug);
+        ctx.currentMode = ctx.missionModeEnabled
+          ? `mission-${ctx.currentMissionResetLevel}`
+          : "normal";
+        flushConfig(ctx, logger.logDebug);
         logWithTimestamp(
-          `[MODE] 20r ${ctx.level20ResetEnabled ? "ON" : "OFF"} (level20ResetEnabled=${ctx.level20ResetEnabled})`,
+          `[MODE] Mission level resets ${ctx.level20ResetEnabled ? "enabled" : "disabled"}.`,
+        );
+        logWithTimestamp(
+          ctx.level20ResetEnabled
+            ? `[MODE] Normal mode enabled (mission resets at level 20).`
+            : `[MODE] Normal mode disabled.`,
         );
         return;
       }
@@ -572,9 +610,14 @@ function createCommandHandler(ctx, logger, actions, configApi, services = {}) {
         ctx.config.missionModeEnabled = ctx.missionModeEnabled;
         ctx.config.missionResetLevel = String(ctx.currentMissionResetLevel || "11");
         ctx.config.level20ResetEnabled = ctx.level20ResetEnabled;
-        saveConfig(ctx, logger.logDebug);
+        ctx.currentMode = ctx.missionModeEnabled
+          ? `mission-${ctx.currentMissionResetLevel}`
+          : "normal";
+        flushConfig(ctx, logger.logDebug);
         logWithTimestamp(
-          `[MODE] mm ${ctx.missionModeEnabled ? "ON" : "OFF"} level=${ctx.currentMissionResetLevel} (missionModeEnabled=${ctx.missionModeEnabled})`,
+          ctx.missionModeEnabled
+            ? `[MODE] Mission mode enabled (mission resets at level ${ctx.currentMissionResetLevel}).`
+            : `[MODE] Mission mode disabled.`,
         );
         return;
       }
