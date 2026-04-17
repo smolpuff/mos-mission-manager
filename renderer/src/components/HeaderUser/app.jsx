@@ -15,7 +15,9 @@ export default function HeaderUser({
     status.fundingWalletSummary?.status === "ok"
       ? status.fundingWalletSummary
       : null;
-  const mainWalletBalances = Array.isArray(status.currentUserWalletSummary?.balances)
+  const mainWalletBalances = Array.isArray(
+    status.currentUserWalletSummary?.balances,
+  )
     ? status.currentUserWalletSummary.balances
     : [];
 
@@ -28,7 +30,9 @@ export default function HeaderUser({
   };
 
   const findBalance = (key) => {
-    const want = String(key || "").trim().toLowerCase();
+    const want = String(key || "")
+      .trim()
+      .toLowerCase();
     for (const entry of mainWalletBalances) {
       const k = String(entry?.key || entry?.symbol || entry?.name || "")
         .trim()
@@ -57,8 +61,8 @@ export default function HeaderUser({
             </div>
           </div>
         ) : signerMode === "dapp" ? (
-          <div className="user_meta__funding_wallet flex gap-3 items-center">
-            <div className="text-xs mt-1">
+          <div className="user_meta__funding_wallet flex gap-3 items-center mt-1">
+            <div className="text-xs ">
               <span className="user_meta__funding_wallet_lockstate text-xs">
                 {lockLabel}
               </span>{" "}
@@ -99,9 +103,8 @@ export default function HeaderUser({
             </div>
             <div className="flex gap-3 items-center">
               <div className="flex gap-1 items-center">
-                <div>
-                  <img src={solIcon} alt="Solana logo" />
-                </div>
+                <img src={solIcon} alt="Solana logo" />
+
                 <div className="text-xs">
                   {Number(fundingSummary.sol || 0).toLocaleString(undefined, {
                     maximumFractionDigits: 4,
@@ -110,9 +113,8 @@ export default function HeaderUser({
                 </div>
               </div>
               <div className="flex gap-1 items-center">
-                <div>
-                  <img src={pbpIcon} alt="PBP token logo" />
-                </div>
+                <img src={pbpIcon} alt="PBP token logo" />
+
                 <div className="text-xs">
                   {Number(fundingSummary.pbp || 0).toLocaleString(undefined, {
                     maximumFractionDigits: 2,
@@ -139,12 +141,12 @@ export default function HeaderUser({
         <div className="flex items-center justify-end gap-2">
           <ConnectionBadge status={status} isAuthenticated={isAuthenticated} />
         </div>
-        <div className="flex items-center justify-end gap-2">
+        <div className="flex items-center justify-end gap-1 w-full">
           <StatusBadge running={status.running} />
           {typeof onManualClaim === "function" ? (
             <button
               type="button"
-              className="btn btn-clear btn-xs"
+              className="btn btn-clear btn-xs p-0"
               title="Run manual claim/assign (c)"
               onClick={() => onManualClaim()}
               disabled={!status.running}
