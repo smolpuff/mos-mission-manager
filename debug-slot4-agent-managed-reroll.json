@@ -1,5 +1,0 @@
-{
-  "generatedAt": "2026-04-17T00:09:55.306Z",
-  "action": "agent_managed_mission_reroll_slot4",
-  "fatal": "Attempted to sign a transaction with an address that is not a signer for it"
-}

@@ -1,0 +1,74 @@
+{
+  "generatedAt": "2026-04-17T18:46:29.846Z",
+  "payerWallet": "AxR7LYpRwRrWRu4uqSwjJcWf6JjFxKkNnsJT26qjtSHp",
+  "prepare": {
+    "content": [
+      {
+        "type": "text",
+        "text": "Prepared mission reroll for 98d6f283-68ac-4aba-ad93-be9f84660d28."
+      }
+    ],
+    "structuredContent": {
+      "success": true,
+      "assignedMissionId": "98d6f283-68ac-4aba-ad93-be9f84660d28",
+      "rerollCost": 500,
+      "transaction": "2o7WjzfD56SwBBTXQtaocjqN2AKW5vvsdamU6uzHMxcm5ndSdNCy5fpfPXszMRXSZxSpwJsYkivW8FQbHJ6vtcS2ubCnwhAaoX8kwQ5oeXG81ZLcYKhq7WtqYzTne18vaUBsdcxSKv6qRVZbVSupmmzHVN9jnkTzcnPQMmMrCDDafxxcJCynKSAvzpYvRuUnpZCqoFAYqNQnfyf1dZzgg5dGTP9uHPG2hwMNM3snCHBdjphgn5SkP5p6HAX3hPrgvEzqMQBikug14BRTfzcKVaaXms1hVhgCEcZNLajtpcTnaQMVZTiRfWnHQyXkhmZz7C888LXg9LofR8KrQ5KgG22F6Mscx3oKE5dLmH7g738Q7ebRa5kB98Ce1MfLW6h7oShCv5L7X8wHCq6XnwwYUvPbSWBYhY9LGMtCndgcekyLUMNTVxyQpUzj6QEyEcQyZfqcukh5v9Yuh1Td2YoWmQ5kxY4tRr1akd39JQ6GPA1dwGsUEUWan1z6woG5LStroMx4ohTQiW8CQzSb",
+      "rerollToken": "eyJhbGciOiJIUzI1NiJ9.eyJ0b2tlblR5cGUiOiJtY3BfbWlzc2lvbl9yZXJvbGwiLCJwbGF5RmFiSWQiOiJBM0ZEMzdCODY0RTBFQjgzIiwid2FsbGV0SWQiOiIzTGdpTnltRnlQQUM4TUhkeDhHalZnR3VHM2NhQ1J4czhyUmcycGl0cmJNViIsInBheWVyV2FsbGV0SWQiOiJBeFI3TFlwUndScldSdTR1cVN3akpjV2Y2SmpGeEtrTm5zSlQyNnFqdFNIcCIsImFzc2lnbmVkTWlzc2lvbklkIjoiOThkNmYyODMtNjhhYy00YWJhLWFkOTMtYmU5Zjg0NjYwZDI4IiwicmVyb2xsQ29zdCI6NTAwLCJ0cmFuc2FjdGlvbiI6IjJvN1dqemZENTZTd0JCVFhRdGFvY2pxTjJBS1c1dnZzZGFtVTZ1ekhNeGNtNW5kU2ROQ3k1ZnBmUFhzek1SWFNaeFNwd0pzWWtpdlc4RlFiSEo2dnRjUzJ1YkNud2hBYW9YOGt3UTVvZVhHODFaTGNZS2hxN1d0cVl6VG5lMTh2YVVCc2RjeFNLdjZxUlZaYlZTdXBtbXpIVk45am5rVHpjblBRTW1NckNERGFmeHhjSkN5bktTQXZ6cFl2UnVVbnBaQ3FvRkFZcU5RbmZ5ZjFkWnpnZzVkR1RQOXVIUEcyaHdNTk0zc25DSEJkanBoZ241U2tQNXA2SEFYM2hQcmd2RXpxTVFCaWt1ZzE0QlJUZnpjS1ZhYVhtczFoVmhnQ0VjWk5MYWp0cGNUbmFRTVZaVGlSZlduSFF5WGtobVp6N0M4ODhMWGc5TG9mUjhLclE1S2dHMjJGNk1zY3gzb0tFNWRMbUg3ZzczOFE3ZWJSYTVrQjk4Q2UxTWZMVzZoN29TaEN2NUw3WDh3SENxNlhud3dZVXZQYlNXQlloWTlMR010Q25kZ2Nla3lMVU1OVFZ4eVFwVXpqNlFFeUVjUXlaZnFjdWtoNXY5WXVoMVRkMllvV21RNWt4WTR0UnIxYWtkMzlKUTZHUEExZHdHc1VFVVdhbjF6NndvRzVMU3Ryb014NG9oVFFpVzhDUXpTYiIsImlzcyI6InBicC13ZWIzLW1jcC1taXNzaW9uLXJlcm9sbCIsImF1ZCI6InBicC13ZWIzLW1jcC1jbGllbnQiLCJpYXQiOjE3NzY0NTE0NjcsImp0aSI6ImMzYmUwZDhhNWQ1OTg5MGM2MTZkZDNkYTBhZDJlOTdmIiwiZXhwIjoxNzc2NDUzMjY3fQ.RR0SaMkTCIUizTI5jpjry9svegWV5fDianECJemhwAM",
+      "payerWalletId": "AxR7LYpRwRrWRu4uqSwjJcWf6JjFxKkNnsJT26qjtSHp",
+      "signingMode": "agent_managed",
+      "missionRerollId": "mrr_e58cfd1bf0bcecbfd4a3a2c1",
+      "signingBridgePath": "/mcp/sign-mission-reroll?missionRerollId=mrr_e58cfd1bf0bcecbfd4a3a2c1",
+      "signingBridgeUrl": "https://pixelbypixel.studio/mcp/sign-mission-reroll?missionRerollId=mrr_e58cfd1bf0bcecbfd4a3a2c1",
+      "expiresAt": "2026-04-17T19:14:27.863Z",
+      "signingMethods": {
+        "browserBridge": {
+          "supported": true,
+          "signingUrl": "https://pixelbypixel.studio/mcp/sign-mission-reroll?missionRerollId=mrr_e58cfd1bf0bcecbfd4a3a2c1"
+        },
+        "agentManagedWallet": {
+          "supported": true,
+          "note": "Agent may sign transaction directly and call submit_signed_mission_reroll."
+        }
+      },
+      "note": "Check whether PBP_AGENT_WALLET_PATH is set. If it is, ask the user: \"do you want me to sign it or do you want a URL to sign it?\" If they choose agent-managed signing, sign locally with the transaction fee-payer keypair and call submit_signed_mission_reroll.",
+      "agentWalletGuide": {
+        "envVarName": "PBP_AGENT_WALLET_PATH",
+        "promptWhenConfigured": "If PBP_AGENT_WALLET_PATH is configured, ask the user: \"do you want me to sign it or do you want a URL to sign it?\"",
+        "steps": [
+          "Check whether PBP_AGENT_WALLET_PATH points to a local Solana keypair JSON file.",
+          "If the keypair is available, offer agent-managed signing before defaulting to a browser signing flow.",
+          "Only sign locally when the keypair public key matches the transaction fee payer.",
+          "If the user chooses agent-managed signing, load that keypair locally and sign the returned transaction.",
+          "After signing, call submit_signed_mission_reroll."
+        ]
+      }
+    }
+  },
+  "decodedSignerAddresses": [
+    "AxR7LYpRwRrWRu4uqSwjJcWf6JjFxKkNnsJT26qjtSHp"
+  ],
+  "encodedSignedTransactionLength": 528,
+  "attempts": [
+    {
+      "attempt": 1,
+      "ok": false,
+      "error": "Command failed: ./bin/pbp-mcp call submit_signed_mission_reroll --args {\"rerollToken\":\"eyJhbGciOiJIUzI1NiJ9.eyJ0b2tlblR5cGUiOiJtY3BfbWlzc2lvbl9yZXJvbGwiLCJwbGF5RmFiSWQiOiJBM0ZEMzdCODY0RTBFQjgzIiwid2FsbGV0SWQiOiIzTGdpTnltRnlQQUM4TUhkeDhHalZnR3VHM2NhQ1J4czhyUmcycGl0cmJNViIsInBheWVyV2FsbGV0SWQiOiJBeFI3TFlwUndScldSdTR1cVN3akpjV2Y2SmpGeEtrTm5zSlQyNnFqdFNIcCIsImFzc2lnbmVkTWlzc2lvbklkIjoiOThkNmYyODMtNjhhYy00YWJhLWFkOTMtYmU5Zjg0NjYwZDI4IiwicmVyb2xsQ29zdCI6NTAwLCJ0cmFuc2FjdGlvbiI6IjJvN1dqemZENTZTd0JCVFhRdGFvY2pxTjJBS1c1dnZzZGFtVTZ1ekhNeGNtNW5kU2ROQ3k1ZnBmUFhzek1SWFNaeFNwd0pzWWtpdlc4RlFiSEo2dnRjUzJ1YkNud2hBYW9YOGt3UTVvZVhHODFaTGNZS2hxN1d0cVl6VG5lMTh2YVVCc2RjeFNLdjZxUlZaYlZTdXBtbXpIVk45am5rVHpjblBRTW1NckNERGFmeHhjSkN5bktTQXZ6cFl2UnVVbnBaQ3FvRkFZcU5RbmZ5ZjFkWnpnZzVkR1RQOXVIUEcyaHdNTk0zc25DSEJkanBoZ241U2tQNXA2SEFYM2hQcmd2RXpxTVFCaWt1ZzE0QlJUZnpjS1ZhYVhtczFoVmhnQ0VjWk5MYWp0cGNUbmFRTVZaVGlSZlduSFF5WGtobVp6N0M4ODhMWGc5TG9mUjhLclE1S2dHMjJGNk1zY3gzb0tFNWRMbUg3ZzczOFE3ZWJSYTVrQjk4Q2UxTWZMVzZoN29TaEN2NUw3WDh3SENxNlhud3dZVXZQYlNXQlloWTlMR010Q25kZ2Nla3lMVU1OVFZ4eVFwVXpqNlFFeUVjUXlaZnFjdWtoNXY5WXVoMVRkMllvV21RNWt4WTR0UnIxYWtkMzlKUTZHUEExZHdHc1VFVVdhbjF6NndvRzVMU3Ryb014NG9oVFFpVzhDUXpTYiIsImlzcyI6InBicC13ZWIzLW1jcC1taXNzaW9uLXJlcm9sbCIsImF1ZCI6InBicC13ZWIzLW1jcC1jbGllbnQiLCJpYXQiOjE3NzY0NTE0NjcsImp0aSI6ImMzYmUwZDhhNWQ1OTg5MGM2MTZkZDNkYTBhZDJlOTdmIiwiZXhwIjoxNzc2NDUzMjY3fQ.RR0SaMkTCIUizTI5jpjry9svegWV5fDianECJemhwAM\",\"encodedSignedTransaction\":\"3w9UgGaG7rZ2sGKYQqedVNydBTdJKsajLTsoH8RR5gZZG2xMTxKu86iVDmDu2ozPJrDHqcNf8Fb2V1rZYNwsMaSv2MgrPhYw2KHXuxbMAYX4pkphUJES7GfxPs6dxRD68hAAEPJBsCUiyodowYe8kBcsP8mJx4i1FvjvAxXun6dyesFQFsvJBuCCedK3TtVW6538pvXeQB6615j4qC9sUao5PWdd2j6mDZXfNTQc3MLdzXKfJwEmeeqnB3BLCscoi43ggVniJxRwbcxtDNS72UCdi778DjMjtm8nCB4AnNoPsGxbR1JD6G9DaWHkrwZJ3EqNa98nA4BeMrKk97oc4gzLzXAEncmGcgrda4FbUo1xHcWDZBggTydiyxZ8wrM4auLTA2Com7ahV7rSZUTqBn46Z9PTbuUpqt7fyvscbnnhi31SMVodDCL9pdYBQHEogtWikStgKspwkA2NSRt7LLR5U19wfYQbNXLHESv2DmeF79Y23dBhFd2vxLns2Vtn57kjpustEZo9j3Cb\"}\nerror: fetch failed: POST https://pixelbypixel.studio/mcp\n"
+    },
+    {
+      "attempt": 2,
+      "ok": false,
+      "error": "Command failed: ./bin/pbp-mcp call submit_signed_mission_reroll --args {\"rerollToken\":\"eyJhbGciOiJIUzI1NiJ9.eyJ0b2tlblR5cGUiOiJtY3BfbWlzc2lvbl9yZXJvbGwiLCJwbGF5RmFiSWQiOiJBM0ZEMzdCODY0RTBFQjgzIiwid2FsbGV0SWQiOiIzTGdpTnltRnlQQUM4TUhkeDhHalZnR3VHM2NhQ1J4czhyUmcycGl0cmJNViIsInBheWVyV2FsbGV0SWQiOiJBeFI3TFlwUndScldSdTR1cVN3akpjV2Y2SmpGeEtrTm5zSlQyNnFqdFNIcCIsImFzc2lnbmVkTWlzc2lvbklkIjoiOThkNmYyODMtNjhhYy00YWJhLWFkOTMtYmU5Zjg0NjYwZDI4IiwicmVyb2xsQ29zdCI6NTAwLCJ0cmFuc2FjdGlvbiI6IjJvN1dqemZENTZTd0JCVFhRdGFvY2pxTjJBS1c1dnZzZGFtVTZ1ekhNeGNtNW5kU2ROQ3k1ZnBmUFhzek1SWFNaeFNwd0pzWWtpdlc4RlFiSEo2dnRjUzJ1YkNud2hBYW9YOGt3UTVvZVhHODFaTGNZS2hxN1d0cVl6VG5lMTh2YVVCc2RjeFNLdjZxUlZaYlZTdXBtbXpIVk45am5rVHpjblBRTW1NckNERGFmeHhjSkN5bktTQXZ6cFl2UnVVbnBaQ3FvRkFZcU5RbmZ5ZjFkWnpnZzVkR1RQOXVIUEcyaHdNTk0zc25DSEJkanBoZ241U2tQNXA2SEFYM2hQcmd2RXpxTVFCaWt1ZzE0QlJUZnpjS1ZhYVhtczFoVmhnQ0VjWk5MYWp0cGNUbmFRTVZaVGlSZlduSFF5WGtobVp6N0M4ODhMWGc5TG9mUjhLclE1S2dHMjJGNk1zY3gzb0tFNWRMbUg3ZzczOFE3ZWJSYTVrQjk4Q2UxTWZMVzZoN29TaEN2NUw3WDh3SENxNlhud3dZVXZQYlNXQlloWTlMR010Q25kZ2Nla3lMVU1OVFZ4eVFwVXpqNlFFeUVjUXlaZnFjdWtoNXY5WXVoMVRkMllvV21RNWt4WTR0UnIxYWtkMzlKUTZHUEExZHdHc1VFVVdhbjF6NndvRzVMU3Ryb014NG9oVFFpVzhDUXpTYiIsImlzcyI6InBicC13ZWIzLW1jcC1taXNzaW9uLXJlcm9sbCIsImF1ZCI6InBicC13ZWIzLW1jcC1jbGllbnQiLCJpYXQiOjE3NzY0NTE0NjcsImp0aSI6ImMzYmUwZDhhNWQ1OTg5MGM2MTZkZDNkYTBhZDJlOTdmIiwiZXhwIjoxNzc2NDUzMjY3fQ.RR0SaMkTCIUizTI5jpjry9svegWV5fDianECJemhwAM\",\"encodedSignedTransaction\":\"3w9UgGaG7rZ2sGKYQqedVNydBTdJKsajLTsoH8RR5gZZG2xMTxKu86iVDmDu2ozPJrDHqcNf8Fb2V1rZYNwsMaSv2MgrPhYw2KHXuxbMAYX4pkphUJES7GfxPs6dxRD68hAAEPJBsCUiyodowYe8kBcsP8mJx4i1FvjvAxXun6dyesFQFsvJBuCCedK3TtVW6538pvXeQB6615j4qC9sUao5PWdd2j6mDZXfNTQc3MLdzXKfJwEmeeqnB3BLCscoi43ggVniJxRwbcxtDNS72UCdi778DjMjtm8nCB4AnNoPsGxbR1JD6G9DaWHkrwZJ3EqNa98nA4BeMrKk97oc4gzLzXAEncmGcgrda4FbUo1xHcWDZBggTydiyxZ8wrM4auLTA2Com7ahV7rSZUTqBn46Z9PTbuUpqt7fyvscbnnhi31SMVodDCL9pdYBQHEogtWikStgKspwkA2NSRt7LLR5U19wfYQbNXLHESv2DmeF79Y23dBhFd2vxLns2Vtn57kjpustEZo9j3Cb\"}\nerror: fetch failed: POST https://pixelbypixel.studio/mcp\n"
+    },
+    {
+      "attempt": 3,
+      "ok": false,
+      "error": "Command failed: ./bin/pbp-mcp call submit_signed_mission_reroll --args {\"rerollToken\":\"eyJhbGciOiJIUzI1NiJ9.eyJ0b2tlblR5cGUiOiJtY3BfbWlzc2lvbl9yZXJvbGwiLCJwbGF5RmFiSWQiOiJBM0ZEMzdCODY0RTBFQjgzIiwid2FsbGV0SWQiOiIzTGdpTnltRnlQQUM4TUhkeDhHalZnR3VHM2NhQ1J4czhyUmcycGl0cmJNViIsInBheWVyV2FsbGV0SWQiOiJBeFI3TFlwUndScldSdTR1cVN3akpjV2Y2SmpGeEtrTm5zSlQyNnFqdFNIcCIsImFzc2lnbmVkTWlzc2lvbklkIjoiOThkNmYyODMtNjhhYy00YWJhLWFkOTMtYmU5Zjg0NjYwZDI4IiwicmVyb2xsQ29zdCI6NTAwLCJ0cmFuc2FjdGlvbiI6IjJvN1dqemZENTZTd0JCVFhRdGFvY2pxTjJBS1c1dnZzZGFtVTZ1ekhNeGNtNW5kU2ROQ3k1ZnBmUFhzek1SWFNaeFNwd0pzWWtpdlc4RlFiSEo2dnRjUzJ1YkNud2hBYW9YOGt3UTVvZVhHODFaTGNZS2hxN1d0cVl6VG5lMTh2YVVCc2RjeFNLdjZxUlZaYlZTdXBtbXpIVk45am5rVHpjblBRTW1NckNERGFmeHhjSkN5bktTQXZ6cFl2UnVVbnBaQ3FvRkFZcU5RbmZ5ZjFkWnpnZzVkR1RQOXVIUEcyaHdNTk0zc25DSEJkanBoZ241U2tQNXA2SEFYM2hQcmd2RXpxTVFCaWt1ZzE0QlJUZnpjS1ZhYVhtczFoVmhnQ0VjWk5MYWp0cGNUbmFRTVZaVGlSZlduSFF5WGtobVp6N0M4ODhMWGc5TG9mUjhLclE1S2dHMjJGNk1zY3gzb0tFNWRMbUg3ZzczOFE3ZWJSYTVrQjk4Q2UxTWZMVzZoN29TaEN2NUw3WDh3SENxNlhud3dZVXZQYlNXQlloWTlMR010Q25kZ2Nla3lMVU1OVFZ4eVFwVXpqNlFFeUVjUXlaZnFjdWtoNXY5WXVoMVRkMllvV21RNWt4WTR0UnIxYWtkMzlKUTZHUEExZHdHc1VFVVdhbjF6NndvRzVMU3Ryb014NG9oVFFpVzhDUXpTYiIsImlzcyI6InBicC13ZWIzLW1jcC1taXNzaW9uLXJlcm9sbCIsImF1ZCI6InBicC13ZWIzLW1jcC1jbGllbnQiLCJpYXQiOjE3NzY0NTE0NjcsImp0aSI6ImMzYmUwZDhhNWQ1OTg5MGM2MTZkZDNkYTBhZDJlOTdmIiwiZXhwIjoxNzc2NDUzMjY3fQ.RR0SaMkTCIUizTI5jpjry9svegWV5fDianECJemhwAM\",\"encodedSignedTransaction\":\"3w9UgGaG7rZ2sGKYQqedVNydBTdJKsajLTsoH8RR5gZZG2xMTxKu86iVDmDu2ozPJrDHqcNf8Fb2V1rZYNwsMaSv2MgrPhYw2KHXuxbMAYX4pkphUJES7GfxPs6dxRD68hAAEPJBsCUiyodowYe8kBcsP8mJx4i1FvjvAxXun6dyesFQFsvJBuCCedK3TtVW6538pvXeQB6615j4qC9sUao5PWdd2j6mDZXfNTQc3MLdzXKfJwEmeeqnB3BLCscoi43ggVniJxRwbcxtDNS72UCdi778DjMjtm8nCB4AnNoPsGxbR1JD6G9DaWHkrwZJ3EqNa98nA4BeMrKk97oc4gzLzXAEncmGcgrda4FbUo1xHcWDZBggTydiyxZ8wrM4auLTA2Com7ahV7rSZUTqBn46Z9PTbuUpqt7fyvscbnnhi31SMVodDCL9pdYBQHEogtWikStgKspwkA2NSRt7LLR5U19wfYQbNXLHESv2DmeF79Y23dBhFd2vxLns2Vtn57kjpustEZo9j3Cb\"}\nerror: fetch failed: POST https://pixelbypixel.studio/mcp\n"
+    },
+    {
+      "attempt": 4,
+      "ok": false,
+      "error": "Command failed: ./bin/pbp-mcp call submit_signed_mission_reroll --args {\"rerollToken\":\"eyJhbGciOiJIUzI1NiJ9.eyJ0b2tlblR5cGUiOiJtY3BfbWlzc2lvbl9yZXJvbGwiLCJwbGF5RmFiSWQiOiJBM0ZEMzdCODY0RTBFQjgzIiwid2FsbGV0SWQiOiIzTGdpTnltRnlQQUM4TUhkeDhHalZnR3VHM2NhQ1J4czhyUmcycGl0cmJNViIsInBheWVyV2FsbGV0SWQiOiJBeFI3TFlwUndScldSdTR1cVN3akpjV2Y2SmpGeEtrTm5zSlQyNnFqdFNIcCIsImFzc2lnbmVkTWlzc2lvbklkIjoiOThkNmYyODMtNjhhYy00YWJhLWFkOTMtYmU5Zjg0NjYwZDI4IiwicmVyb2xsQ29zdCI6NTAwLCJ0cmFuc2FjdGlvbiI6IjJvN1dqemZENTZTd0JCVFhRdGFvY2pxTjJBS1c1dnZzZGFtVTZ1ekhNeGNtNW5kU2ROQ3k1ZnBmUFhzek1SWFNaeFNwd0pzWWtpdlc4RlFiSEo2dnRjUzJ1YkNud2hBYW9YOGt3UTVvZVhHODFaTGNZS2hxN1d0cVl6VG5lMTh2YVVCc2RjeFNLdjZxUlZaYlZTdXBtbXpIVk45am5rVHpjblBRTW1NckNERGFmeHhjSkN5bktTQXZ6cFl2UnVVbnBaQ3FvRkFZcU5RbmZ5ZjFkWnpnZzVkR1RQOXVIUEcyaHdNTk0zc25DSEJkanBoZ241U2tQNXA2SEFYM2hQcmd2RXpxTVFCaWt1ZzE0QlJUZnpjS1ZhYVhtczFoVmhnQ0VjWk5MYWp0cGNUbmFRTVZaVGlSZlduSFF5WGtobVp6N0M4ODhMWGc5TG9mUjhLclE1S2dHMjJGNk1zY3gzb0tFNWRMbUg3ZzczOFE3ZWJSYTVrQjk4Q2UxTWZMVzZoN29TaEN2NUw3WDh3SENxNlhud3dZVXZQYlNXQlloWTlMR010Q25kZ2Nla3lMVU1OVFZ4eVFwVXpqNlFFeUVjUXlaZnFjdWtoNXY5WXVoMVRkMllvV21RNWt4WTR0UnIxYWtkMzlKUTZHUEExZHdHc1VFVVdhbjF6NndvRzVMU3Ryb014NG9oVFFpVzhDUXpTYiIsImlzcyI6InBicC13ZWIzLW1jcC1taXNzaW9uLXJlcm9sbCIsImF1ZCI6InBicC13ZWIzLW1jcC1jbGllbnQiLCJpYXQiOjE3NzY0NTE0NjcsImp0aSI6ImMzYmUwZDhhNWQ1OTg5MGM2MTZkZDNkYTBhZDJlOTdmIiwiZXhwIjoxNzc2NDUzMjY3fQ.RR0SaMkTCIUizTI5jpjry9svegWV5fDianECJemhwAM\",\"encodedSignedTransaction\":\"3w9UgGaG7rZ2sGKYQqedVNydBTdJKsajLTsoH8RR5gZZG2xMTxKu86iVDmDu2ozPJrDHqcNf8Fb2V1rZYNwsMaSv2MgrPhYw2KHXuxbMAYX4pkphUJES7GfxPs6dxRD68hAAEPJBsCUiyodowYe8kBcsP8mJx4i1FvjvAxXun6dyesFQFsvJBuCCedK3TtVW6538pvXeQB6615j4qC9sUao5PWdd2j6mDZXfNTQc3MLdzXKfJwEmeeqnB3BLCscoi43ggVniJxRwbcxtDNS72UCdi778DjMjtm8nCB4AnNoPsGxbR1JD6G9DaWHkrwZJ3EqNa98nA4BeMrKk97oc4gzLzXAEncmGcgrda4FbUo1xHcWDZBggTydiyxZ8wrM4auLTA2Com7ahV7rSZUTqBn46Z9PTbuUpqt7fyvscbnnhi31SMVodDCL9pdYBQHEogtWikStgKspwkA2NSRt7LLR5U19wfYQbNXLHESv2DmeF79Y23dBhFd2vxLns2Vtn57kjpustEZo9j3Cb\"}\nerror: fetch failed: POST https://pixelbypixel.studio/mcp\n"
+    }
+  ],
+  "finalSubmit": null
+}

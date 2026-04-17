@@ -1,4 +1,0 @@
-{
-  "generatedAt": "2026-04-13T02:18:17.436Z",
-  "fatal": "Command failed: ./bin/pbp-mcp call prepare_mission_reroll --args {\"assignedMissionId\":\"eb95df8f-e45f-410d-a2fb-129131826755\",\"signingMode\":\"browser_bridge\"}\nerror: fetch failed\n"
-}

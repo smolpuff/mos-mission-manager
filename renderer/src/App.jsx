@@ -144,7 +144,7 @@ function SlideNumberFormatted({ value, format }) {
 }
 
 function ControlView() {
-  const { bridge, status, logs } = useBackendState();
+  const { bridge, status, logs, lastEvent } = useBackendState();
   const [currentPage, setCurrentPage] = useState("missions");
   const [isCliActive, setIsCliActive] = useState(false);
   const [fundingSource, setFundingSource] = useState("browser");
@@ -333,6 +333,11 @@ function ControlView() {
     }
     const rewardTotals = status.sessionRewardTotals || {};
     const spendTotals = status.sessionSpendTotals || {};
+    const signerMode = String(status.signerMode || "").trim();
+    const applyMainWalletSpend = signerMode !== "app_wallet";
+    const effectiveSpendTotals = applyMainWalletSpend
+      ? spendTotals
+      : { pbp: 0, cc: 0, tc: 0 };
     const formatWalletAmount = (value) => {
       const n = Number(value);
       if (!Number.isFinite(n)) return "0";
@@ -356,7 +361,7 @@ function ControlView() {
         icon: pbpIcon,
         balance:
           byKey.get("pbp")?.displayBalance ?? byKey.get("pbp")?.balance ?? 0,
-        earned: (rewardTotals.pbp ?? 0) - (spendTotals.pbp ?? 0),
+        earned: (rewardTotals.pbp ?? 0) - (effectiveSpendTotals.pbp ?? 0),
         earnedVisible: true,
       },
       {
@@ -369,7 +374,7 @@ function ControlView() {
           byKey.get("community_coins")?.displayBalance ??
           byKey.get("community_coins")?.balance ??
           0,
-        earned: (rewardTotals.cc ?? 0) - (spendTotals.cc ?? 0),
+        earned: (rewardTotals.cc ?? 0) - (effectiveSpendTotals.cc ?? 0),
         earnedVisible: true,
       },
       {
@@ -382,7 +387,7 @@ function ControlView() {
           byKey.get("tournament_coins")?.displayBalance ??
           byKey.get("tournament_coins")?.balance ??
           0,
-        earned: (rewardTotals.tc ?? 0) - (spendTotals.tc ?? 0),
+        earned: (rewardTotals.tc ?? 0) - (effectiveSpendTotals.tc ?? 0),
         earnedVisible: true,
       },
     ].map((tile) => ({
@@ -404,14 +409,15 @@ function ControlView() {
     }));
   }, [
     status.currentUserWalletSummary,
+    status.signerMode,
     status.sessionRewardTotals,
     status.sessionSpendTotals,
   ]);
   const lockLabel =
     status.signerLocked === true
-      ? "🔒"
+      ? "Locked"
       : status.signerLocked === false
-        ? "🔓"
+        ? "Unlocked"
         : "";
   const slots = Array.isArray(status.guiMissionSlots)
     ? status.guiMissionSlots
@@ -445,9 +451,71 @@ function ControlView() {
     ? activityLabel
     : status.running
       ? isWatching
-        ? "Watching Missions..."
+        ? "Watching missions..."
         : "Starting up..."
       : "Stopped";
+
+  useEffect(() => {
+    if (status.running) return;
+    setActivityLabel(null);
+  }, [status.running]);
+
+  useEffect(() => {
+    if (!lastEvent || typeof lastEvent !== "object") return;
+    const type = String(lastEvent.type || "").trim();
+    let next = null;
+    let resetToWatchingMs = null;
+    if (type === "claimed") {
+      const logLabel = String(lastEvent.logLabel || "").trim();
+      next = logLabel ? `✅ ${logLabel}` : "✅ Claimed mission";
+      resetToWatchingMs = 2200;
+    } else if (type === "assigning") {
+      const state = String(lastEvent.state || "").trim();
+      if (state === "start") {
+        next = "🚀 Starting mission...";
+      } else if (state === "done") {
+        const count = Number(lastEvent.assigned || 0);
+        next = count > 0 ? "✅ Started mission" : "Watching missions...";
+        if (count > 0) resetToWatchingMs = 2200;
+      } else if (state === "error") {
+        next = "❌ Start failed";
+        resetToWatchingMs = 3200;
+      }
+    } else if (type === "assigned") {
+      next = "✅ Started mission";
+      resetToWatchingMs = 2200;
+    } else if (type === "claiming") {
+      const state = String(lastEvent.state || "").trim();
+      if (state === "start") {
+        next = "⏳ Claiming mission...";
+      } else if (state === "done") {
+        const count = Number(lastEvent.claimed || 0);
+        next = count > 0 ? `✅ Claimed ${count}` : "Watching missions...";
+        if (count > 0) resetToWatchingMs = 2200;
+      } else if (state === "error") {
+        next = "❌ Claim failed";
+        resetToWatchingMs = 3200;
+      }
+    } else if (type === "tick" && isWatching) {
+      const current = String(activityLabel || "").toLowerCase();
+      if (current.includes("claiming mission") || current.includes("starting mission")) {
+        next = "Watching missions...";
+      }
+    }
+    if (!next) return;
+    setActivityLabel(next);
+    if (!Number.isFinite(Number(resetToWatchingMs)) || Number(resetToWatchingMs) <= 0) {
+      return;
+    }
+    const timer = setTimeout(() => {
+      setActivityLabel((current) => {
+        if (!status.running) return null;
+        if (status.watcherRunning === true) return "Watching missions...";
+        return current === next ? null : current;
+      });
+    }, Number(resetToWatchingMs));
+    return () => clearTimeout(timer);
+  }, [lastEvent, isWatching, activityLabel, status.running, status.watcherRunning]);
 
   useEffect(() => {
     setIsCliActive(status.cliWindowOpen === true);
@@ -476,27 +544,13 @@ function ControlView() {
   }, [bridge, status.signerMode, status.fundingWalletSummary?.status]);
 
   useEffect(() => {
-    if (!status.running || !Array.isArray(logs) || logs.length === 0) return;
-    const last = logs[logs.length - 1];
-    const text = String(last?.text || "");
-    let next = null;
-    if (
-      /^\[WATCH\].*✅\s+Claimed/i.test(text) ||
-      /Claimed .*reward/i.test(text)
-    ) {
-      next = "✅ Claimed Mission";
-    } else if (/^\[ASSIGN\].*✅\s+Started mission/i.test(text)) {
-      next = "🚀 Started Mission";
-    } else if (/^\[WATCH\].*Cycle complete/i.test(text)) {
-      next = "🔎 Watching Missions...";
+    if (!status.running) return;
+    if (isWatching) {
+      setActivityLabel((current) => current || "Watching missions...");
+      return;
     }
-    if (!next) return;
-    setActivityLabel(next);
-    const timer = setTimeout(() => {
-      setActivityLabel(null);
-    }, 1400);
-    return () => clearTimeout(timer);
-  }, [logs, status.running]);
+    setActivityLabel((current) => current || "Starting up...");
+  }, [status.running, isWatching]);
 
   const openCliWindow = () => {
     setIsCliActive(true);
@@ -520,9 +574,32 @@ function ControlView() {
     }
   };
   const startMissions = async () => {
+    const applyPersistedModeToBackend = async () => {
+      if (!bridge?.sendCommand) return;
+      if (isMissionMode) {
+        const resetLevel = String(status.currentMissionResetLevel || "6")
+          .trim();
+        const levelNumber = Number(resetLevel);
+        const safeLevel =
+          Number.isFinite(levelNumber) && levelNumber > 0
+            ? Math.floor(levelNumber)
+            : 6;
+        await bridge.sendCommand(`mm ${safeLevel}`);
+        return;
+      }
+      if (resetEnabled) {
+        await bridge.sendCommand("mm off");
+        await bridge.sendCommand("20r on");
+        return;
+      }
+      await bridge.sendCommand("mm off");
+      await bridge.sendCommand("20r off");
+    };
+
     if (!status.running) {
       await bridge.startBackend();
     }
+    await applyPersistedModeToBackend();
     await bridge.sendCommand("resume");
   };
 

@@ -278,21 +278,6 @@ async function runStartupSequence() {
     });
     signer.logModeSelected("startup");
 
-    if (
-      ctx.signerMode === "app_wallet" &&
-      ctx.signerConfig?.walletRef &&
-      (ctx.signerLocked || !ctx.signerReady)
-    ) {
-      try {
-        logger.logWithTimestamp("[STARTUP] Unlocking app wallet signer...");
-        await signer.unlock();
-      } catch (error) {
-        logger.logWithTimestamp(
-          `[STARTUP] ⚠️ App wallet unlock failed: ${error.message}`,
-        );
-      }
-    }
-
     let loginOk = false;
 
     if (ctx.debugMode) {

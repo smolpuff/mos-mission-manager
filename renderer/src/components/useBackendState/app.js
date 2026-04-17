@@ -1,6 +1,37 @@
 import { useEffect, useState } from "react";
 import useDesktopBridge from "../useDesktopBridge";
 
+function normalizeTotals(raw) {
+  const src = raw && typeof raw === "object" ? raw : {};
+  return {
+    pbp: typeof src.pbp === "number" ? src.pbp : 0,
+    tc: typeof src.tc === "number" ? src.tc : 0,
+    cc: typeof src.cc === "number" ? src.cc : 0,
+  };
+}
+
+function mergePersistentTotals(current, next) {
+  const a = normalizeTotals(current);
+  const b = normalizeTotals(next);
+  return {
+    pbp: Math.max(a.pbp, b.pbp),
+    tc: Math.max(a.tc, b.tc),
+    cc: Math.max(a.cc, b.cc),
+  };
+}
+
+function normalizeBackendEvent(event) {
+  if (!event || typeof event !== "object") return null;
+  const typeFromEnvelope = String(event.type || "").trim();
+  if (typeFromEnvelope === "pbp_event") {
+    const payload =
+      event.payload && typeof event.payload === "object" ? event.payload : {};
+    const mappedType = String(event.event || "").trim();
+    return mappedType ? { type: mappedType, ...payload } : null;
+  }
+  return event;
+}
+
 export default function useBackendState() {
   const bridge = useDesktopBridge();
   const [status, setStatus] = useState({
@@ -32,17 +63,39 @@ export default function useBackendState() {
     cliWindowOpen: false,
   });
   const [logs, setLogs] = useState([]);
-  const [eventTick, setEventTick] = useState(0);
+  const [lastEvent, setLastEvent] = useState(null);
+  const [persistentRewardTotals, setPersistentRewardTotals] = useState({
+    pbp: 0,
+    tc: 0,
+    cc: 0,
+  });
+  const [persistentSpendTotals, setPersistentSpendTotals] = useState({
+    pbp: 0,
+    tc: 0,
+    cc: 0,
+  });
 
   useEffect(() => {
     let mounted = true;
     bridge.getState().then((state) => {
       if (!mounted) return;
+      setPersistentRewardTotals((current) =>
+        mergePersistentTotals(current, state.status?.sessionRewardTotals),
+      );
+      setPersistentSpendTotals((current) =>
+        mergePersistentTotals(current, state.status?.sessionSpendTotals),
+      );
       setStatus(state.status);
       setLogs(state.logs);
     });
 
     const offStatus = bridge.onBackendStatus((nextStatus) => {
+      setPersistentRewardTotals((current) =>
+        mergePersistentTotals(current, nextStatus?.sessionRewardTotals),
+      );
+      setPersistentSpendTotals((current) =>
+        mergePersistentTotals(current, nextStatus?.sessionSpendTotals),
+      );
       setStatus(nextStatus);
     });
     const offOutput = bridge.onBackendOutput((entry) => {
@@ -50,13 +103,14 @@ export default function useBackendState() {
     });
     const offEvent =
       bridge.onBackendEvent?.((event) => {
-        if (event?.type === "cli_window_state") {
+        const normalizedEvent = normalizeBackendEvent(event);
+        if (normalizedEvent?.type === "cli_window_state") {
           setStatus((current) => ({
             ...current,
-            cliWindowOpen: event.open === true,
+            cliWindowOpen: normalizedEvent.open === true,
           }));
         }
-        setEventTick((n) => n + 1);
+        setLastEvent(normalizedEvent);
       }) || (() => {});
 
     return () => {
@@ -71,6 +125,12 @@ export default function useBackendState() {
     let cancelled = false;
     bridge.getState().then(async (state) => {
       if (cancelled) return;
+      setPersistentRewardTotals((current) =>
+        mergePersistentTotals(current, state.status?.sessionRewardTotals),
+      );
+      setPersistentSpendTotals((current) =>
+        mergePersistentTotals(current, state.status?.sessionSpendTotals),
+      );
       setStatus(state.status);
     });
     return () => {
@@ -78,5 +138,11 @@ export default function useBackendState() {
     };
   }, [bridge]);
 
-  return { bridge, status, logs };
+  const effectiveStatus = {
+    ...status,
+    sessionRewardTotals: persistentRewardTotals,
+    sessionSpendTotals: persistentSpendTotals,
+  };
+
+  return { bridge, status: effectiveStatus, logs, lastEvent };
 }

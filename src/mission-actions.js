@@ -7,9 +7,55 @@ const {
 
 function createMissionActionExecutor(logger, mcp, signer) {
   const { logDebug } = logger;
+  const SUBMIT_SIGNED_TIMEOUT_MS = 120000;
+
+  function formatTokenAmount(value, token = "PBP") {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return "n/a";
+    return `${n.toLocaleString(undefined, { maximumFractionDigits: 2 })} ${token}`;
+  }
+
+  function extractToolMessages(result) {
+    const contentMessages = Array.isArray(result?.content)
+      ? result.content
+          .map((entry) =>
+            entry && typeof entry === "object" ? String(entry.text || "").trim() : "",
+          )
+          .filter(Boolean)
+      : [];
+    const detailsMessage = String(
+      result?.structuredContent?.details?.message || "",
+    ).trim();
+    const noteMessage = String(result?.structuredContent?.note || "").trim();
+    const allMessages = [
+      ...contentMessages,
+      ...(detailsMessage ? [detailsMessage] : []),
+      ...(noteMessage ? [noteMessage] : []),
+    ];
+    return {
+      contentMessages,
+      detailsMessage: detailsMessage || null,
+      noteMessage: noteMessage || null,
+      allMessages,
+      joined: allMessages.join(" | "),
+    };
+  }
+
+  function classifySubmitError(message) {
+    const text = String(message || "");
+    if (
+      /fetch failed|ENOTFOUND|ECONN|EAI_AGAIN|network|socket|request timeout|timed out/i.test(
+        text,
+      )
+    ) {
+      return "transport";
+    }
+    return "server_response";
+  }
 
   function summarizeToolResult(result) {
     const sc = result?.structuredContent || {};
+    const messages = extractToolMessages(result);
     return {
       success: sc?.success ?? null,
       topLevelKeys: Object.keys(sc),
@@ -26,6 +72,8 @@ function createMissionActionExecutor(logger, mcp, signer) {
       transactionLength:
         typeof sc?.transaction === "string" ? sc.transaction.length : null,
       note: sc?.note || null,
+      errorId: sc?.errorId || null,
+      responseMessage: messages.joined || null,
     };
   }
 
@@ -77,7 +125,41 @@ function createMissionActionExecutor(logger, mcp, signer) {
       cost: signed.cost,
       ...debugMeta,
     });
-    const submitted = await mcp.mcpToolCall(signed.submitTool, signed.submitArgs);
+    let submitted = null;
+    const submitTimeoutMs =
+      String(signed.submitTool || "").startsWith("submit_signed_")
+        ? SUBMIT_SIGNED_TIMEOUT_MS
+        : undefined;
+    try {
+      submitted = await mcp.mcpToolCall(
+        signed.submitTool,
+        signed.submitArgs,
+        submitTimeoutMs ? { timeoutMs: submitTimeoutMs } : {},
+      );
+    } catch (error) {
+      const errorMessage = String(error?.message || error || "unknown submit error");
+      const category = classifySubmitError(errorMessage);
+      logger.logWithTimestamp(
+        `[SIGNER] Submit failed (${category}) action=${actionName} tool=${signed.submitTool} cost=${formatTokenAmount(signed.cost)}: ${errorMessage}`,
+      );
+      logDebug(debugScope, `${submitDebugAction}_transport_error`, {
+        actionName,
+        submitTool: signed.submitTool,
+        submitTimeoutMs: submitTimeoutMs || null,
+        category,
+        error: errorMessage,
+        submitArgsKeys:
+          signed.submitArgs && typeof signed.submitArgs === "object"
+            ? Object.keys(signed.submitArgs)
+            : [],
+        encodedSignedTransactionLength:
+          typeof signed.submitArgs?.encodedSignedTransaction === "string"
+            ? signed.submitArgs.encodedSignedTransaction.length
+            : null,
+        ...debugMeta,
+      });
+      throw error;
+    }
     logDebug(debugScope, `${submitDebugAction}_result`, {
       actionName,
       submitTool: signed.submitTool,
@@ -85,18 +167,38 @@ function createMissionActionExecutor(logger, mcp, signer) {
       ...debugMeta,
     });
     if (!toolCallSucceeded(submitted)) {
+      const failureMessage = extractToolFailureMessage(
+        submitted,
+        `${signed.submitTool} failed`,
+      );
+      const submitMessages = extractToolMessages(submitted);
+      logger.logWithTimestamp(
+        `[SIGNER] Submit failed (server_response) action=${actionName} tool=${signed.submitTool} cost=${formatTokenAmount(signed.cost)}: ${failureMessage}`,
+      );
+      logDebug(debugScope, `${submitDebugAction}_response_error`, {
+        actionName,
+        submitTool: signed.submitTool,
+        error: failureMessage,
+        responseMessages: submitMessages.allMessages,
+        responseMessageJoined: submitMessages.joined || null,
+        submitSummary: summarizeToolResult(submitted),
+        ...debugMeta,
+      });
       throw new Error(
-        extractToolFailureMessage(submitted, `${signed.submitTool} failed`),
+        failureMessage,
       );
     }
+    const submitMessages = extractToolMessages(submitted);
     logger.logWithTimestamp(
-      `[SIGNER] ✅ Submitted action=${actionName} via ${signed.submitTool}.`,
+      `[SIGNER] ✅ Submitted action=${actionName} via ${signed.submitTool} cost=${formatTokenAmount(signed.cost)}.`,
     );
     logDebug(debugScope, `${submitDebugAction}_ok`, {
       actionName,
       submitTool: signed.submitTool,
       tokenPreview: signed.tokenPreview,
       cost: signed.cost,
+      responseMessages: submitMessages.allMessages,
+      responseMessageJoined: submitMessages.joined || null,
       ...debugMeta,
     });
     return {

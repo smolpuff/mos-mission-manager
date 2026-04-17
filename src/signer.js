@@ -11,7 +11,7 @@ const {
   createKeyPairSignerFromBytes,
   createKeyPairSignerFromPrivateKeyBytes,
   signTransactionWithSigners,
-  getBase64EncodedWireTransaction,
+  getTransactionEncoder,
   getBase58Decoder,
 } = require("@solana/kit");
 const {
@@ -77,6 +77,11 @@ function missionPageCooldownMsFromConfig(ctx) {
 function createSignerService(ctx, logger) {
   const { logWithTimestamp, logDebug } = logger;
   let approvalPromptHandler = null;
+
+  function getBase58EncodedWireTransaction(transaction) {
+    const wireTransactionBytes = getTransactionEncoder().encode(transaction);
+    return getBase58Decoder().decode(wireTransactionBytes);
+  }
 
   function normalizeSignerMode(value) {
     const normalized = String(value || "").trim();
@@ -570,7 +575,64 @@ function createSignerService(ctx, logger) {
     if (!fs.existsSync(file)) return null;
     try {
       const raw = fs.readFileSync(file, "utf8");
-      return JSON.parse(raw);
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        return null;
+      }
+      const compact = {
+        version: Number(parsed.version) || VAULT_VERSION,
+        algorithm: String(parsed.algorithm || VAULT_ALGORITHM),
+        nonce: String(parsed.nonce || ""),
+        authTag: String(parsed.authTag || ""),
+        ciphertext: String(parsed.ciphertext || ""),
+        createdAt:
+          typeof parsed.createdAt === "string" && parsed.createdAt.trim()
+            ? parsed.createdAt
+            : nowIso(),
+      };
+      if (
+        parsed.mnemonicBackup &&
+        typeof parsed.mnemonicBackup === "object" &&
+        !Array.isArray(parsed.mnemonicBackup)
+      ) {
+        const mnemonicBackup = {
+          version:
+            Number(parsed.mnemonicBackup.version) || VAULT_VERSION,
+          algorithm: String(
+            parsed.mnemonicBackup.algorithm || VAULT_ALGORITHM,
+          ),
+          nonce: String(parsed.mnemonicBackup.nonce || ""),
+          authTag: String(parsed.mnemonicBackup.authTag || ""),
+          ciphertext: String(parsed.mnemonicBackup.ciphertext || ""),
+          createdAt:
+            typeof parsed.mnemonicBackup.createdAt === "string" &&
+            parsed.mnemonicBackup.createdAt.trim()
+              ? parsed.mnemonicBackup.createdAt
+              : nowIso(),
+        };
+        if (
+          mnemonicBackup.nonce &&
+          mnemonicBackup.authTag &&
+          mnemonicBackup.ciphertext
+        ) {
+          compact.mnemonicBackup = mnemonicBackup;
+        }
+      }
+      if (!compact.nonce || !compact.authTag || !compact.ciphertext) {
+        throw new Error("Vault record is missing encrypted payload fields.");
+      }
+      const compactJson = JSON.stringify(compact);
+      const parsedJson = JSON.stringify(parsed);
+      if (compactJson !== parsedJson) {
+        persistVaultRecord(compact);
+        logDebug("signer", "vault_compacted", {
+          removedKeys: Object.keys(parsed).filter(
+            (key) => !Object.prototype.hasOwnProperty.call(compact, key),
+          ),
+          vaultFile: redactPath(file),
+        });
+      }
+      return compact;
     } catch (error) {
       logDebug("signer", "vault_load_failed", {
         error: error.message,
@@ -843,24 +905,11 @@ function createSignerService(ctx, logger) {
     const importedAt = nowIso();
     const vaultRecord = {
       ...encrypted,
-      walletRef,
-      walletAddress,
-      derivationPath,
-      importSourceType: sourceType,
-      mnemonicBackup: encryptedMnemonic,
-      keyLength: secretBytes.length,
-      keyStore: {
-        provider: secureStorageProvider(),
-        service: SIGNER_SERVICE,
-        account: SIGNER_ACCOUNT,
-        file:
-          secureStorageProvider() === "windows_dpapi"
-            ? keyStoreFileRelative()
-            : null,
-      },
-      allowedActions: Array.from(SUPPORTED_MISSION_ACTIONS),
-      importedAt,
+      ...(encryptedMnemonic ? { mnemonicBackup: encryptedMnemonic } : {}),
     };
+    const provider = secureStorageProvider();
+    const keyStoreFile =
+      provider === "windows_dpapi" ? keyStoreFileRelative() : null;
     const signerConfig = {
       vaultFile: vaultFileRelative(),
       walletRef,
@@ -871,10 +920,10 @@ function createSignerService(ctx, logger) {
       vaultVersion: VAULT_VERSION,
       algorithm: VAULT_ALGORITHM,
       importedAt,
-      keyStoreProvider: vaultRecord.keyStore.provider,
+      keyStoreProvider: provider,
       keyStoreService: SIGNER_SERVICE,
       keyStoreAccount: SIGNER_ACCOUNT,
-      keyStoreFile: vaultRecord.keyStore.file,
+      keyStoreFile,
       allowedActions: Array.from(SUPPORTED_MISSION_ACTIONS),
       enabled: ctx.signerConfig?.enabled !== false,
       auditFile: ctx.signerConfig?.auditFile || auditFileRelative(),
@@ -920,6 +969,8 @@ function createSignerService(ctx, logger) {
       logDebug("signer", "persist_secret_failed", {
         error: error.message,
         sourceType,
+        mnemonicProvided:
+          typeof mnemonic === "string" && mnemonic.trim().length > 0,
         vaultFile: vaultFileRelative(),
       });
       throw error;
@@ -1280,22 +1331,25 @@ function createSignerService(ctx, logger) {
     if (!ctx.signerConfig?.walletRef) {
       throw new Error("No app wallet found. Create or import one first.");
     }
+    const vault = loadVaultRecord();
+    if (!vault) throw new Error("Encrypted signer vault is missing or unreadable.");
     let vaultKey = null;
     try {
-      const vault = loadVaultRecord();
-      if (!vault) throw new Error("Encrypted signer vault is missing or unreadable.");
       vaultKey = await readVaultKeyFromSecureStorage();
       const mnemonic =
         vault.mnemonicBackup && typeof vault.mnemonicBackup === "object"
           ? decryptUtf8(vault.mnemonicBackup, vaultKey)
           : null;
       return {
-        walletAddress:
-          normalizeWalletAddress(ctx.signerConfig?.walletAddress) ||
-          normalizeWalletAddress(vault.walletAddress) ||
-          null,
-        derivationPath: vault.derivationPath || null,
-        sourceType: vault.importSourceType || null,
+        walletAddress: normalizeWalletAddress(ctx.signerConfig?.walletAddress) || null,
+        derivationPath:
+          typeof ctx.signerConfig?.derivationPath === "string"
+            ? ctx.signerConfig.derivationPath
+            : null,
+        sourceType:
+          typeof ctx.signerConfig?.importSourceType === "string"
+            ? ctx.signerConfig.importSourceType
+            : null,
         mnemonic,
       };
     } finally {
@@ -1380,9 +1434,6 @@ function createSignerService(ctx, logger) {
     }
     if (!ctx.signerConfig?.walletRef) {
       throw new Error("No app wallet found. Run 'signer create' or 'signer import'.");
-    }
-    if (ctx.signerLocked || !ctx.signerReady) {
-      throw new Error("Signer is locked or unavailable. Run 'signer unlock'.");
     }
   }
 
@@ -1582,10 +1633,18 @@ function createSignerService(ctx, logger) {
       identifiers: validated.identifiers,
       replayFingerprint: replayFingerprint.slice(0, 16),
     });
-    await requestManualApproval(normalizedAction, validated);
-
     let signer = null;
+    let unlockedForSign = false;
     try {
+      if (
+        ctx.signerMode === "app_wallet" &&
+        (ctx.signerLocked ||
+          !ctx.signerReady ||
+          !Buffer.isBuffer(ctx.signerSessionSecretKey))
+      ) {
+        await unlock();
+        unlockedForSign = true;
+      }
       if (validated.decode.signerMatchesExpectation === false) {
         logWithTimestamp(
           `[SIGNER] ⚠️ Prepared tx signer mismatch for ${normalizedAction}: tx requires ${validated.decode.signerAddresses.join(", ")} but app wallet is ${validated.decode.expectedSignerAddress}. Attempting sign anyway for diagnostics.`,
@@ -1608,7 +1667,7 @@ function createSignerService(ctx, logger) {
         decoded.decodedTransaction,
       );
       const encodedSignedTransaction =
-        getBase64EncodedWireTransaction(signedTransaction);
+        getBase58EncodedWireTransaction(signedTransaction);
       const submitArgs = {
         [validated.tokenField]: validated.structuredContent[validated.tokenField],
         encodedSignedTransaction,
@@ -1661,6 +1720,9 @@ function createSignerService(ctx, logger) {
     } finally {
       if (ctx.signerMode === "app_wallet" && ctx.signerReady && !ctx.signerLocked) {
         lock("post_sign");
+      } else if (ctx.signerMode === "app_wallet" && unlockedForSign) {
+        clearSignerSessionSecretKey();
+        updateSignerState();
       }
     }
   }

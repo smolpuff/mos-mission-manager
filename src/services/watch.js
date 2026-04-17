@@ -35,6 +35,8 @@ function createWatchService(ctx, logger, mcp, checks, configApi, services = {}) 
   let traceSequence = 0;
   let walletRefreshTimer = null;
   let walletRefreshPendingReason = null;
+  let currentWalletSummaryRefreshTimer = null;
+  let currentWalletSummaryRefreshPendingReason = null;
 
   function missionPageCooldownMs() {
     const sec = Number(ctx.config?.missionPageOpenCooldownSeconds);
@@ -65,9 +67,41 @@ function createWatchService(ctx, logger, mcp, checks, configApi, services = {}) 
     }, 250);
   }
 
+  function scheduleCurrentWalletSummaryRefresh(reason = "wallet_change") {
+    currentWalletSummaryRefreshPendingReason = reason;
+    if (currentWalletSummaryRefreshTimer) return;
+    currentWalletSummaryRefreshTimer = setTimeout(() => {
+      currentWalletSummaryRefreshTimer = null;
+      const pending =
+        currentWalletSummaryRefreshPendingReason || "wallet_change";
+      currentWalletSummaryRefreshPendingReason = null;
+      if (!checks || typeof checks.runWhoAmICheck !== "function") return;
+      Promise.resolve()
+        .then(() => checks.runWhoAmICheck())
+        .then(() => {
+          logDebug("watch", "current_wallet_summary_refreshed", {
+            reason: pending,
+          });
+          if (ctx.guiBridge?.emitNow) ctx.guiBridge.emitNow();
+        })
+        .catch((error) =>
+          logDebug("watch", "current_wallet_summary_refresh_failed", {
+            reason: pending,
+            error: error.message,
+          }),
+        );
+    }, 350);
+  }
+
   function nextTraceId(kind = "cycle") {
     traceSequence += 1;
     return `${kind}_${traceSequence}`;
+  }
+
+  async function sleep(ms) {
+    await new Promise((resolve) =>
+      setTimeout(resolve, Math.max(0, Number(ms) || 0)),
+    );
   }
 
   function snapshotTraceSummary(snapshotMap) {
@@ -815,6 +849,7 @@ function createWatchService(ctx, logger, mcp, checks, configApi, services = {}) 
     if (ctx.guiBridge && typeof ctx.guiBridge.emitNow === "function") {
       ctx.guiBridge.emitNow();
     }
+    scheduleCurrentWalletSummaryRefresh("claim");
     return claimed;
   }
 
@@ -1112,7 +1147,16 @@ function createWatchService(ctx, logger, mcp, checks, configApi, services = {}) 
     });
     const rerollArgs = {
       assignedMissionId,
-      ...(ctx.signerMode === "dapp" ? { signingMode: "browser_bridge" } : {}),
+      ...(ctx.signerMode === "dapp"
+        ? { signingMode: "browser_bridge" }
+        : {
+            signingMode: "agent_managed",
+            ...(String(ctx.signerConfig?.walletAddress || "").trim()
+              ? {
+                  payerWallet: String(ctx.signerConfig.walletAddress).trim(),
+                }
+              : {}),
+          }),
     };
     logDebug("watch", "mission_reroll_prepare_args", {
       reason,
@@ -1293,6 +1337,7 @@ function createWatchService(ctx, logger, mcp, checks, configApi, services = {}) 
       );
       return true;
     }
+    let rerolledCount = 0;
     for (const mission of resetHits) {
       try {
         if (!signer) {
@@ -1300,6 +1345,7 @@ function createWatchService(ctx, logger, mcp, checks, configApi, services = {}) 
         }
         signer.ensureMissionActionSupported("mission_reroll");
         await performMissionReroll(mission, { reason, label });
+        rerolledCount += 1;
       } catch (error) {
         logWithTimestamp(
           `[RESET] ❌ Reroll blocked for ${mission.name}: ${error.message}`,
@@ -1312,6 +1358,45 @@ function createWatchService(ctx, logger, mcp, checks, configApi, services = {}) 
           level: mission.level ?? null,
           slot: mission.slot ?? null,
           error: error.message,
+        });
+      }
+    }
+    if (rerolledCount > 0) {
+      logWithTimestamp(
+        `[ASSIGN] ▶ Post-reset assign check (rerolled=${rerolledCount})...`,
+      );
+      try {
+        const immediateMissionResult = await mcp.mcpToolCall(
+          "get_user_missions",
+          {},
+        );
+        let assignResult = await checks.autoAssignConfiguredMissions({
+          reason: `post_reset_${reason}`,
+          missionsResult: immediateMissionResult,
+        });
+        logAssignCheckResult(assignResult);
+        if (Number(assignResult?.assigned || 0) === 0) {
+          await sleep(1200);
+          const retryMissionResult = await mcp.mcpToolCall(
+            "get_user_missions",
+            {},
+          );
+          assignResult = await checks.autoAssignConfiguredMissions({
+            reason: `post_reset_${reason}_retry`,
+            missionsResult: retryMissionResult,
+          });
+          logAssignCheckResult(assignResult);
+        }
+      } catch (error) {
+        logWithTimestamp(
+          `[ASSIGN] ❌ Post-reset assign check failed: ${error.message}`,
+        );
+        logDebug("watch", "post_reset_assign_failed", {
+          reason,
+          label,
+          rerolledCount,
+          error: error.message,
+          stack: error.stack,
         });
       }
     }
@@ -1730,6 +1815,14 @@ function createWatchService(ctx, logger, mcp, checks, configApi, services = {}) 
       });
       claimed += Number(fallback?.claimed || 0);
     }
+    if (ctx.guiBridge?.sendEvent) {
+      ctx.guiBridge.sendEvent("claiming", {
+        state: "done",
+        reason: "watch",
+        claimed,
+      });
+    }
+    if (ctx.guiBridge?.emitNow) ctx.guiBridge.emitNow();
     logDebug("watch", "cycle_result", {
       watch: result?.structuredContent?.watch || {},
       watchWindowEnded: summary.windowEnded,

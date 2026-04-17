@@ -1,0 +1,86 @@
+{
+  "generatedAt": "2026-04-17T18:56:34.859Z",
+  "mode": "base64-retest",
+  "payerWallet": "AxR7LYpRwRrWRu4uqSwjJcWf6JjFxKkNnsJT26qjtSHp",
+  "prepare": {
+    "content": [
+      {
+        "type": "text",
+        "text": "Prepared mission reroll for 98d6f283-68ac-4aba-ad93-be9f84660d28."
+      }
+    ],
+    "structuredContent": {
+      "success": true,
+      "assignedMissionId": "98d6f283-68ac-4aba-ad93-be9f84660d28",
+      "rerollCost": 500,
+      "transaction": "2o7WjzfD56SwBBTXQtaocjqN2AKW5vvsdamU6uzHMxcm5ndSdNCy5fpfPXszMRXSZxSpwJsYkivW8FQbHJ6vtcS2ubCnwhAaoX8kwQ5oeXG81ZLcYKhq7WtqYzTne18vaUBsdcxSKv6qRVZbVSupmmzHVN9jnkTzcnPQMmMrCDDafxxcJCynKSAvzpYvRuUnpZCqoFAYqNQnfyf1dZzgg5dGTP9uHPG2hwMNM3snCHBdjphgn5SkP5p6HAX3hPrgvEzqMQBikug14BRTfzcKVaaXms1hVhgCEcZNLajtpcTnaQMVZTiRfWnHQyXkhmZz7C888LXg9LofR8KrQ5KgG22F6Mscx3oKE5dMDJGuv27dn8Nioja23kTVbih5L8ATDGPyhR9GUq2jueQHeFPLDDq71RgSWyLy7KnYnq2gSpcw466RfnRdp3CwuVSPBhDHfvhT9d2gDUdmvNneqjjTkJfVjYn86k6Vngs1g9xDuEuJtiyPFfMwnT7vS8fQYkZi6VEqKtJzinXhmGKh",
+      "rerollToken": "eyJhbGciOiJIUzI1NiJ9.eyJ0b2tlblR5cGUiOiJtY3BfbWlzc2lvbl9yZXJvbGwiLCJwbGF5RmFiSWQiOiJBM0ZEMzdCODY0RTBFQjgzIiwid2FsbGV0SWQiOiIzTGdpTnltRnlQQUM4TUhkeDhHalZnR3VHM2NhQ1J4czhyUmcycGl0cmJNViIsInBheWVyV2FsbGV0SWQiOiJBeFI3TFlwUndScldSdTR1cVN3akpjV2Y2SmpGeEtrTm5zSlQyNnFqdFNIcCIsImFzc2lnbmVkTWlzc2lvbklkIjoiOThkNmYyODMtNjhhYy00YWJhLWFkOTMtYmU5Zjg0NjYwZDI4IiwicmVyb2xsQ29zdCI6NTAwLCJ0cmFuc2FjdGlvbiI6IjJvN1dqemZENTZTd0JCVFhRdGFvY2pxTjJBS1c1dnZzZGFtVTZ1ekhNeGNtNW5kU2ROQ3k1ZnBmUFhzek1SWFNaeFNwd0pzWWtpdlc4RlFiSEo2dnRjUzJ1YkNud2hBYW9YOGt3UTVvZVhHODFaTGNZS2hxN1d0cVl6VG5lMTh2YVVCc2RjeFNLdjZxUlZaYlZTdXBtbXpIVk45am5rVHpjblBRTW1NckNERGFmeHhjSkN5bktTQXZ6cFl2UnVVbnBaQ3FvRkFZcU5RbmZ5ZjFkWnpnZzVkR1RQOXVIUEcyaHdNTk0zc25DSEJkanBoZ241U2tQNXA2SEFYM2hQcmd2RXpxTVFCaWt1ZzE0QlJUZnpjS1ZhYVhtczFoVmhnQ0VjWk5MYWp0cGNUbmFRTVZaVGlSZlduSFF5WGtobVp6N0M4ODhMWGc5TG9mUjhLclE1S2dHMjJGNk1zY3gzb0tFNWRNREpHdXYyN2RuOE5pb2phMjNrVFZiaWg1TDhBVERHUHloUjlHVXEyanVlUUhlRlBMRERxNzFSZ1NXeUx5N0tuWW5xMmdTcGN3NDY2UmZuUmRwM0N3dVZTUEJoREhmdmhUOWQyZ0RVZG12Tm5lcWpqVGtKZlZqWW44Nms2Vm5nczFnOXhEdUV1SnRpeVBGZk13blQ3dlM4ZlFZa1ppNlZFcUt0SnppblhobUdLaCIsImlzcyI6InBicC13ZWIzLW1jcC1taXNzaW9uLXJlcm9sbCIsImF1ZCI6InBicC13ZWIzLW1jcC1jbGllbnQiLCJpYXQiOjE3NzY0NTIxOTQsImp0aSI6IjVjNGY0OTM1YWFjZTBhNjM4NDc1N2U2MjU0ZDU3NTY0IiwiZXhwIjoxNzc2NDUzOTk0fQ.n_0AMmomJB1tgrYSkiqOJuhhAy-D8GWbgX-xD44qrtQ",
+      "payerWalletId": "AxR7LYpRwRrWRu4uqSwjJcWf6JjFxKkNnsJT26qjtSHp",
+      "signingMode": "agent_managed",
+      "missionRerollId": "mrr_9e13acd29aed492e7f5884fc",
+      "signingBridgePath": "/mcp/sign-mission-reroll?missionRerollId=mrr_9e13acd29aed492e7f5884fc",
+      "signingBridgeUrl": "https://pixelbypixel.studio/mcp/sign-mission-reroll?missionRerollId=mrr_9e13acd29aed492e7f5884fc",
+      "expiresAt": "2026-04-17T19:26:34.339Z",
+      "signingMethods": {
+        "browserBridge": {
+          "supported": true,
+          "signingUrl": "https://pixelbypixel.studio/mcp/sign-mission-reroll?missionRerollId=mrr_9e13acd29aed492e7f5884fc"
+        },
+        "agentManagedWallet": {
+          "supported": true,
+          "note": "Agent may sign transaction directly and call submit_signed_mission_reroll."
+        }
+      },
+      "note": "Check whether PBP_AGENT_WALLET_PATH is set. If it is, ask the user: \"do you want me to sign it or do you want a URL to sign it?\" If they choose agent-managed signing, sign locally with the transaction fee-payer keypair and call submit_signed_mission_reroll.",
+      "agentWalletGuide": {
+        "envVarName": "PBP_AGENT_WALLET_PATH",
+        "promptWhenConfigured": "If PBP_AGENT_WALLET_PATH is configured, ask the user: \"do you want me to sign it or do you want a URL to sign it?\"",
+        "steps": [
+          "Check whether PBP_AGENT_WALLET_PATH points to a local Solana keypair JSON file.",
+          "If the keypair is available, offer agent-managed signing before defaulting to a browser signing flow.",
+          "Only sign locally when the keypair public key matches the transaction fee payer.",
+          "If the user chooses agent-managed signing, load that keypair locally and sign the returned transaction.",
+          "After signing, call submit_signed_mission_reroll."
+        ]
+      }
+    }
+  },
+  "decodedSignerAddresses": [
+    "AxR7LYpRwRrWRu4uqSwjJcWf6JjFxKkNnsJT26qjtSHp"
+  ],
+  "encodedSignedTransactionLength": 516,
+  "attempts": [
+    {
+      "attempt": 1,
+      "ok": true,
+      "submit": {
+        "content": [
+          {
+            "type": "text",
+            "text": "Failed to decode signed transaction"
+          }
+        ],
+        "structuredContent": {
+          "success": false,
+          "errorId": null,
+          "details": null
+        },
+        "isError": true
+      }
+    }
+  ],
+  "finalSubmit": {
+    "content": [
+      {
+        "type": "text",
+        "text": "Failed to decode signed transaction"
+      }
+    ],
+    "structuredContent": {
+      "success": false,
+      "errorId": null,
+      "details": null
+    },
+    "isError": true
+  }
+}

@@ -133,25 +133,42 @@ function createChecksService(ctx, logger, mcp, services = {}) {
   }
 
   function parseVirtualCurrencyBalances(virtualCurrencies = {}) {
-    if (!virtualCurrencies || typeof virtualCurrencies !== "object") return [];
+    if (!virtualCurrencies) return [];
     const rows = [];
-    for (const [symbolRaw, amountRaw] of Object.entries(virtualCurrencies)) {
+    const pushRow = ({ symbolRaw, nameRaw = null, amountRaw }) => {
       const symbol = String(symbolRaw || "").trim().toUpperCase();
-      const key = normalizeRewardBucket(symbol) || String(symbolRaw || "")
-        .trim()
-        .toLowerCase();
+      const key =
+        normalizeRewardBucket(symbol) ||
+        String(symbolRaw || "").trim().toLowerCase();
       const balance = parseBalanceNumber(amountRaw);
-      if (!symbol || balance === null) continue;
+      if (!symbol || balance === null) return;
       rows.push({
         key,
         symbol,
-        name: symbol,
+        name: nameRaw ? String(nameRaw).trim() : symbol,
         mint: null,
         balance,
         displayBalance: balance.toLocaleString(undefined, {
           maximumFractionDigits: 2,
         }),
       });
+    };
+
+    if (Array.isArray(virtualCurrencies)) {
+      for (const entry of virtualCurrencies) {
+        if (!entry || typeof entry !== "object") continue;
+        pushRow({
+          symbolRaw: entry.code || entry.symbol || entry.currency || entry.key,
+          nameRaw: entry.name || entry.displayName || null,
+          amountRaw: entry.balance ?? entry.amount ?? entry.value,
+        });
+      }
+      return rows;
+    }
+
+    if (typeof virtualCurrencies !== "object") return [];
+    for (const [symbolRaw, amountRaw] of Object.entries(virtualCurrencies)) {
+      pushRow({ symbolRaw, amountRaw });
     }
     return rows;
   }
@@ -815,7 +832,16 @@ function createChecksService(ctx, logger, mcp, services = {}) {
       });
       const resetArgs = {
         nftId,
-        ...(ctx.signerMode === "dapp" ? { signingMode: "browser_bridge" } : {}),
+        ...(ctx.signerMode === "dapp"
+          ? { signingMode: "browser_bridge" }
+          : {
+              signingMode: "agent_managed",
+              ...(String(ctx.signerConfig?.walletAddress || "").trim()
+                ? {
+                    payerWallet: String(ctx.signerConfig.walletAddress).trim(),
+                  }
+                : {}),
+            }),
       };
       logDebug("assign", "cooldown_reset_prepare_args", {
         reason,
@@ -990,7 +1016,16 @@ function createChecksService(ctx, logger, mcp, services = {}) {
       });
       const unlockArgs = {
         slotNumber: targetSlotNumber,
-        ...(ctx.signerMode === "dapp" ? { signingMode: "browser_bridge" } : {}),
+        ...(ctx.signerMode === "dapp"
+          ? { signingMode: "browser_bridge" }
+          : {
+              signingMode: "agent_managed",
+              ...(String(ctx.signerConfig?.walletAddress || "").trim()
+                ? {
+                    payerWallet: String(ctx.signerConfig.walletAddress).trim(),
+                  }
+                : {}),
+            }),
       };
       logDebug("assign", "slot_unlock_prepare_args", {
         reason,
@@ -1337,7 +1372,14 @@ function createChecksService(ctx, logger, mcp, services = {}) {
     }
 
     ctx.autoAssignRunning = true;
+    let assigningStarted = false;
+    let assignedCountForEvent = null;
     try {
+      if (ctx.guiBridge?.sendEvent) {
+        ctx.guiBridge.sendEvent("assigning", { state: "start", reason });
+        assigningStarted = true;
+      }
+      if (ctx.guiBridge?.emitNow) ctx.guiBridge.emitNow();
       let { result: currentMissionResult, missions, candidates } =
         await loadAssignableCandidates(
           reason,
@@ -1401,6 +1443,14 @@ function createChecksService(ctx, logger, mcp, services = {}) {
             resolved,
           ),
         });
+        if (assigningStarted && ctx.guiBridge?.sendEvent) {
+          ctx.guiBridge.sendEvent("assigning", {
+            state: "done",
+            reason,
+            assigned: 0,
+          });
+        }
+        if (ctx.guiBridge?.emitNow) ctx.guiBridge.emitNow();
         return { ok: true, attempted: 0, assigned: 0 };
       }
 
@@ -1634,6 +1684,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
           );
         }
       }
+      assignedCountForEvent = assigned;
 
       if (assigned > 0) {
         await refreshMissionHeaderStats({ refreshNftCount: true });
@@ -1654,6 +1705,14 @@ function createChecksService(ctx, logger, mcp, services = {}) {
         startedMissionNames,
         startedMissionDetails,
       });
+      if (assigningStarted && ctx.guiBridge?.sendEvent) {
+        ctx.guiBridge.sendEvent("assigning", {
+          state: "done",
+          reason,
+          assigned,
+        });
+      }
+      if (ctx.guiBridge?.emitNow) ctx.guiBridge.emitNow();
       return {
         ok: true,
         attempted: candidates.length,
@@ -1661,6 +1720,23 @@ function createChecksService(ctx, logger, mcp, services = {}) {
         startedMissionNames,
         startedMissionDetails,
       };
+    } catch (error) {
+      logWithTimestamp(`[ASSIGN] ❌ Assign check failed: ${error.message}`);
+      logDebug("assign", "auto_assign_failed", {
+        reason,
+        error: error.message,
+        stack: error.stack,
+      });
+      if (assigningStarted && ctx.guiBridge?.sendEvent) {
+        ctx.guiBridge.sendEvent("assigning", {
+          state: "error",
+          reason,
+          assigned: assignedCountForEvent,
+          error: error.message,
+        });
+      }
+      if (ctx.guiBridge?.emitNow) ctx.guiBridge.emitNow();
+      return { ok: false, attempted: 0, assigned: 0, error: error.message };
     } finally {
       ctx.autoAssignRunning = false;
     }
@@ -1691,7 +1767,25 @@ function createChecksService(ctx, logger, mcp, services = {}) {
         .filter((m) => m.id)
         .slice(0, limit);
 
-      if (candidates.length === 0) return { ok: true, claimed: 0 };
+      if (candidates.length === 0) {
+        if (ctx.guiBridge?.sendEvent) {
+          ctx.guiBridge.sendEvent("claiming", {
+            state: "done",
+            reason,
+            claimed: 0,
+          });
+        }
+        if (ctx.guiBridge?.emitNow) ctx.guiBridge.emitNow();
+        return { ok: true, claimed: 0 };
+      }
+      if (ctx.guiBridge?.sendEvent) {
+        ctx.guiBridge.sendEvent("claiming", {
+          state: "start",
+          reason,
+          maxClaims: limit,
+        });
+      }
+      if (ctx.guiBridge?.emitNow) ctx.guiBridge.emitNow();
 
       let claimed = 0;
       for (const mission of candidates) {
@@ -1728,12 +1822,28 @@ function createChecksService(ctx, logger, mcp, services = {}) {
         }
       }
       if (claimed > 0) scheduleFundingWalletRefresh("claim_fallback");
+      if (ctx.guiBridge?.sendEvent) {
+        ctx.guiBridge.sendEvent("claiming", {
+          state: "done",
+          reason,
+          claimed,
+        });
+      }
+      if (ctx.guiBridge?.emitNow) ctx.guiBridge.emitNow();
       return { ok: true, claimed };
     } catch (error) {
       logDebug("watch", "fallback_claim_scan_failed", {
         reason,
         error: error.message,
       });
+      if (ctx.guiBridge?.sendEvent) {
+        ctx.guiBridge.sendEvent("claiming", {
+          state: "error",
+          reason,
+          error: error.message,
+        });
+      }
+      if (ctx.guiBridge?.emitNow) ctx.guiBridge.emitNow();
       return { ok: false, claimed: 0 };
     }
   }
@@ -1778,7 +1888,8 @@ function createChecksService(ctx, logger, mcp, services = {}) {
       return { ok: true, displayName, walletId, walletSummary };
     } catch (error) {
       logDebug("check", "whoami_failed", { error: error.message });
-      ctx.currentUserWalletSummary = null;
+      // Keep the last known wallet summary to avoid UI balance flicker when
+      // who_am_i or wallet summary calls fail transiently.
       return { ok: false, displayName: "unknown", walletId: "unknown" };
     }
   }
