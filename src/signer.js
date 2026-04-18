@@ -445,11 +445,12 @@ function createSignerService(ctx, logger) {
       const file = keyStoreFileAbsolute();
       const script =
         "$ErrorActionPreference='Stop'; " +
-        "$bytes=[Convert]::FromBase64String($args[0]); " +
-        "$enc=[System.Security.Cryptography.ProtectedData]::Protect($bytes,$null,[System.Security.Cryptography.DataProtectionScope]::CurrentUser); " +
+        "$plain=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($args[0])); " +
+        "$secure=ConvertTo-SecureString -String $plain -AsPlainText -Force; " +
+        "$enc=ConvertFrom-SecureString -SecureString $secure; " +
         "$dir=[System.IO.Path]::GetDirectoryName($args[1]); " +
         "if ($dir) { [System.IO.Directory]::CreateDirectory($dir) | Out-Null }; " +
-        "[System.IO.File]::WriteAllText($args[1],[Convert]::ToBase64String($enc));";
+        "[System.IO.File]::WriteAllText($args[1],$enc);";
       await execFileAsync("powershell", [
         "-NoProfile",
         "-NonInteractive",
@@ -500,9 +501,13 @@ function createSignerService(ctx, logger) {
       const script =
         "$ErrorActionPreference='Stop'; " +
         "if (-not [System.IO.File]::Exists($args[0])) { throw 'Vault key file not found.' }; " +
-        "$enc=[Convert]::FromBase64String([System.IO.File]::ReadAllText($args[0]).Trim()); " +
-        "$bytes=[System.Security.Cryptography.ProtectedData]::Unprotect($enc,$null,[System.Security.Cryptography.DataProtectionScope]::CurrentUser); " +
-        "[Console]::Out.Write([Convert]::ToBase64String($bytes));";
+        "$enc=[System.IO.File]::ReadAllText($args[0]).Trim(); " +
+        "if (-not $enc) { throw 'Vault key file is empty.' }; " +
+        "$secure=ConvertTo-SecureString -String $enc; " +
+        "$bstr=[Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure); " +
+        "try { $plain=[Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr) } finally { if ($bstr -ne [IntPtr]::Zero) { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr) } }; " +
+        "if (-not $plain) { throw 'Vault key decrypt failed.' }; " +
+        "[Console]::Out.Write($plain);";
       const stdout = await execFileAsync("powershell", [
         "-NoProfile",
         "-NonInteractive",

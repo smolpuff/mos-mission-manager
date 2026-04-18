@@ -7,11 +7,18 @@
 
 ## general UI related
 
+- started mission status STILL HANGS for a long time and flashes weird. have it 1 not flash all crazy and 2 not last so long after hte mission it stays way too long. i dont know why it should be for like 5 maybe?
+- error with reset make it outline teh nft that has the error with an I icon overlay. have that open a modal that has the message on it and details. need visual like HEY I NEED ATTENTION
+
+- fix win 11 secure storage, failed on create. screenshot.
+- need to be able to import wallet made elsewhere for burner <-- WHATEVER IS NEEDED NORMALLY
+
+- create generated app wallet UI modal(s): confirm it creates, shows checkmark, address, and recovery phrase (hidden by default, reveal works)
+
+- secret keys modal: verify "backend must be running" message when stopped; verify phrase loads when running <-- can this be changed os ti DOESNT need to be running
+
 ## windows test checklist
 
-- create generated app wallet (UI modal): confirm it creates, shows checkmark, address, and recovery phrase (hidden by default, reveal works)
-- copy buttons in modals (address + phrase): verify copy works and shows "Copied" feedback
-- secret keys modal: verify "backend must be running" message when stopped; verify phrase loads when running
 - signer vault storage: verify windows DPAPI/key store works (no vault key read/write errors; reveal backup works after restart)
 - funding wallet balance refresh: verify it loads once at startup, then refreshes only after token-affecting actions (no RPC spam / no flicker)
 
