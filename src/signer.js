@@ -368,27 +368,22 @@ function createSignerService(ctx, logger) {
   }
 
   function getBrowserBridgeUrl(structuredContent) {
-
     const sc = structuredContent && typeof structuredContent === "object"
       ? structuredContent
       : {};
-    const direct = String(sc.signingBridgeUrl || "").trim();
-    if (direct) return direct;
-    const methodUrl = String(
-      sc?.signingMethods?.browserBridge?.signingUrl || "",
-    ).trim();
-    if (methodUrl) return methodUrl;
-    return null;
-  }
-
-  function getDappFallbackUrl(actionName) {
-    const action = normalizeActionName(actionName);
-    if (
-      action === "mission_reroll" ||
-      action === "nft_cooldown_reset" ||
-      action === "mission_slot_unlock"
-    ) {
-      return MISSION_PLAY_URL_SHARED || MISSION_PLAY_URL;
+    const candidates = [
+      sc.signingBridgeUrl,
+      sc.signingUrl,
+      sc?.signingMethods?.browserBridge?.signingUrl,
+      sc?.signingMethods?.browserBridge?.url,
+    ];
+    for (const value of candidates) {
+      const url = String(value || "").trim();
+      if (/^https?:\/\//i.test(url)) return url;
+    }
+    const bridgePath = String(sc.signingBridgePath || "").trim();
+    if (bridgePath.startsWith("/")) {
+      return `https://pixelbypixel.studio${bridgePath}`;
     }
     return null;
   }
@@ -1604,9 +1599,7 @@ function createSignerService(ctx, logger) {
 
     if (ctx.signerMode === "dapp") {
       const directBridgeUrl = getBrowserBridgeUrl(validated.structuredContent);
-      const targetUrl =
-        directBridgeUrl || getDappFallbackUrl(normalizedAction);
-      if (!targetUrl) {
+      if (!directBridgeUrl) {
         const keys = Object.keys(validated.structuredContent || {}).slice(0, 40);
         logDebug("dapp", "signing_url_missing", {
           actionName: normalizedAction,
@@ -1614,24 +1607,16 @@ function createSignerService(ctx, logger) {
           signingMode: validated.structuredContent?.signingMode || null,
         });
         throw new Error(
-          `dapp mode requires prepare payload bridge fields for ${normalizedAction} (expected signingBridgeUrl or signingMethods.browserBridge.signingUrl). keys=${keys.join(",")}`,
+          `dapp mode requires prepare payload bridge fields for ${normalizedAction} (expected signingBridgeUrl/signingBridgePath/signingUrl). keys=${keys.join(",")}`,
         );
       }
-      if (!directBridgeUrl) {
-        logDebug("dapp", "signing_url_fallback", {
-          actionName: normalizedAction,
-          fallbackUrl: targetUrl,
-          topLevelKeys: Object.keys(validated.structuredContent || {}).slice(0, 40),
-        });
-      }
+      const targetUrl = directBridgeUrl;
       logWithTimestamp(
         `[DAPP] 🌐 Opening PbP signing page for ${normalizedAction}...`,
       );
-      // DAPP mode currently can't reliably deep-link to the right signing URL,
-      // so behave like manual mode and open the generic missions page with a
-      // cooldown to avoid window spam. Still print the signing URL for copy/paste.
       const openResult = await openMissionPlayPage({
         cooldownMs: missionPageCooldownMsFromConfig(ctx),
+        targetUrl,
       });
       if (openResult?.suppressed) {
         logDebug("dapp", "mission_page_open_suppressed", {

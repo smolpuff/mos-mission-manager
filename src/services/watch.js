@@ -104,6 +104,39 @@ function createWatchService(ctx, logger, mcp, checks, configApi, services = {}) 
     );
   }
 
+  async function waitForDappRerollSettlement(assignedMissionId, opts = {}) {
+    const wantedId = String(assignedMissionId || "").trim();
+    if (!wantedId) return { settled: false, reason: "missing_assigned_mission_id" };
+    const timeoutMs = Math.max(0, Number(opts.timeoutMs) || 12_000);
+    const pollMs = Math.max(250, Number(opts.pollMs) || 1_500);
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() <= deadline) {
+      try {
+        const missionsResult = await mcp.mcpToolCall("get_user_missions", {});
+        const missions = normalizeMissionList(missionsResult);
+        const mission = missions.find((entry) => {
+          const id = String(
+            entry?.assignedMissionId || entry?.assigned_mission_id || "",
+          ).trim();
+          return id === wantedId;
+        });
+        if (!mission) {
+          return { settled: true, reason: "mission_not_found" };
+        }
+        if (!missionHasAssignedNft(mission)) {
+          return { settled: true, reason: "assigned_nft_cleared" };
+        }
+      } catch (error) {
+        logDebug("watch", "dapp_reroll_settle_poll_failed", {
+          assignedMissionId: wantedId,
+          error: error.message,
+        });
+      }
+      await sleep(pollMs);
+    }
+    return { settled: false, reason: "timeout" };
+  }
+
   function snapshotTraceSummary(snapshotMap) {
     if (!(snapshotMap instanceof Map)) return [];
     return Array.from(snapshotMap.values()).map((m) => ({
@@ -1195,6 +1228,20 @@ function createWatchService(ctx, logger, mcp, checks, configApi, services = {}) 
         actionResult?.signed?.cost ?? prepared?.structuredContent?.rerollCost,
         { actionName: "mission_reroll" },
       );
+    }
+    if (ctx.signerMode === "dapp" && !actionResult?.submitted) {
+      logWithTimestamp("[DAPP] ⏳ Waiting briefly for reroll to settle...");
+      const settle = await waitForDappRerollSettlement(assignedMissionId, {
+        timeoutMs: 12_000,
+        pollMs: 1_500,
+      });
+      logDebug("watch", "dapp_reroll_settle_done", {
+        reason,
+        label,
+        assignedMissionId,
+        settled: settle.settled === true,
+        settleReason: settle.reason || null,
+      });
     }
     logWithTimestamp(
       `[RESET] ✅ Rerolled: ${name} lvl=${level}${slot === null ? "" : ` slot=${slot}`}`,

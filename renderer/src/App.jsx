@@ -159,6 +159,15 @@ function ControlView() {
   const [latestCompetitionBusy, setLatestCompetitionBusy] = useState(false);
   const [latestCompetitionError, setLatestCompetitionError] = useState(null);
   const [usePreviousDebug, setUsePreviousDebug] = useState(false);
+  const [createWalletOpen, setCreateWalletOpen] = useState(false);
+  const [createWalletOnboarding, setCreateWalletOnboarding] = useState(false);
+  const [createWalletConfirm, setCreateWalletConfirm] = useState(false);
+  const [createWalletBusy, setCreateWalletBusy] = useState(false);
+  const [createWalletError, setCreateWalletError] = useState(null);
+  const [createWalletResult, setCreateWalletResult] = useState(null);
+  const [createWalletRevealed, setCreateWalletRevealed] = useState(false);
+  const [createCopiedPhraseLabel, setCreateCopiedPhraseLabel] = useState(null);
+  const [createCopiedAddrLabel, setCreateCopiedAddrLabel] = useState(null);
   const isMissionMode = modeSelection === "mission";
   const isNormalMode = !isMissionMode;
   const applyConfigPatch = async (patch) => {
@@ -180,6 +189,29 @@ function ControlView() {
       try {
         await bridge.refreshWalletSummary();
       } catch {}
+    }
+    if (next === "app_wallet") {
+      const signerWallet = String(status.signerWallet || "").trim();
+      const fundingAddress = String(
+        status.fundingWalletSummary?.address || "",
+      ).trim();
+      const hasWalletByStatus =
+        status.signerStatus === "app_wallet_locked" ||
+        status.signerStatus === "app_wallet_unlocked";
+      const hasWallet = Boolean(signerWallet || fundingAddress || hasWalletByStatus);
+      const missingWallet =
+        status.signerStatus === "app_wallet_not_imported" || !hasWallet;
+      if (missingWallet) {
+        setCreateWalletOnboarding(true);
+        setCreateWalletOpen(true);
+        setCreateWalletConfirm(false);
+        setCreateWalletBusy(false);
+        setCreateWalletError(null);
+        setCreateWalletResult(null);
+        setCreateWalletRevealed(false);
+        setCreateCopiedPhraseLabel(null);
+        setCreateCopiedAddrLabel(null);
+      }
     }
   };
   const runModeCommand = async (commands) => {
@@ -439,14 +471,6 @@ function ControlView() {
   const [secretCopiedPhraseLabel, setSecretCopiedPhraseLabel] = useState(null);
   const [secretCopiedAddrLabel, setSecretCopiedAddrLabel] = useState(null);
 
-  const [createWalletOpen, setCreateWalletOpen] = useState(false);
-  const [createWalletConfirm, setCreateWalletConfirm] = useState(false);
-  const [createWalletBusy, setCreateWalletBusy] = useState(false);
-  const [createWalletError, setCreateWalletError] = useState(null);
-  const [createWalletResult, setCreateWalletResult] = useState(null);
-  const [createWalletRevealed, setCreateWalletRevealed] = useState(false);
-  const [createCopiedPhraseLabel, setCreateCopiedPhraseLabel] = useState(null);
-  const [createCopiedAddrLabel, setCreateCopiedAddrLabel] = useState(null);
   const mainStatusLabel = activityLabel
     ? activityLabel
     : status.running
@@ -634,8 +658,9 @@ function ControlView() {
     }
   };
 
-  const openCreateWalletModal = () => {
+  const openCreateWalletModal = ({ onboarding = false } = {}) => {
     setCreateWalletOpen(true);
+    setCreateWalletOnboarding(onboarding);
     setCreateWalletConfirm(false);
     setCreateWalletBusy(false);
     setCreateWalletError(null);
@@ -646,7 +671,7 @@ function ControlView() {
   };
 
   const runCreateWallet = async () => {
-    if (!createWalletConfirm) return;
+    if (!createWalletOnboarding && !createWalletConfirm) return;
     if (!bridge?.createGeneratedWallet) {
       setCreateWalletError("Wallet creation is not available in this build.");
       return;
@@ -663,7 +688,7 @@ function ControlView() {
       const res = await bridge.createGeneratedWallet();
       if (!res?.ok) throw new Error(res?.error || "Wallet creation failed.");
       setCreateWalletResult(res.created || null);
-      setCreateWalletRevealed(true);
+      setCreateWalletRevealed(false);
       await applyConfigPatch({ signerMode: "app_wallet" });
       if (bridge?.refreshWalletSummary) {
         void bridge.refreshWalletSummary();
@@ -1133,8 +1158,9 @@ function ControlView() {
                   </div>
                 ) : (
                   <div className="text-xs text-slate-300">
-                    This replaces your current app-wallet in the app. Save the
-                    recovery phrase immediately.
+                    {createWalletOnboarding
+                      ? "No app-wallet is configured yet. Generate one now to enable app-wallet mode."
+                      : "This replaces your current app-wallet in the app. Save the recovery phrase immediately."}
                   </div>
                 )}
 
@@ -1142,7 +1168,7 @@ function ControlView() {
                   <div className="text-sm text-error">{createWalletError}</div>
                 ) : null}
 
-                {!createWalletResult ? (
+                {!createWalletResult && !createWalletOnboarding ? (
                   <label className="flex items-start gap-2 text-sm">
                     <input
                       type="checkbox"
@@ -1261,7 +1287,10 @@ function ControlView() {
                     <button
                       type="button"
                       className="btn btn-gradient"
-                      disabled={!createWalletConfirm || createWalletBusy}
+                      disabled={
+                        createWalletBusy ||
+                        (!createWalletOnboarding && !createWalletConfirm)
+                      }
                       onClick={() => void runCreateWallet()}
                     >
                       {createWalletBusy ? "Generating..." : "Generate Wallet"}

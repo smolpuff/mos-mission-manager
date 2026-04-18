@@ -20,7 +20,7 @@ Current implemented flows:
 - three reset execution modes:
   - `app_wallet`
   - `manual`
-  - `dapp` placeholder
+  - `dapp`
 
 ## Requirements
 
@@ -103,8 +103,8 @@ signer setup
 - `manual`
   - the app opens the missions page and you reset or approve it yourself
 - `dapp`
-  - intended future browser-wallet approval flow
-  - not wired yet
+  - opens the prepare payload bridge signing URL in your browser wallet
+  - you approve/sign in browser manually
 
 ## App Wallet Setup
 
@@ -334,8 +334,8 @@ Behavior by mode:
 - `manual`
   - opens the missions page for you to handle it yourself
 - `dapp`
-  - planned browser approval flow
-  - currently blocked with `NOT ENABLED YET`
+  - opens the prepare payload bridge signing URL in your browser wallet
+  - complete approval/signing in browser, then return to the app
 
 ## Commands
 

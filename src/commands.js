@@ -234,7 +234,7 @@ function createCommandHandler(ctx, logger, actions, configApi, services = {}) {
       }
       if (selected === "dapp") {
         logWithTimestamp(
-          "[SIGNER] dapp mode selected. Browser approval flow is planned but not wired yet.",
+          "[SIGNER] dapp mode selected. Prepared actions will open the bridge signing URL in your browser wallet.",
         );
       }
     }
@@ -623,4 +623,3 @@ function createCommandHandler(ctx, logger, actions, configApi, services = {}) {
 module.exports = {
   createCommandHandler,
 };
-

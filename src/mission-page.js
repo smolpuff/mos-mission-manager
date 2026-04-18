@@ -14,7 +14,7 @@ function normalizeCooldownMs(value) {
   return Math.min(Math.floor(n), 60 * 60 * 1000);
 }
 
-async function openMissionPlayPage({ cooldownMs } = {}) {
+async function openMissionPlayPage({ cooldownMs, targetUrl } = {}) {
   const now = Date.now();
   const effectiveCooldownMs = normalizeCooldownMs(cooldownMs);
   const elapsedMs = now - lastMissionPageOpenAt;
@@ -28,13 +28,26 @@ async function openMissionPlayPage({ cooldownMs } = {}) {
     };
   }
 
-  const target = String(MISSION_PLAY_URL || '').trim();
+  const target = String(targetUrl || MISSION_PLAY_URL || "").trim();
   if (!target) return { ok: false, opened: false, suppressed: false };
   const candidates =
     process.platform === 'darwin'
       ? [['open', [target]]]
       : process.platform === 'win32'
-        ? [['rundll32', ['url.dll,FileProtocolHandler', target]]]
+        ? [
+            ['rundll32', ['url.dll,FileProtocolHandler', target]],
+            [
+              'powershell',
+              [
+                '-NoProfile',
+                '-NonInteractive',
+                '-Command',
+                'Start-Process -FilePath $args[0]',
+                target,
+              ],
+            ],
+            ['cmd', ['/c', 'start', '', target]],
+          ]
         : [
             ['xdg-open', [target]],
             ['gio', ['open', target]],
