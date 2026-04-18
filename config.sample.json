@@ -1,30 +1,8 @@
 {
-  "totalClaimed": 710,
-  "targetMissions": ["Do it All!", "Race!"],
-  "watchPollIntervalSeconds": 30,
-  "level20ResetEnabled": false,
-  "missionModeEnabled": false,
-  "missionResetLevel": "68",
-  "watchCycleSeconds": 0,
-  "clientMissionPollIntervalSeconds": 0,
-  "missionPageOpenCooldownSeconds": 60,
-  "signerMode": "app_wallet",
-  "signer": {
-    "enabled": true,
-    "vaultFile": "data/signer-vault.json",
-    "auditFile": "data/signer-audit.log",
-    "replayWindowSeconds": 180,
-    "actionCooldownSeconds": {
-      "mission_cooldown_reset": 10,
-      "mission_reroll": 10,
-      "mission_slot_unlock": 30,
-      "mission_swap": 15
-    },
-    "maxActionCost": {
-      "mission_cooldown_reset": 1000,
-      "mission_reroll": 1000,
-      "mission_slot_unlock": 5000,
-      "mission_swap": 1000
-    }
-  }
+  "targetMissions": [
+    "Do it All!",
+    "Race!",
+    "Get Tilted for Points!",
+    "Race for Points"
+  ]
 }

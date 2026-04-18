@@ -3,7 +3,7 @@
 const path = require("path");
 const os = require("os");
 
-const APP_VERSION = "3.0.3";
+const APP_VERSION = "3.0.5";
 const APP_NAME = "missions-v3-mcp";
 const DEFAULT_MISSION_RESET_LEVEL = "20";
 const DEFAULT_SIGNER_MODE = "app_wallet";
