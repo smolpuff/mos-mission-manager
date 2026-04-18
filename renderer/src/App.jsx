@@ -168,6 +168,8 @@ function ControlView() {
   const [createWalletRevealed, setCreateWalletRevealed] = useState(false);
   const [createCopiedPhraseLabel, setCreateCopiedPhraseLabel] = useState(null);
   const [createCopiedAddrLabel, setCreateCopiedAddrLabel] = useState(null);
+  const [slotResetErrors, setSlotResetErrors] = useState({});
+  const [resetErrorModal, setResetErrorModal] = useState(null);
   const isMissionMode = modeSelection === "mission";
   const isNormalMode = !isMissionMode;
   const applyConfigPatch = async (patch) => {
@@ -542,6 +544,44 @@ function ControlView() {
   }, [lastEvent, isWatching, activityLabel, status.running, status.watcherRunning]);
 
   useEffect(() => {
+    if (!lastEvent || typeof lastEvent !== "object") return;
+    const type = String(lastEvent.type || "").trim();
+    if (type === "reset_error") {
+      const slot = Number(lastEvent.slot);
+      const slotKey = Number.isFinite(slot) && slot >= 1 && slot <= 4
+        ? String(slot)
+        : String(lastEvent.assignedMissionId || lastEvent.missionName || Date.now());
+      const nextError = {
+        slot: Number.isFinite(slot) ? slot : null,
+        assignedMissionId: String(lastEvent.assignedMissionId || "").trim() || null,
+        missionName: String(lastEvent.missionName || "").trim() || "Unknown mission",
+        actionName: String(lastEvent.actionName || "").trim() || "reset",
+        error: String(lastEvent.error || "Reset failed."),
+        bridgeUrl: String(lastEvent.bridgeUrl || "").trim() || null,
+        at: Date.now(),
+      };
+      setSlotResetErrors((current) => ({
+        ...current,
+        [slotKey]: nextError,
+      }));
+      return;
+    }
+    if (type === "reset_error_cleared") {
+      const slot = Number(lastEvent.slot);
+      const slotKey = Number.isFinite(slot) && slot >= 1 && slot <= 4
+        ? String(slot)
+        : String(lastEvent.assignedMissionId || "").trim();
+      if (!slotKey) return;
+      setSlotResetErrors((current) => {
+        if (!Object.prototype.hasOwnProperty.call(current, slotKey)) return current;
+        const next = { ...current };
+        delete next[slotKey];
+        return next;
+      });
+    }
+  }, [lastEvent]);
+
+  useEffect(() => {
     setIsCliActive(status.cliWindowOpen === true);
   }, [status.cliWindowOpen]);
 
@@ -636,12 +676,6 @@ function ControlView() {
     if (secretModalBackup) return;
     if (!bridge?.revealSignerBackup) {
       setSecretModalError("Secret key view is not available in this build.");
-      return;
-    }
-    if (!status.running) {
-      setSecretModalError(
-        "Secret keys require the backend to be running. Start missions first, then try again.",
-      );
       return;
     }
     setSecretModalBusy(true);
@@ -1943,6 +1977,7 @@ function ControlView() {
                   {[1, 2, 3, 4].map((slot) => {
                     const entry =
                       slots.find((s) => Number(s?.slot) === slot) || null;
+                    const slotError = slotResetErrors[String(slot)] || null;
                     const title = entry?.missionName || `slot ${slot}`;
                     const missionLevel =
                       entry?.missionLevel === null ||
@@ -1969,11 +2004,24 @@ function ControlView() {
                       : 0;
                     const imgSrc = pickSlotImage(entry);
                     return (
-                      <div className="card-mission " key={slot}>
+                      <div
+                        className={`card-mission ${slotError ? "card-mission--error" : ""}`}
+                        key={slot}
+                      >
                         <div className="card-mission__header relative overflow-clip">
                           <MissionSlotImage src={imgSrc} />
                           {isStarting ? (
                             <span className="loading loading-spinner loading-xs text-white/30 absolute top-2 right-2 z-20" />
+                          ) : null}
+                          {slotError ? (
+                            <button
+                              type="button"
+                              className="mission-error-badge"
+                              title="Reset error details"
+                              onClick={() => setResetErrorModal(slotError)}
+                            >
+                              !
+                            </button>
                           ) : null}
                           {missionLevel ? (
                             <div className="z-10 text-sm flex items-center rounded-[5px] justify-center w-7 h-7 opacity-100 place-self-end-safe shadow-md shadow-black/20 font-semibold bg-amber-500 border-orange-200 border-2">
@@ -2010,6 +2058,84 @@ function ControlView() {
               </section>
             </>
           )}
+          {resetErrorModal ? (
+            <div
+              className="fixed inset-0 z-60 grid place-items-center bg-black/50 p-4"
+              role="dialog"
+              aria-modal="true"
+              onMouseDown={(e) => {
+                if (e.target === e.currentTarget) setResetErrorModal(null);
+              }}
+            >
+              <div className="card w-full max-w-140 space-y-4 !bg-[#0b1116] border border-error/50 z-10">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="text-lg font-semibold text-error">
+                    Reset Needs Attention
+                  </div>
+                  <button
+                    type="button"
+                    className="btn btn-clear btn-sm"
+                    onClick={() => setResetErrorModal(null)}
+                    title="Close"
+                  >
+                    ✕
+                  </button>
+                </div>
+                <div className="text-sm text-slate-200">
+                  <span className="font-semibold">
+                    {resetErrorModal?.missionName || "Unknown mission"}
+                  </span>
+                  {Number.isFinite(Number(resetErrorModal?.slot))
+                    ? ` (slot ${Number(resetErrorModal.slot)})`
+                    : ""}
+                </div>
+                <div className="rounded-md border border-error/40 bg-error/10 p-3 text-sm text-slate-100">
+                  {resetErrorModal?.error || "Reset failed."}
+                </div>
+                {resetErrorModal?.bridgeUrl ? (
+                  <div className="space-y-2">
+                    <div className="text-xs uppercase text-slate-300">
+                      Manual Reset Bridge URL
+                    </div>
+                    <div className="rounded-md border border-white/10 bg-black/20 p-2 text-xs break-all text-slate-200">
+                      {resetErrorModal.bridgeUrl}
+                    </div>
+                    <div className="flex items-center justify-end gap-2">
+                      <button
+                        type="button"
+                        className="btn btn-clear btn-sm"
+                        onClick={() => {
+                          const url = String(resetErrorModal.bridgeUrl || "").trim();
+                          if (!url) return;
+                          try {
+                            window.open(url, "_blank", "noopener,noreferrer");
+                          } catch {}
+                        }}
+                      >
+                        Open Link
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-gradient btn-sm"
+                        onClick={() => void copyText(resetErrorModal.bridgeUrl)}
+                      >
+                        Copy Link
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
+                <div className="flex items-center justify-end">
+                  <button
+                    type="button"
+                    className="btn btn-clear btn-sm"
+                    onClick={() => setResetErrorModal(null)}
+                  >
+                    Close
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : null}
         </div>
       </div>
     </main>
@@ -2024,7 +2150,17 @@ function CliView() {
   useEffect(() => {
     const node = outputRef.current;
     if (!node) return;
-    node.scrollTop = node.scrollHeight;
+    const selection = window.getSelection ? window.getSelection() : null;
+    const selectingTerminalText =
+      Boolean(selection && !selection.isCollapsed) &&
+      node.contains(selection.anchorNode);
+    if (selectingTerminalText) return;
+    const distanceFromBottom =
+      node.scrollHeight - (node.scrollTop + node.clientHeight);
+    const shouldAutoScroll = distanceFromBottom <= 32;
+    if (shouldAutoScroll) {
+      node.scrollTop = node.scrollHeight;
+    }
   }, [logs]);
 
   async function submitCommand(nextCommand) {

@@ -1178,6 +1178,7 @@ function createWatchService(ctx, logger, mcp, checks, configApi, services = {}) 
       level,
       slot,
     });
+    let manualBridgeUrl = null;
     const rerollArgs = {
       assignedMissionId,
       ...(ctx.signerMode === "dapp"
@@ -1199,6 +1200,20 @@ function createWatchService(ctx, logger, mcp, checks, configApi, services = {}) 
       args: rerollArgs,
     });
     const prepared = await mcp.mcpToolCall("prepare_mission_reroll", rerollArgs);
+    manualBridgeUrl = String(
+      prepared?.structuredContent?.signingBridgeUrl ||
+      prepared?.structuredContent?.signingUrl ||
+      prepared?.structuredContent?.signingMethods?.browserBridge?.signingUrl ||
+      "",
+    ).trim();
+    if (!manualBridgeUrl) {
+      const bridgePath = String(
+        prepared?.structuredContent?.signingBridgePath || "",
+      ).trim();
+      if (bridgePath.startsWith("/")) {
+        manualBridgeUrl = `https://pixelbypixel.studio${bridgePath}`;
+      }
+    }
     logDebug("watch", "mission_reroll_prepare_result", {
       reason,
       label,
@@ -1208,21 +1223,29 @@ function createWatchService(ctx, logger, mcp, checks, configApi, services = {}) 
       slot,
       structuredContent: prepared?.structuredContent || null,
     });
-    const actionResult = await executePreparedMissionAction({
-      actionName: "mission_reroll",
-      prepareResult: prepared,
-      expected: { assignedMissionId },
-      debugScope: "watch",
-      submitDebugAction: "mission_reroll_submit",
-      debugMeta: {
-        reason,
-        label,
-        assignedMissionId,
-        name,
-        level,
-        slot,
-      },
-    });
+    let actionResult;
+    try {
+      actionResult = await executePreparedMissionAction({
+        actionName: "mission_reroll",
+        prepareResult: prepared,
+        expected: { assignedMissionId },
+        debugScope: "watch",
+        submitDebugAction: "mission_reroll_submit",
+        debugMeta: {
+          reason,
+          label,
+          assignedMissionId,
+          name,
+          level,
+          slot,
+        },
+      });
+    } catch (error) {
+      if (manualBridgeUrl) {
+        error.manualBridgeUrl = manualBridgeUrl;
+      }
+      throw error;
+    }
     if (actionResult?.submitted) {
       addSessionSpendTotals(
         actionResult?.signed?.cost ?? prepared?.structuredContent?.rerollCost,
@@ -1254,6 +1277,14 @@ function createWatchService(ctx, logger, mcp, checks, configApi, services = {}) 
       level,
       slot,
     });
+    if (ctx.guiBridge?.sendEvent) {
+      ctx.guiBridge.sendEvent("reset_error_cleared", {
+        actionName: "mission_reroll",
+        assignedMissionId,
+        missionName: name,
+        slot,
+      });
+    }
     return true;
   }
 
@@ -1406,6 +1437,17 @@ function createWatchService(ctx, logger, mcp, checks, configApi, services = {}) 
           slot: mission.slot ?? null,
           error: error.message,
         });
+        if (ctx.guiBridge?.sendEvent) {
+          ctx.guiBridge.sendEvent("reset_error", {
+            actionName: "mission_reroll",
+            assignedMissionId: mission.assignedMissionId || mission.id || null,
+            missionName: mission.name || null,
+            level: mission.level ?? null,
+            slot: mission.slot ?? null,
+            error: String(error?.message || error || "Reset failed"),
+            bridgeUrl: String(error?.manualBridgeUrl || "").trim() || null,
+          });
+        }
       }
     }
     if (rerolledCount > 0) {

@@ -25,7 +25,17 @@ export default function CliView({
   useEffect(() => {
     const node = outputRef.current;
     if (!node) return;
-    node.scrollTop = node.scrollHeight;
+    const selection = window.getSelection ? window.getSelection() : null;
+    const selectingTerminalText =
+      Boolean(selection && !selection.isCollapsed) &&
+      node.contains(selection.anchorNode);
+    if (selectingTerminalText) return;
+    const distanceFromBottom =
+      node.scrollHeight - (node.scrollTop + node.clientHeight);
+    const shouldAutoScroll = distanceFromBottom <= 32;
+    if (shouldAutoScroll) {
+      node.scrollTop = node.scrollHeight;
+    }
   }, [logs]);
 
   async function submitCommand(nextCommand) {

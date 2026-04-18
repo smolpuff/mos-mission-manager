@@ -554,12 +554,16 @@ function sendBackendCommand(command) {
   return true;
 }
 
-function requestBackend(action, payload = {}) {
+async function requestBackend(action, payload = {}, options = {}) {
+  const ensureRunning = options?.ensureRunning === true;
+  if ((!backend || !backendStatus.running) && ensureRunning) {
+    startBackend();
+  }
   if (!backend || !backendStatus.running) {
     throw new Error("Backend is not running.");
   }
   const requestId = `${Date.now()}_${Math.random().toString(16).slice(2)}`;
-  const timeoutMs = 5000;
+  const timeoutMs = Number(options?.timeoutMs) > 0 ? Number(options.timeoutMs) : 5000;
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       pendingBackendRequests.delete(requestId);
@@ -838,7 +842,10 @@ app.whenReady().then(async () => {
     }
   });
   ipcMain.handle("signer:reveal-backup", async () => {
-    const payload = await requestBackend("signer_reveal_backup", {});
+    const payload = await requestBackend("signer_reveal_backup", {}, {
+      ensureRunning: true,
+      timeoutMs: 12000,
+    });
     return payload;
   });
   ipcMain.handle("signer:create-generated-wallet", async () => {
