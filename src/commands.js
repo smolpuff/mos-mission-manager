@@ -48,7 +48,7 @@ function createCommandHandler(ctx, logger, actions, configApi, services = {}) {
       "[HELP] h/help, clear, status, login, check, c, r, reset20, 20r [on|off], mm [off|on|<level>], pause, resume, q",
     );
     logWithTimestamp(
-      "[HELP] signer [status|setup|create|reveal|app_wallet|manual|dapp|import [path-or-key]|remove|unlock|lock]",
+      "[HELP] signer [status|doctor|setup|create|reveal|app_wallet|manual|dapp|import [path-or-key]|remove|unlock|lock]",
     );
     logWithTimestamp(
       `[HELP] auth mode: ${ctx.interactiveAuth ? "interactive headless URL" : "token-only"}`,
@@ -369,6 +369,14 @@ function createCommandHandler(ctx, logger, actions, configApi, services = {}) {
           logWithTimestamp(`[SIGNER] ${signer.modeSummary()}`);
           return;
         }
+        if (arg === "doctor") {
+          try {
+            await signer.doctor();
+          } catch (error) {
+            logWithTimestamp(`[SIGNER] ❌ Doctor failed: ${error.message}`);
+          }
+          return;
+        }
         if (arg === "setup") {
           await runFirstTimeSignerSetup({ force: true });
           return;
@@ -489,7 +497,7 @@ function createCommandHandler(ctx, logger, actions, configApi, services = {}) {
           arg !== "dapp"
         ) {
           logWithTimestamp(
-            "[SIGNER] ❌ Usage: signer [status|setup|create|reveal|app_wallet|manual|dapp|import [path-or-key]|remove|unlock|lock]",
+            "[SIGNER] ❌ Usage: signer [status|doctor|setup|create|reveal|app_wallet|manual|dapp|import [path-or-key]|remove|unlock|lock]",
           );
           return;
         }

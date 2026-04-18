@@ -28,7 +28,7 @@ const VAULT_VERSION = 1;
 const VAULT_ALGORITHM = "aes-256-gcm";
 const VAULT_KEY_BYTES = 32;
 const VAULT_IV_BYTES = 12;
-const SIGNER_SERVICE = "missions-v3-mcp.signer.v1";
+const SCOPED_SIGNER_SERVICE_PREFIX = "missions-v3-mcp.signer.v2";
 const SIGNER_ACCOUNT = "app-wallet-vault-key";
 const DEFAULT_VAULT_FILE = path.join("data", "signer-vault.json");
 const SUPPORTED_SIGNER_MODES = new Set(["app_wallet", "manual", "dapp"]);
@@ -110,6 +110,23 @@ function createSignerService(ctx, logger) {
   function ensureVaultDir() {
     const dir = path.dirname(vaultFileAbsolute());
     fs.mkdirSync(dir, { recursive: true });
+  }
+
+  function scopedSignerService() {
+    const vaultPath = path.resolve(vaultFileAbsolute());
+    const digest = crypto
+      .createHash("sha256")
+      .update(vaultPath)
+      .digest("hex")
+      .slice(0, 16);
+    return `${SCOPED_SIGNER_SERVICE_PREFIX}.${digest}`;
+  }
+
+  function secureStorageIdentity() {
+    return {
+      service: scopedSignerService(),
+      account: SIGNER_ACCOUNT,
+    };
   }
 
   function auditFileRelative() {
@@ -430,6 +447,7 @@ function createSignerService(ctx, logger) {
   async function writeVaultKeyToSecureStorage(vaultKey) {
     const provider = secureStorageProvider();
     const encoded = vaultKey.toString("base64");
+    const identity = secureStorageIdentity();
     if (!encoded) {
       throw new Error("Refusing to store an empty vault key.");
     }
@@ -438,9 +456,9 @@ function createSignerService(ctx, logger) {
         "add-generic-password",
         "-U",
         "-a",
-        SIGNER_ACCOUNT,
+        identity.account,
         "-s",
-        SIGNER_SERVICE,
+        identity.service,
         "-w",
         encoded,
       ]);
@@ -458,7 +476,9 @@ function createSignerService(ctx, logger) {
         "$enc=ConvertFrom-SecureString -SecureString $secure; " +
         "$dir=[System.IO.Path]::GetDirectoryName($file); " +
         "if ($dir) { [System.IO.Directory]::CreateDirectory($dir) | Out-Null }; " +
-        "[System.IO.File]::WriteAllText($file,$enc);";
+        "$tmp=$file + '.tmp'; " +
+        "[System.IO.File]::WriteAllText($tmp,$enc); " +
+        "if ([System.IO.File]::Exists($file)) { [System.IO.File]::Replace($tmp,$file,$null,$true) } else { [System.IO.File]::Move($tmp,$file) };";
       await execFileAsync("powershell", [
         "-NoProfile",
         "-NonInteractive",
@@ -479,9 +499,9 @@ function createSignerService(ctx, logger) {
           "store",
           "--label=missions-v3-mcp signer vault key",
           "service",
-          SIGNER_SERVICE,
+          identity.service,
           "account",
-          SIGNER_ACCOUNT,
+          identity.account,
         ],
         { input: encoded },
       );
@@ -492,20 +512,19 @@ function createSignerService(ctx, logger) {
     );
   }
 
-  async function readVaultKeyFromSecureStorage() {
+  async function readRawVaultKeyFromSecureStorage() {
     const provider = secureStorageProvider();
+    const identity = secureStorageIdentity();
     if (provider === "macos_keychain") {
       const stdout = await execFileAsync("security", [
         "find-generic-password",
         "-a",
-        SIGNER_ACCOUNT,
+        identity.account,
         "-s",
-        SIGNER_SERVICE,
+        identity.service,
         "-w",
       ]);
-      const value = String(stdout || "").trim();
-      if (!value) throw new Error("Vault key not found in macOS Keychain.");
-      return Buffer.from(value, "base64");
+      return String(stdout || "").trim();
     }
     if (provider === "windows_dpapi") {
       const file = keyStoreFileAbsolute();
@@ -531,39 +550,55 @@ function createSignerService(ctx, logger) {
           SIGNER_VAULT_KEY_FILE: file,
         },
       });
-      const value = String(stdout || "").trim();
-      if (!value) throw new Error("Vault key not found in Windows DPAPI store.");
-      return Buffer.from(value, "base64");
+      return String(stdout || "").trim();
     }
     if (provider === "linux_secret_service") {
       const stdout = await execFileAsync("secret-tool", [
         "lookup",
         "service",
-        SIGNER_SERVICE,
+        identity.service,
         "account",
-        SIGNER_ACCOUNT,
+        identity.account,
       ]);
-      const value = String(stdout || "").trim();
-      if (!value) throw new Error("Vault key not found in Linux Secret Service.");
-      return Buffer.from(value, "base64");
+      return String(stdout || "").trim();
     }
     throw new Error(
       `OS secure storage is not implemented on this platform (${process.platform}). Unlock is blocked.`,
     );
   }
 
+  async function readVaultKeyFromSecureStorage() {
+    const provider = secureStorageProvider();
+    const value = await readRawVaultKeyFromSecureStorage();
+    if (!value) {
+      if (provider === "macos_keychain") {
+        throw new Error("Vault key not found in macOS Keychain.");
+      }
+      if (provider === "windows_dpapi") {
+        throw new Error("Vault key not found in Windows DPAPI store.");
+      }
+      if (provider === "linux_secret_service") {
+        throw new Error("Vault key not found in Linux Secret Service.");
+      }
+    }
+    return Buffer.from(value, "base64");
+  }
+
   async function deleteVaultKeyFromSecureStorage() {
     const provider = secureStorageProvider();
+    const identity = secureStorageIdentity();
     if (provider === "unsupported") return;
     try {
       if (provider === "macos_keychain") {
-        await execFileAsync("security", [
-          "delete-generic-password",
-          "-a",
-          SIGNER_ACCOUNT,
-          "-s",
-          SIGNER_SERVICE,
-        ]);
+        try {
+          await execFileAsync("security", [
+            "delete-generic-password",
+            "-a",
+            identity.account,
+            "-s",
+            identity.service,
+          ]);
+        } catch {}
         return;
       }
       if (provider === "windows_dpapi") {
@@ -575,13 +610,15 @@ function createSignerService(ctx, logger) {
         return;
       }
       if (provider === "linux_secret_service") {
-        await execFileAsync("secret-tool", [
-          "clear",
-          "service",
-          SIGNER_SERVICE,
-          "account",
-          SIGNER_ACCOUNT,
-        ]);
+        try {
+          await execFileAsync("secret-tool", [
+            "clear",
+            "service",
+            identity.service,
+            "account",
+            identity.account,
+          ]);
+        } catch {}
       }
     } catch (error) {
       logDebug("signer", "secure_storage_delete_skipped", {
@@ -933,6 +970,7 @@ function createSignerService(ctx, logger) {
     const provider = secureStorageProvider();
     const keyStoreFile =
       provider === "windows_dpapi" ? keyStoreFileRelative() : null;
+    const identity = secureStorageIdentity();
     const signerConfig = {
       vaultFile: vaultFileRelative(),
       walletRef,
@@ -944,8 +982,8 @@ function createSignerService(ctx, logger) {
       algorithm: VAULT_ALGORITHM,
       importedAt,
       keyStoreProvider: provider,
-      keyStoreService: SIGNER_SERVICE,
-      keyStoreAccount: SIGNER_ACCOUNT,
+      keyStoreService: identity.service,
+      keyStoreAccount: identity.account,
       keyStoreFile,
       allowedActions: Array.from(SUPPORTED_MISSION_ACTIONS),
       enabled: ctx.signerConfig?.enabled !== false,
@@ -962,6 +1000,30 @@ function createSignerService(ctx, logger) {
     const previousVaultRaw = hadPreviousVault
       ? fs.readFileSync(vaultPath, "utf8")
       : null;
+    const hadPreviousMacKeychain =
+      provider === "macos_keychain" &&
+      (await (async () => {
+        try {
+          await readRawVaultKeyFromSecureStorage();
+          return true;
+        } catch {
+          return false;
+        }
+      })());
+    const previousMacKeychainRaw =
+      provider === "macos_keychain" && hadPreviousMacKeychain
+        ? await readRawVaultKeyFromSecureStorage()
+        : null;
+    const keyStorePath =
+      provider === "windows_dpapi" ? keyStoreFileAbsolute() : null;
+    const hadPreviousKeyStore =
+      provider === "windows_dpapi" && keyStorePath
+        ? fs.existsSync(keyStorePath)
+        : false;
+    const previousKeyStoreRaw =
+      provider === "windows_dpapi" && hadPreviousKeyStore && keyStorePath
+        ? fs.readFileSync(keyStorePath, "utf8")
+        : null;
 
     try {
       persistVaultRecord(vaultRecord);
@@ -1005,6 +1067,36 @@ function createSignerService(ctx, logger) {
           error: rollbackError.message,
           vaultFile: vaultFileRelative(),
         });
+      }
+      if (provider === "macos_keychain") {
+        try {
+          if (hadPreviousMacKeychain && typeof previousMacKeychainRaw === "string") {
+            await writeVaultKeyToSecureStorage(
+              Buffer.from(previousMacKeychainRaw, "base64"),
+            );
+          } else {
+            await deleteVaultKeyFromSecureStorage();
+          }
+        } catch (rollbackError) {
+          logDebug("signer", "persist_secret_keychain_rollback_failed", {
+            error: rollbackError.message,
+            keyStoreProvider: provider,
+          });
+        }
+      }
+      if (provider === "windows_dpapi" && keyStorePath) {
+        try {
+          if (hadPreviousKeyStore && typeof previousKeyStoreRaw === "string") {
+            fs.writeFileSync(keyStorePath, previousKeyStoreRaw);
+          } else if (!hadPreviousKeyStore && fs.existsSync(keyStorePath)) {
+            fs.unlinkSync(keyStorePath);
+          }
+        } catch (rollbackError) {
+          logDebug("signer", "persist_secret_keystore_rollback_failed", {
+            error: rollbackError.message,
+            keyStoreFile: redactPath(keyStorePath),
+          });
+        }
       }
       logDebug("signer", "persist_secret_failed", {
         error: error.message,
