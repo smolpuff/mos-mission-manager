@@ -27,6 +27,9 @@
     "appId": "dephlect.pbp-missions.desktop",
     "productName": "missions-v3-mcp",
     "icon": "icon",
+    "toolsets": {
+      "winCodeSign": "1.1.0"
+    },
     "directories": {
       "output": "release",
       "buildResources": "electron/icons"
@@ -50,6 +53,7 @@
     },
     "win": {
       "icon": "icon.ico",
+      "signAndEditExecutable": false,
       "target": [
         {
           "target": "portable",
