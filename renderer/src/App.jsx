@@ -1642,7 +1642,9 @@ function ControlView() {
                             : void startMissions()
                         }
                       >
-                        {!status.running ? "Start Missions" : "Press to stop"}
+                        {!status.running
+                          ? "Start Missioninginginging"
+                          : "Press to stop"}
                       </button>
                     </div>
                   </div>
