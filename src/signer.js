@@ -339,10 +339,17 @@ function createSignerService(ctx, logger) {
 
   function execFileAsync(file, args, opts = {}) {
     return new Promise((resolve, reject) => {
+      const execOptions = { encoding: "utf8" };
+      if (opts && typeof opts === "object" && opts.env) {
+        execOptions.env = { ...process.env, ...opts.env };
+      }
+      if (opts && typeof opts === "object" && typeof opts.cwd === "string") {
+        execOptions.cwd = opts.cwd;
+      }
       const child = execFile(
         file,
         args,
-        { encoding: "utf8" },
+        execOptions,
         (error, stdout, stderr) => {
           if (error) {
             const message = String(
@@ -428,6 +435,9 @@ function createSignerService(ctx, logger) {
   async function writeVaultKeyToSecureStorage(vaultKey) {
     const provider = secureStorageProvider();
     const encoded = vaultKey.toString("base64");
+    if (!encoded) {
+      throw new Error("Refusing to store an empty vault key.");
+    }
     if (provider === "macos_keychain") {
       await execFileAsync("security", [
         "add-generic-password",
@@ -445,20 +455,26 @@ function createSignerService(ctx, logger) {
       const file = keyStoreFileAbsolute();
       const script =
         "$ErrorActionPreference='Stop'; " +
-        "$plain=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($args[0])); " +
+        "$plain=[string]$env:SIGNER_VAULT_KEY_B64; " +
+        "$file=[string]$env:SIGNER_VAULT_KEY_FILE; " +
+        "if (-not $plain) { throw 'Vault key text is empty.' }; " +
+        "if (-not $file) { throw 'Vault key path is empty.' }; " +
         "$secure=ConvertTo-SecureString -String $plain -AsPlainText -Force; " +
         "$enc=ConvertFrom-SecureString -SecureString $secure; " +
-        "$dir=[System.IO.Path]::GetDirectoryName($args[1]); " +
+        "$dir=[System.IO.Path]::GetDirectoryName($file); " +
         "if ($dir) { [System.IO.Directory]::CreateDirectory($dir) | Out-Null }; " +
-        "[System.IO.File]::WriteAllText($args[1],$enc);";
+        "[System.IO.File]::WriteAllText($file,$enc);";
       await execFileAsync("powershell", [
         "-NoProfile",
         "-NonInteractive",
         "-Command",
         script,
-        encoded,
-        file,
-      ]);
+      ], {
+        env: {
+          SIGNER_VAULT_KEY_B64: encoded,
+          SIGNER_VAULT_KEY_FILE: file,
+        },
+      });
       return;
     }
     if (provider === "linux_secret_service") {
@@ -500,8 +516,10 @@ function createSignerService(ctx, logger) {
       const file = keyStoreFileAbsolute();
       const script =
         "$ErrorActionPreference='Stop'; " +
-        "if (-not [System.IO.File]::Exists($args[0])) { throw 'Vault key file not found.' }; " +
-        "$enc=[System.IO.File]::ReadAllText($args[0]).Trim(); " +
+        "$file=[string]$env:SIGNER_VAULT_KEY_FILE; " +
+        "if (-not $file) { throw 'Vault key path is empty.' }; " +
+        "if (-not [System.IO.File]::Exists($file)) { throw 'Vault key file not found.' }; " +
+        "$enc=[System.IO.File]::ReadAllText($file).Trim(); " +
         "if (-not $enc) { throw 'Vault key file is empty.' }; " +
         "$secure=ConvertTo-SecureString -String $enc; " +
         "$bstr=[Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure); " +
@@ -513,8 +531,11 @@ function createSignerService(ctx, logger) {
         "-NonInteractive",
         "-Command",
         script,
-        file,
-      ]);
+      ], {
+        env: {
+          SIGNER_VAULT_KEY_FILE: file,
+        },
+      });
       const value = String(stdout || "").trim();
       if (!value) throw new Error("Vault key not found in Windows DPAPI store.");
       return Buffer.from(value, "base64");
@@ -863,7 +884,9 @@ function createSignerService(ctx, logger) {
       const candidates = await deriveMnemonicCandidates(stringCandidate);
       const matched = expectedWalletAddress
         ? candidates.find((entry) => entry.walletAddress === expectedWalletAddress)
-        : null;
+        : candidates.find(
+            (entry) => entry.derivationPath === DEFAULT_MNEMONIC_DERIVATION_PATH,
+          ) || candidates[0] || null;
       if (!matched && expectedWalletAddress) {
         throw new Error(
           `Recovery phrase did not match wallet ${expectedWalletAddress} on supported Solana derivation paths.`,
@@ -871,7 +894,7 @@ function createSignerService(ctx, logger) {
       }
       if (!matched) {
         throw new Error(
-          "Recovery phrase import requires the app-wallet address to verify the correct account.",
+          "Recovery phrase import failed to derive a supported Solana account.",
         );
       }
       return {
@@ -939,6 +962,11 @@ function createSignerService(ctx, logger) {
       maxActionCost:
         ctx.signerConfig?.maxActionCost || DEFAULT_MAX_ACTION_COST,
     };
+    const vaultPath = vaultFileAbsolute();
+    const hadPreviousVault = fs.existsSync(vaultPath);
+    const previousVaultRaw = hadPreviousVault
+      ? fs.readFileSync(vaultPath, "utf8")
+      : null;
 
     try {
       persistVaultRecord(vaultRecord);
@@ -971,6 +999,18 @@ function createSignerService(ctx, logger) {
         hasRecoveryPhraseBackup: Boolean(encryptedMnemonic),
       };
     } catch (error) {
+      try {
+        if (hadPreviousVault && typeof previousVaultRaw === "string") {
+          fs.writeFileSync(vaultPath, previousVaultRaw);
+        } else if (!hadPreviousVault && fs.existsSync(vaultPath)) {
+          fs.unlinkSync(vaultPath);
+        }
+      } catch (rollbackError) {
+        logDebug("signer", "persist_secret_rollback_failed", {
+          error: rollbackError.message,
+          vaultFile: vaultFileRelative(),
+        });
+      }
       logDebug("signer", "persist_secret_failed", {
         error: error.message,
         sourceType,
@@ -1355,6 +1395,11 @@ function createSignerService(ctx, logger) {
           typeof ctx.signerConfig?.importSourceType === "string"
             ? ctx.signerConfig.importSourceType
             : null,
+        hasRecoveryPhraseBackupFlag:
+          ctx.signerConfig?.hasRecoveryPhraseBackup === true,
+        hasMnemonicBackupInVault: Boolean(
+          vault.mnemonicBackup && typeof vault.mnemonicBackup === "object",
+        ),
         mnemonic,
       };
     } finally {

@@ -131,9 +131,8 @@ The header always shows the funding wallet:
 - `MANUAL` in manual mode
 - `DAPP` in dapp mode
 
-Recovery phrases are verified against the app-wallet address before the app saves anything.
+Recovery phrase import uses the standard Solana derivation path by default (`m/44'/501'/0'/0'`).
 The connected payout wallet from MCP is not used for this.
-If you import by recovery phrase, the app asks for the app-wallet address the phrase should unlock.
 
 You can rerun that same guided setup any time with:
 

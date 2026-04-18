@@ -189,32 +189,14 @@ function createCommandHandler(ctx, logger, actions, configApi, services = {}) {
         return;
       }
       try {
-        const expectedWalletAddress =
-          signer && signer.looksLikeRecoveryPhrase(pasted)
-            ? await resolveExpectedWalletAddress()
-            : null;
         signer.setSignerMode("app_wallet", "import");
-        await signer.importFromText(pasted, { expectedWalletAddress });
+        await signer.importFromText(pasted);
         flushConfig(ctx, logger.logDebug);
         await refreshFundingWalletHeader();
       } catch (error) {
         logWithTimestamp(`[SIGNER] ❌ Import failed: ${error.message}`);
       }
     }
-
-    async function resolveExpectedWalletAddress() {
-      const entered = await askQuestion(
-        rl,
-        "Paste the app-wallet address this recovery phrase should unlock: ",
-      );
-      if (!entered) {
-        throw new Error(
-          "Recovery phrase import requires the app-wallet address to verify the correct account.",
-        );
-      }
-      return entered;
-    }
-
     async function runFirstTimeSignerSetup({ force = false } = {}) {
       if (!force && ctx.config.signerSetupCompleted === true) return;
       logWithTimestamp(
@@ -450,12 +432,8 @@ function createCommandHandler(ctx, logger, actions, configApi, services = {}) {
           const importPath = importValue && fs.existsSync(importValue) ? importValue : null;
           if (!importPath) {
             try {
-              const expectedWalletAddress =
-                signer.looksLikeRecoveryPhrase(importValue)
-                  ? await resolveExpectedWalletAddress()
-                  : null;
               signer.setSignerMode("app_wallet", "import");
-              await signer.importFromText(importValue, { expectedWalletAddress });
+              await signer.importFromText(importValue);
               flushConfig(ctx, logger.logDebug);
               await refreshFundingWalletHeader();
             } catch (error) {
@@ -645,3 +623,4 @@ function createCommandHandler(ctx, logger, actions, configApi, services = {}) {
 module.exports = {
   createCommandHandler,
 };
+
