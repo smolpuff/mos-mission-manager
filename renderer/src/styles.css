@@ -629,6 +629,7 @@
   box-shadow: 0 0 0 3px rgba(234, 72, 72, 0.25);
 }
 
+
 @keyframes missionErrorPulse {
   0% {
     box-shadow:
@@ -636,12 +637,14 @@
       0 0 0 6px rgba(234, 72, 72, 0.14),
       0 2px 10px rgba(234, 72, 72, 0.35);
   }
+
   50% {
     box-shadow:
       0 0 0 1px rgba(234, 72, 72, 1),
       0 0 0 10px rgba(234, 72, 72, 0.2),
       0 4px 16px rgba(234, 72, 72, 0.45);
   }
+
   100% {
     box-shadow:
       0 0 0 1px rgba(234, 72, 72, 0.9),
@@ -777,6 +780,41 @@ button.btn.btn-gradient {
   animation: numOutDown 260ms ease-out both;
 }
 
+/* mish */
+.competition__h,
+.mish-gradient {
+  @apply font-bold inline-flex italic items-center;
+  color: transparent;
+  font-size: 3rem;
+  background-clip: text;
+  background-image: linear-gradient(180deg, #FCC46D 0%, #FFD876 43%, #fbe6e7 50%, #f388b1 70%);
+  text-shadow: 0 1rem 1rem rgba(0, 0, 0, 0.3);
+  border: inset 2px solid rgba(255, 255, 255, 0.6);
+
+  span {
+    font-size: 5rem;
+    @apply font-black;
+  }
+}
+
+.results-table .results-row--current {
+  font-weight: bold;
+  position: relative;
+  @apply text-shadow-lg;
+  background-image: linear-gradient(90deg,
+      var(--color-info),
+      var(--color-primary),
+      var(--color-secondary));
+  background-repeat: no-repeat;
+  background-size: 100%;
+  background-position: center;
+  transform-origin: center;
+
+}
+
+.results-table .results-row--current td {
+  background: transparent !important;
+}
 
 /* settings page */
 
@@ -1028,8 +1066,7 @@ button.btn.btn-gradient {
     transform-origin: 50% 100%;
     filter: drop-shadow(0 0 0 rgba(255, 80, 80, 0));
 
-    transition:
-      opacity 220ms ease,
+    transition: opacity 220ms ease,
       transform 420ms cubic-bezier(0.22, 0.9, 0.24, 1),
       filter 220ms ease;
   }
@@ -1113,8 +1150,7 @@ button.btn.btn-gradient {
       opacity: 1;
       transform: translateX(-50%) translateY(0) scaleY(1);
       /* filter: drop-shadow(0 0 10px rgba(255, 80, 80, 0.4)); */
-      filter:
-        drop-shadow(0 0 10px rgba(255, 80, 80, 0.5)) drop-shadow(0 0 18px rgba(255, 140, 40, 0.16));
+      filter: drop-shadow(0 0 10px rgba(255, 80, 80, 0.5)) drop-shadow(0 0 18px rgba(255, 140, 40, 0.16));
 
     }
 
@@ -1126,8 +1162,7 @@ button.btn.btn-gradient {
     &:hover,
     &:focus-visible {
       .mo-fire {
-        filter:
-          drop-shadow(0 0 10px rgba(255, 80, 80, 0.5)) drop-shadow(0 0 18px rgba(255, 140, 40, 0.16));
+        filter: drop-shadow(0 0 10px rgba(255, 80, 80, 0.5)) drop-shadow(0 0 18px rgba(255, 140, 40, 0.16));
       }
     }
   }

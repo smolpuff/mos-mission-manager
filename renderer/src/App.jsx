@@ -158,7 +158,6 @@ function ControlView() {
   const [latestCompetition, setLatestCompetition] = useState(null);
   const [latestCompetitionBusy, setLatestCompetitionBusy] = useState(false);
   const [latestCompetitionError, setLatestCompetitionError] = useState(null);
-  const [usePreviousDebug, setUsePreviousDebug] = useState(false);
   const [createWalletOpen, setCreateWalletOpen] = useState(false);
   const [createWalletOnboarding, setCreateWalletOnboarding] = useState(false);
   const [createWalletConfirm, setCreateWalletConfirm] = useState(false);
@@ -200,7 +199,9 @@ function ControlView() {
       const hasWalletByStatus =
         status.signerStatus === "app_wallet_locked" ||
         status.signerStatus === "app_wallet_unlocked";
-      const hasWallet = Boolean(signerWallet || fundingAddress || hasWalletByStatus);
+      const hasWallet = Boolean(
+        signerWallet || fundingAddress || hasWalletByStatus,
+      );
       const missingWallet =
         status.signerStatus === "app_wallet_not_imported" || !hasWallet;
       if (missingWallet) {
@@ -264,9 +265,7 @@ function ControlView() {
     setLatestCompetitionBusy(true);
     setLatestCompetitionError(null);
     try {
-      const res = await bridge.getLatestCompetition({
-        competitionPick: usePreviousDebug ? "second" : "first",
-      });
+      const res = await bridge.getLatestCompetition({});
       if (!res?.ok) throw new Error(res?.error || "Scrape failed.");
       setLatestCompetition(res.competition || null);
     } catch (e) {
@@ -275,6 +274,18 @@ function ControlView() {
       setLatestCompetitionBusy(false);
     }
   };
+
+  useEffect(() => {
+    if (currentPage !== "mish_tish") return;
+    if (latestCompetition || latestCompetitionBusy || latestCompetitionError)
+      return;
+    void refreshLatestCompetition();
+  }, [
+    currentPage,
+    latestCompetition,
+    latestCompetitionBusy,
+    latestCompetitionError,
+  ]);
 
   const setMissionResetEnabled = async (enabled) => {
     setResetEnabled(enabled);
@@ -461,6 +472,27 @@ function ControlView() {
     status.fundingWalletSummary?.status === "ok"
       ? status.fundingWalletSummary
       : null;
+  const appWalletAddress = String(
+    fundingWalletSummary?.address || status.signerWallet || "",
+  ).trim();
+  const normalizeCompetitionName = (value) =>
+    String(value || "")
+      .trim()
+      .toLowerCase()
+      .replace(/^@+/, "")
+      .replace(/\s+/g, "")
+      .replace(/[^a-z0-9._-]/g, "");
+  const currentCompetitionUserKeys = [
+    normalizeCompetitionName(status.currentUserDisplayName),
+    normalizeCompetitionName(status.currentUserWalletId),
+  ].filter(Boolean);
+  const isCurrentCompetitionRow = (playerValue) => {
+    const rowKey = normalizeCompetitionName(playerValue);
+    if (!rowKey || !currentCompetitionUserKeys.length) return false;
+    return currentCompetitionUserKeys.some(
+      (key) => rowKey === key || rowKey.includes(key) || key.includes(rowKey),
+    );
+  };
   const isWatching = status.watcherRunning === true;
   const isStarting = status.running && !isWatching;
   const [activityLabel, setActivityLabel] = useState(null);
@@ -524,13 +556,19 @@ function ControlView() {
       }
     } else if (type === "tick" && isWatching) {
       const current = String(activityLabel || "").toLowerCase();
-      if (current.includes("claiming mission") || current.includes("starting mission")) {
+      if (
+        current.includes("claiming mission") ||
+        current.includes("starting mission")
+      ) {
         next = "Watching missions...";
       }
     }
     if (!next) return;
     setActivityLabel(next);
-    if (!Number.isFinite(Number(resetToWatchingMs)) || Number(resetToWatchingMs) <= 0) {
+    if (
+      !Number.isFinite(Number(resetToWatchingMs)) ||
+      Number(resetToWatchingMs) <= 0
+    ) {
       return;
     }
     const timer = setTimeout(() => {
@@ -541,20 +579,33 @@ function ControlView() {
       });
     }, Number(resetToWatchingMs));
     return () => clearTimeout(timer);
-  }, [lastEvent, isWatching, activityLabel, status.running, status.watcherRunning]);
+  }, [
+    lastEvent,
+    isWatching,
+    activityLabel,
+    status.running,
+    status.watcherRunning,
+  ]);
 
   useEffect(() => {
     if (!lastEvent || typeof lastEvent !== "object") return;
     const type = String(lastEvent.type || "").trim();
     if (type === "reset_error") {
       const slot = Number(lastEvent.slot);
-      const slotKey = Number.isFinite(slot) && slot >= 1 && slot <= 4
-        ? String(slot)
-        : String(lastEvent.assignedMissionId || lastEvent.missionName || Date.now());
+      const slotKey =
+        Number.isFinite(slot) && slot >= 1 && slot <= 4
+          ? String(slot)
+          : String(
+              lastEvent.assignedMissionId ||
+                lastEvent.missionName ||
+                Date.now(),
+            );
       const nextError = {
         slot: Number.isFinite(slot) ? slot : null,
-        assignedMissionId: String(lastEvent.assignedMissionId || "").trim() || null,
-        missionName: String(lastEvent.missionName || "").trim() || "Unknown mission",
+        assignedMissionId:
+          String(lastEvent.assignedMissionId || "").trim() || null,
+        missionName:
+          String(lastEvent.missionName || "").trim() || "Unknown mission",
         actionName: String(lastEvent.actionName || "").trim() || "reset",
         error: String(lastEvent.error || "Reset failed."),
         bridgeUrl: String(lastEvent.bridgeUrl || "").trim() || null,
@@ -568,12 +619,14 @@ function ControlView() {
     }
     if (type === "reset_error_cleared") {
       const slot = Number(lastEvent.slot);
-      const slotKey = Number.isFinite(slot) && slot >= 1 && slot <= 4
-        ? String(slot)
-        : String(lastEvent.assignedMissionId || "").trim();
+      const slotKey =
+        Number.isFinite(slot) && slot >= 1 && slot <= 4
+          ? String(slot)
+          : String(lastEvent.assignedMissionId || "").trim();
       if (!slotKey) return;
       setSlotResetErrors((current) => {
-        if (!Object.prototype.hasOwnProperty.call(current, slotKey)) return current;
+        if (!Object.prototype.hasOwnProperty.call(current, slotKey))
+          return current;
         const next = { ...current };
         delete next[slotKey];
         return next;
@@ -637,12 +690,29 @@ function ControlView() {
       return false;
     }
   };
+  const openExternalUrl = async (url) => {
+    const target = String(url || "").trim();
+    if (!target) return false;
+    if (bridge?.openExternal) {
+      try {
+        await bridge.openExternal(target);
+        return true;
+      } catch {}
+    }
+    try {
+      window.open(target, "_blank", "noopener,noreferrer");
+      return true;
+    } catch {
+      return false;
+    }
+  };
   const startMissions = async () => {
     const applyPersistedModeToBackend = async () => {
       if (!bridge?.sendCommand) return;
       if (isMissionMode) {
-        const resetLevel = String(status.currentMissionResetLevel || "6")
-          .trim();
+        const resetLevel = String(
+          status.currentMissionResetLevel || "6",
+        ).trim();
         const levelNumber = Number(resetLevel);
         const safeLevel =
           Number.isFinite(levelNumber) && levelNumber > 0
@@ -861,7 +931,7 @@ function ControlView() {
                   </div>
 
                   {fundingEnabled && fundingSource === "app_wallet" ? (
-                    <div className="space-y-2">
+                    <div className="space-y-3">
                       <h3 className="sm border-b border-white/20 pb-1">
                         App-Wallet Details
                       </h3>
@@ -871,19 +941,15 @@ function ControlView() {
                       >
                         Address
                       </label>
-                      <div className="user__wallet-addres text-lg flex gap-3 items-center">
-                        {fundingWalletSummary?.address ||
-                          status.signerWallet ||
-                          "—"}
+                      <div className="user__wallet-addres text-lg flex flex-wrap gap-y-0 gap-x-5 items-center">
+                        <div className="flex w-full flex-basis">
+                          {appWalletAddress || "—"}
+                        </div>
                         <button
                           type="button"
-                          className="fill-white flex items-center gap-1 text-xs btn btn-clear hover:fill-accent hover:text-accent hover:cursor-pointer"
+                          className="fill-white flex  items-center gap-1 font-normal text-xs px-0  py-1 h-min btn btn-clear hover:fill-accent hover:text-accent hover:cursor-pointer"
                           onClick={() => {
-                            const value = String(
-                              fundingWalletSummary?.address ||
-                                status.signerWallet ||
-                                "",
-                            ).trim();
+                            const value = appWalletAddress;
                             if (!value) return;
                             void copyText(value).then((ok) => {
                               setCopiedLabel(ok ? "Copied" : "Copy failed");
@@ -894,11 +960,30 @@ function ControlView() {
                           <svg
                             xmlns="http://www.w3.org/2000/svg"
                             viewBox="0 0 640 640"
-                            className="w-6 h-6"
+                            className="w-4 h-4"
                           >
-                            <path d="M352 512L128 512L128 288L176 288L176 224L128 224C92.7 224 64 252.7 64 288L64 512C64 547.3 92.7 576 128 576L352 576C387.3 576 416 547.3 416 512L416 464L352 464L352 512zM288 416L512 416C547.3 416 576 387.3 576 352L576 128C576 92.7 547.3 64 512 64L288 64C252.7 64 224 92.7 224 128L224 352C224 387.3 252.7 416 288 416z" />
-                          </svg>{" "}
+                            <path d="M352 544L128 544C110.3 544 96 529.7 96 512L96 288C96 270.3 110.3 256 128 256L176 256L176 224L128 224C92.7 224 64 252.7 64 288L64 512C64 547.3 92.7 576 128 576L352 576C387.3 576 416 547.3 416 512L416 464L384 464L384 512C384 529.7 369.7 544 352 544zM288 384C270.3 384 256 369.7 256 352L256 128C256 110.3 270.3 96 288 96L512 96C529.7 96 544 110.3 544 128L544 352C544 369.7 529.7 384 512 384L288 384zM224 352C224 387.3 252.7 416 288 416L512 416C547.3 416 576 387.3 576 352L576 128C576 92.7 547.3 64 512 64L288 64C252.7 64 224 92.7 224 128L224 352z" />
+                          </svg>
                           {copiedLabel || "Copy"}
+                        </button>
+                        <button
+                          type="button"
+                          className="fill-white flex font-normal items-center gap-1 text-xs btn-clear btn px-0 py-1 h-min hover:fill-accent hover:text-accent hover:cursor-pointer"
+                          disabled={!appWalletAddress}
+                          onClick={() => {
+                            if (!appWalletAddress) return;
+                            const target = `https://solscan.io/account/${encodeURIComponent(appWalletAddress)}`;
+                            void openExternalUrl(target);
+                          }}
+                        >
+                          <svg
+                            xmlns="http://www.w3.org/2000/svg"
+                            viewBox="0 0 640 640"
+                            className="w-4 h-4"
+                          >
+                            <path d="M574.5 449.2L489.6 537.9C487.8 539.8 485.5 541.4 483 542.4C480.5 543.4 477.8 544 475.1 544L72.9 544C71 544 69.1 543.5 67.5 542.4C65.9 541.3 64.6 539.9 63.9 538.2C63.2 536.5 62.9 534.6 63.2 532.7C63.5 530.8 64.4 529.1 65.7 527.8L150.6 439.1C152.4 437.2 154.7 435.6 157.1 434.6C159.5 433.6 162.2 433 164.9 433L567.3 433C569.2 433 571.1 433.5 572.7 434.6C574.3 435.7 575.6 437.1 576.3 438.8C577 440.5 577.3 442.4 577 444.3C576.7 446.2 575.8 447.9 574.5 449.2zM489.7 270.6C487.9 268.7 485.6 267.1 483.1 266.1C480.6 265.1 477.9 264.5 475.2 264.5L72.8 264.5C70.9 264.5 69 265 67.4 266.1C65.8 267.2 64.5 268.6 63.8 270.3C63.1 272 62.8 273.9 63.1 275.8C63.4 277.7 64.3 279.4 65.6 280.7L150.5 369.4C152.3 371.3 154.6 372.9 157 373.9C159.4 374.9 162.1 375.5 164.8 375.5L567.2 375.5C569.1 375.5 571 375 572.6 373.9C574.2 372.8 575.5 371.4 576.2 369.7C576.9 368 577.2 366.1 576.9 364.2C576.6 362.3 575.7 360.6 574.4 359.3L489.5 270.6zM72.9 206.9L475.3 206.9C478 206.9 480.7 206.4 483.2 205.3C485.7 204.2 487.9 202.7 489.8 200.8L574.7 112.1C576 110.7 576.9 109 577.2 107.2C577.5 105.4 577.3 103.5 576.5 101.7C575.7 99.9 574.5 98.5 572.9 97.5C571.3 96.5 569.4 95.9 567.5 95.9L165 96C162.3 96 159.6 96.5 157.2 97.6C154.8 98.7 152.5 100.2 150.7 102.1L65.7 190.8C64.4 192.2 63.5 193.9 63.2 195.7C62.9 197.5 63.1 199.4 63.9 201.2C64.7 203 65.9 204.4 67.5 205.4C69.1 206.4 71 207 72.9 207z" />
+                          </svg>
+                          Explorer
                         </button>
                       </div>
                       <div className="grid grid-cols-2 gap-8">
@@ -1343,160 +1428,196 @@ function ControlView() {
             </div>
           ) : null}
           {currentPage === "mish_tish" ? (
-            <section>
-              <div className="card gap-4">
-                <div className="flex items-center justify-between gap-3">
-                  <div className="space-y-0.5">
-                    <h1 className="text-2xl font-normal">
+            <section className=" h-160 flex flex-col gap-6">
+              <div className="competition__header grid gap-4 grid-cols-2 items-center">
+                <div className="-mt-6">
+                  <h1 className="text-2xl font-normal competition__h leading-tight">
+                    Competition
+                    <span>
                       {latestCompetition?.competitionNumber
-                        ? `Competition ${latestCompetition.competitionNumber}`
-                        : "Competition"}
-                    </h1>
+                        ? ` ${latestCompetition.competitionNumber}`
+                        : ""}
+                    </span>{" "}
+                    <div className="flex items-center gap-2 ">
+                      <button
+                        type="button"
+                        className="btn btn-clear btn-sm uppercase !tracking-wider font-light text-slate-300"
+                        onClick={() => void refreshLatestCompetition()}
+                        disabled={latestCompetitionBusy}
+                        title={
+                          latestCompetition
+                            ? "Refresh competition data"
+                            : "Load competition data"
+                        }
+                      >
+                        {latestCompetitionBusy
+                          ? latestCompetition
+                            ? "Refreshing..."
+                            : "Loading..."
+                          : latestCompetition
+                            ? "Refresh"
+                            : "Load"}
+                      </button>
+                    </div>
+                  </h1>
+                </div>
+                <div className="gap-1 text-xs justify-self-end  flex flex-col flex-0">
+                  <div>
+                    Start{" "}
+                    {latestCompetition?.start ||
+                      latestCompetition?.datesText ||
+                      "Unknown"}
                   </div>
-                  <div className="flex items-center gap-2">
-                    <label className="text-xs text-slate-400 flex items-center gap-1 select-none">
-                      <input
-                        type="checkbox"
-                        checked={usePreviousDebug}
-                        onChange={(e) => {
-                          setUsePreviousDebug(e.target.checked === true);
-                          setLatestCompetition(null);
-                        }}
-                      />
-                      Use previous (debug)
-                    </label>
-                    <button
-                      type="button"
-                      className="btn btn-clear btn-sm uppercase !tracking-wider font-light text-slate-300"
-                      onClick={() => void refreshLatestCompetition()}
-                      disabled={latestCompetitionBusy}
-                      title={
-                        latestCompetition
-                          ? "Refresh competition data"
-                          : "Load competition data"
-                      }
-                    >
-                      {latestCompetitionBusy
-                        ? latestCompetition
-                          ? "Refreshing..."
-                          : "Loading..."
-                        : latestCompetition
-                          ? "Refresh"
-                          : "Load"}
-                    </button>
+                  <div>
+                    End{" "}
+                    {latestCompetition?.end ||
+                      latestCompetition?.datesText ||
+                      "Unknown"}
                   </div>
                 </div>
+              </div>
 
-                {latestCompetitionError ? (
-                  <div className="text-sm text-red-300">
-                    {latestCompetitionError}
-                  </div>
-                ) : null}
-
-                {!latestCompetition ? (
-                  <div className="text-sm text-slate-300">
-                    {latestCompetitionBusy
-                      ? "Loading competition..."
-                      : "Press Load to fetch the latest competition."}
-                  </div>
+              <div className="card gap-4 competition__missions -mt-4">
+                <div className="text-sm text-slate-400 hidden">Missions</div>
+                {Array.isArray(latestCompetition?.missions) &&
+                latestCompetition.missions.length ? (
+                  <ul className="text-sm list-disc pl-5 space-y-0.5">
+                    {latestCompetition.missions.map((m, idx) => (
+                      <li key={`${idx}_${m}`}>{m}</li>
+                    ))}
+                  </ul>
                 ) : (
-                  <div className="space-y-3">
-                    {latestCompetition.debug?.challenge ? (
-                      <div className="text-sm text-amber-200">
-                        Headless scrape looks blocked (
-                        {latestCompetition.debug.challenge}). Try again after
-                        opening the competitions page once in-app, or disable
-                        bot protection.
-                      </div>
-                    ) : null}
-                    <div className="grid grid-cols-2 gap-2 text-sm">
-                      <div className="text-slate-400">Start</div>
-                      <div>
-                        {latestCompetition.start ||
-                          latestCompetition.datesText ||
-                          "Unknown"}
-                      </div>
-                      <div className="text-slate-400">End</div>
-                      <div>
-                        {latestCompetition.end ||
-                          latestCompetition.datesText ||
-                          "Unknown"}
-                      </div>
-                    </div>
-
-                    <div className="space-y-1">
-                      <div className="text-sm text-slate-400">Missions</div>
-                      {Array.isArray(latestCompetition.missions) &&
-                      latestCompetition.missions.length ? (
-                        <ul className="text-sm list-disc pl-5 space-y-0.5">
-                          {latestCompetition.missions.map((m, idx) => (
-                            <li key={`${idx}_${m}`}>{m}</li>
-                          ))}
-                        </ul>
-                      ) : (
-                        <div className="text-sm text-slate-300">
-                          No missions found.
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="space-y-1">
-                      <div className="text-sm text-slate-400">Prizes</div>
-                      {Array.isArray(latestCompetition.prizes) &&
-                      latestCompetition.prizes.length ? (
-                        <ul className="text-sm list-disc pl-5 space-y-0.5">
-                          {latestCompetition.prizes.map((p, idx) => (
-                            <li key={`${idx}_${p}`}>{p}</li>
-                          ))}
-                        </ul>
-                      ) : (
-                        <div className="text-sm text-slate-300">
-                          No prizes found.
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="space-y-1">
-                      <div className="text-sm text-slate-400">Results</div>
-                      {latestCompetition.resultsStatus ? (
-                        <div className="text-sm text-slate-300">
-                          {latestCompetition.resultsStatus}
-                        </div>
-                      ) : Array.isArray(latestCompetition.users) &&
-                        latestCompetition.users.length ? (
-                        <ul className="text-sm list-disc pl-5 space-y-0.5">
-                          {latestCompetition.users.map((u, idx) => (
-                            <li key={`${idx}_${u}`}>{u}</li>
-                          ))}
-                        </ul>
-                      ) : (
-                        <div className="text-sm text-slate-300">
-                          No users found.
-                        </div>
-                      )}
-                    </div>
-
-                    {latestCompetition.debug ? (
-                      <details className="text-xs text-slate-400">
-                        <summary className="cursor-pointer select-none">
-                          Debug
-                        </summary>
-                        <div className="pt-2 space-y-2">
-                          <div>
-                            pick:{" "}
-                            {latestCompetition.debug.competitionPick || "?"} •
-                            cards: {latestCompetition.debug.cardCount ?? "?"}
-                          </div>
-                          {latestCompetition.debug.sampleText ? (
-                            <div className="whitespace-pre-wrap break-words">
-                              {latestCompetition.debug.sampleText}
-                            </div>
-                          ) : null}
-                        </div>
-                      </details>
-                    ) : null}
+                  <div className="text-sm text-slate-300">
+                    No missions found.
                   </div>
                 )}
+              </div>
+
+              <div className="flex gap-4 h-101.5 overflow-x-visible overflow-y-hidden">
+                <div className="gap-4 rounded-lg w-full h-full min-h-0 flex flex-col">
+                  {latestCompetitionError ? (
+                    <div className="text-sm text-red-300">
+                      {latestCompetitionError}
+                    </div>
+                  ) : null}
+
+                  {!latestCompetition ? (
+                    <div className="text-sm text-slate-300">
+                      {latestCompetitionBusy
+                        ? "Loading competition..."
+                        : "Press Load to fetch the latest competition."}
+                    </div>
+                  ) : (
+                    <div className="h-full min-h-0 flex flex-col gap-3">
+                      {latestCompetition.debug?.challenge ? (
+                        <div className="text-sm text-amber-200">
+                          Headless scrape looks blocked (
+                          {latestCompetition.debug.challenge}). Try again after
+                          opening the competitions page once in-app, or disable
+                          bot protection.
+                        </div>
+                      ) : null}
+
+                      <div className="w-full flex-1 min-h-0 card flex flex-col">
+                        <div className="text-sm text-slate-400 w-full | hidden">
+                          Results
+                        </div>
+                        {latestCompetition.resultsStatus ? (
+                          <div className="text-sm text-slate-300">
+                            {latestCompetition.resultsStatus}
+                          </div>
+                        ) : Array.isArray(latestCompetition.userRows) &&
+                          latestCompetition.userRows.length ? (
+                          <div className=" overflow-hidden overflow-y-scroll w-full flex-1 min-h-0">
+                            <table className="results-table w-full text-xs border-collapse h-full">
+                              <thead className="">
+                                <tr className="text-slate-400 border-b border-slate-700/70 ">
+                                  <th className="text-left font-normal py-1 pr-2">
+                                    Place
+                                  </th>
+                                  <th className="text-left   font-normal py-1 pr-2">
+                                    Player
+                                  </th>
+                                  <th className="text-right font-normal py-1 pr-2">
+                                    Completed
+                                  </th>
+                                  <th className="text-right font-normal py-1">
+                                    Unique NFTs
+                                  </th>
+                                </tr>
+                              </thead>
+                              <tbody className="w-full">
+                                {latestCompetition.userRows.map((row, idx) => {
+                                  const isCurrentUserRow =
+                                    isCurrentCompetitionRow(row.player);
+                                  return (
+                                    <tr
+                                      key={`${idx}_${row.player}_${row.rank}`}
+                                      className={`border-b border-slate-800/70 last:border-0 gap-2 ${
+                                        isCurrentUserRow
+                                          ? "results-row--current"
+                                          : ""
+                                      }`}
+                                    >
+                                      <td className="py-1 pr-2 rounded-l-md text-slate-200">
+                                        {Number.isFinite(Number(row.rank))
+                                          ? Number(row.rank)
+                                          : "-"}
+                                      </td>
+                                      <td className="py-1 pr-2 text-slate-100">
+                                        {row.player || "-"}
+                                      </td>
+                                      <td className="py-1 pr-2 text-right text-slate-200">
+                                        {Number.isFinite(Number(row.completed))
+                                          ? Number(row.completed)
+                                          : "-"}
+                                      </td>
+                                      <td className="py-1 text-right text-slate-200 rounded-r-md">
+                                        {Number.isFinite(Number(row.uniqueNFTs))
+                                          ? Number(row.uniqueNFTs)
+                                          : "-"}
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          </div>
+                        ) : Array.isArray(latestCompetition.users) &&
+                          latestCompetition.users.length ? (
+                          <ul className="text-sm list-disc pl-5 space-y-0.5">
+                            {latestCompetition.users.map((u, idx) => (
+                              <li key={`${idx}_${u}`}>{u}</li>
+                            ))}
+                          </ul>
+                        ) : (
+                          <div className="text-sm text-slate-300">
+                            No users found.
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+                <div className="space-y-1 max-w-[200px] w-full">
+                  <div className="text-sm text-slate-400 mish-gradient !text-2xl">
+                    Prizes
+                  </div>
+                  {Array.isArray(latestCompetition?.prizes) &&
+                  latestCompetition.prizes.length ? (
+                    <ul className="text-xs space-y-0.5 ">
+                      {latestCompetition.prizes.map((p, idx) => (
+                        <li key={`${idx}_${p}`} className="flex flex-col gap-2">
+                          {p}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <div className="text-sm text-slate-300">
+                      No prizes found.
+                    </div>
+                  )}
+                </div>
               </div>
             </section>
           ) : null}
@@ -2105,11 +2226,11 @@ function ControlView() {
                         type="button"
                         className="btn btn-clear btn-sm"
                         onClick={() => {
-                          const url = String(resetErrorModal.bridgeUrl || "").trim();
+                          const url = String(
+                            resetErrorModal.bridgeUrl || "",
+                          ).trim();
                           if (!url) return;
-                          try {
-                            window.open(url, "_blank", "noopener,noreferrer");
-                          } catch {}
+                          void openExternalUrl(url);
                         }}
                       >
                         Open Link

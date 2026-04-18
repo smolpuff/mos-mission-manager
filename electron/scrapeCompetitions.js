@@ -362,8 +362,9 @@ async function scrapeLatestCompetition(opts = {}) {
       ? findListFollowingHeader(root, "Prizes")
       : findListFollowingHeader(root, "Prize");
 
-    let resultsStatus = null;
-    let users = [];
+	    let resultsStatus = null;
+	    let userRows = [];
+	    let users = [];
 
 	    const noResults =
 	      /no\\s+results\\s+yet/i.test(text) ||
@@ -372,6 +373,68 @@ async function scrapeLatestCompetition(opts = {}) {
 	    if (noResults) {
 	      resultsStatus = "No results yet";
 	    } else {
+	      const expandResultsToggles = async () => {
+	        const toggleCandidates = Array.from(root.querySelectorAll("button, a, [role='button']"))
+	          .filter((el) => {
+	            const t = coerceText(el.innerText || el.textContent || "");
+	            if (!t) return false;
+	            return (
+	              /^s\\s*\\+$/i.test(t) ||
+	              /^show\\b/i.test(t) ||
+	              /\\bshow\\s+more\\b/i.test(t) ||
+	              /\\bmore\\b/i.test(t)
+	            );
+	          })
+	          .slice(0, 6);
+	        for (const el of toggleCandidates) {
+	          try {
+	            el.click();
+	          } catch {}
+	        }
+	        if (toggleCandidates.length > 0) {
+	          await sleep(220);
+	        }
+	      };
+
+	      const parseUsersFromFirstTable = () => {
+	        const tables = Array.from(root.querySelectorAll("table"));
+	        const table = tables[0] || null;
+	        if (!table) return [];
+	        const headerCells = Array.from(
+	          table.querySelectorAll("thead th, tr th"),
+	        ).map((c) => coerceText(c.innerText || c.textContent || "").toLowerCase());
+	        const rankIndex = headerCells.findIndex((t) => /rank|place|position/.test(t));
+	        const playerIndex = headerCells.findIndex((t) => /player|user|wallet/.test(t));
+	        const completedIndex = headerCells.findIndex((t) => /completed|finish|done/.test(t));
+	        const uniqueIndex = headerCells.findIndex((t) => /unique\\s*nft|unique/.test(t));
+	        const rows = Array.from(table.querySelectorAll("tr"));
+	        const out = [];
+	        for (const row of rows) {
+	          const cells = Array.from(row.querySelectorAll("td"));
+	          if (cells.length < 2) continue;
+	          const values = cells.map((c) => coerceText(c.innerText || c.textContent || ""));
+	          const rankRaw = values[rankIndex >= 0 ? rankIndex : 0] || "";
+	          const rankMatch = String(rankRaw).match(/\\d{1,4}/);
+	          const rank = rankMatch ? Number(rankMatch[0]) : null;
+	          const player = values[playerIndex >= 0 ? playerIndex : 1] || "";
+	          const completedRaw = values[completedIndex >= 0 ? completedIndex : 2] || "";
+	          const uniqueRaw = values[uniqueIndex >= 0 ? uniqueIndex : 3] || "";
+	          const completedMatch = String(completedRaw).match(/\\d{1,8}/);
+	          const uniqueMatch = String(uniqueRaw).match(/\\d{1,8}/);
+	          const completed = completedMatch ? Number(completedMatch[0]) : null;
+	          const uniqueNFTs = uniqueMatch ? Number(uniqueMatch[0]) : null;
+	          if (!Number.isFinite(rank)) continue;
+	          if (!player || /^player$/i.test(player)) continue;
+	          out.push({
+	            rank,
+	            player,
+	            completed,
+	            uniqueNFTs,
+	          });
+	        }
+	        return out;
+	      };
+
 	      const findResultsHeaderBlock = () => {
 	        const candidates = Array.from(root.querySelectorAll("*"))
 	          .map((el) => ({ el, t: coerceText(el.innerText) }))
@@ -394,12 +457,12 @@ async function scrapeLatestCompetition(opts = {}) {
 	        // Typical: "3 — rmrfkorea 302 225"
 	        const m = t.match(/^\\s*(\\d{1,4})\\s*(?:[-–—]|\\s)+\\s*([a-z0-9_\\-.]{2,})\\s+(\\d{1,8})\\s+(\\d{1,8})\\s*$/i);
 	        if (!m) return null;
-	        const rank = m[1];
+	        const rank = Number(m[1]);
 	        const player = m[2];
-	        const completed = m[3];
-	        const unique = m[4];
+	        const completed = Number(m[3]);
+	        const uniqueNFTs = Number(m[4]);
 	        if (!/[a-z]/i.test(player)) return null;
-	        return "#" + rank + " • " + player + " • Completed " + completed + " • Unique NFTs " + unique;
+	        return { rank, player, completed, uniqueNFTs };
 	      };
 
 	      const scrapeResultsGrid = () => {
@@ -430,10 +493,20 @@ async function scrapeLatestCompetition(opts = {}) {
 	        return found;
 	      };
 
-	      const grid = scrapeResultsGrid();
-	      if (grid.length) {
-	        users = grid.slice(0, 150);
-	      }
+	      const runResultsScrape = async () => {
+	        await expandResultsToggles();
+	        const tableUsers = parseUsersFromFirstTable();
+	        if (tableUsers.length) return tableUsers.slice(0, 150);
+	        const grid = scrapeResultsGrid();
+	        if (grid.length) return grid.slice(0, 150);
+	        return [];
+	      };
+	      userRows = await runResultsScrape();
+	      users = userRows.map((row) =>
+	        "#" + row.rank + " • " + row.player +
+	        (Number.isFinite(row.completed) ? " • Completed " + row.completed : "") +
+	        (Number.isFinite(row.uniqueNFTs) ? " • Unique NFTs " + row.uniqueNFTs : ""),
+	      );
 	    }
 
     return {
@@ -442,9 +515,10 @@ async function scrapeLatestCompetition(opts = {}) {
       end: endText || null,
       datesText: datesMatch ? coerceText(datesMatch[0]) : null,
       missions,
-      prizes,
-      resultsStatus,
-      users,
+	      prizes,
+	      resultsStatus,
+	      userRows,
+	      users,
       sourceUrl: location.href,
       scrapedAt: new Date().toISOString(),
 	      debug: {
@@ -474,6 +548,24 @@ async function scrapeLatestCompetition(opts = {}) {
           ? result.prizes.map(coerceText).filter(Boolean)
           : [],
         resultsStatus: coerceText(result?.resultsStatus),
+        userRows: Array.isArray(result?.userRows)
+          ? result.userRows
+              .map((row) => ({
+                rank: Number(row?.rank),
+                player: coerceText(row?.player),
+                completed:
+                  Number.isFinite(Number(row?.completed))
+                    ? Number(row.completed)
+                    : null,
+                uniqueNFTs:
+                  Number.isFinite(Number(row?.uniqueNFTs))
+                    ? Number(row.uniqueNFTs)
+                    : null,
+              }))
+              .filter(
+                (row) => Number.isFinite(row.rank) && row.rank > 0 && row.player,
+              )
+          : [],
         users: Array.isArray(result?.users)
           ? result.users.map(coerceText).filter(Boolean)
           : [],

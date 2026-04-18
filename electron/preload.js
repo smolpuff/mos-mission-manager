@@ -13,6 +13,7 @@ contextBridge.exposeInMainWorld("missionsDesktop", {
   revealSignerBackup: () => ipcRenderer.invoke("signer:reveal-backup"),
   createGeneratedWallet: () => ipcRenderer.invoke("signer:create-generated-wallet"),
   copyToClipboard: (text) => ipcRenderer.invoke("clipboard:copy", text),
+  openExternal: (url) => ipcRenderer.invoke("external:open", url),
   openCliWindow: () => ipcRenderer.invoke("window:open-cli"),
   isCliWindowOpen: () => ipcRenderer.invoke("window:is-cli-open"),
   minimizeWindow: () => ipcRenderer.invoke("window:minimize"),

@@ -3,7 +3,7 @@
 const fs = require("fs");
 const path = require("path");
 const { fork, execFile } = require("child_process");
-const { app, BrowserWindow, Menu, ipcMain, clipboard } = require("electron");
+const { app, BrowserWindow, Menu, ipcMain, clipboard, shell } = require("electron");
 const { fetchOnchainFundingWalletSummary } = require("../src/wallet/onchain-summary");
 const { scrapeLatestCompetition } = require("./scrapeCompetitions");
 
@@ -855,6 +855,14 @@ app.whenReady().then(async () => {
   ipcMain.handle("clipboard:copy", async (_event, text) => {
     const value = String(text || "");
     clipboard.writeText(value);
+    return true;
+  });
+  ipcMain.handle("external:open", async (_event, url) => {
+    const target = String(url || "").trim();
+    if (!/^https?:\/\//i.test(target)) {
+      throw new Error("Invalid external URL.");
+    }
+    await shell.openExternal(target);
     return true;
   });
   ipcMain.handle("window:open-cli", async () => {
