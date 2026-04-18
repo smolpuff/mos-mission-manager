@@ -1481,9 +1481,11 @@ function ControlView() {
                 <div className="text-sm text-slate-400 hidden">Missions</div>
                 {Array.isArray(latestCompetition?.missions) &&
                 latestCompetition.missions.length ? (
-                  <ul className="text-sm list-disc pl-5 space-y-0.5">
+                  <ul className="text-sm list-disc pl-5 space-y-0.5 flex flex-wrap">
                     {latestCompetition.missions.map((m, idx) => (
-                      <li key={`${idx}_${m}`}>{m}</li>
+                      <li className=" basis-1/2" key={`${idx}_${m}`}>
+                        {m}
+                      </li>
                     ))}
                   </ul>
                 ) : (
@@ -2312,6 +2314,7 @@ function CliView() {
   return (
     <main className="cli-shell">
       <WindowChrome title="CLI Bridge" subtitle="Manual Control" />
+      <div className="cli-drag-strip" aria-hidden="true" />
 
       <section className=" flex-1  ">
         <div className="space-y-4">
@@ -2319,7 +2322,7 @@ function CliView() {
             className="terminal bg-black/75"
             ref={outputRef}
             style={{
-              height: "472px",
+              height: "460px",
               minHeight: "120px",
               overflowY: "auto",
             }}

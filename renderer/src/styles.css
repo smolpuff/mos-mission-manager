@@ -233,11 +233,24 @@
     @apply flex flex-col;
   }
 
+  .cli-drag-strip {
+    @apply mx-4 h-3;
+    app-region: drag;
+    -webkit-app-region: drag;
+  }
+
+  .cli-shell>section {
+    app-region: drag;
+    -webkit-app-region: drag;
+  }
+
   .window-chrome {
     @apply flex items-center h-10 px-4 py-2;
     /* border-bottom: 1px solid rgba(148, 163, 184, 0.12); */
     user-select: none;
     -webkit-user-select: none;
+    app-region: drag;
+    -webkit-app-region: drag;
   }
 
   .window-drag {
@@ -268,6 +281,7 @@
     app-region: no-drag;
     -webkit-app-region: no-drag;
   }
+
 
   .window-actions-spacer {
     @apply min-w-12;

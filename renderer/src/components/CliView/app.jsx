@@ -52,6 +52,7 @@ export default function CliView({
   return (
     <main className="cli-shell">
       <WindowChrome title="CLI Bridge" subtitle="Manual Control" />
+      <div className="cli-drag-strip" aria-hidden="true" />
       <header className="cli-toolbar">
         <div>
           <h1 className="cli-title">CLI Bridge</h1>

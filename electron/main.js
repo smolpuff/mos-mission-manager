@@ -748,6 +748,7 @@ async function createCliWindow() {
     maximizable: false,
     fullscreenable: false,
     resizable: false,
+    movable: true,
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,

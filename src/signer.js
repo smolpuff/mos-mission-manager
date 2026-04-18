@@ -100,11 +100,18 @@ function createSignerService(ctx, logger) {
     return DEFAULT_VAULT_FILE;
   }
 
+  function storageBaseDir() {
+    if (typeof ctx.configPath === "string" && ctx.configPath.trim()) {
+      return path.dirname(ctx.configPath);
+    }
+    return process.cwd();
+  }
+
   function vaultFileAbsolute() {
     const relative = vaultFileRelative();
     return path.isAbsolute(relative)
       ? relative
-      : path.join(process.cwd(), relative);
+      : path.join(storageBaseDir(), relative);
   }
 
   function ensureVaultDir() {
@@ -129,6 +136,28 @@ function createSignerService(ctx, logger) {
     };
   }
 
+  function configuredSecureStorageIdentity() {
+    const service = String(ctx.signerConfig?.keyStoreService || "").trim();
+    const account = String(ctx.signerConfig?.keyStoreAccount || "").trim();
+    if (!service || !account) return null;
+    return { service, account };
+  }
+
+  function secureStorageReadIdentities() {
+    const identities = [];
+    const seen = new Set();
+    const configured = configuredSecureStorageIdentity();
+    const scoped = secureStorageIdentity();
+    for (const entry of [configured, scoped]) {
+      if (!entry) continue;
+      const key = `${entry.service}\u0000${entry.account}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      identities.push(entry);
+    }
+    return identities;
+  }
+
   function auditFileRelative() {
     const configured = ctx.signerConfig?.auditFile;
     if (typeof configured === "string" && configured.trim()) {
@@ -141,7 +170,7 @@ function createSignerService(ctx, logger) {
     const relative = auditFileRelative();
     return path.isAbsolute(relative)
       ? relative
-      : path.join(process.cwd(), relative);
+      : path.join(storageBaseDir(), relative);
   }
 
   function ensureAuditDir() {
@@ -188,7 +217,7 @@ function createSignerService(ctx, logger) {
   function redactPath(filePath) {
     const absolute = String(filePath || "");
     if (!absolute) return "";
-    return path.relative(process.cwd(), absolute) || absolute;
+    return path.relative(storageBaseDir(), absolute) || absolute;
   }
 
   function walletRefFromSecret(secretBytes) {
@@ -424,7 +453,7 @@ function createSignerService(ctx, logger) {
     const relative = keyStoreFileRelative();
     return path.isAbsolute(relative)
       ? relative
-      : path.join(process.cwd(), relative);
+      : path.join(storageBaseDir(), relative);
   }
 
   function secureStorageDisplayName() {
@@ -514,17 +543,26 @@ function createSignerService(ctx, logger) {
 
   async function readRawVaultKeyFromSecureStorage() {
     const provider = secureStorageProvider();
-    const identity = secureStorageIdentity();
+    const identities = secureStorageReadIdentities();
     if (provider === "macos_keychain") {
-      const stdout = await execFileAsync("security", [
-        "find-generic-password",
-        "-a",
-        identity.account,
-        "-s",
-        identity.service,
-        "-w",
-      ]);
-      return String(stdout || "").trim();
+      let lastError = null;
+      for (const identity of identities) {
+        try {
+          const stdout = await execFileAsync("security", [
+            "find-generic-password",
+            "-a",
+            identity.account,
+            "-s",
+            identity.service,
+            "-w",
+          ]);
+          return String(stdout || "").trim();
+        } catch (error) {
+          lastError = error;
+        }
+      }
+      if (lastError) throw lastError;
+      throw new Error("No macOS secure storage identity is configured.");
     }
     if (provider === "windows_dpapi") {
       const file = keyStoreFileAbsolute();
@@ -553,14 +591,23 @@ function createSignerService(ctx, logger) {
       return String(stdout || "").trim();
     }
     if (provider === "linux_secret_service") {
-      const stdout = await execFileAsync("secret-tool", [
-        "lookup",
-        "service",
-        identity.service,
-        "account",
-        identity.account,
-      ]);
-      return String(stdout || "").trim();
+      let lastError = null;
+      for (const identity of identities) {
+        try {
+          const stdout = await execFileAsync("secret-tool", [
+            "lookup",
+            "service",
+            identity.service,
+            "account",
+            identity.account,
+          ]);
+          return String(stdout || "").trim();
+        } catch (error) {
+          lastError = error;
+        }
+      }
+      if (lastError) throw lastError;
+      throw new Error("No Linux secure storage identity is configured.");
     }
     throw new Error(
       `OS secure storage is not implemented on this platform (${process.platform}). Unlock is blocked.`,
