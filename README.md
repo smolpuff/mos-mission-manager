@@ -8,21 +8,15 @@
 
 ##
 
-## SUPER WARNING
+`missions-v3-mcp` is a CLI + desktop app for Pixel by Pixel mission automation over MCP. IT IS ENTIRELY STAND ALONE AND DOES NOT REQUIRE AN AGENT (bc thats gross)
 
-USE THIS AT YOUR OWN RISK.
+## SUPER DUPER WONDER WARNING
 
-THIS TOOL CAN BREAK, FAIL, MISFIRE, OR DO THE WRONG THING.
-IT MAY MESS UP YOUR WORKFLOW, MISS ACTIONS, OR CREATE BAD STATE.
+ONLY USE A BURNER WALLET FOR FUNDING.
 
-YOU ARE 100% RESPONSIBLE FOR EVERYTHING THAT HAPPENS WHEN YOU RUN IT.
-THE AUTHOR IS NOT RESPONSIBLE FOR ANY LOSS, DAMAGE, OR ISSUES.
+This project is entirely vibe-coded after large dabs :D
 
-THIS PROJECT WAS ENTIRELY VIBE-CODED AFTER HALF-GRAM DABS. lolol.
-
-`missions-v3-mcp` is a CLI + desktop control app for Pixel by Pixel mission automation over MCP.
-
-- Use a dedicated burner wallet if you run `app_wallet` mode.
+## Current state
 
 Implemented flows:
 
@@ -33,6 +27,14 @@ Implemented flows:
 - NFT cooldown reset
 
 ## Disclaimer
+
+USE THIS AT YOUR OWN RISK.
+
+THIS TOOL CAN BREAK, FAIL, MISFIRE, OR DO THE WRONG THING.
+IT MAY MESS UP YOUR WORKFLOW, MISS ACTIONS, OR CREATE BAD STATE.
+
+YOU ARE 100% RESPONSIBLE FOR EVERYTHING THAT HAPPENS WHEN YOU RUN IT.
+THE AUTHOR IS NOT RESPONSIBLE FOR ANY LOSS, DAMAGE, OR ISSUES.
 
 This software is provided as-is, with no warranty of any kind.
 
@@ -52,7 +54,7 @@ This project was heavily vibe-coded and is still evolving.
 - access to the Pixel by Pixel MCP endpoint
 - local `config.json` (create from `config.sample.json`)
 
-## Usage
+## Desktop Usage FIRST USE
 
 ### 1) Open Settings
 
@@ -83,14 +85,14 @@ Example:
 
 After editing `config.json`, restart the app if it is already running.
 
-Note: a first-launch wizard for this flow is planned, but not live yet.
+Note: a first-launch wizard for this flow is planned.
 
 ## Running Missions
 
 After wallet setup and mission config:
 
 1. Open the app.
-2. Go to the main missions/control page.
+2. Go to the main missions pane.
 3. Configure missions on PBP site (for now, feature coming soon)
 4. Press **Start** to begin processing.
 5. Use **Pause/Resume** in the UI as needed.

@@ -2169,14 +2169,14 @@ function ControlView() {
                               {missionLevel}
                             </div>
                           ) : null}
-                          {hasProgress ? (
+                          {!slotError & hasProgress ? (
                             <div className="relative w-full h-4 rounded-full overflow-hidden bg-zinc-800 opacity-90 shadow-md shadow-black/20 after:hidden ">
-                              <div className="absolute inset-0 z-0 bg-linear-to-r from-violet-500 via-fuchsia-500 to-pink-500 after:hidden transition-all"></div>
+                              <div className="absolute rounded-full inset-0 z-0 bg-linear-to-r from-violet-500 via-fuchsia-500 to-pink-500 after:hidden transition-all"></div>
                               <div
-                                className="absolute top-0 right-0 z-10 h-full bg-zinc-800 after:hidden transition-all"
+                                className="absolute rounded-full top-0 right-0 z-10 h-full bg-zinc-800 after:hidden transition-all"
                                 style={{ width: `${100 - progressPercent}%` }}
                               ></div>
-                              <div className="absolute inset-0 z-20 flex items-center justify-center text-[10px] font-semibold text-white">
+                              <div className="absolute inset-0 z-20 flex items-center rounded-full justify-center text-[10px] font-semibold text-white">
                                 {progress}
                               </div>
                             </div>
