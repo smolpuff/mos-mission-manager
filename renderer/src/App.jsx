@@ -1722,7 +1722,14 @@ function ControlView() {
                       onClick={() => void activateNormalMode()}
                       type="button"
                     >
-                      normal
+                      <div className="space-y-2">
+                        <div className="z-10 mode__name font-bold text-2xl leading-7">
+                          Normal Mode
+                        </div>
+                        <div className="text-xs">
+                          Resets level 20. Can be toggled.
+                        </div>
+                      </div>
                     </button>
                     <button
                       className={`h-full card @container items-center justify-center overflow-hidden transition-all ${isMissionMode ? "active" : ""}`}
@@ -1730,6 +1737,15 @@ function ControlView() {
                       type="button"
                       id="mission-mode-mm_button"
                     >
+                      {" "}
+                      <div className="space-y-2">
+                        <div className="z-10 mode__name font-bold text-2xl leading-7">
+                          Mission Mode
+                        </div>
+                        <div className="text-xs">
+                          Resets level 11. Cannot be toggled.
+                        </div>
+                      </div>
                       <div class="mo-fire">
                         <svg
                           version="1.1"
