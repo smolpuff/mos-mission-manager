@@ -1588,7 +1588,12 @@ function createWatchService(ctx, logger, mcp, checks, configApi, services = {}) 
       logDebug("watch", "snapshot_before_failed", { error: error.message });
     }
 
-    const watchTimeoutMs = Math.max(30000, opts.watchSeconds * 1000 + 15000);
+    const watchTimeoutMs = Math.max(
+      90000,
+      opts.watchSeconds * 1000 +
+        opts.pollIntervalSeconds * 1000 +
+        30000,
+    );
     const startedAt = Date.now();
     let watchTick = 0;
     let missionStateById = new Map();
@@ -2268,7 +2273,13 @@ function createWatchService(ctx, logger, mcp, checks, configApi, services = {}) 
             });
           }
         }
-        logWithTimestamp("[WATCH] ❌ Cycle failed; retrying in 3s.");
+        const displayMessage =
+          typeof error?.message === "string" && error.message.trim()
+            ? error.message.trim()
+            : "unknown error";
+        logWithTimestamp(
+          `[WATCH] ❌ Cycle failed: ${displayMessage}. Retrying in 3s.`,
+        );
         logDebug("watch", "cycle_error", {
           error: error.message,
           stack: error.stack,
