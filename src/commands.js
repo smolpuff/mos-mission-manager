@@ -164,7 +164,7 @@ function createCommandHandler(ctx, logger, actions, configApi, services = {}) {
     async function runSignerImportPrompt() {
       const riskOk = await confirmYes(
         rl,
-        "app_wallet mode is for a dedicated burner wallet only. Continue with key import? yes/no ",
+        "app_wallet mode is for a dedicated burner wallet only. Continue with key import? This will replace the current imported app wallet if one exists. yes/no ",
       );
       if (!riskOk) {
         logWithTimestamp("[SIGNER] Import cancelled.");
@@ -174,7 +174,7 @@ function createCommandHandler(ctx, logger, actions, configApi, services = {}) {
         !ctx.signerConfig?.walletRef ||
         (await confirmYes(
           rl,
-          "Replace the existing imported signer vault if one exists? yes/no ",
+          "Replace the existing imported signer vault + OS-stored vault key if one exists? yes/no ",
         ));
       if (!replaceOk) {
         logWithTimestamp("[SIGNER] Import cancelled.");
@@ -437,6 +437,24 @@ function createCommandHandler(ctx, logger, actions, configApi, services = {}) {
             await runSignerImportPrompt();
             return;
           }
+          const riskOk = await confirmYes(
+            rl,
+            "app_wallet mode is for a dedicated burner wallet only. Continue with import? This will replace the current imported app wallet if one exists. yes/no ",
+          );
+          if (!riskOk) {
+            logWithTimestamp("[SIGNER] Import cancelled.");
+            return;
+          }
+          const replaceOk =
+            !ctx.signerConfig?.walletRef ||
+            (await confirmYes(
+              rl,
+              "Replace the existing imported signer vault + OS-stored vault key if one exists? yes/no ",
+            ));
+          if (!replaceOk) {
+            logWithTimestamp("[SIGNER] Import cancelled.");
+            return;
+          }
           const importPath = importValue && fs.existsSync(importValue) ? importValue : null;
           if (!importPath) {
             try {
@@ -449,21 +467,21 @@ function createCommandHandler(ctx, logger, actions, configApi, services = {}) {
             }
             return;
           }
-          const riskOk = await confirmYes(
+          const fileRiskOk = await confirmYes(
             rl,
-            "app_wallet mode is for a dedicated burner wallet only. Continue with file import? yes/no ",
+            "app_wallet mode is for a dedicated burner wallet only. Continue with file import? This will replace the current imported app wallet if one exists. yes/no ",
           );
-          if (!riskOk) {
+          if (!fileRiskOk) {
             logWithTimestamp("[SIGNER] Import cancelled.");
             return;
           }
-          const replaceOk =
+          const fileReplaceOk =
             !ctx.signerConfig?.walletRef ||
             (await confirmYes(
               rl,
-              "Replace the existing imported signer vault if one exists? yes/no ",
+              "Replace the existing imported signer vault + OS-stored vault key if one exists? yes/no ",
             ));
-          if (!replaceOk) {
+          if (!fileReplaceOk) {
             logWithTimestamp("[SIGNER] Import cancelled.");
             return;
           }

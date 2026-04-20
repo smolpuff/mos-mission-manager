@@ -169,6 +169,10 @@ function ControlView() {
   const [createCopiedAddrLabel, setCreateCopiedAddrLabel] = useState(null);
   const [slotResetErrors, setSlotResetErrors] = useState({});
   const [resetErrorModal, setResetErrorModal] = useState(null);
+  const [slotUnlockModalOpen, setSlotUnlockModalOpen] = useState(false);
+  const [slotUnlockBusy, setSlotUnlockBusy] = useState(false);
+  const [slotUnlockError, setSlotUnlockError] = useState(null);
+  const [slotUnlockResult, setSlotUnlockResult] = useState(null);
   const isMissionMode = modeSelection === "mission";
   const isNormalMode = !isMissionMode;
   const applyConfigPatch = async (patch) => {
@@ -467,6 +471,20 @@ function ControlView() {
   const slots = Array.isArray(status.guiMissionSlots)
     ? status.guiMissionSlots
     : [];
+  const slotUnlockSummary =
+    status.slotUnlockSummary && typeof status.slotUnlockSummary === "object"
+      ? status.slotUnlockSummary
+      : null;
+  const slotUnlockCost = Number(
+    slotUnlockSummary?.unlockCost ?? slotUnlockSummary?.raw?.unlockCost ?? 2500,
+  );
+  const normalizedSlotUnlockCost =
+    Number.isFinite(slotUnlockCost) && slotUnlockCost > 0
+      ? Math.floor(slotUnlockCost)
+      : 2500;
+  const canUnlockSlot4 =
+    slotUnlockSummary?.canUnlockMore === true &&
+    Number(slotUnlockSummary?.nextUnlockSlot) === 4;
   const missionStats = status.currentMissionStats || {};
   const fundingWalletSummary =
     status.fundingWalletSummary?.status === "ok"
@@ -704,6 +722,35 @@ function ControlView() {
       return true;
     } catch {
       return false;
+    }
+  };
+  const confirmUnlockSlot4 = async () => {
+    if (!bridge?.prepareSlot4Unlock) {
+      setSlotUnlockError("Unlock flow is not available in this build.");
+      return;
+    }
+    if (!status.running) {
+      setSlotUnlockError("Start missions first so backend can prepare the unlock.");
+      return;
+    }
+    setSlotUnlockBusy(true);
+    setSlotUnlockError(null);
+    setSlotUnlockResult(null);
+    try {
+      const res = await bridge.prepareSlot4Unlock();
+      if (!res?.ok) throw new Error(res?.error || "Unlock preparation failed.");
+      const prepared = res.prepared || null;
+      setSlotUnlockResult(prepared);
+      if (!prepared?.ok) {
+        throw new Error(prepared?.reason || "Unlock preparation failed.");
+      }
+      if (prepared?.reason === "no_more_to_unlock") {
+        setSlotUnlockError("No more slots to unlock.");
+      }
+    } catch (e) {
+      setSlotUnlockError(String(e?.message || e));
+    } finally {
+      setSlotUnlockBusy(false);
     }
   };
   const startMissions = async () => {
@@ -2183,6 +2230,20 @@ function ControlView() {
                           ) : (
                             ""
                           )}
+                          {slot === 4 && canUnlockSlot4 ? (
+                            <button
+                              type="button"
+                              className="absolute inset-0 z-30 grid place-items-center bg-black/55 text-white font-semibold tracking-wide uppercase text-xs"
+                              onClick={() => {
+                                setSlotUnlockModalOpen(true);
+                                setSlotUnlockBusy(false);
+                                setSlotUnlockError(null);
+                                setSlotUnlockResult(null);
+                              }}
+                            >
+                              Click to unlock
+                            </button>
+                          ) : null}
                         </div>
                         <div className="card-mission__meta">
                           <div className="card-mission__title">
@@ -2272,6 +2333,70 @@ function ControlView() {
                     onClick={() => setResetErrorModal(null)}
                   >
                     Close
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : null}
+          {slotUnlockModalOpen ? (
+            <div
+              className="fixed inset-0 z-60 grid place-items-center bg-black/50 p-4"
+              role="dialog"
+              aria-modal="true"
+              onMouseDown={(e) => {
+                if (e.target === e.currentTarget && !slotUnlockBusy) {
+                  setSlotUnlockModalOpen(false);
+                }
+              }}
+            >
+              <div className="card w-full max-w-140 space-y-4 !bg-[#0b1116] border border-white/15 z-10">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="text-lg font-semibold text-white">
+                    Unlock Slot 4
+                  </div>
+                  <button
+                    type="button"
+                    className="btn btn-clear btn-sm"
+                    onClick={() => setSlotUnlockModalOpen(false)}
+                    title="Close"
+                    disabled={slotUnlockBusy}
+                  >
+                    ✕
+                  </button>
+                </div>
+                <div className="text-sm text-slate-200">
+                  Are you sure you want to unlock your 4th slot for{" "}
+                  <span className="font-semibold">
+                    {normalizedSlotUnlockCost} PBP
+                  </span>
+                  ?
+                </div>
+                {slotUnlockError ? (
+                  <div className="rounded-md border border-error/40 bg-error/10 p-3 text-sm text-slate-100">
+                    {slotUnlockError}
+                  </div>
+                ) : null}
+                {slotUnlockResult?.reason === "no_more_to_unlock" ? (
+                  <div className="rounded-md border border-success/35 bg-success/10 p-3 text-sm text-slate-100">
+                    No more to unlock.
+                  </div>
+                ) : null}
+                <div className="flex items-center justify-end gap-2">
+                  <button
+                    type="button"
+                    className="btn btn-clear btn-sm"
+                    onClick={() => setSlotUnlockModalOpen(false)}
+                    disabled={slotUnlockBusy}
+                  >
+                    No
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-gradient btn-sm"
+                    onClick={() => void confirmUnlockSlot4()}
+                    disabled={slotUnlockBusy}
+                  >
+                    {slotUnlockBusy ? "Preparing..." : "Yes"}
                   </button>
                 </div>
               </div>

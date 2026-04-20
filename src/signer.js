@@ -1307,6 +1307,11 @@ function createSignerService(ctx, logger) {
     if (!fs.existsSync(sourcePath)) {
       throw new Error(`Import file not found: ${sourcePath}`);
     }
+    if (ctx.signerConfig?.walletRef) {
+      logWithTimestamp(
+        "[SIGNER] 🔄 Replacing existing imported app wallet (safe replace; old wallet is kept if import fails).",
+      );
+    }
 
     const secretBytes = parseKeypairFile(sourcePath);
     const walletAddress = await walletAddressFromSecret(secretBytes);
@@ -1326,6 +1331,11 @@ function createSignerService(ctx, logger) {
 
     if (ctx.signerMode !== "app_wallet") {
       throw new Error("Switch signer mode to app_wallet before importing.");
+    }
+    if (ctx.signerConfig?.walletRef) {
+      logWithTimestamp(
+        "[SIGNER] 🔄 Replacing existing imported app wallet (safe replace; old wallet is kept if import fails).",
+      );
     }
 
     const { secretBytes, walletAddress, derivationPath, sourceType } =

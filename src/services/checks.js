@@ -489,6 +489,29 @@ function createChecksService(ctx, logger, mcp, services = {}) {
     return sc.slotUnlockSummary || sc?.missions?.slotUnlockSummary || null;
   }
 
+  function normalizeSlotUnlockSummary(result) {
+    const summary = extractSlotUnlockSummary(result);
+    if (!summary || typeof summary !== "object") return null;
+    const canUnlockMore = summary.canUnlockMore === true;
+    const nextUnlockSlotRaw = Number(summary.nextUnlockSlot);
+    const nextUnlockSlot =
+      Number.isFinite(nextUnlockSlotRaw) && nextUnlockSlotRaw > 0
+        ? Math.floor(nextUnlockSlotRaw)
+        : null;
+    const unlockCostRaw = Number(
+      summary.unlockCost ?? summary.cost ?? summary.price ?? null,
+    );
+    const unlockCost = Number.isFinite(unlockCostRaw) && unlockCostRaw > 0
+      ? unlockCostRaw
+      : 2500;
+    return {
+      canUnlockMore,
+      nextUnlockSlot,
+      unlockCost,
+      raw: summary,
+    };
+  }
+
   function isRetryableActiveMissionAssignError(message = "") {
     return /NFT is already in an active mission/i.test(String(message || ""));
   }
@@ -1084,6 +1107,81 @@ function createChecksService(ctx, logger, mcp, services = {}) {
         reason: "unlock_failed",
       };
     }
+  }
+
+  async function prepareUnlockSlot4({ reason = "ui_manual_unlock" } = {}) {
+    const targetSlotNumber = TARGET_UNLOCK_SLOT;
+    const missionsResult = await mcp.mcpToolCall("get_user_missions", {});
+    const summary = normalizeSlotUnlockSummary(missionsResult);
+    ctx.slotUnlockSummary = summary;
+
+    if (!summary?.canUnlockMore) {
+      return {
+        ok: true,
+        ready: false,
+        unlocked: false,
+        reason: "no_more_to_unlock",
+        summary,
+      };
+    }
+    if (
+      Number.isFinite(summary?.nextUnlockSlot) &&
+      Number(summary.nextUnlockSlot) !== targetSlotNumber
+    ) {
+      return {
+        ok: false,
+        ready: false,
+        unlocked: false,
+        reason: "unexpected_next_unlock_slot",
+        summary,
+      };
+    }
+    if (ctx.signerMode === "manual") {
+      const openResult = await openMissionPlayPage({
+        cooldownMs: missionPageCooldownMs(),
+      });
+      return {
+        ok: true,
+        ready: false,
+        unlocked: false,
+        reason: "manual_mode",
+        openedMissionPage: openResult?.ok === true,
+        summary,
+      };
+    }
+    if (!signer) {
+      return {
+        ok: false,
+        ready: false,
+        unlocked: false,
+        reason: "missing_signer",
+        summary,
+      };
+    }
+    signer.ensureMissionActionSupported("mission_slot_unlock");
+    const unlockArgs = {
+      slotNumber: targetSlotNumber,
+      ...(ctx.signerMode === "dapp"
+        ? { signingMode: "browser_bridge" }
+        : {
+            signingMode: "agent_managed",
+            ...(String(ctx.signerConfig?.walletAddress || "").trim()
+              ? {
+                  payerWallet: String(ctx.signerConfig.walletAddress).trim(),
+                }
+              : {}),
+          }),
+    };
+    const prepared = await mcp.mcpToolCall("unlock_mission_slot", unlockArgs);
+    return {
+      ok: true,
+      ready: true,
+      unlocked: false,
+      reason,
+      slotNumber: targetSlotNumber,
+      summary,
+      prepare: prepared,
+    };
   }
 
   function configuredTargetEntries() {
@@ -1940,6 +2038,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
         missions,
         progressByAssignedMissionId,
       );
+      ctx.slotUnlockSummary = normalizeSlotUnlockSummary(result);
 
       ctx.currentMissionStats = {
         ...ctx.currentMissionStats,
@@ -2021,6 +2120,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
     filterSelectedMissions,
     logSelectedWatchTargetsAtStartup,
     autoAssignConfiguredMissions,
+    prepareUnlockSlot4,
     runInitialChecks,
   };
 }

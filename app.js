@@ -69,6 +69,7 @@ function createGuiStateEmitter(ctx) {
       currentUserWalletSummary: ctx.currentUserWalletSummary,
       currentMissionStats: ctx.currentMissionStats,
       guiMissionSlots: ctx.guiMissionSlots,
+      slotUnlockSummary: ctx.slotUnlockSummary,
       currentMode: ctx.currentMode,
       level20ResetEnabled: ctx.level20ResetEnabled,
       missionModeEnabled: ctx.missionModeEnabled,
@@ -176,6 +177,16 @@ if (process.env.PBP_GUI_BRIDGE === "1" && typeof process.send === "function") {
         const created = await signer.createGeneratedWallet();
         flushConfig(ctx, logger.logDebug);
         sendGuiResponse(requestId, { ok: true, created });
+        return;
+      }
+      if (action === "prepare_slot4_unlock") {
+        if (!checks || typeof checks.prepareUnlockSlot4 !== "function") {
+          throw new Error("Slot unlock service unavailable.");
+        }
+        const prepared = await checks.prepareUnlockSlot4({
+          reason: "ui_slot4_unlock",
+        });
+        sendGuiResponse(requestId, { ok: true, prepared });
         return;
       }
       sendGuiResponse(requestId, {

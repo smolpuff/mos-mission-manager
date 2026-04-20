@@ -50,6 +50,7 @@ const backendStatus = {
   currentUserWalletId: null,
   currentUserWalletSummary: null,
   currentMissionStats: null,
+  slotUnlockSummary: null,
   currentMode: null,
   level20ResetEnabled: null,
   missionModeEnabled: null,
@@ -455,6 +456,7 @@ function startBackend() {
   backendStatus.sessionSpendTotals = null;
   backendStatus.fundingWalletSummary = null;
   backendStatus.guiMissionSlots = null;
+  backendStatus.slotUnlockSummary = null;
   publishStatus();
   pushOutput("system", "[GUI] Backend started.\n");
 
@@ -503,6 +505,7 @@ function startBackend() {
     backendStatus.exitSignal = signal;
     backendStatus.currentMissionStats = null;
     backendStatus.guiMissionSlots = null;
+    backendStatus.slotUnlockSummary = null;
     backend = null;
     pushOutput(
       "system",
@@ -526,6 +529,7 @@ function stopBackend() {
   pushOutput("system", "[GUI] Stopping backend...\n");
   backendStatus.currentMissionStats = null;
   backendStatus.guiMissionSlots = null;
+  backendStatus.slotUnlockSummary = null;
   publishStatus();
   backend.kill("SIGTERM");
   clearStopTimer();
@@ -851,6 +855,13 @@ app.whenReady().then(async () => {
   });
   ipcMain.handle("signer:create-generated-wallet", async () => {
     const payload = await requestBackend("signer_create_generated_wallet", {});
+    return payload;
+  });
+  ipcMain.handle("slot:prepare-unlock4", async () => {
+    const payload = await requestBackend("prepare_slot4_unlock", {}, {
+      ensureRunning: true,
+      timeoutMs: 15000,
+    });
     return payload;
   });
   ipcMain.handle("clipboard:copy", async (_event, text) => {

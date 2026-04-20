@@ -11,6 +11,7 @@ contextBridge.exposeInMainWorld("missionsDesktop", {
   updateConfig: (patch) => ipcRenderer.invoke("config:update", patch),
   refreshWalletSummary: () => ipcRenderer.invoke("wallet:refresh-summary"),
   revealSignerBackup: () => ipcRenderer.invoke("signer:reveal-backup"),
+  prepareSlot4Unlock: () => ipcRenderer.invoke("slot:prepare-unlock4"),
   createGeneratedWallet: () => ipcRenderer.invoke("signer:create-generated-wallet"),
   copyToClipboard: (text) => ipcRenderer.invoke("clipboard:copy", text),
   openExternal: (url) => ipcRenderer.invoke("external:open", url),

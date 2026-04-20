@@ -99,6 +99,7 @@ function createContext() {
     },
 
     guiMissionSlots: [],
+    slotUnlockSummary: null,
   };
 }
 
