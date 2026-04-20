@@ -2079,8 +2079,17 @@ function createChecksService(ctx, logger, mcp, services = {}) {
   async function runInitialChecks() {
     logWithTimestamp("[CHECK] ⏳ Loading data...");
     ctx.isAuthenticated = false;
+    const checkStartedAt = Date.now();
+    const stepDurations = [];
+    const markStep = (name, startedAt) => {
+      const ms = Math.max(0, Date.now() - startedAt);
+      stepDurations.push({ name, ms });
+      logWithTimestamp(`[CHECK] ⏱ ${name}: ${ms}ms`);
+    };
 
+    let stepStartedAt = Date.now();
     const whoami = await runWhoAmICheck();
+    markStep("who_am_i", stepStartedAt);
     if (!whoami.ok) {
       logWithTimestamp("[CHECK] ❌ Loading data failed (not authenticated).");
       return false;
@@ -2089,18 +2098,42 @@ function createChecksService(ctx, logger, mcp, services = {}) {
     ctx.isAuthenticated = true;
     ctx.currentUserDisplayName = whoami.displayName || "unknown";
     ctx.currentUserWalletId = whoami.walletId || "unknown";
+
+    stepStartedAt = Date.now();
     await refreshFundingWalletSummary();
+    markStep("funding_wallet_summary", stepStartedAt);
+
+    stepStartedAt = Date.now();
     await refreshMissionCatalog();
+    markStep("mission_catalog", stepStartedAt);
+
+    stepStartedAt = Date.now();
     validateConfiguredTargets();
+    markStep("validate_targets", stepStartedAt);
+
+    stepStartedAt = Date.now();
     logSelectedWatchTargetsAtStartup();
+    markStep("log_targets", stepStartedAt);
+
+    stepStartedAt = Date.now();
     const health = await runMcpHealthCheck();
+    markStep("mcp_health", stepStartedAt);
+
+    stepStartedAt = Date.now();
     const missions = await refreshMissionHeaderStats({ refreshNftCount: true });
+    markStep("mission_header_stats", stepStartedAt);
 
     if (!health.ok || !missions.ok) {
       logWithTimestamp("[CHECK] ❌ Loading data failed.");
       return false;
     }
 
+    const totalMs = Math.max(0, Date.now() - checkStartedAt);
+    logWithTimestamp(`[CHECK] ⏱ total startup checks: ${totalMs}ms`);
+    logDebug("check", "initial_checks_timing", {
+      totalMs,
+      steps: stepDurations,
+    });
     logWithTimestamp("[CHECK] ✅ Loading data complete.");
     logWithTimestamp(
       `[INFO] 🎯 ${missions.stats.total} missions found: ${missions.stats.active} active, ${missions.stats.available} available, ${missions.stats.claimable} claimable, 💎 ${missions.stats.nftsAvailable}/${missions.stats.nftsTotal} NFT`,
