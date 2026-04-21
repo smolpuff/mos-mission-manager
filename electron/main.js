@@ -6,6 +6,14 @@ const { fork, execFile } = require("child_process");
 const { app, BrowserWindow, Menu, ipcMain, clipboard, shell } = require("electron");
 const { fetchOnchainFundingWalletSummary } = require("../src/wallet/onchain-summary");
 const { scrapeLatestCompetition } = require("./scrapeCompetitions");
+const { login: mcpLogin, callTool: mcpCallTool } = require("../lib/mcp");
+const {
+  normalizeMissionList,
+  normalizeMissionCatalogList,
+  normalizeNftList,
+  missionHasAssignedNft,
+  missionIsActive,
+} = require("../src/missions/normalize");
 
 const ROOT_DIR = path.resolve(__dirname, "..");
 const RENDERER_DEV_URL =
@@ -257,6 +265,196 @@ function summarizeWalletPayload(payload) {
       source: "mcp",
     },
   };
+}
+
+function missionDisplayName(mission = {}) {
+  return (
+    mission?.missionName ||
+    mission?.name ||
+    mission?.title ||
+    mission?.mission ||
+    mission?.label ||
+    "Unknown mission"
+  );
+}
+
+function missionRewardLabel(mission = {}) {
+  const direct = mission?.reward || mission?.rewards || mission?.rewardText;
+  if (typeof direct === "string" && direct.trim()) return direct.trim();
+  if (direct && typeof direct === "object") {
+    const nestedAmount =
+      direct?.amount ??
+      direct?.value ??
+      direct?.rewardAmount ??
+      direct?.prizeAmount ??
+      null;
+    const nestedSymbol =
+      direct?.symbol ??
+      direct?.token ??
+      direct?.currency ??
+      direct?.rewardSymbol ??
+      direct?.prize ??
+      null;
+    const nestedN = Number(nestedAmount);
+    const nestedS = String(nestedSymbol || "").trim();
+    if (Number.isFinite(nestedN) && nestedS) {
+      return `${nestedN.toLocaleString()} ${nestedS}`;
+    }
+    if (Number.isFinite(nestedN)) return nestedN.toLocaleString();
+  }
+  if (Array.isArray(mission?.rewards)) {
+    const rewardText = mission.rewards
+      .map((entry) => {
+        if (!entry) return null;
+        if (typeof entry === "string" && entry.trim()) return entry.trim();
+        if (typeof entry !== "object") return null;
+        const amount =
+          entry?.amount ??
+          entry?.value ??
+          entry?.rewardAmount ??
+          entry?.prizeAmount ??
+          null;
+        const symbol =
+          entry?.symbol ??
+          entry?.token ??
+          entry?.currency ??
+          entry?.rewardSymbol ??
+          entry?.prize ??
+          null;
+        const n = Number(amount);
+        const s = String(symbol || "").trim();
+        if (Number.isFinite(n) && s) return `${n.toLocaleString()} ${s}`;
+        if (Number.isFinite(n)) return n.toLocaleString();
+        return null;
+      })
+      .filter(Boolean)
+      .join(" + ");
+    if (rewardText) return rewardText;
+  }
+  const amount =
+    mission?.rewardAmount ??
+    mission?.reward_amount ??
+    mission?.tokenReward ??
+    mission?.token_reward ??
+    mission?.prizeAmount ??
+    mission?.prize_amount ??
+    mission?.amount ??
+    null;
+  const symbol =
+    mission?.rewardSymbol ??
+    mission?.reward_symbol ??
+    mission?.tokenSymbol ??
+    mission?.token_symbol ??
+    mission?.prize ??
+    mission?.rewardToken ??
+    mission?.prizeToken ??
+    mission?.currency ??
+    mission?.currencySymbol ??
+    null;
+  const n = Number(amount);
+  const s = String(symbol || "").trim();
+  if (Number.isFinite(n) && s) {
+    return `${n.toLocaleString()} ${s}`;
+  }
+  if (Number.isFinite(n)) return n.toLocaleString();
+  return null;
+}
+
+function missionCollectionEntries(mission = {}) {
+  const rawCandidates = [
+    mission?.collections,
+    mission?.collection,
+    mission?.validCollections,
+    mission?.valid_collections,
+    mission?.allowedCollections,
+    mission?.allowed_collections,
+    mission?.eligibleCollections,
+    mission?.eligible_collections,
+    mission?.supportedCollections,
+    mission?.supported_collections,
+    mission?.nftCollections,
+    mission?.nft_collections,
+    mission?.requirements?.collections,
+    mission?.requirements?.allowedCollections,
+    mission?.requirements?.allowed_collections,
+    mission?.meta?.collections,
+    mission?.meta?.allowedCollections,
+    Array.isArray(mission?.levels)
+      ? mission.levels.map(
+          (level) =>
+            level?.validCollections ||
+            level?.valid_collections ||
+            level?.collections ||
+            null,
+        )
+      : null,
+  ];
+  const out = [];
+  const seen = new Set();
+  const pushOne = (entry) => {
+    if (!entry) return;
+    const name =
+      typeof entry === "string"
+        ? entry
+        : entry?.name || entry?.title || entry?.collection || entry?.symbol;
+    const s = String(name || "").trim();
+    if (!s) return;
+    const key = s.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    const image =
+      typeof entry === "object"
+        ? entry?.image ||
+          entry?.imageUrl ||
+          entry?.image_url ||
+          entry?.logo ||
+          entry?.icon ||
+          null
+        : null;
+    out.push({ name: s, image: image ? String(image) : null });
+  };
+  const flatten = (value) => {
+    if (!value) return;
+    if (Array.isArray(value)) {
+      for (const v of value) flatten(v);
+      return;
+    }
+    if (typeof value === "string") {
+      const parts = value.split(/[,|/]/g).map((x) => x.trim()).filter(Boolean);
+      if (parts.length > 1) {
+        for (const p of parts) pushOne(p);
+      } else {
+        pushOne(value);
+      }
+      return;
+    }
+    if (typeof value === "object") {
+      pushOne(value);
+      return;
+    }
+  };
+  for (const candidate of rawCandidates) flatten(candidate);
+  return out;
+}
+
+function isAuthFailureMessage(message) {
+  return /401|403|unauthorized|forbidden|missing token|invalid token/i.test(
+    String(message || ""),
+  );
+}
+
+async function runOnboardingPopupLogin({
+  url = "https://pixelbypixel.studio/mcp",
+  timeoutMs = 30000,
+  loginTimeoutMs = 180000,
+} = {}) {
+  await mcpLogin({
+    url,
+    noBrowser: false,
+    printAuthUrl: false,
+    timeoutMs,
+    loginTimeoutMs,
+  });
 }
 
 function installMinimalApplicationMenu() {
@@ -972,6 +1170,151 @@ app.whenReady().then(async () => {
   ipcMain.handle("signer:create-generated-wallet", async () => {
     const payload = await requestBackend("signer_create_generated_wallet", {});
     return payload;
+  });
+  ipcMain.handle("onboarding:fetch-account", async () => {
+    const emitProgress = (progress, phase, message) => {
+      publishEvent({
+        type: "onboarding_progress",
+        progress: Math.max(0, Math.min(100, Number(progress) || 0)),
+        phase: String(phase || "").trim() || "unknown",
+        message: String(message || "").trim() || null,
+      });
+    };
+
+    emitProgress(5, "start", "Starting account sync");
+    const loadAccount = async () => {
+      emitProgress(35, "whoami", "Fetching profile");
+      const who = await mcpCallTool("who_am_i", {}, {
+        url: "https://pixelbypixel.studio/mcp",
+      });
+      emitProgress(65, "missions", "Fetching missions");
+      const missionsResult = await mcpCallTool("get_user_missions", {}, {
+        url: "https://pixelbypixel.studio/mcp",
+      });
+      emitProgress(85, "catalog", "Fetching mission catalog");
+      const catalogResult = await mcpCallTool("get_mission_catalog", {}, {
+        url: "https://pixelbypixel.studio/mcp",
+      });
+      emitProgress(92, "nfts", "Fetching wallet collections");
+      const nftResult = await mcpCallTool("get_mission_nfts", {}, {
+        url: "https://pixelbypixel.studio/mcp",
+      });
+      return { who, missionsResult, catalogResult, nftResult };
+    };
+
+    let loaded = null;
+    try {
+      loaded = await loadAccount();
+    } catch (error) {
+      if (!isAuthFailureMessage(error?.message)) throw error;
+      emitProgress(20, "login", "Login required");
+      await runOnboardingPopupLogin({
+        url: "https://pixelbypixel.studio/mcp",
+        timeoutMs: 30000,
+        loginTimeoutMs: 180000,
+      });
+      emitProgress(30, "login_complete", "Login complete");
+      loaded = await loadAccount();
+    }
+
+    const who = loaded?.who || {};
+    const whoInfo = who?.structuredContent || {};
+    const displayName =
+      whoInfo.display_name || whoInfo.displayName || whoInfo.username || "unknown";
+    const walletId = whoInfo.wallet_id || whoInfo.walletId || "unknown";
+
+    const missions = normalizeMissionList(loaded?.missionsResult || {}).map(
+      (mission, index) => ({
+        id:
+          mission?.assignedMissionId ||
+          mission?.assigned_mission_id ||
+          mission?.id ||
+          mission?.missionId ||
+          `${index}`,
+        catalogMissionId:
+          mission?.missionId ||
+          mission?.mission_id ||
+          mission?.catalogMissionId ||
+          mission?.catalog_mission_id ||
+          null,
+        name: missionDisplayName(mission),
+        currentLevel: Number.isFinite(Number(mission?.current_level))
+          ? Number(mission.current_level)
+          : Number.isFinite(Number(mission?.level))
+            ? Number(mission.level)
+            : null,
+        slot: Number.isFinite(Number(mission?.slot)) ? Number(mission.slot) : null,
+        hasAssignedNft: missionHasAssignedNft(mission),
+        isActive: missionIsActive(mission),
+        image:
+          mission?.assignedNftImage ||
+          mission?.nftImage ||
+          mission?.imageUrl ||
+          mission?.image ||
+          null,
+        reward: missionRewardLabel(mission),
+        collections: missionCollectionEntries(mission),
+      }),
+    );
+
+    const rawCatalog = normalizeMissionCatalogList(loaded?.catalogResult || {});
+    const dedup = new Map();
+    for (let index = 0; index < rawCatalog.length; index += 1) {
+      const mission = rawCatalog[index] || {};
+      const name = missionDisplayName(mission);
+      const key = name.toLowerCase().trim();
+      if (!key || dedup.has(key)) continue;
+      dedup.set(key, {
+        id:
+          mission?.id ||
+          mission?.missionId ||
+          mission?.mission_id ||
+          mission?.name ||
+          mission?.title ||
+          `${index}`,
+        name,
+        reward: missionRewardLabel(mission),
+        collections: missionCollectionEntries(mission),
+      });
+    }
+    const missionCatalog = Array.from(dedup.values());
+    const ownedCollectionKeys = new Set();
+    const walletNfts = normalizeNftList(loaded?.nftResult || {});
+    for (const nft of walletNfts) {
+      const c =
+        nft?.collection ||
+        nft?.collectionName ||
+        nft?.collection_name ||
+        nft?.collectionSymbol ||
+        nft?.collection_symbol ||
+        nft?.symbol ||
+        null;
+      const key = String(c || "").trim().toLowerCase();
+      if (key) ownedCollectionKeys.add(key);
+    }
+
+    emitProgress(100, "done", "Sync complete");
+    return {
+      ok: true,
+      whoami: { displayName, walletId },
+      missions,
+      missionCatalog,
+      ownedCollections: Array.from(ownedCollectionKeys),
+    };
+  });
+  ipcMain.handle("onboarding:apply-selection", async (_event, payload = {}) => {
+    const next = applyDesktopConfigPatch({
+      signerMode: String(payload?.signerMode || "").trim() || undefined,
+      targetMissions: Array.isArray(payload?.targetMissions)
+        ? payload.targetMissions
+        : undefined,
+      firstRunOnboardingCompleted: true,
+    });
+    if (typeof next.signerMode === "string") {
+      backendStatus.signerMode = next.signerMode;
+    }
+    publishStatus();
+    return { ok: true, config: next };
   });
   ipcMain.handle("slot:prepare-unlock4", async () => {
     const payload = await requestBackend("prepare_slot4_unlock", {}, {

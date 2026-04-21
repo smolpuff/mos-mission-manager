@@ -13,6 +13,9 @@ contextBridge.exposeInMainWorld("missionsDesktop", {
   revealSignerBackup: () => ipcRenderer.invoke("signer:reveal-backup"),
   prepareSlot4Unlock: () => ipcRenderer.invoke("slot:prepare-unlock4"),
   createGeneratedWallet: () => ipcRenderer.invoke("signer:create-generated-wallet"),
+  fetchOnboardingAccount: () => ipcRenderer.invoke("onboarding:fetch-account"),
+  applyOnboardingSelection: (payload) =>
+    ipcRenderer.invoke("onboarding:apply-selection", payload),
   copyToClipboard: (text) => ipcRenderer.invoke("clipboard:copy", text),
   openExternal: (url) => ipcRenderer.invoke("external:open", url),
   openCliWindow: () => ipcRenderer.invoke("window:open-cli"),

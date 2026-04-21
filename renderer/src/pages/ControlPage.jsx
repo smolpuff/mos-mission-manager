@@ -11,6 +11,7 @@ import pbpIcon from "../img/icon_pbp.webp";
 import solIcon from "../img/icon-sm__sol.svg";
 import ccIcon from "../img/icon_cc.webp";
 import tcIcon from "../img/icon_tc.webp";
+import backImg from "../img/back.png";
 const debug = false;
 
 const quickCommands = ["login", "check", "pause", "resume", "status", "r", "c"];
@@ -101,6 +102,14 @@ function parseDisplayNumber(value) {
   const cleaned = value.replace(/[, _]/g, "").trim();
   const n = Number(cleaned);
   return Number.isFinite(n) ? n : 0;
+}
+
+function missionKey(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .replace(/[^a-z0-9 ]/g, "");
 }
 
 function SlideNumberFormatted({ value, format }) {
@@ -254,6 +263,10 @@ function ControlView() {
       }
       if (typeof config.missionModeEnabled === "boolean") {
         setModeSelection(config.missionModeEnabled ? "mission" : "normal");
+      }
+      if (config.firstRunOnboardingCompleted !== true) {
+        setOnboardingPreviewOnly(false);
+        setOnboardingOpen(true);
       }
     });
     return () => {
@@ -516,6 +529,7 @@ function ControlView() {
   const isWatching = status.watcherRunning === true;
   const isStarting = status.running && !isWatching;
   const [activityLabel, setActivityLabel] = useState(null);
+  const [manualCheckBusy, setManualCheckBusy] = useState(false);
   const [copiedLabel, setCopiedLabel] = useState(null);
   const [secretModalOpen, setSecretModalOpen] = useState(false);
   const [secretModalBusy, setSecretModalBusy] = useState(false);
@@ -524,6 +538,47 @@ function ControlView() {
   const [secretModalRevealed, setSecretModalRevealed] = useState(false);
   const [secretCopiedPhraseLabel, setSecretCopiedPhraseLabel] = useState(null);
   const [secretCopiedAddrLabel, setSecretCopiedAddrLabel] = useState(null);
+  const [onboardingOpen, setOnboardingOpen] = useState(false);
+  const [onboardingStep, setOnboardingStep] = useState(1);
+  const [onboardingBusy, setOnboardingBusy] = useState(false);
+  const [onboardingError, setOnboardingError] = useState(null);
+  const [onboardingSignerMode, setOnboardingSignerMode] = useState("");
+  const [onboardingAppWalletBusy, setOnboardingAppWalletBusy] = useState(false);
+  const [onboardingAppWalletError, setOnboardingAppWalletError] =
+    useState(null);
+  const [onboardingAppWalletAddress, setOnboardingAppWalletAddress] =
+    useState("");
+  const [onboardingWhoami, setOnboardingWhoami] = useState(null);
+  const [onboardingMissions, setOnboardingMissions] = useState([]);
+  const [onboardingMissionCatalog, setOnboardingMissionCatalog] = useState([]);
+  const [onboardingOwnedCollections, setOnboardingOwnedCollections] = useState(
+    new Set(),
+  );
+  const [onboardingSelectedMissions, setOnboardingSelectedMissions] = useState(
+    new Set(),
+  );
+  const [onboardingPreviewOnly, setOnboardingPreviewOnly] = useState(false);
+  const [onboardingDataLoading, setOnboardingDataLoading] = useState(false);
+  const [onboardingBodyHeight, setOnboardingBodyHeight] = useState(null);
+  const onboardingBodyRef = useRef(null);
+  const onboardingCatalogByName = useMemo(() => {
+    const map = new Map();
+    for (const mission of onboardingMissionCatalog) {
+      const key = missionKey(mission?.name);
+      if (!key || map.has(key)) continue;
+      map.set(key, mission);
+    }
+    return map;
+  }, [onboardingMissionCatalog]);
+  const onboardingCatalogById = useMemo(() => {
+    const map = new Map();
+    for (const mission of onboardingMissionCatalog) {
+      const key = String(mission?.id || "").trim();
+      if (!key || map.has(key)) continue;
+      map.set(key, mission);
+    }
+    return map;
+  }, [onboardingMissionCatalog]);
 
   const mainStatusLabel = activityLabel
     ? activityLabel
@@ -536,11 +591,25 @@ function ControlView() {
   useEffect(() => {
     if (status.running) return;
     setActivityLabel(null);
+    setManualCheckBusy(false);
   }, [status.running]);
 
   useEffect(() => {
     if (!lastEvent || typeof lastEvent !== "object") return;
     const type = String(lastEvent.type || "").trim();
+    if (type === "assigning") {
+      const state = String(lastEvent.state || "").trim();
+      if (state === "start") setManualCheckBusy(true);
+      if (state === "done" || state === "error") setManualCheckBusy(false);
+    }
+    if (type === "claiming") {
+      const state = String(lastEvent.state || "").trim();
+      if (state === "start") setManualCheckBusy(true);
+      if (state === "done" || state === "error") setManualCheckBusy(false);
+    }
+    if (type === "claimed" || type === "assigned") {
+      setManualCheckBusy(false);
+    }
     let next = null;
     let resetToWatchingMs = null;
     if (type === "claimed") {
@@ -654,7 +723,8 @@ function ControlView() {
       });
       setResetErrorModal((current) => {
         if (!current || String(current.assignedMissionId || "") !== slotKey) {
-          if (Number.isFinite(slot) && Number(current.slot) === slot) return null;
+          if (Number.isFinite(slot) && Number(current.slot) === slot)
+            return null;
           return current;
         }
         return null;
@@ -696,6 +766,51 @@ function ControlView() {
     }
     setActivityLabel((current) => current || "Starting up...");
   }, [status.running, isWatching]);
+
+  useEffect(() => {
+    if (!onboardingOpen) return undefined;
+    const onKeyDown = (event) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      setOnboardingOpen(false);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [onboardingOpen]);
+
+  useEffect(() => {
+    if (!onboardingOpen) {
+      setOnboardingBodyHeight(null);
+      return;
+    }
+    const body = onboardingBodyRef.current;
+    if (!body) return;
+    const next = body.scrollHeight;
+    setOnboardingBodyHeight((prev) => (prev == null ? next : prev));
+    const raf = requestAnimationFrame(() => {
+      setOnboardingBodyHeight(next);
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [
+    onboardingOpen,
+    onboardingStep,
+    onboardingBusy,
+    onboardingDataLoading,
+    onboardingError,
+    onboardingMissionCatalog.length,
+    onboardingMissions.length,
+  ]);
+
+  useEffect(() => {
+    if (!onboardingOpen) return undefined;
+    const body = onboardingBodyRef.current;
+    if (!body || typeof ResizeObserver === "undefined") return undefined;
+    const observer = new ResizeObserver(() => {
+      setOnboardingBodyHeight(body.scrollHeight);
+    });
+    observer.observe(body);
+    return () => observer.disconnect();
+  }, [onboardingOpen]);
 
   const openCliWindow = () => {
     setIsCliActive(true);
@@ -740,7 +855,9 @@ function ControlView() {
       return;
     }
     if (!status.running) {
-      setSlotUnlockError("Start missions first so backend can prepare the unlock.");
+      setSlotUnlockError(
+        "Start missions first so backend can prepare the unlock.",
+      );
       return;
     }
     setSlotUnlockBusy(true);
@@ -861,6 +978,337 @@ function ControlView() {
     }
   };
 
+  const toggleOnboardingMission = (name) => {
+    const key = String(name || "").trim();
+    if (!key) return;
+    setOnboardingSelectedMissions((current) => {
+      const next = new Set(current);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
+  const missionCollectionsLabel = (
+    mission,
+    catalogLookupByName = null,
+    catalogLookupById = null,
+  ) => {
+    const direct = Array.isArray(mission?.collections)
+      ? mission.collections
+      : [];
+    if (direct.length > 0) return direct.join(", ");
+    if (
+      catalogLookupById instanceof Map ||
+      catalogLookupByName instanceof Map
+    ) {
+      const idKey = String(
+        mission?.catalogMissionId || mission?.missionId || mission?.id || "",
+      ).trim();
+      const byId =
+        idKey && catalogLookupById instanceof Map
+          ? catalogLookupById.get(idKey)
+          : null;
+      const nameKey = missionKey(mission?.name);
+      const byName =
+        nameKey && catalogLookupByName instanceof Map
+          ? catalogLookupByName.get(nameKey)
+          : null;
+      const fromCatalog = byId || byName || null;
+      const values = Array.isArray(fromCatalog?.collections)
+        ? fromCatalog.collections
+        : [];
+      if (values.length > 0) return values.join(", ");
+    }
+    return "Collection requirements unavailable";
+  };
+  const normalizeCollectionKey = (value) =>
+    String(value || "")
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, " ")
+      .replace(/[^a-z0-9 ]/g, "");
+  const resolveMissionCollections = (mission) => {
+    const toEntry = (entry) => {
+      if (!entry) return null;
+      if (typeof entry === "string") {
+        const name = entry.trim();
+        return name ? { name, image: null } : null;
+      }
+      const name = String(
+        entry?.name || entry?.title || entry?.collection || entry?.symbol || "",
+      ).trim();
+      if (!name) return null;
+      const image = String(
+        entry?.image ||
+          entry?.imageUrl ||
+          entry?.image_url ||
+          entry?.logo ||
+          "",
+      ).trim();
+      return { name, image: image || null };
+    };
+    const direct = Array.isArray(mission?.collections)
+      ? mission.collections.map(toEntry).filter(Boolean)
+      : [];
+    if (direct.length > 0) return direct;
+    const idKey = String(
+      mission?.catalogMissionId || mission?.missionId || mission?.id || "",
+    ).trim();
+    const fromId = idKey ? onboardingCatalogById.get(idKey) : null;
+    const fromName = onboardingCatalogByName.get(missionKey(mission?.name));
+    const fallback = fromId || fromName || null;
+    const fallbackCollections = Array.isArray(fallback?.collections)
+      ? fallback.collections.map(toEntry).filter(Boolean)
+      : [];
+    return fallbackCollections;
+  };
+
+  const ensureOnboardingAppWallet = async ({
+    generateIfMissing = true,
+  } = {}) => {
+    const signerWallet = String(status.signerWallet || "").trim();
+    const fundingAddress = String(
+      status.fundingWalletSummary?.address || "",
+    ).trim();
+    const hasWalletByStatus =
+      status.signerStatus === "app_wallet_locked" ||
+      status.signerStatus === "app_wallet_unlocked";
+    let resolvedAddress = signerWallet || fundingAddress || "";
+
+    if (!resolvedAddress && bridge?.refreshWalletSummary) {
+      try {
+        const refreshed = await bridge.refreshWalletSummary();
+        const refreshedAddress = String(
+          refreshed?.fundingWalletSummary?.address || refreshed?.walletId || "",
+        ).trim();
+        if (refreshedAddress) resolvedAddress = refreshedAddress;
+      } catch {}
+    }
+
+    const hasWallet = Boolean(
+      resolvedAddress || onboardingAppWalletAddress || hasWalletByStatus,
+    );
+    if (hasWallet) {
+      setOnboardingAppWalletAddress(
+        resolvedAddress || onboardingAppWalletAddress,
+      );
+      setOnboardingAppWalletError(null);
+      return true;
+    }
+
+    if (!generateIfMissing) return false;
+    if (!bridge?.createGeneratedWallet) {
+      setOnboardingAppWalletError(
+        "Wallet creation is not available in this build.",
+      );
+      return false;
+    }
+
+    setOnboardingBusy(true);
+    setOnboardingAppWalletBusy(true);
+    setOnboardingAppWalletError(null);
+    try {
+      if (!status.running && bridge?.startBackend) {
+        await bridge.startBackend();
+      }
+      const created = await bridge.createGeneratedWallet();
+      if (!created?.ok) {
+        throw new Error(created?.error || "Wallet creation failed.");
+      }
+      const walletAddress = String(
+        created?.created?.walletAddress || "",
+      ).trim();
+      if (walletAddress) setOnboardingAppWalletAddress(walletAddress);
+      if (bridge?.refreshWalletSummary) {
+        void bridge.refreshWalletSummary();
+      }
+      return true;
+    } catch (error) {
+      setOnboardingAppWalletError(String(error?.message || error));
+      return false;
+    } finally {
+      setOnboardingBusy(false);
+      setOnboardingAppWalletBusy(false);
+    }
+  };
+
+  const continueOnboarding = async () => {
+    if (onboardingStep === 1) {
+      const selectedMode = String(onboardingSignerMode || "").trim();
+      if (!selectedMode) {
+        setOnboardingError("Select a funding type to continue.");
+        return;
+      }
+      if (selectedMode === "app_wallet") {
+        const ok = await ensureOnboardingAppWallet({ generateIfMissing: true });
+        if (!ok) return;
+      }
+    }
+    if (onboardingPreviewOnly) {
+      if (onboardingStep === 1) {
+        setOnboardingWhoami(null);
+        setOnboardingMissions([]);
+        setOnboardingMissionCatalog([]);
+        setOnboardingOwnedCollections(new Set());
+        setOnboardingSelectedMissions(new Set());
+        setOnboardingStep(2);
+      }
+      if (onboardingStep === 1 || onboardingStep === 2) {
+        if (!bridge?.fetchOnboardingAccount) {
+          setOnboardingError(
+            "Onboarding fetch is not available in this build.",
+          );
+          return;
+        }
+        setOnboardingBusy(true);
+        setOnboardingDataLoading(true);
+        setOnboardingError(null);
+        try {
+          const response = await Promise.race([
+            bridge.fetchOnboardingAccount(),
+            new Promise((_, reject) =>
+              setTimeout(
+                () => reject(new Error("Step 2 timed out. Please retry.")),
+                45000,
+              ),
+            ),
+          ]);
+          if (!response?.ok) {
+            throw new Error(response?.error || "Failed to load account info.");
+          }
+          const missions = Array.isArray(response.missions)
+            ? response.missions
+            : [];
+          const catalog = Array.isArray(response.missionCatalog)
+            ? response.missionCatalog
+            : [];
+          const seeded = new Set(
+            missions
+              .map((mission) => String(mission?.name || "").trim())
+              .filter(Boolean),
+          );
+          setOnboardingWhoami(response.whoami || null);
+          setOnboardingMissions(missions);
+          setOnboardingMissionCatalog(catalog);
+          setOnboardingOwnedCollections(
+            new Set(
+              (Array.isArray(response.ownedCollections)
+                ? response.ownedCollections
+                : []
+              )
+                .map((entry) => normalizeCollectionKey(entry))
+                .filter(Boolean),
+            ),
+          );
+          setOnboardingSelectedMissions(seeded);
+          setOnboardingStep(2);
+        } catch (error) {
+          setOnboardingError(String(error?.message || error));
+          setOnboardingStep(2);
+        } finally {
+          setOnboardingBusy(false);
+          setOnboardingDataLoading(false);
+        }
+      }
+      return;
+    }
+    if (!bridge?.fetchOnboardingAccount) {
+      setOnboardingError("Onboarding fetch is not available in this build.");
+      return;
+    }
+    setOnboardingWhoami(null);
+    setOnboardingMissions([]);
+    setOnboardingMissionCatalog([]);
+    setOnboardingOwnedCollections(new Set());
+    setOnboardingSelectedMissions(new Set());
+    setOnboardingStep(2);
+    setOnboardingBusy(true);
+    setOnboardingDataLoading(true);
+    setOnboardingError(null);
+    try {
+      const response = await Promise.race([
+        bridge.fetchOnboardingAccount(),
+        new Promise((_, reject) =>
+          setTimeout(
+            () => reject(new Error("Step 2 timed out. Please retry.")),
+            45000,
+          ),
+        ),
+      ]);
+      if (!response?.ok) {
+        throw new Error(response?.error || "Failed to load account info.");
+      }
+      const missions = Array.isArray(response.missions)
+        ? response.missions
+        : [];
+      const catalog = Array.isArray(response.missionCatalog)
+        ? response.missionCatalog
+        : [];
+      const seeded = new Set(
+        missions
+          .map((mission) => String(mission?.name || "").trim())
+          .filter(Boolean),
+      );
+      setOnboardingWhoami(response.whoami || null);
+      setOnboardingMissions(missions);
+      setOnboardingMissionCatalog(catalog);
+      setOnboardingOwnedCollections(
+        new Set(
+          (Array.isArray(response.ownedCollections)
+            ? response.ownedCollections
+            : []
+          )
+            .map((entry) => normalizeCollectionKey(entry))
+            .filter(Boolean),
+        ),
+      );
+      setOnboardingSelectedMissions(seeded);
+      setOnboardingStep(2);
+    } catch (error) {
+      setOnboardingError(String(error?.message || error));
+      setOnboardingStep(2);
+    } finally {
+      setOnboardingBusy(false);
+      setOnboardingDataLoading(false);
+    }
+  };
+
+  const applyOnboarding = async () => {
+    if (onboardingPreviewOnly) {
+      setOnboardingOpen(false);
+      return;
+    }
+    const selectedMissionNames = Array.from(onboardingSelectedMissions)
+      .map((name) => String(name || "").trim())
+      .filter(Boolean);
+    setOnboardingBusy(true);
+    setOnboardingError(null);
+    try {
+      await applyConfigPatch({
+        signerMode: onboardingSignerMode,
+        targetMissions:
+          selectedMissionNames.length > 0 ? selectedMissionNames : undefined,
+        firstRunOnboardingCompleted: true,
+      });
+      if (bridge?.applyOnboardingSelection) {
+        const response = await bridge.applyOnboardingSelection({
+          signerMode: onboardingSignerMode,
+          targetMissions:
+            selectedMissionNames.length > 0 ? selectedMissionNames : undefined,
+        });
+        if (!response?.ok) {
+          throw new Error(response?.error || "Failed to apply onboarding.");
+        }
+      }
+      setOnboardingOpen(false);
+    } catch (error) {
+      setOnboardingError(String(error?.message || error));
+    } finally {
+      setOnboardingBusy(false);
+    }
+  };
+
   return (
     <main className="shell">
       <WindowChrome
@@ -883,7 +1331,12 @@ function ControlView() {
             status={status}
             debug={debug}
             isAuthenticated={status.isAuthenticated}
-            onManualClaim={() => status.running && bridge?.sendCommand?.("c")}
+            manualCheckBusy={manualCheckBusy}
+            onManualClaim={() => {
+              if (!status.running) return;
+              setManualCheckBusy(true);
+              bridge?.sendCommand?.("c");
+            }}
           />
           {currentPage === "settings" ? (
             <SettingsPage
@@ -901,6 +1354,335 @@ function ControlView() {
               openSecretModal={openSecretModal}
               openCreateWalletModal={openCreateWalletModal}
             />
+          ) : null}
+          {onboardingOpen ? (
+            <div
+              className="fixed inset-0 z-60 grid place-items-center bg-black/50 p-4"
+              role="dialog"
+              aria-modal="true"
+            >
+              <div
+                className="p-4  w-full rounded-xl shadow-2xl shadow-black/95 space-y-4 z-10 border-2 border-[#1D1C27]  transition-all duration-250 ease-out"
+                style={{
+                  maxWidth: onboardingStep === 2 ? "680px" : "680px",
+                  backgroundImage: `url(${backImg})`,
+                  backgroundSize: "cover",
+                  backgroundPosition: "center",
+                }}
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <div className="text-lg font-semibold">
+                    {onboardingStep == 2
+                      ? "Assigned Mission Setup"
+                      : "Funding Source Setup"}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className="text-xs text-slate-400">
+                      Step {onboardingStep}/2
+                    </div>
+                    <button
+                      type="button"
+                      className="btn btn-clear btn-sm "
+                      onClick={() => setOnboardingOpen(false)}
+                      title="Close"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                </div>
+                <div
+                  className="overflow-hidden transition-[height] duration-250 ease-out"
+                  style={{
+                    height:
+                      onboardingBodyHeight == null
+                        ? "auto"
+                        : `${onboardingBodyHeight}px`,
+                  }}
+                >
+                  <div ref={onboardingBodyRef} className="space-y-3">
+                    {onboardingStep === 1 ? (
+                      <div className="space-y-4">
+                        <div className="text-sm text-slate-300">
+                          Choose wallet funding type.
+                        </div>
+                        <div className="signer-type flex-col">
+                          {[
+                            [
+                              "app_wallet",
+                              "App Wallet",
+                              "A dedicated, self-custodial in-app burner wallet for automated signing.",
+                            ],
+
+                            [
+                              "dapp",
+                              "Browse Wallet",
+                              "You must approve each transaction in your browser when the browser window opens.",
+                            ],
+                            [
+                              "manual",
+                              "Manual",
+                              "A browser window will open for you to mauanlly reset.",
+                            ],
+                          ].map(([value, title, desc]) => (
+                            <label
+                              key={value}
+                              className="signer-type__app items-start"
+                            >
+                              <input
+                                type="radio"
+                                name="onboarding_signer_mode"
+                                value={value}
+                                className="fake-checkbox-radio"
+                                checked={onboardingSignerMode === value}
+                                onChange={() => {
+                                  setOnboardingSignerMode(value);
+                                  setOnboardingError(null);
+                                  if (value === "app_wallet") {
+                                    void ensureOnboardingAppWallet({
+                                      generateIfMissing: true,
+                                    });
+                                  } else {
+                                    setOnboardingAppWalletError(null);
+                                    setOnboardingAppWalletAddress("");
+                                  }
+                                }}
+                              />
+                              <div className="space-y-1 w-full">
+                                <div className="flex gap-2 items-center w-full justify-between">
+                                  <div className="text-base text-white">
+                                    {title}
+                                  </div>
+                                  {value === "app_wallet" ? (
+                                    <span className="badge h-min uppercase border-transparent bg-white text-black text-[11px] place-self-center ">
+                                      Full Automation
+                                    </span>
+                                  ) : null}
+                                </div>
+                                <div className="text-xs text-slate-300">
+                                  {desc}
+                                </div>
+                                {value === "app_wallet" ? (
+                                  <div className="flex font-semibold gap-2 mt-3  text-slate-300">
+                                    <img
+                                      src={solIcon}
+                                      className="w-4 h-4"
+                                      alt="Solana logo"
+                                    />{" "}
+                                    Requires PBP & small SOL amount for
+                                    transactions. Address found in settings.
+                                  </div>
+                                ) : null}
+                                {value === "app_wallet" &&
+                                onboardingSignerMode === "app_wallet" ? (
+                                  <div className="rounded-md border border-white/10 bg-black/30 p-3 space-y-0.5 mt-2">
+                                    <div className="text-xs text-slate-300">
+                                      {onboardingAppWalletBusy
+                                        ? "Generating app wallet..."
+                                        : onboardingAppWalletAddress
+                                          ? "Wallet Address"
+                                          : "Wallet will be generated when you continue."}
+                                    </div>
+                                    {onboardingAppWalletAddress ? (
+                                      <div className="flex items-center gap-4 flex-wrap">
+                                        <div className="text-sm text-slate-100 break-all">
+                                          {onboardingAppWalletAddress}
+                                        </div>
+                                        <button
+                                          type="button"
+                                          className="fill-white flex items-center gap-1 font-normal text-xs px-0 py-0 h-min btn btn-clear hover:fill-accent hover:text-accent hover:cursor-pointer"
+                                          onClick={() => {
+                                            const value =
+                                              onboardingAppWalletAddress;
+                                            if (!value) return;
+                                            void copyText(value).then((ok) => {
+                                              setCopiedLabel(
+                                                ok ? "Copied" : "Copy failed",
+                                              );
+                                              setTimeout(
+                                                () => setCopiedLabel(null),
+                                                1200,
+                                              );
+                                            });
+                                          }}
+                                        >
+                                          <svg
+                                            xmlns="http://www.w3.org/2000/svg"
+                                            viewBox="0 0 640 640"
+                                            className="w-4 h-4"
+                                          >
+                                            <path d="M352 544L128 544C110.3 544 96 529.7 96 512L96 288C96 270.3 110.3 256 128 256L176 256L176 224L128 224C92.7 224 64 252.7 64 288L64 512C64 547.3 92.7 576 128 576L352 576C387.3 576 416 547.3 416 512L416 464L384 464L384 512C384 529.7 369.7 544 352 544zM288 384C270.3 384 256 369.7 256 352L256 128C256 110.3 270.3 96 288 96L512 96C529.7 96 544 110.3 544 128L544 352C544 369.7 529.7 384 512 384L288 384zM224 352C224 387.3 252.7 416 288 416L512 416C547.3 416 576 387.3 576 352L576 128C576 92.7 547.3 64 512 64L288 64C252.7 64 224 92.7 224 128L224 352z" />
+                                          </svg>
+                                          Copy
+                                        </button>
+                                      </div>
+                                    ) : null}
+                                    <div className="text-[11px] text-slate-400">
+                                      Recovery keys are available in Settings.
+                                    </div>
+                                    {onboardingAppWalletError ? (
+                                      <div className="text-xs text-error">
+                                        {onboardingAppWalletError}
+                                      </div>
+                                    ) : null}
+                                  </div>
+                                ) : null}
+                              </div>
+                            </label>
+                          ))}
+                        </div>
+
+                        <div className="flex justify-end">
+                          <button
+                            type="button"
+                            className="btn btn-gradient btn-sm text-shadow-sm text-shadow-black/40"
+                            onClick={() => void continueOnboarding()}
+                            disabled={
+                              onboardingBusy ||
+                              !String(onboardingSignerMode || "").trim()
+                            }
+                          >
+                            Continue
+                          </button>
+                        </div>
+                      </div>
+                    ) : null}
+                    {onboardingStep === 2 ? (
+                      <div className="space-y-4">
+                        <div className="rounded-md border border-warning/30 bg-warning/10 p-3 text-sm text-slate-200 flex gap-2">
+                          <div>
+                            Make sure these are the active you to watch and they
+                            are assigned. If not, change them on the{" "}
+                            <a
+                              href="https://www.pixelbypixel.studio"
+                              className="text-accent underline"
+                              onClick={(event) => {
+                                event.preventDefault();
+                                void openExternalUrl(
+                                  "https://www.pixelbypixel.studio",
+                                );
+                              }}
+                            >
+                              Pixel by Pixel Studios Missions Page
+                            </a>
+                            , then click{" "}
+                            <span className="font-semibold">
+                              Refresh mission status
+                            </span>{" "}
+                            before clicking done .
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-4 gap-2">
+                          {[1, 2, 3, 4].map((slot) => {
+                            const assigned =
+                              onboardingMissions.find(
+                                (m) => Number(m?.slot) === slot,
+                              ) || null;
+                            const imgSrc = assigned
+                              ? pickSlotImage(assigned)
+                              : null;
+                            const loadingSlot =
+                              onboardingDataLoading ||
+                              (!assigned && onboardingMissions.length === 0);
+                            return (
+                              <div
+                                key={`onboarding-slot-${slot}`}
+                                className="rounded-md border-2 border-white/10 bg-black/20 p-3 h-full flex flex-col gap-2"
+                              >
+                                <div className="flex gap flex-row justify-between items-center">
+                                  <div className="text-[11px] text-slate-400">
+                                    {assigned?.currentLevel !== null &&
+                                    assigned?.currentLevel !== undefined
+                                      ? `Level ${assigned.currentLevel}`
+                                      : "Level —"}
+                                  </div>
+                                  <div
+                                    className={`${assigned && assigned.isActive ? "badge badge-success" : ""} px-2 h-auto text-[11px] text-slate-900`}
+                                  >
+                                    {assigned
+                                      ? assigned.isActive
+                                        ? "Active"
+                                        : "Assigned"
+                                      : "No NFT"}
+                                  </div>
+                                </div>
+                                {loadingSlot ? (
+                                  <div className="grid place-items-center flex-1">
+                                    <span className="loading loading-spinner loading-sm text-success" />
+                                  </div>
+                                ) : (
+                                  <div className="flex flex-col flex-1">
+                                    <div className="text-sm text-slate-100 ">
+                                      {assigned?.name || "Unassigned"}
+                                    </div>
+
+                                    <div className="flex text-[11px] text-slate-300 mt-auto">
+                                      {assigned?.reward || "Reward unknown"}
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                        <div className="flex justify-between">
+                          <button
+                            type="button"
+                            className="btn btn-clear btn-sm px-0"
+                            onClick={() => setOnboardingStep(1)}
+                            disabled={onboardingBusy}
+                          >
+                            Back
+                          </button>
+                          <div class="flex gap-2">
+                            <button
+                              type="button"
+                              className="btn btn-clear btn-sm"
+                              onClick={() => void continueOnboarding()}
+                              disabled={onboardingBusy || onboardingDataLoading}
+                            >
+                              <span className="inline-flex items-center gap-1.5">
+                                <svg
+                                  xmlns="http://www.w3.org/2000/svg"
+                                  viewBox="0 0 640 640"
+                                  className={`w-4 h-4 ${onboardingDataLoading ? "animate-spin" : ""}`}
+                                  fill="currentColor"
+                                  aria-hidden="true"
+                                >
+                                  <path d="M320 96c123.7 0 224 100.3 224 224s-100.3 224-224 224S96 443.7 96 320c0-34.1 7.6-66.5 21.3-95.5l44.9 22.4C151.2 268 144 293.4 144 320c0 97.2 78.8 176 176 176s176-78.8 176-176S417.2 144 320 144c-47.4 0-90.4 18.7-122.1 49.2l58.1 58.1L112 304V160l51.8 51.8C203.2 163.2 258.3 96 320 96z" />
+                                </svg>
+                                <span>
+                                  {onboardingDataLoading
+                                    ? "Refreshing..."
+                                    : "Refresh mission status"}
+                                </span>
+                              </span>
+                            </button>
+                            <button
+                              type="button"
+                              className="btn btn-gradient btn-sm text-shadow-sm text-shadow-black/40"
+                              onClick={() => void applyOnboarding()}
+                              disabled={onboardingBusy}
+                            >
+                              {onboardingPreviewOnly
+                                ? "Done"
+                                : onboardingBusy
+                                  ? "Applying..."
+                                  : "Apply"}
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    ) : null}
+                    {onboardingError ? (
+                      <div className="rounded-md border border-error/40 bg-error/10 p-2 text-sm text-slate-100">
+                        {onboardingError}
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
+              </div>
+            </div>
           ) : null}
           {secretModalOpen ? (
             <div
@@ -1291,6 +2073,26 @@ function ControlView() {
                           ? "Start Missioninginginging"
                           : "Press to stop"}
                       </button>
+                    </div>
+                    <div className="flex justify-end">
+                      {/* onboarding testing  */}
+                      {/* <button
+                        type="button"
+                        className="btn btn-clear btn-xs"
+                        onClick={() => {
+                          setOnboardingPreviewOnly(true);
+                          setOnboardingOpen(true);
+                          setOnboardingStep(1);
+                          setOnboardingBusy(false);
+                          setOnboardingError(null);
+                          setOnboardingWhoami(null);
+                          setOnboardingMissions([]);
+                          setOnboardingMissionCatalog([]);
+                          setOnboardingSelectedMissions(new Set());
+                        }}
+                      >
+                        Open Setup Flow
+                      </button> */}
                     </div>
                   </div>
                   <div className="flex items-center justify-center">
@@ -1738,12 +2540,14 @@ function ControlView() {
                                 "\u00a0"
                               )}
                             </span>
-                            <span className="user__wallet-ballance-sol text-lg font-semibold leading-tight">
+                            <span
+                              className={`user__wallet-ballance-sol text-lg font-semibold leading-tight`}
+                            >
                               <SlideNumberFormatted
                                 value={tile.balanceNumber}
                                 format={(n) =>
                                   Number(n || 0).toLocaleString(undefined, {
-                                    maximumFractionDigits: 2,
+                                    maximumFractionDigits: 3,
                                   })
                                 }
                               />
