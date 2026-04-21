@@ -231,6 +231,8 @@
 
   .cli-shell {
     @apply flex flex-col;
+    height: 100vh;
+    overflow: hidden;
   }
 
   .cli-drag-strip {
@@ -240,23 +242,25 @@
   }
 
   .cli-shell>section {
-    app-region: drag;
-    -webkit-app-region: drag;
+    app-region: no-drag;
+    -webkit-app-region: no-drag;
+    min-height: 0;
   }
 
   .window-chrome {
     @apply flex items-center h-10 px-4 py-2;
+    position: relative;
     /* border-bottom: 1px solid rgba(148, 163, 184, 0.12); */
     user-select: none;
     -webkit-user-select: none;
-    app-region: drag;
-    -webkit-app-region: drag;
+    app-region: no-drag;
+    -webkit-app-region: no-drag;
   }
 
   .window-drag {
     @apply flex min-w-0 flex-1 items-center justify-center;
-    app-region: drag;
-    -webkit-app-region: drag;
+    app-region: no-drag;
+    -webkit-app-region: no-drag;
   }
 
   .window-title-wrap {
@@ -437,8 +441,13 @@
     user-select: text;
     -webkit-user-select: text;
     cursor: text;
+    overscroll-behavior: contain;
     app-region: no-drag;
     -webkit-app-region: no-drag;
+  }
+
+  body.cli-locked {
+    overflow: hidden;
   }
 
   .log-line {

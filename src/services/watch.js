@@ -98,6 +98,29 @@ function createWatchService(ctx, logger, mcp, checks, configApi, services = {}) 
     return `${kind}_${traceSequence}`;
   }
 
+  function clearGuiMissionSlot(slot) {
+    const slotNumber = Number(slot);
+    if (!Number.isFinite(slotNumber) || slotNumber < 1 || slotNumber > 4) {
+      return false;
+    }
+    const slots = Array.isArray(ctx.guiMissionSlots) ? ctx.guiMissionSlots : [];
+    if (slots.length !== 4) return false;
+    const next = slots.slice();
+    next[slotNumber - 1] = {
+      slot: slotNumber,
+      missionId: null,
+      missionName: null,
+      missionLevel: null,
+      progress: null,
+      goal: null,
+      assignedNft: null,
+      nftLevel: null,
+      nftImage: null,
+    };
+    ctx.guiMissionSlots = next;
+    return true;
+  }
+
   async function sleep(ms) {
     await new Promise((resolve) =>
       setTimeout(resolve, Math.max(0, Number(ms) || 0)),
@@ -1425,6 +1448,7 @@ function createWatchService(ctx, logger, mcp, checks, configApi, services = {}) 
         await performMissionReroll(mission, { reason, label });
         rerolledCount += 1;
       } catch (error) {
+        const clearedSlot = clearGuiMissionSlot(mission?.slot);
         logWithTimestamp(
           `[RESET] ❌ Reroll blocked for ${mission.name}: ${error.message}`,
         );
@@ -1435,6 +1459,7 @@ function createWatchService(ctx, logger, mcp, checks, configApi, services = {}) 
           name: mission.name || null,
           level: mission.level ?? null,
           slot: mission.slot ?? null,
+          clearedSlot,
           error: error.message,
         });
         if (ctx.guiBridge?.sendEvent) {
@@ -1447,6 +1472,9 @@ function createWatchService(ctx, logger, mcp, checks, configApi, services = {}) 
             error: String(error?.message || error || "Reset failed"),
             bridgeUrl: String(error?.manualBridgeUrl || "").trim() || null,
           });
+        }
+        if (clearedSlot && ctx.guiBridge?.emitNow) {
+          ctx.guiBridge.emitNow();
         }
       }
     }

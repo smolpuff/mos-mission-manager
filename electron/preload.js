@@ -17,6 +17,8 @@ contextBridge.exposeInMainWorld("missionsDesktop", {
   openExternal: (url) => ipcRenderer.invoke("external:open", url),
   openCliWindow: () => ipcRenderer.invoke("window:open-cli"),
   isCliWindowOpen: () => ipcRenderer.invoke("window:is-cli-open"),
+  getWindowPosition: () => ipcRenderer.invoke("window:get-position"),
+  setWindowPosition: (x, y) => ipcRenderer.invoke("window:set-position", { x, y }),
   minimizeWindow: () => ipcRenderer.invoke("window:minimize"),
   closeWindow: () => ipcRenderer.invoke("window:close"),
   onBackendStatus: (callback) => {

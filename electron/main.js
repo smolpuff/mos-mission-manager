@@ -545,13 +545,129 @@ function stopBackend() {
   return { ...backendStatus };
 }
 
-function sendBackendCommand(command) {
-  const trimmed = String(command || "").trim();
-  if (!backend || !backendStatus.running) {
-    throw new Error("Backend is not running.");
+async function waitForBackendStdinWritable(timeoutMs = 1500) {
+  const deadline = Date.now() + Math.max(100, Number(timeoutMs) || 1500);
+  while (Date.now() < deadline) {
+    if (
+      backend &&
+      backendStatus.running &&
+      backend.stdin &&
+      backend.stdin.writable &&
+      !backend.stdin.destroyed
+    ) {
+      return true;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 25));
   }
+  return Boolean(
+    backend &&
+      backendStatus.running &&
+      backend.stdin &&
+      backend.stdin.writable &&
+      !backend.stdin.destroyed,
+  );
+}
+
+function parseStoppedModeCommand(command) {
+  const trimmed = String(command || "").trim();
+  if (!trimmed) return { type: "none" };
+  const parts = trimmed.split(/\s+/);
+  const cmd = String(parts[0] || "").toLowerCase();
+  const arg = String(parts[1] || "").toLowerCase();
+
+  if (cmd === "start") {
+    return { type: "start" };
+  }
+
+  if (cmd === "20r") {
+    if (parts.length === 1) return { type: "20r", mode: "toggle" };
+    if (arg === "on" || arg === "off") return { type: "20r", mode: arg };
+    return { type: "invalid20r" };
+  }
+
+  if (cmd === "mm") {
+    if (parts.length === 1) return { type: "mm", mode: "toggle" };
+    if (arg === "on" || arg === "off") return { type: "mm", mode: arg };
+    const level = Number(parts[1]);
+    if (Number.isFinite(level) && level > 0) {
+      return { type: "mm", mode: "level", level: Math.floor(level) };
+    }
+    return { type: "invalidMm" };
+  }
+
+  return { type: "other" };
+}
+
+function applyStoppedModeConfig(parsed) {
+  const current = readDesktopConfig();
+  const patch = {};
+
+  if (parsed.type === "20r") {
+    const previous = current.level20ResetEnabled === true;
+    const nextEnabled =
+      parsed.mode === "toggle" ? !previous : parsed.mode === "on";
+    patch.level20ResetEnabled = nextEnabled;
+    patch.missionModeEnabled = nextEnabled ? false : current.missionModeEnabled === true;
+  }
+
+  if (parsed.type === "mm") {
+    const previous = current.missionModeEnabled === true;
+    let nextMissionEnabled = previous;
+    if (parsed.mode === "toggle") nextMissionEnabled = !previous;
+    if (parsed.mode === "on") nextMissionEnabled = true;
+    if (parsed.mode === "off") nextMissionEnabled = false;
+    if (parsed.mode === "level") {
+      nextMissionEnabled = true;
+      patch.missionResetLevel = String(parsed.level);
+    }
+    patch.missionModeEnabled = nextMissionEnabled;
+    patch.level20ResetEnabled = nextMissionEnabled ? false : current.level20ResetEnabled === true;
+    if (nextMissionEnabled && typeof patch.missionResetLevel !== "string") {
+      patch.missionResetLevel = String(current.missionResetLevel || "11");
+    }
+  }
+
+  const next = applyDesktopConfigPatch(patch);
+  if (typeof next.level20ResetEnabled === "boolean") {
+    backendStatus.level20ResetEnabled = next.level20ResetEnabled;
+  }
+  if (typeof next.missionModeEnabled === "boolean") {
+    backendStatus.missionModeEnabled = next.missionModeEnabled;
+  }
+  if (typeof next.missionResetLevel === "string") {
+    backendStatus.currentMissionResetLevel = next.missionResetLevel;
+  }
+  backendStatus.currentMode = backendStatus.missionModeEnabled
+    ? `mission-${backendStatus.currentMissionResetLevel || "11"}`
+    : "normal";
+  publishStatus();
+}
+
+async function sendBackendCommand(command) {
+  const trimmed = String(command || "").trim();
   if (!trimmed) {
     throw new Error("Command is empty.");
+  }
+  if (!backend || !backendStatus.running) {
+    const parsed = parseStoppedModeCommand(trimmed);
+    if (parsed.type === "start") {
+      startBackend();
+    } else if (parsed.type === "20r" || parsed.type === "mm") {
+      applyStoppedModeConfig(parsed);
+      pushOutput("stdin", `> ${trimmed}\n`);
+      pushOutput("system", `[GUI] Saved mode setting while runner is stopped.\n`);
+      return true;
+    } else if (parsed.type === "invalid20r") {
+      throw new Error("Usage: 20r [on|off]");
+    } else if (parsed.type === "invalidMm") {
+      throw new Error("Usage: mm [off|on|<level>]");
+    } else {
+      throw new Error("Backend is not running. Use 'start' to launch it.");
+    }
+  }
+  const ready = await waitForBackendStdinWritable();
+  if (!ready) {
+    throw new Error("Backend is not running.");
   }
   backend.stdin.write(`${trimmed}\n`);
   pushOutput("stdin", `> ${trimmed}\n`);
@@ -884,6 +1000,20 @@ app.whenReady().then(async () => {
   ipcMain.handle("window:is-cli-open", async () => {
     return Boolean(cliWindow && !cliWindow.isDestroyed());
   });
+  ipcMain.handle("window:get-position", async (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (!win || win.isDestroyed()) return [0, 0];
+    return win.getPosition();
+  });
+  ipcMain.handle("window:set-position", async (event, payload = {}) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (!win || win.isDestroyed()) return false;
+    const x = Number(payload?.x);
+    const y = Number(payload?.y);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return false;
+    win.setPosition(Math.round(x), Math.round(y));
+    return true;
+  });
   ipcMain.handle("window:minimize", async (event) => {
     const win = BrowserWindow.fromWebContents(event.sender);
     if (win && !win.isDestroyed()) {
@@ -894,7 +1024,11 @@ app.whenReady().then(async () => {
   ipcMain.handle("window:close", async (event) => {
     const win = BrowserWindow.fromWebContents(event.sender);
     if (win && !win.isDestroyed()) {
-      win.close();
+      if (controlWindow && !controlWindow.isDestroyed() && win === controlWindow) {
+        app.quit();
+      } else {
+        win.close();
+      }
     }
     return true;
   });

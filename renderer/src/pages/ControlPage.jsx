@@ -635,6 +635,7 @@ function ControlView() {
         ...current,
         [slotKey]: nextError,
       }));
+      setResetErrorModal(nextError);
       return;
     }
     if (type === "reset_error_cleared") {
@@ -650,6 +651,13 @@ function ControlView() {
         const next = { ...current };
         delete next[slotKey];
         return next;
+      });
+      setResetErrorModal((current) => {
+        if (!current || String(current.assignedMissionId || "") !== slotKey) {
+          if (Number.isFinite(slot) && Number(current.slot) === slot) return null;
+          return current;
+        }
+        return null;
       });
     }
   }, [lastEvent]);
@@ -1796,7 +1804,7 @@ function ControlView() {
                               title="Reset error details"
                               onClick={() => setResetErrorModal(slotError)}
                             >
-                              !
+                              i
                             </button>
                           ) : null}
                           {missionLevel ? (
@@ -1877,6 +1885,12 @@ function ControlView() {
                   </span>
                   {Number.isFinite(Number(resetErrorModal?.slot))
                     ? ` (slot ${Number(resetErrorModal.slot)})`
+                    : ""}
+                </div>
+                <div className="text-xs text-slate-300">
+                  Action: {resetErrorModal?.actionName || "reset"}{" "}
+                  {resetErrorModal?.at
+                    ? `• ${new Date(resetErrorModal.at).toLocaleString()}`
                     : ""}
                 </div>
                 <div className="rounded-md border border-error/40 bg-error/10 p-3 text-sm text-slate-100">

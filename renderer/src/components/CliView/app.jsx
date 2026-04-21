@@ -114,7 +114,6 @@ export default function CliView({
               className="btn btn-sm btn-ghost"
               key={item}
               onClick={() => submitCommand(item)}
-              disabled={!status.running}
             >
               {item}
             </button>
@@ -132,12 +131,10 @@ export default function CliView({
             placeholder="Type any existing CLI command..."
             value={command}
             onChange={(event) => setCommand(event.target.value)}
-            disabled={!status.running}
           />
           <button
             className="btn btn-primary"
             type="submit"
-            disabled={!status.running}
           >
             Send
           </button>
