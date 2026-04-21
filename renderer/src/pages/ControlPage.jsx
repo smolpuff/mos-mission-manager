@@ -2540,14 +2540,12 @@ function ControlView() {
                                 "\u00a0"
                               )}
                             </span>
-                            <span
-                              className={`user__wallet-ballance-sol text-lg font-semibold leading-tight`}
-                            >
+                            <span className="user__wallet-ballance-sol text-lg font-semibold leading-tight">
                               <SlideNumberFormatted
                                 value={tile.balanceNumber}
                                 format={(n) =>
                                   Number(n || 0).toLocaleString(undefined, {
-                                    maximumFractionDigits: 3,
+                                    maximumFractionDigits: 2,
                                   })
                                 }
                               />
