@@ -77,7 +77,88 @@ const backendStatus = {
   fundingWalletSummary: null,
   guiMissionSlots: null,
   cliWindowOpen: false,
+  analytics: null,
 };
+
+const ANALYTICS_VERSION = 1;
+const OUTPUT_LINE_BUFFER = { stdout: "", stderr: "", system: "", stdin: "" };
+
+function createEmptyAnalytics() {
+  return {
+    version: ANALYTICS_VERSION,
+    lifetime: {
+      startedAt: null,
+      totalClaims: 0,
+      totalResets: 0,
+      totalResetCostPbp: 0,
+      currencyEarned: { pbp: 0, tc: 0, cc: 0 },
+      missionClaims: {},
+      nftsUsed: [],
+    },
+    session: {
+      startedAt: null,
+      totalClaims: 0,
+      totalResets: 0,
+      totalResetCostPbp: 0,
+      currencyEarned: { pbp: 0, tc: 0, cc: 0 },
+      missionClaims: {},
+      nftsUsed: [],
+    },
+  };
+}
+
+function normalizeAnalytics(raw) {
+  const empty = createEmptyAnalytics();
+  const src = raw && typeof raw === "object" ? raw : {};
+  const norm = {
+    version: ANALYTICS_VERSION,
+    lifetime: {
+      startedAt:
+        typeof src?.lifetime?.startedAt === "number" &&
+        Number.isFinite(src.lifetime.startedAt)
+          ? src.lifetime.startedAt
+          : null,
+      totalClaims: Number(src?.lifetime?.totalClaims || 0) || 0,
+      totalResets: Number(src?.lifetime?.totalResets || 0) || 0,
+      totalResetCostPbp: Number(src?.lifetime?.totalResetCostPbp || 0) || 0,
+      currencyEarned: {
+        pbp: Number(src?.lifetime?.currencyEarned?.pbp || 0) || 0,
+        tc: Number(src?.lifetime?.currencyEarned?.tc || 0) || 0,
+        cc: Number(src?.lifetime?.currencyEarned?.cc || 0) || 0,
+      },
+      missionClaims:
+        src?.lifetime?.missionClaims && typeof src.lifetime.missionClaims === "object"
+          ? src.lifetime.missionClaims
+          : {},
+      nftsUsed: Array.isArray(src?.lifetime?.nftsUsed)
+        ? src.lifetime.nftsUsed.map((v) => String(v || "").trim()).filter(Boolean)
+        : [],
+    },
+    session: {
+      startedAt:
+        typeof src?.session?.startedAt === "number" &&
+        Number.isFinite(src.session.startedAt)
+          ? src.session.startedAt
+          : null,
+      totalClaims: Number(src?.session?.totalClaims || 0) || 0,
+      totalResets: Number(src?.session?.totalResets || 0) || 0,
+      totalResetCostPbp: Number(src?.session?.totalResetCostPbp || 0) || 0,
+      currencyEarned: {
+        pbp: Number(src?.session?.currencyEarned?.pbp || 0) || 0,
+        tc: Number(src?.session?.currencyEarned?.tc || 0) || 0,
+        cc: Number(src?.session?.currencyEarned?.cc || 0) || 0,
+      },
+      missionClaims:
+        src?.session?.missionClaims && typeof src.session.missionClaims === "object"
+          ? src.session.missionClaims
+          : {},
+      nftsUsed: Array.isArray(src?.session?.nftsUsed)
+        ? src.session.nftsUsed.map((v) => String(v || "").trim()).filter(Boolean)
+        : [],
+    },
+  };
+  return { ...empty, ...norm };
+}
 
 function isDev() {
   return !app.isPackaged;
@@ -118,6 +199,9 @@ function pushOutput(stream, text) {
     logHistory = logHistory.slice(-maxLogHistory);
   }
   publish("backend:output", payload);
+  if (stream === "stdout" || stream === "stderr") {
+    applyAnalyticsFromChunk(stream, text);
+  }
 }
 
 function publishStatus() {
@@ -167,12 +251,146 @@ function getConfigPath() {
   return path.join(getBackendWorkingDirectory(), "config.json");
 }
 
+function getAnalyticsPath() {
+  return path.join(getBackendWorkingDirectory(), "data", "stats-analytics.json");
+}
+
 function readDesktopConfig() {
   try {
     const raw = fs.readFileSync(getConfigPath(), "utf8");
     return JSON.parse(raw);
   } catch {
     return {};
+  }
+}
+
+function loadAnalytics() {
+  try {
+    const raw = fs.readFileSync(getAnalyticsPath(), "utf8");
+    return normalizeAnalytics(JSON.parse(raw));
+  } catch {
+    return createEmptyAnalytics();
+  }
+}
+
+function saveAnalytics(analytics) {
+  try {
+    const next = normalizeAnalytics(analytics);
+    const target = getAnalyticsPath();
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.writeFileSync(target, JSON.stringify(next, null, 2));
+    backendStatus.analytics = next;
+  } catch {}
+}
+
+function beginAnalyticsSession() {
+  const current = normalizeAnalytics(backendStatus.analytics || loadAnalytics());
+  if (!Number.isFinite(Number(current?.lifetime?.startedAt))) {
+    current.lifetime.startedAt = Date.now();
+  }
+  current.session = {
+    startedAt: Date.now(),
+    totalClaims: 0,
+    totalResets: 0,
+    totalResetCostPbp: 0,
+    currencyEarned: { pbp: 0, tc: 0, cc: 0 },
+    missionClaims: {},
+    nftsUsed: [],
+  };
+  saveAnalytics(current);
+}
+
+function addUniqueValue(list, value) {
+  const normalized = String(value || "").trim();
+  if (!normalized) return list;
+  const set = new Set(Array.isArray(list) ? list : []);
+  set.add(normalized);
+  return Array.from(set);
+}
+
+function applyAnalyticsLine(line) {
+  const text = String(line || "").trim();
+  if (!text) return false;
+  const current = normalizeAnalytics(backendStatus.analytics || loadAnalytics());
+  let changed = false;
+
+  const claimMatch = text.match(/\[WATCH\]\s+✅\s+Claimed:\s*(.+)$/i);
+  if (claimMatch) {
+    const body = String(claimMatch[1] || "").trim();
+    const mission = String(body.split(" slot=")[0] || "unknown mission").trim() || "unknown mission";
+    const rewardMatch = body.match(/([0-9]+(?:\.[0-9]+)?)\s+([A-Z]{2,4})/);
+    const amount = Number(rewardMatch?.[1] || 0);
+    const token = String(rewardMatch?.[2] || "").toLowerCase();
+    current.lifetime.totalClaims += 1;
+    current.session.totalClaims += 1;
+    current.lifetime.missionClaims[mission] =
+      Number(current.lifetime.missionClaims[mission] || 0) + 1;
+    current.session.missionClaims[mission] =
+      Number(current.session.missionClaims[mission] || 0) + 1;
+    if (Number.isFinite(amount) && amount > 0 && ["pbp", "tc", "cc"].includes(token)) {
+      current.lifetime.currencyEarned[token] += amount;
+      current.session.currencyEarned[token] += amount;
+    }
+    changed = true;
+  }
+
+  if (
+    /\[RESET\]\s+✅\s+Rerolled:/i.test(text) ||
+    /\[RESET\]\s+✅\s+Cooldown reset complete:/i.test(text)
+  ) {
+    current.lifetime.totalResets += 1;
+    current.session.totalResets += 1;
+    changed = true;
+  }
+
+  const spendMatch = text.match(/\[SPEND\].*-\s*([0-9]+(?:\.[0-9]+)?)\s+PBP/i);
+  if (spendMatch) {
+    const amount = Number(spendMatch[1] || 0);
+    if (Number.isFinite(amount) && amount > 0) {
+      current.lifetime.totalResetCostPbp += amount;
+      current.session.totalResetCostPbp += amount;
+      changed = true;
+    }
+  }
+
+  const nftMatch = text.match(/nft=([^\s,]+)/i);
+  if (nftMatch && nftMatch[1]) {
+    const nft = String(nftMatch[1]).trim();
+    const nextLifetime = addUniqueValue(current.lifetime.nftsUsed, nft);
+    const nextSession = addUniqueValue(current.session.nftsUsed, nft);
+    if (
+      nextLifetime.length !== current.lifetime.nftsUsed.length ||
+      nextSession.length !== current.session.nftsUsed.length
+    ) {
+      current.lifetime.nftsUsed = nextLifetime;
+      current.session.nftsUsed = nextSession;
+      changed = true;
+    }
+  }
+
+  if (changed) {
+    saveAnalytics(current);
+    publishStatus();
+  }
+  return changed;
+}
+
+function applyAnalyticsFromChunk(stream, chunkText) {
+  const key = String(stream || "stdout");
+  const prefix = String(OUTPUT_LINE_BUFFER[key] || "");
+  const merged = `${prefix}${String(chunkText || "")}`;
+  const lines = merged.split(/\r?\n/);
+  OUTPUT_LINE_BUFFER[key] = lines.pop() || "";
+  for (const line of lines) {
+    applyAnalyticsLine(line);
+  }
+}
+
+function flushAnalyticsBuffers() {
+  for (const key of Object.keys(OUTPUT_LINE_BUFFER)) {
+    const pending = String(OUTPUT_LINE_BUFFER[key] || "").trim();
+    if (pending) applyAnalyticsLine(pending);
+    OUTPUT_LINE_BUFFER[key] = "";
   }
 }
 
@@ -187,6 +405,7 @@ function applyDesktopConfigPatch(patch = {}) {
 
 function hydrateBackendStatusFromConfig() {
   const config = readDesktopConfig();
+  backendStatus.analytics = loadAnalytics();
   if (typeof config.level20ResetEnabled === "boolean") {
     backendStatus.level20ResetEnabled = config.level20ResetEnabled;
   }
@@ -699,6 +918,7 @@ function startBackend() {
   backendStatus.fundingWalletSummary = null;
   backendStatus.guiMissionSlots = null;
   backendStatus.slotUnlockSummary = null;
+  beginAnalyticsSession();
   publishStatus();
   pushOutput("system", "[GUI] Backend started.\n");
 
@@ -740,6 +960,7 @@ function startBackend() {
   });
 
   backend.on("exit", (code, signal) => {
+    flushAnalyticsBuffers();
     clearStopTimer();
     backendStatus.running = false;
     backendStatus.pid = null;
@@ -769,6 +990,7 @@ function stopBackend() {
   }
 
   pushOutput("system", "[GUI] Stopping backend...\n");
+  flushAnalyticsBuffers();
   backendStatus.currentMissionStats = null;
   backendStatus.guiMissionSlots = null;
   backendStatus.slotUnlockSummary = null;
@@ -1455,6 +1677,132 @@ app.whenReady().then(async () => {
     }
     publishStatus();
     return { ok: true, config: next };
+  });
+  ipcMain.handle("rentals:preview", async () => {
+    const loadPreview = async () => {
+      const rentableResult = await mcpCallTool(
+        "get_rentable_nfts",
+        {},
+        { url: "https://pixelbypixel.studio/mcp" },
+      );
+      const missionsResult = await mcpCallTool(
+        "get_user_missions",
+        {},
+        { url: "https://pixelbypixel.studio/mcp" },
+      );
+
+      const rentableRaw = Array.isArray(rentableResult?.structuredContent?.data)
+        ? rentableResult.structuredContent.data
+        : [];
+      const rentable = rentableRaw.slice(0, 24).map((entry, index) => ({
+        id:
+          entry?.rentalListingId ||
+          entry?.listingId ||
+          entry?.id ||
+          `listing-${index}`,
+        rentalListingId: entry?.rentalListingId || entry?.listingId || null,
+        account: entry?.account || entry?.nftAccount || null,
+        name:
+          entry?.offChainMetadata?.metadata?.name ||
+          entry?.DASMetadata?.name ||
+          entry?.name ||
+          "Unknown NFT",
+        image:
+          entry?.offChainMetadata?.metadata?.image ||
+          entry?.DASMetadata?.image ||
+          null,
+        collection:
+          entry?.offChainMetadata?.metadata?.symbol ||
+          entry?.DASMetadata?.symbol ||
+          null,
+        level: Number.isFinite(Number(entry?.stats?.level))
+          ? Number(entry.stats.level)
+          : null,
+        rentalStatus: entry?.rentalStatus || null,
+      }));
+
+      const missionList = normalizeMissionList(missionsResult || {});
+      const slotSummary = missionList
+        .map((mission, index) => ({
+          id:
+            mission?.assignedMissionId ||
+            mission?.assigned_mission_id ||
+            `slot-${index}`,
+          slot: Number.isFinite(Number(mission?.slot)) ? Number(mission.slot) : null,
+          missionName: missionDisplayName(mission),
+          assignedNft: mission?.assigned_nft || mission?.assignedNft || null,
+          nftSource: mission?.nft_source || mission?.nftSource || null,
+          rentalLeaseId: mission?.rental_lease_id || mission?.rentalLeaseId || null,
+          currentLevel: Number.isFinite(Number(mission?.current_level))
+            ? Number(mission.current_level)
+            : Number.isFinite(Number(mission?.level))
+              ? Number(mission.level)
+              : null,
+        }))
+        .sort((a, b) => Number(a.slot || 99) - Number(b.slot || 99));
+      const activeRentals = missionList
+        .filter((mission) => String(mission?.nft_source || mission?.nftSource || "").toLowerCase() === "rental")
+        .map((mission, index) => ({
+          id:
+            mission?.assignedMissionId ||
+            mission?.assigned_mission_id ||
+            `mission-rental-${index}`,
+          slot: Number.isFinite(Number(mission?.slot)) ? Number(mission.slot) : null,
+          missionName: missionDisplayName(mission),
+          assignedNft:
+            mission?.assigned_nft ||
+            mission?.assignedNft ||
+            null,
+          image:
+            mission?.assignedNftImage ||
+            mission?.assigned_nft_image ||
+            mission?.nftImage ||
+            mission?.image ||
+            null,
+          rentalLeaseId:
+            mission?.rental_lease_id ||
+            mission?.rentalLeaseId ||
+            null,
+          currentLevel: Number.isFinite(Number(mission?.current_level))
+            ? Number(mission.current_level)
+            : Number.isFinite(Number(mission?.level))
+              ? Number(mission.level)
+            : null,
+        }));
+
+      const rentableByCollection = new Map();
+      for (const row of rentable) {
+        const key = String(row.collection || "unknown").trim() || "unknown";
+        rentableByCollection.set(key, (rentableByCollection.get(key) || 0) + 1);
+      }
+      const poolByCollection = Array.from(rentableByCollection.entries())
+        .map(([collection, count]) => ({ collection, count }))
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 10);
+
+      return {
+        ok: true,
+        rentableCount: Number(rentableResult?.structuredContent?.count || rentableRaw.length || 0),
+        rentable,
+        activeRentals,
+        slotSummary,
+        poolByCollection,
+      };
+    };
+
+    try {
+      return await loadPreview();
+    } catch (error) {
+      if (!isAuthFailureMessage(error?.message)) {
+        return { ok: false, error: String(error?.message || error) };
+      }
+      await runOnboardingPopupLogin({
+        url: "https://pixelbypixel.studio/mcp",
+        timeoutMs: 30000,
+        loginTimeoutMs: 180000,
+      });
+      return await loadPreview();
+    }
   });
   ipcMain.handle("slot:prepare-unlock4", async () => {
     const payload = await requestBackend(

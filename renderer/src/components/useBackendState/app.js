@@ -61,6 +61,7 @@ export default function useBackendState() {
     fundingWalletSummary: null,
     mcpConnection: null,
     cliWindowOpen: false,
+    analytics: null,
   });
   const [logs, setLogs] = useState([]);
   const [lastEvent, setLastEvent] = useState(null);

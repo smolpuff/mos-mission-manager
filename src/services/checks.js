@@ -26,6 +26,8 @@ function createChecksService(ctx, logger, mcp, services = {}) {
     mcp,
     signer,
   );
+  let rentalFallbackBlockedUntil = 0;
+  let rentalFallbackBlockReason = "";
   let walletRefreshTimer = null;
   let walletRefreshPendingReason = null;
 
@@ -41,6 +43,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
   const SOLANA_RPC_URL = "https://api.mainnet-beta.solana.com";
   const PBP_MINT = "3f7wfg9yHLtGKvy75MmqsVT1ueTFoqyySQbusrX1YAQ4";
   const missionNftByAccount = new Map();
+  const assignedNftMetadataByAccount = new Map();
   const DEFAULT_REWARD_TOTALS = {
     pbp: 0,
     tc: 0,
@@ -407,19 +410,29 @@ function createChecksService(ctx, logger, mcp, services = {}) {
       const nftFromLookup = assignedAccount
         ? missionNftByAccount.get(assignedAccount) || null
         : null;
+      const nftFromAssignedCache = assignedAccount
+        ? assignedNftMetadataByAccount.get(assignedAccount) || null
+        : null;
       const missionImage = missionCardImageFromMission(mission);
       const nftImage =
         assignedNftImageFromMission(mission) ||
         assignedNftImageFromMission({ nft: nftFromLookup }) ||
+        assignedNftImageFromMission({ nft: nftFromAssignedCache }) ||
         missionImage ||
         null;
       const nftLabel =
         assignedNftLabelFromMission(mission) ||
-        (nftFromLookup ? nftDisplayName(nftFromLookup) : null);
+        (nftFromLookup
+          ? nftDisplayName(nftFromLookup)
+          : nftFromAssignedCache
+            ? nftDisplayName(nftFromAssignedCache)
+            : null);
       const nftLevel =
         assignedNftLevelFromMission(mission) ||
         (Number.isFinite(Number(nftFromLookup?.level))
           ? Number(nftFromLookup.level)
+          : Number.isFinite(Number(nftFromAssignedCache?.level))
+            ? Number(nftFromAssignedCache.level)
           : null);
       slots.push({
         slot,
@@ -476,6 +489,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
 
   function nftAccountId(nft) {
     const id =
+      nft?.account ||
       nft?.nftAccount ||
       nft?.nft_account ||
       nft?.tokenAddress ||
@@ -534,6 +548,39 @@ function createChecksService(ctx, logger, mcp, services = {}) {
 
   function isRetryableActiveMissionAssignError(message = "") {
     return /NFT is already in an active mission/i.test(String(message || ""));
+  }
+
+  function rentalListingId(entry) {
+    const id =
+      entry?.rentalListingId ||
+      entry?.listingId ||
+      entry?.listing_id ||
+      entry?.id;
+    return isUsableIdValue(id) ? String(id).trim() : null;
+  }
+
+  function normalizeRentableList(result) {
+    const sc = result?.structuredContent || {};
+    if (Array.isArray(sc?.data)) return sc.data;
+    if (Array.isArray(sc?.nfts)) return sc.nfts;
+    if (Array.isArray(sc?.items)) return sc.items;
+    return [];
+  }
+
+  async function countAvailableOwnedNftsForAssignments() {
+    try {
+      const allNftsResult = await mcp.mcpToolCall("get_mission_nfts", {});
+      const allNfts = normalizeNftList(allNftsResult);
+      return allNfts
+        .map((nft) => ({ nft, account: nftAccountId(nft) }))
+        .filter((entry) => entry.account)
+        .filter((entry) => nftIsAvailable(entry.nft)).length;
+    } catch (error) {
+      logDebug("assign", "owned_nft_availability_check_failed", {
+        error: error.message,
+      });
+      return null;
+    }
   }
 
   function parseBalanceNumber(value) {
@@ -1578,6 +1625,11 @@ function createChecksService(ctx, logger, mcp, services = {}) {
       let assigned = 0;
       const startedMissionNames = [];
       const startedMissionDetails = [];
+      const rentalFallbackEnabled =
+        ctx.missionModeEnabled === true ||
+        ctx.config?.missionModeEnabled === true ||
+        ctx.config?.enableRentals === true;
+      let availableOwnedNfts = null;
       for (const mission of candidates) {
         const id = assignedMissionId(mission);
         const name = missionName(mission) || "unknown mission";
@@ -1649,6 +1701,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
           .filter((entry) => nftIsAvailable(entry.nft))
           .filter((entry) => entry.account)
           .slice(0, 3);
+        let rentalCandidates = [];
         if (assignableNfts.length === 0) {
           const cooldownCandidates = nfts
             .map((nft) => ({ nft, account: nftAccountId(nft) }))
@@ -1674,7 +1727,76 @@ function createChecksService(ctx, logger, mcp, services = {}) {
             );
           }
         }
+        if (assignableNfts.length === 0 && rentalFallbackEnabled) {
+          if (Date.now() < rentalFallbackBlockedUntil) {
+            const remainingSeconds = Math.max(
+              1,
+              Math.ceil((rentalFallbackBlockedUntil - Date.now()) / 1000),
+            );
+            logWithTimestamp(
+              `[RENTAL] ⏸️ ${name}: rental fallback temporarily paused (${remainingSeconds}s). ${rentalFallbackBlockReason || ""}`.trim(),
+            );
+            continue;
+          }
+          if (availableOwnedNfts === null) {
+            availableOwnedNfts = await countAvailableOwnedNftsForAssignments();
+          }
+          if (Number.isFinite(availableOwnedNfts) && availableOwnedNfts <= 0) {
+            try {
+              const rentableResult = await mcp.mcpToolCall("get_rentable_nfts", {});
+              rentalCandidates = normalizeRentableList(rentableResult)
+                .map((entry) => ({
+                  listingId: rentalListingId(entry),
+                  account: nftAccountId(entry),
+                  nft: entry,
+                }))
+                .filter((entry) => entry.listingId)
+                .slice(0, 3);
+              logDebug("assign", "rental_candidates_loaded", {
+                reason,
+                missionName: name,
+                missionId: id,
+                count: rentalCandidates.length,
+              });
+              logWithTimestamp(
+                `[RENTAL] 🔎 ${name}: found ${rentalCandidates.length} rentable candidate(s).`,
+              );
+              if (rentalCandidates.length === 0) {
+                logWithTimestamp(
+                  `[RENTAL] ℹ️ ${name}: no rentable NFTs available right now.`,
+                );
+              }
+            } catch (error) {
+              logDebug("assign", "rental_candidates_failed", {
+                reason,
+                missionName: name,
+                missionId: id,
+                error: error.message,
+              });
+              logWithTimestamp(
+                `[RENTAL] ❌ ${name}: failed to load rentable NFTs: ${error.message}`,
+              );
+            }
+          } else {
+            logDebug("assign", "rental_skipped_owned_nfts_available", {
+              reason,
+              missionName: name,
+              missionId: id,
+              availableOwnedNfts,
+            });
+            logWithTimestamp(
+              `[RENTAL] ⏭️ ${name}: skipped rental fallback (owned available NFTs=${availableOwnedNfts}).`,
+            );
+          }
+        }
         if (assignableNfts.length === 0) {
+          if (rentalCandidates.length > 0) {
+            logWithTimestamp(
+              `[ASSIGN] ℹ️ No owned NFT available for: ${name}. Trying rental fallback...`,
+            );
+          }
+        }
+        if (assignableNfts.length === 0 && rentalCandidates.length === 0) {
           logWithTimestamp(
             `[ASSIGN] ℹ️ No eligible NFT available for: ${name}`,
           );
@@ -1685,9 +1807,104 @@ function createChecksService(ctx, logger, mcp, services = {}) {
         let missionAssigned = false;
         let lastError = null;
         logWithTimestamp(`[ASSIGN] 🚀 Starting mission: ${name}${levelText}`);
-        for (let index = 0; index < assignableNfts.length; index += 1) {
-          const { nft, account } = assignableNfts[index];
+        const assignmentOptions =
+          assignableNfts.length > 0
+            ? assignableNfts.map((entry) => ({ ...entry, source: "owned" }))
+            : rentalCandidates.map((entry) => ({ ...entry, source: "rental" }));
+        for (let index = 0; index < assignmentOptions.length; index += 1) {
+          const option = assignmentOptions[index];
+          const nft = option.nft;
+          let account = option.account;
           try {
+            if (option.source === "rental") {
+              logWithTimestamp(
+                `[RENTAL] 🚀 ${name}: starting lease (listingId=${option.listingId})...`,
+              );
+              logDebug("assign", "rental_lease_start", {
+                reason,
+                missionName: name,
+                missionId: id,
+                listingId: option.listingId,
+                signingMode:
+                  ctx.signerMode === "dapp" ? "browser_bridge" : "agent_managed",
+                attempt: index + 1,
+                maxAttempts: assignmentOptions.length,
+              });
+              const leaseResult = await mcp.mcpToolCall("start_rental_lease", {
+                listingId: option.listingId,
+                ...(ctx.signerMode === "dapp"
+                  ? { signingMode: "browser_bridge" }
+                  : { signingMode: "agent_managed" }),
+              });
+              if (!toolCallSucceeded(leaseResult)) {
+                const message =
+                  leaseResult?.content?.[0]?.text ||
+                  leaseResult?.structuredContent?.error ||
+                  "start_rental_lease failed";
+                throw new Error(message);
+              }
+              const lease =
+                leaseResult?.structuredContent?.data ||
+                leaseResult?.structuredContent?.lease ||
+                leaseResult?.structuredContent ||
+                {};
+              const leaseId = String(
+                lease?.leaseId ||
+                  lease?.rentalLeaseId ||
+                  leaseResult?.structuredContent?.leaseId ||
+                  "",
+              ).trim();
+              const leasedAccount = nftAccountId(lease) || account;
+              let resolvedPostLeaseAccount = leasedAccount;
+              try {
+                const postLeaseMissionNfts = await mcp.mcpToolCall("get_mission_nfts", {
+                  assignedMissionId: id,
+                });
+                const postLeaseCandidates = normalizeNftList(postLeaseMissionNfts)
+                  .map((item) => ({ item, account: nftAccountId(item) }))
+                  .filter((entry) => entry.account)
+                  .filter((entry) => nftIsAvailable(entry.item));
+                if (postLeaseCandidates.length > 0) {
+                  resolvedPostLeaseAccount = postLeaseCandidates[0].account;
+                }
+                logDebug("assign", "rental_post_lease_nft_refresh", {
+                  reason,
+                  missionName: name,
+                  missionId: id,
+                  postLeaseCandidateCount: postLeaseCandidates.length,
+                  selectedAccount: resolvedPostLeaseAccount || null,
+                });
+              } catch (postLeaseError) {
+                logDebug("assign", "rental_post_lease_nft_refresh_failed", {
+                  reason,
+                  missionName: name,
+                  missionId: id,
+                  error: postLeaseError.message,
+                });
+              }
+              if (!resolvedPostLeaseAccount) {
+                rentalFallbackBlockedUntil = Date.now() + 10 * 60 * 1000;
+                rentalFallbackBlockReason =
+                  "No assignable nftAccount returned after lease. Use website flow, then retry later.";
+                throw new Error(
+                  "Rental lease succeeded but no assignable nftAccount was available after lease.",
+                );
+              }
+              account = resolvedPostLeaseAccount;
+              logWithTimestamp(
+                `[RENTAL] ✅ ${name}: lease started, nftAccount=${account}.`,
+              );
+              logDebug("assign", "rental_lease_done", {
+                reason,
+                missionName: name,
+                missionId: id,
+                listingId: option.listingId,
+                leaseId: leaseId || null,
+                nftAccount: account,
+                result: leaseResult?.structuredContent || leaseResult,
+              });
+              option.leaseId = leaseId || null;
+            }
             logDebug("assign", "assign_call_start", {
               reason,
               missionName: name,
@@ -1695,14 +1912,23 @@ function createChecksService(ctx, logger, mcp, services = {}) {
               slot,
               nftAccount: account,
               attempt: index + 1,
-              maxAttempts: assignableNfts.length,
-              selectedFrom: "owned",
+              maxAttempts: assignmentOptions.length,
+              selectedFrom: option.source,
             });
             const assignResult = await mcp.mcpToolCall(
               "assign_nft_to_mission",
               {
                 assignedMissionId: id,
                 nftAccount: account,
+                ...(option.source === "rental"
+                  ? {
+                      rentalLeaseId: option.leaseId || undefined,
+                      nftSource: "rental",
+                    }
+                  : {}),
+                ...(ctx.signerMode === "dapp"
+                  ? { signingMode: "browser_bridge" }
+                  : { signingMode: "agent_managed" }),
               },
             );
             logDebug("assign", "assign_call_done", {
@@ -1711,9 +1937,9 @@ function createChecksService(ctx, logger, mcp, services = {}) {
               missionId: id,
               nftAccount: account,
               attempt: index + 1,
-              maxAttempts: assignableNfts.length,
+              maxAttempts: assignmentOptions.length,
               success: toolCallSucceeded(assignResult),
-              selectedFrom: "owned",
+              selectedFrom: option.source,
               result: assignResult?.structuredContent || assignResult,
             });
             if (!toolCallSucceeded(assignResult)) {
@@ -1766,6 +1992,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
                 slot,
                 nftAccount: account,
                 reason,
+                source: option.source,
               });
             }
             if (ctx.guiBridge && typeof ctx.guiBridge.emitNow === "function") {
@@ -1777,18 +2004,29 @@ function createChecksService(ctx, logger, mcp, services = {}) {
             const retryable = isRetryableActiveMissionAssignError(
               error.message,
             );
-            const hasNext = index + 1 < assignableNfts.length;
+            const hasNext = index + 1 < assignmentOptions.length;
             logDebug("assign", "assign_failed", {
               missionName: name,
               missionId: id,
               nftAccount: account,
               attempt: index + 1,
-              maxAttempts: assignableNfts.length,
+              maxAttempts: assignmentOptions.length,
               error: error.message,
               retryable,
               willRetry: retryable && hasNext,
               selectedNft: nft || null,
+              selectedFrom: option.source,
             });
+            if (option.source === "rental") {
+              if (/NFT is no longer owned by user/i.test(String(error?.message || ""))) {
+                rentalFallbackBlockedUntil = Date.now() + 10 * 60 * 1000;
+                rentalFallbackBlockReason =
+                  "Backend returned 'NFT is no longer owned by user' after lease; pausing retries.";
+              }
+              logWithTimestamp(
+                `[RENTAL] ❌ ${name}: rental attempt failed: ${error.message}`,
+              );
+            }
             if (retryable && hasNext) {
               continue;
             }
@@ -2052,6 +2290,40 @@ function createChecksService(ctx, logger, mcp, services = {}) {
         } catch (error) {
           logDebug("check", "nft_count_failed", { error: error.message });
         }
+      }
+
+      try {
+        const missingAccounts = missions
+          .map((mission) => missionAssignedNftAccount(mission))
+          .filter((account) => isUsableIdValue(account))
+          .map((account) => String(account).trim())
+          .filter((account) => !missionNftByAccount.has(account))
+          .filter((account) => !assignedNftMetadataByAccount.has(account));
+
+        const uniqueMissing = Array.from(new Set(missingAccounts)).slice(0, 6);
+        for (const account of uniqueMissing) {
+          try {
+            const nftResult = await mcp.mcpToolCall("get_nft", {
+              mintAddress: account,
+            });
+            const nfts = Array.isArray(nftResult?.structuredContent?.nfts)
+              ? nftResult.structuredContent.nfts
+              : [];
+            const first = nfts.find((nft) => nftAccountId(nft) === account) || nfts[0] || null;
+            if (first) {
+              assignedNftMetadataByAccount.set(account, first);
+            }
+          } catch (error) {
+            logDebug("check", "assigned_nft_metadata_fetch_failed", {
+              account,
+              error: error.message,
+            });
+          }
+        }
+      } catch (error) {
+        logDebug("check", "assigned_nft_metadata_batch_failed", {
+          error: error.message,
+        });
       }
 
       ctx.guiMissionSlots = computeGuiMissionSlots(

@@ -48,6 +48,9 @@ function loadConfig(ctx, logWithTimestamp) {
   } else {
     ctx.config.nftCooldownResetEnabled = false;
   }
+  if (typeof ctx.config.enableRentals !== "boolean") {
+    ctx.config.enableRentals = false;
+  }
   if (typeof ctx.config.missionResetLevel === "string") {
     ctx.currentMissionResetLevel = ctx.config.missionResetLevel;
   }

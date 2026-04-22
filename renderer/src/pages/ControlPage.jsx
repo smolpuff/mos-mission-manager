@@ -6,6 +6,8 @@ import useBackendState from "../components/useBackendState/app";
 import ToggleSwitch from "../components/ToggleSwitch/app";
 import CompetitionPage from "./CompetitionPage";
 import SettingsPage from "./SettingsPage";
+import StatsPage from "./StatsPage";
+import RentalsPage from "./RentalsPage";
 
 import pbpIcon from "../img/icon_pbp.webp";
 import solIcon from "../img/icon-sm__sol.svg";
@@ -165,6 +167,7 @@ function ControlView() {
   const [resetEnabled, setResetEnabled] = useState(
     status.level20ResetEnabled === true,
   );
+  const [rentalsEnabled, setRentalsEnabled] = useState(false);
   const [modeSelection, setModeSelection] = useState(
     status.missionModeEnabled === true ? "mission" : "normal",
   );
@@ -188,6 +191,8 @@ function ControlView() {
   const [slotUnlockResult, setSlotUnlockResult] = useState(null);
   const [bridgeLinkModal, setBridgeLinkModal] = useState(null);
   const [lowBalanceModal, setLowBalanceModal] = useState(null);
+  const [statsHistory, setStatsHistory] = useState([]);
+  const sessionStartedAtRef = useRef(Date.now());
   const [lowBalanceThresholds, setLowBalanceThresholds] = useState({
     pbp: 1000,
     sol: 0.01,
@@ -270,6 +275,9 @@ function ControlView() {
       if (typeof config.level20ResetEnabled === "boolean") {
         setResetEnabled(config.level20ResetEnabled);
       }
+      if (typeof config.enableRentals === "boolean") {
+        setRentalsEnabled(config.enableRentals);
+      }
       if (typeof config.missionModeEnabled === "boolean") {
         setModeSelection(config.missionModeEnabled ? "mission" : "normal");
       }
@@ -338,6 +346,10 @@ function ControlView() {
     setResetEnabled(enabled);
     await applyConfigPatch({ level20ResetEnabled: enabled });
     await runModeCommand(enabled ? "20r on" : "20r off");
+  };
+  const setRentalsFallbackEnabled = async (enabled) => {
+    setRentalsEnabled(enabled);
+    await applyConfigPatch({ enableRentals: enabled });
   };
   const activateNormalMode = async () => {
     setModeSelection("normal");
@@ -514,6 +526,41 @@ function ControlView() {
   const slots = Array.isArray(status.guiMissionSlots)
     ? status.guiMissionSlots
     : [];
+
+  useEffect(() => {
+    const rewards = status.sessionRewardTotals || {};
+    const spend = status.sessionSpendTotals || {};
+    const entry = {
+      at: Date.now(),
+      earnedPbp: Number(rewards.pbp || 0),
+      spendPbp: Number(spend.pbp || 0),
+      netPbp: Number(rewards.pbp || 0) - Number(spend.pbp || 0),
+      claimed: Number(status.currentMissionStats?.claimed || 0),
+      active: Number(status.currentMissionStats?.active || 0),
+      claimable: Number(status.currentMissionStats?.claimable || 0),
+    };
+    setStatsHistory((current) => {
+      const prev = current[current.length - 1];
+      if (
+        prev &&
+        prev.earnedPbp === entry.earnedPbp &&
+        prev.spendPbp === entry.spendPbp &&
+        prev.netPbp === entry.netPbp &&
+        prev.claimed === entry.claimed &&
+        prev.active === entry.active &&
+        prev.claimable === entry.claimable
+      ) {
+        return current;
+      }
+      return [...current, entry].slice(-240);
+    });
+  }, [
+    status.sessionRewardTotals,
+    status.sessionSpendTotals,
+    status.currentMissionStats?.claimed,
+    status.currentMissionStats?.active,
+    status.currentMissionStats?.claimable,
+  ]);
   const slotUnlockSummary =
     status.slotUnlockSummary && typeof status.slotUnlockSummary === "object"
       ? status.slotUnlockSummary
@@ -2158,6 +2205,15 @@ function ControlView() {
               isCurrentCompetitionRow={isCurrentCompetitionRow}
             />
           ) : null}
+          {currentPage === "stats" ? (
+            <StatsPage
+              status={status}
+              logs={logs}
+              missionStats={missionStats}
+              sessionStartedAtMs={sessionStartedAtRef.current}
+            />
+          ) : null}
+          {currentPage === "rentals" ? <RentalsPage bridge={bridge} /> : null}
           {currentPage !== "missions" ? null : (
             <>
               <div className="space-y-1.5">
@@ -2590,10 +2646,16 @@ function ControlView() {
                         <ToggleSwitch
                           switchID="enableRentals"
                           title="Enable Rentals"
-                          disabled
+                          checked={isMissionMode ? true : rentalsEnabled}
+                          disabled={isMissionMode}
+                          onChange={(event) =>
+                            void setRentalsFallbackEnabled(event.target.checked)
+                          }
                         />
                         <div className="text-[11px] text-slate-400 -mt-1">
-                          Rentals coming soon
+                          {isMissionMode
+                            ? "Mission mode forces rentals on when needed."
+                            : "Use rentals only when no owned NFTs are available."}
                         </div>
                       </div>
                     </div>
