@@ -49,7 +49,9 @@ function MissionSlotImage({ src }) {
           alt=""
           className="mission-image mission-image--in"
         />
-      ) : null}
+      ) : (
+        <div className="mission-image-placeholder">No available NFTs</div>
+      )}
     </>
   );
 }
@@ -184,6 +186,7 @@ function ControlView() {
   const [slotUnlockBusy, setSlotUnlockBusy] = useState(false);
   const [slotUnlockError, setSlotUnlockError] = useState(null);
   const [slotUnlockResult, setSlotUnlockResult] = useState(null);
+  const [bridgeLinkModal, setBridgeLinkModal] = useState(null);
   const [lowBalanceModal, setLowBalanceModal] = useState(null);
   const [lowBalanceThresholds, setLowBalanceThresholds] = useState({
     pbp: 1000,
@@ -291,6 +294,9 @@ function ControlView() {
         setOnboardingOpen(true);
       }
     });
+    if (bridge?.bootstrapWalletSummary) {
+      void bridge.bootstrapWalletSummary().catch(() => {});
+    }
     return () => {
       cancelled = true;
     };
@@ -731,25 +737,49 @@ function ControlView() {
     }
     if (type === "reset_error_cleared") {
       const slot = Number(lastEvent.slot);
-      const slotKey =
+      const clearKey =
         Number.isFinite(slot) && slot >= 1 && slot <= 4
           ? String(slot)
           : String(lastEvent.assignedMissionId || "").trim();
-      if (!slotKey) return;
+      const assignedMissionId = String(
+        lastEvent.assignedMissionId || "",
+      ).trim();
+      if (!clearKey && !assignedMissionId && !Number.isFinite(slot)) return;
       setSlotResetErrors((current) => {
-        if (!Object.prototype.hasOwnProperty.call(current, slotKey))
-          return current;
+        let mutated = false;
         const next = { ...current };
-        delete next[slotKey];
+        for (const [key, value] of Object.entries(current || {})) {
+          const matchesKey = clearKey && key === clearKey;
+          const matchesSlot =
+            Number.isFinite(slot) && Number(value?.slot) === Number(slot);
+          const matchesAssignedMissionId =
+            assignedMissionId &&
+            String(value?.assignedMissionId || "").trim() === assignedMissionId;
+          if (matchesKey || matchesSlot || matchesAssignedMissionId) {
+            delete next[key];
+            mutated = true;
+          }
+        }
+        if (!mutated) return current;
         return next;
       });
       setResetErrorModal((current) => {
-        if (!current || String(current.assignedMissionId || "") !== slotKey) {
-          if (current && Number.isFinite(slot) && Number(current.slot) === slot)
-            return null;
-          return current;
-        }
-        return null;
+        if (!current) return current;
+        const modalAssignedMissionId = String(
+          current.assignedMissionId || "",
+        ).trim();
+        const matchesKey =
+          clearKey &&
+          modalAssignedMissionId &&
+          modalAssignedMissionId === clearKey;
+        const matchesAssignedMissionId =
+          assignedMissionId &&
+          modalAssignedMissionId &&
+          modalAssignedMissionId === assignedMissionId;
+        const matchesSlot =
+          Number.isFinite(slot) && Number(current.slot) === Number(slot);
+        if (matchesKey || matchesAssignedMissionId || matchesSlot) return null;
+        return current;
       });
     }
   }, [lastEvent]);
@@ -915,6 +945,19 @@ function ControlView() {
     } catch {
       return false;
     }
+  };
+  const openBridgeLinkModal = (url) => {
+    const target = String(url || "").trim();
+    if (!target) return;
+    setBridgeLinkModal({
+      url: target,
+      phantomUrl: `https://phantom.app/ul/browse/${encodeURIComponent(
+        target,
+      )}?ref=${encodeURIComponent("https://www.pixelbypixel.studio")}`,
+      solflareUrl: `https://solflare.com/ul/v1/browse/${encodeURIComponent(
+        target,
+      )}?cluster=mainnet-beta`,
+    });
   };
   const confirmUnlockSlot4 = async () => {
     if (!bridge?.prepareSlot4Unlock) {
@@ -2714,7 +2757,15 @@ function ControlView() {
                 if (e.target === e.currentTarget) setResetErrorModal(null);
               }}
             >
-              <div className="card w-full max-w-140 space-y-4 !bg-[#0b1116] border border-error/50 z-10">
+              <div
+                className="p-4 w-full rounded-xl shadow-2xl shadow-black/95 space-y-4 z-10 border-2 border-[#1D1C27] transition-all duration-250 ease-out"
+                style={{
+                  maxWidth: "680px",
+                  backgroundImage: `url(${backImg})`,
+                  backgroundSize: "cover",
+                  backgroundPosition: "center",
+                }}
+              >
                 <div className="flex items-center justify-between gap-3">
                   <div className="text-lg font-semibold text-error">
                     Reset Needs Attention
@@ -2762,17 +2813,10 @@ function ControlView() {
                             resetErrorModal.bridgeUrl || "",
                           ).trim();
                           if (!url) return;
-                          void openExternalUrl(url);
+                          openBridgeLinkModal(url);
                         }}
                       >
                         Open Link
-                      </button>
-                      <button
-                        type="button"
-                        className="btn btn-gradient btn-sm"
-                        onClick={() => void copyText(resetErrorModal.bridgeUrl)}
-                      >
-                        Copy Link
                       </button>
                     </div>
                   </div>
@@ -2780,10 +2824,10 @@ function ControlView() {
                 <div className="flex items-center justify-end">
                   <button
                     type="button"
-                    className="btn btn-clear btn-sm"
+                    className="btn btn-gradient btn-sm text-shadow-sm text-shadow-black/40"
                     onClick={() => setResetErrorModal(null)}
                   >
-                    Close
+                    OK
                   </button>
                 </div>
               </div>
@@ -2848,6 +2892,77 @@ function ControlView() {
                     disabled={slotUnlockBusy}
                   >
                     {slotUnlockBusy ? "Preparing..." : "Yes"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : null}
+          {bridgeLinkModal ? (
+            <div
+              className="fixed inset-0 z-60 grid place-items-center bg-black/50 p-4"
+              role="dialog"
+              aria-modal="true"
+              onMouseDown={(e) => {
+                if (e.target === e.currentTarget) setBridgeLinkModal(null);
+              }}
+            >
+              <div
+                className="p-4 w-full rounded-xl shadow-2xl shadow-black/95 space-y-4 z-10 border-2 border-[#1D1C27] transition-all duration-250 ease-out"
+                style={{
+                  maxWidth: "680px",
+                  backgroundImage: `url(${backImg})`,
+                  backgroundSize: "cover",
+                  backgroundPosition: "center",
+                }}
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <div className="text-lg font-semibold text-warning">
+                    Open Bridge URL
+                  </div>
+                  <button
+                    type="button"
+                    className="btn btn-clear btn-sm"
+                    onClick={() => setBridgeLinkModal(null)}
+                    title="Close"
+                  >
+                    ✕
+                  </button>
+                </div>
+                <div className="text-sm text-slate-200">
+                  Open this in a wallet-enabled browser/app (Phantom/Solflare)
+                  or copy it manually.
+                </div>
+                <div className="rounded-md border border-white/10 bg-black/20 p-2 text-xs break-all text-slate-200">
+                  {bridgeLinkModal.url}
+                </div>
+                <div className="flex flex-wrap items-center justify-end gap-2">
+                  <button
+                    type="button"
+                    className="btn btn-clear btn-sm"
+                    onClick={() => void openExternalUrl(bridgeLinkModal.phantomUrl)}
+                  >
+                    Open in Phantom
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-clear btn-sm"
+                    onClick={() => void openExternalUrl(bridgeLinkModal.solflareUrl)}
+                  >
+                    Open in Solflare
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-clear btn-sm"
+                    onClick={() => void openExternalUrl(bridgeLinkModal.url)}
+                  >
+                    Open in Browser
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-gradient btn-sm text-shadow-sm text-shadow-black/40"
+                    onClick={() => void copyText(bridgeLinkModal.url)}
+                  >
+                    Copy Link
                   </button>
                 </div>
               </div>

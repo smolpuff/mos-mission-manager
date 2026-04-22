@@ -379,6 +379,22 @@ function createChecksService(ctx, logger, mcp, services = {}) {
   }
 
   function computeGuiMissionSlots(missions, progressByAssignedMissionId = null) {
+    function missionCardImageFromMission(mission) {
+      if (!mission || typeof mission !== "object") return null;
+      return assignedNftImageFromMission({
+        image: mission?.image,
+        imageUrl: mission?.imageUrl,
+        image_url: mission?.image_url,
+        thumbnail: mission?.thumbnail,
+        thumbnailUrl: mission?.thumbnailUrl,
+        thumbnail_url: mission?.thumbnail_url,
+        missionImage: mission?.missionImage,
+        mission_image: mission?.mission_image,
+        mission: mission?.mission,
+        metadata: mission?.metadata,
+      });
+    }
+
     const slots = [];
     for (let slot = 1; slot <= 4; slot += 1) {
       const mission = missions.find((m) => Number(m?.slot) === slot) || null;
@@ -391,9 +407,11 @@ function createChecksService(ctx, logger, mcp, services = {}) {
       const nftFromLookup = assignedAccount
         ? missionNftByAccount.get(assignedAccount) || null
         : null;
+      const missionImage = missionCardImageFromMission(mission);
       const nftImage =
         assignedNftImageFromMission(mission) ||
         assignedNftImageFromMission({ nft: nftFromLookup }) ||
+        missionImage ||
         null;
       const nftLabel =
         assignedNftLabelFromMission(mission) ||
@@ -410,6 +428,8 @@ function createChecksService(ctx, logger, mcp, services = {}) {
         missionLevel: missionLvl,
         progress,
         goal,
+        missionImage,
+        image: missionImage,
         assignedNft: nftLabel,
         nftLevel,
         nftImage,

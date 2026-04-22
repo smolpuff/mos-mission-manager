@@ -763,6 +763,10 @@ button.btn.btn-gradient {
   image-rendering: auto;
 }
 
+.mission-image-placeholder {
+  @apply absolute inset-0 grid place-items-center text-center text-[11px] font-semibold uppercase tracking-wide text-slate-300/80 px-3;
+}
+
 .mission-image--in {
   animation: missionPixelIn 320ms steps(10, end) both;
 }

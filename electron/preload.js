@@ -10,6 +10,7 @@ contextBridge.exposeInMainWorld("missionsDesktop", {
   getConfig: () => ipcRenderer.invoke("config:get"),
   updateConfig: (patch) => ipcRenderer.invoke("config:update", patch),
   refreshWalletSummary: () => ipcRenderer.invoke("wallet:refresh-summary"),
+  bootstrapWalletSummary: () => ipcRenderer.invoke("wallet:bootstrap-summary"),
   revealSignerBackup: () => ipcRenderer.invoke("signer:reveal-backup"),
   prepareSlot4Unlock: () => ipcRenderer.invoke("slot:prepare-unlock4"),
   createGeneratedWallet: () => ipcRenderer.invoke("signer:create-generated-wallet"),

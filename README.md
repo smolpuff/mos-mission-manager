@@ -14,8 +14,6 @@
 
 ONLY USE A BURNER WALLET FOR FUNDING.
 
-This project is entirely vibe-coded after large dabs :D
-
 ## Current state
 
 Implemented flows:
@@ -56,19 +54,39 @@ This project was heavily vibe-coded and is still evolving.
 
 ## Desktop Usage FIRST USE
 
-### 1) Open Settings
+### 1) First-run wizard
 
-In the desktop app, go to **Settings**.
+On first open, the wizard walks you through:
 
-### 2) Configure wallet mode in the UI
+- funding mode (`app_wallet`, `manual`, `dapp`)
+- login + account/mission sync
+- assigned mission review
 
-In **Wallet** settings, choose your signer flow:
+If you choose `app_wallet`, the wizard can generate the burner wallet and show the funding address directly in the selection card.
+
+Wizard only saves signer mode when you click **Done/Apply**.  
+If you close the wizard, existing settings stay unchanged.
+
+The wizard auto-opens based on this config flag:
+
+```json
+{
+  "firstRunOnboardingCompleted": true
+}
+```
+
+Set/delete this flag to retrigger wizard behavior.
+
+### 2) Configure wallet mode in Settings (any time)
+
+In **Settings > Wallet**, choose your signer flow:
 
 - `app_wallet`: app-managed burner wallet for supported signing
 - `manual`: browser/manual flow
 - `dapp`: browser-wallet signing flow
 
 If using `app_wallet`, use the UI to generate or import the wallet and confirm it is active. Use a dedicated burner wallet if you run `app_wallet` mode.
+If signer vault/keychain state becomes corrupted or inaccessible, the current recovery path is to re-import your wallet.
 
 ## Configure Target Missions (Required for now)
 
@@ -85,7 +103,7 @@ Example:
 
 After editing `config.json`, restart the app if it is already running.
 
-Note: a first-launch wizard for this flow is planned.
+Note: mission swap in wizard is intentionally not wired yet. Mission choices should be set on the Pixel by Pixel site, then refreshed in-app.
 
 ## Running Missions
 
@@ -96,6 +114,45 @@ After wallet setup and mission config:
 3. Configure missions on PBP site (for now, feature coming soon)
 4. Press **Start** to begin processing.
 5. Use **Pause/Resume** in the UI as needed.
+
+## Low Balance Warning
+
+The app shows a warning dialog when funding balance drops below thresholds.
+
+Default thresholds:
+
+- PBP: `1000`
+- SOL: `0.01`
+
+You can customize in `config.json`:
+
+```json
+{
+  "lowBalanceThresholds": {
+    "pbp": 1000,
+    "sol": 0.01
+  }
+}
+```
+
+Alert behavior is one-shot per threshold:
+
+- it only triggers after balance was previously above threshold
+- it triggers once when balance falls below
+- it will not re-trigger until balance goes above threshold again
+
+## Bridge Link Signing (dapp/manual)
+
+Bridge URLs need a wallet-enabled browser context.
+
+- Do **not** open in plain Chrome with no wallet provider.
+- Use wallet browser options (Phantom/Solflare) or a browser with wallet extension connected.
+
+The app provides bridge-link actions in dialog:
+
+- open in wallet browser option
+- open normally
+- copy link
 
 ## Command Reference
 
@@ -120,8 +177,6 @@ General CLI COommands:
 
 - Use a dedicated burner wallet if you run `app_wallet` mode.
 - `dapp` mode uses the browser signing bridge returned by the prepare tool.
-- If expected commands do not appear, restart the app.
-- Mission swap is intentionally not wired yet.
 
 ## License
 

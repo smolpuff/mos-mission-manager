@@ -3,8 +3,17 @@
 const fs = require("fs");
 const path = require("path");
 const { fork, execFile } = require("child_process");
-const { app, BrowserWindow, Menu, ipcMain, clipboard, shell } = require("electron");
-const { fetchOnchainFundingWalletSummary } = require("../src/wallet/onchain-summary");
+const {
+  app,
+  BrowserWindow,
+  Menu,
+  ipcMain,
+  clipboard,
+  shell,
+} = require("electron");
+const {
+  fetchOnchainFundingWalletSummary,
+} = require("../src/wallet/onchain-summary");
 const { scrapeLatestCompetition } = require("./scrapeCompetitions");
 const { login: mcpLogin, callTool: mcpCallTool } = require("../lib/mcp");
 const {
@@ -200,11 +209,16 @@ function extractBalanceNumber(balances, matcher) {
   const entries = Array.isArray(balances) ? balances : [];
   for (const entry of entries) {
     if (!entry || typeof entry !== "object") continue;
-    const symbol = String(entry.symbol || entry.key || "").trim().toUpperCase();
-    const name = String(entry.name || "").trim().toUpperCase();
+    const symbol = String(entry.symbol || entry.key || "")
+      .trim()
+      .toUpperCase();
+    const name = String(entry.name || "")
+      .trim()
+      .toUpperCase();
     if (!matcher({ symbol, name, entry })) continue;
     const raw = entry.displayBalance ?? entry.balance ?? null;
-    const n = typeof raw === "string" ? Number(raw.replace(/[, _]/g, "")) : Number(raw);
+    const n =
+      typeof raw === "string" ? Number(raw.replace(/[, _]/g, "")) : Number(raw);
     if (Number.isFinite(n)) return n;
   }
   return null;
@@ -218,9 +232,15 @@ function normalizeWalletBalanceEntries(raw = []) {
   return Object.entries(raw).map(([symbol, balance]) => {
     const amount = Number(balance);
     return {
-      key: String(symbol || "").trim().toLowerCase(),
-      symbol: String(symbol || "").trim().toUpperCase(),
-      name: String(symbol || "").trim().toUpperCase(),
+      key: String(symbol || "")
+        .trim()
+        .toLowerCase(),
+      symbol: String(symbol || "")
+        .trim()
+        .toUpperCase(),
+      name: String(symbol || "")
+        .trim()
+        .toUpperCase(),
       mint: null,
       balance: Number.isFinite(amount) ? amount : null,
       displayBalance: Number.isFinite(amount)
@@ -237,13 +257,18 @@ function summarizeWalletPayload(payload) {
   const baseBalances = normalizeWalletBalanceEntries(
     sc.balances || sc.walletBalances || sc.wallet_balances || [],
   );
-  const virtualCurrencies =
-    sc.virtualCurrencies || sc.virtual_currencies || {};
+  const virtualCurrencies = sc.virtualCurrencies || sc.virtual_currencies || {};
   const virtualCurrencyBalances = Object.entries(virtualCurrencies)
     .map(([symbol, balance]) => ({
-      key: String(symbol || "").trim().toLowerCase(),
-      symbol: String(symbol || "").trim().toUpperCase(),
-      name: String(symbol || "").trim().toUpperCase(),
+      key: String(symbol || "")
+        .trim()
+        .toLowerCase(),
+      symbol: String(symbol || "")
+        .trim()
+        .toUpperCase(),
+      name: String(symbol || "")
+        .trim()
+        .toUpperCase(),
       mint: null,
       balance: Number(balance),
       displayBalance: Number(balance).toLocaleString(undefined, {
@@ -252,11 +277,27 @@ function summarizeWalletPayload(payload) {
     }))
     .filter((entry) => entry.key && Number.isFinite(entry.balance));
   const mergedBalances = [...baseBalances, ...virtualCurrencyBalances];
-  const sol = extractBalanceNumber(mergedBalances, ({ symbol, name }) => symbol === "SOL" || name === "SOL");
-  const pbp = extractBalanceNumber(mergedBalances, ({ symbol, name }) => symbol === "PBP" || name === "PBP");
+  const sol = extractBalanceNumber(
+    mergedBalances,
+    ({ symbol, name }) => symbol === "SOL" || name === "SOL",
+  );
+  const pbp = extractBalanceNumber(
+    mergedBalances,
+    ({ symbol, name }) => symbol === "PBP" || name === "PBP",
+  );
   return {
     walletId,
     displayName,
+    currentUserWalletSummary: {
+      walletId,
+      displayName,
+      balances: mergedBalances,
+      walletBalanceSummary: Array.isArray(sc.walletBalanceSummary)
+        ? sc.walletBalanceSummary
+        : Array.isArray(sc.wallet_balance_summary)
+          ? sc.wallet_balance_summary
+          : [],
+    },
     fundingWalletSummary: {
       address: sc.walletAddress || sc.wallet_address || null,
       sol,
@@ -420,7 +461,10 @@ function missionCollectionEntries(mission = {}) {
       return;
     }
     if (typeof value === "string") {
-      const parts = value.split(/[,|/]/g).map((x) => x.trim()).filter(Boolean);
+      const parts = value
+        .split(/[,|/]/g)
+        .map((x) => x.trim())
+        .filter(Boolean);
       if (parts.length > 1) {
         for (const p of parts) pushOne(p);
       } else {
@@ -759,10 +803,10 @@ async function waitForBackendStdinWritable(timeoutMs = 1500) {
   }
   return Boolean(
     backend &&
-      backendStatus.running &&
-      backend.stdin &&
-      backend.stdin.writable &&
-      !backend.stdin.destroyed,
+    backendStatus.running &&
+    backend.stdin &&
+    backend.stdin.writable &&
+    !backend.stdin.destroyed,
   );
 }
 
@@ -805,7 +849,9 @@ function applyStoppedModeConfig(parsed) {
     const nextEnabled =
       parsed.mode === "toggle" ? !previous : parsed.mode === "on";
     patch.level20ResetEnabled = nextEnabled;
-    patch.missionModeEnabled = nextEnabled ? false : current.missionModeEnabled === true;
+    patch.missionModeEnabled = nextEnabled
+      ? false
+      : current.missionModeEnabled === true;
   }
 
   if (parsed.type === "mm") {
@@ -819,7 +865,9 @@ function applyStoppedModeConfig(parsed) {
       patch.missionResetLevel = String(parsed.level);
     }
     patch.missionModeEnabled = nextMissionEnabled;
-    patch.level20ResetEnabled = nextMissionEnabled ? false : current.level20ResetEnabled === true;
+    patch.level20ResetEnabled = nextMissionEnabled
+      ? false
+      : current.level20ResetEnabled === true;
     if (nextMissionEnabled && typeof patch.missionResetLevel !== "string") {
       patch.missionResetLevel = String(current.missionResetLevel || "11");
     }
@@ -853,7 +901,10 @@ async function sendBackendCommand(command) {
     } else if (parsed.type === "20r" || parsed.type === "mm") {
       applyStoppedModeConfig(parsed);
       pushOutput("stdin", `> ${trimmed}\n`);
-      pushOutput("system", `[GUI] Saved mode setting while runner is stopped.\n`);
+      pushOutput(
+        "system",
+        `[GUI] Saved mode setting while runner is stopped.\n`,
+      );
       return true;
     } else if (parsed.type === "invalid20r") {
       throw new Error("Usage: 20r [on|off]");
@@ -881,7 +932,8 @@ async function requestBackend(action, payload = {}, options = {}) {
     throw new Error("Backend is not running.");
   }
   const requestId = `${Date.now()}_${Math.random().toString(16).slice(2)}`;
-  const timeoutMs = Number(options?.timeoutMs) > 0 ? Number(options.timeoutMs) : 5000;
+  const timeoutMs =
+    Number(options?.timeoutMs) > 0 ? Number(options.timeoutMs) : 5000;
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       pendingBackendRequests.delete(requestId);
@@ -1032,7 +1084,7 @@ function createSplashWindow() {
     <div class="wrap">
       <div class="row">
         <div class="spinner"></div>
-        <div>Loading missions...</div>
+        <div>Draining pixel's wallets...</div>
       </div>
     </div>
   </body>
@@ -1129,7 +1181,9 @@ app.whenReady().then(async () => {
   ipcMain.handle("wallet:refresh-summary", async () => {
     const config = readDesktopConfig();
     const walletAddress =
-      String(config?.signer?.walletAddress || config?.signer?.wallet || "").trim() ||
+      String(
+        config?.signer?.walletAddress || config?.signer?.wallet || "",
+      ).trim() ||
       String(config?.walletAddress || "").trim() ||
       null;
     if (!walletAddress) {
@@ -1160,11 +1214,74 @@ app.whenReady().then(async () => {
       };
     }
   });
+  ipcMain.handle("wallet:bootstrap-summary", async () => {
+    const fetchBootstrap = async () => {
+      const config = readDesktopConfig();
+      const configuredFundingAddress = String(
+        config?.signer?.walletAddress ||
+          config?.signer?.wallet ||
+          config?.walletAddress ||
+          "",
+      )
+        .trim()
+        .toLowerCase();
+      const walletSummaryResult = await mcpCallTool(
+        "get_wallet_summary",
+        {},
+        {
+          url: "https://pixelbypixel.studio/mcp",
+        },
+      );
+      const summary = summarizeWalletPayload(walletSummaryResult);
+      const summaryWalletId = String(summary?.walletId || "")
+        .trim()
+        .toLowerCase();
+      const looksLikeFundingWallet =
+        Boolean(configuredFundingAddress) &&
+        Boolean(summaryWalletId) &&
+        configuredFundingAddress === summaryWalletId;
+      if (summary?.currentUserWalletSummary && !looksLikeFundingWallet) {
+        backendStatus.currentUserWalletSummary =
+          summary.currentUserWalletSummary;
+      }
+      publishStatus();
+      return {
+        ok: true,
+        summary,
+        skippedMainWalletUpdate: looksLikeFundingWallet,
+      };
+    };
+    try {
+      return await fetchBootstrap();
+    } catch (error) {
+      if (!isAuthFailureMessage(error?.message)) {
+        return {
+          ok: false,
+          error: String(error?.message || error),
+          summary: {
+            currentUserWalletSummary:
+              backendStatus.currentUserWalletSummary || null,
+            fundingWalletSummary: backendStatus.fundingWalletSummary || null,
+          },
+        };
+      }
+      await runOnboardingPopupLogin({
+        url: "https://pixelbypixel.studio/mcp",
+        timeoutMs: 30000,
+        loginTimeoutMs: 180000,
+      });
+      return await fetchBootstrap();
+    }
+  });
   ipcMain.handle("signer:reveal-backup", async () => {
-    const payload = await requestBackend("signer_reveal_backup", {}, {
-      ensureRunning: true,
-      timeoutMs: 12000,
-    });
+    const payload = await requestBackend(
+      "signer_reveal_backup",
+      {},
+      {
+        ensureRunning: true,
+        timeoutMs: 12000,
+      },
+    );
     return payload;
   });
   ipcMain.handle("signer:create-generated-wallet", async () => {
@@ -1184,21 +1301,37 @@ app.whenReady().then(async () => {
     emitProgress(5, "start", "Starting account sync");
     const loadAccount = async () => {
       emitProgress(35, "whoami", "Fetching profile");
-      const who = await mcpCallTool("who_am_i", {}, {
-        url: "https://pixelbypixel.studio/mcp",
-      });
+      const who = await mcpCallTool(
+        "who_am_i",
+        {},
+        {
+          url: "https://pixelbypixel.studio/mcp",
+        },
+      );
       emitProgress(65, "missions", "Fetching missions");
-      const missionsResult = await mcpCallTool("get_user_missions", {}, {
-        url: "https://pixelbypixel.studio/mcp",
-      });
+      const missionsResult = await mcpCallTool(
+        "get_user_missions",
+        {},
+        {
+          url: "https://pixelbypixel.studio/mcp",
+        },
+      );
       emitProgress(85, "catalog", "Fetching mission catalog");
-      const catalogResult = await mcpCallTool("get_mission_catalog", {}, {
-        url: "https://pixelbypixel.studio/mcp",
-      });
+      const catalogResult = await mcpCallTool(
+        "get_mission_catalog",
+        {},
+        {
+          url: "https://pixelbypixel.studio/mcp",
+        },
+      );
       emitProgress(92, "nfts", "Fetching wallet collections");
-      const nftResult = await mcpCallTool("get_mission_nfts", {}, {
-        url: "https://pixelbypixel.studio/mcp",
-      });
+      const nftResult = await mcpCallTool(
+        "get_mission_nfts",
+        {},
+        {
+          url: "https://pixelbypixel.studio/mcp",
+        },
+      );
       return { who, missionsResult, catalogResult, nftResult };
     };
 
@@ -1220,7 +1353,10 @@ app.whenReady().then(async () => {
     const who = loaded?.who || {};
     const whoInfo = who?.structuredContent || {};
     const displayName =
-      whoInfo.display_name || whoInfo.displayName || whoInfo.username || "unknown";
+      whoInfo.display_name ||
+      whoInfo.displayName ||
+      whoInfo.username ||
+      "unknown";
     const walletId = whoInfo.wallet_id || whoInfo.walletId || "unknown";
 
     const missions = normalizeMissionList(loaded?.missionsResult || {}).map(
@@ -1243,7 +1379,9 @@ app.whenReady().then(async () => {
           : Number.isFinite(Number(mission?.level))
             ? Number(mission.level)
             : null,
-        slot: Number.isFinite(Number(mission?.slot)) ? Number(mission.slot) : null,
+        slot: Number.isFinite(Number(mission?.slot))
+          ? Number(mission.slot)
+          : null,
         hasAssignedNft: missionHasAssignedNft(mission),
         isActive: missionIsActive(mission),
         image:
@@ -1289,7 +1427,9 @@ app.whenReady().then(async () => {
         nft?.collection_symbol ||
         nft?.symbol ||
         null;
-      const key = String(c || "").trim().toLowerCase();
+      const key = String(c || "")
+        .trim()
+        .toLowerCase();
       if (key) ownedCollectionKeys.add(key);
     }
 
@@ -1317,10 +1457,14 @@ app.whenReady().then(async () => {
     return { ok: true, config: next };
   });
   ipcMain.handle("slot:prepare-unlock4", async () => {
-    const payload = await requestBackend("prepare_slot4_unlock", {}, {
-      ensureRunning: true,
-      timeoutMs: 15000,
-    });
+    const payload = await requestBackend(
+      "prepare_slot4_unlock",
+      {},
+      {
+        ensureRunning: true,
+        timeoutMs: 15000,
+      },
+    );
     return payload;
   });
   ipcMain.handle("clipboard:copy", async (_event, text) => {
@@ -1367,7 +1511,11 @@ app.whenReady().then(async () => {
   ipcMain.handle("window:close", async (event) => {
     const win = BrowserWindow.fromWebContents(event.sender);
     if (win && !win.isDestroyed()) {
-      if (controlWindow && !controlWindow.isDestroyed() && win === controlWindow) {
+      if (
+        controlWindow &&
+        !controlWindow.isDestroyed() &&
+        win === controlWindow
+      ) {
         app.quit();
       } else {
         win.close();
@@ -1392,7 +1540,11 @@ app.whenReady().then(async () => {
   try {
     const launchConfig = readDesktopConfig();
     const walletAddress =
-      String(launchConfig?.signer?.walletAddress || launchConfig?.signer?.wallet || "").trim() ||
+      String(
+        launchConfig?.signer?.walletAddress ||
+          launchConfig?.signer?.wallet ||
+          "",
+      ).trim() ||
       String(launchConfig?.walletAddress || "").trim() ||
       null;
     if (launchConfig.signerMode) {
