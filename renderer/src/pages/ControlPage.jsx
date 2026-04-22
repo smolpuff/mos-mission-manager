@@ -184,6 +184,12 @@ function ControlView() {
   const [slotUnlockBusy, setSlotUnlockBusy] = useState(false);
   const [slotUnlockError, setSlotUnlockError] = useState(null);
   const [slotUnlockResult, setSlotUnlockResult] = useState(null);
+  const [lowBalanceModal, setLowBalanceModal] = useState(null);
+  const [lowBalanceThresholds, setLowBalanceThresholds] = useState({
+    pbp: 1000,
+    sol: 0.01,
+  });
+  const lowBalanceArmedRef = useRef({ pbp: false, sol: false });
   const isMissionMode = modeSelection === "mission";
   const isNormalMode = !isMissionMode;
   const applyConfigPatch = async (patch) => {
@@ -264,6 +270,22 @@ function ControlView() {
       if (typeof config.missionModeEnabled === "boolean") {
         setModeSelection(config.missionModeEnabled ? "mission" : "normal");
       }
+      const configuredPbp = Number(
+        config?.lowBalanceThresholds?.pbp ?? config?.lowBalancePbpThreshold,
+      );
+      const configuredSol = Number(
+        config?.lowBalanceThresholds?.sol ?? config?.lowBalanceSolThreshold,
+      );
+      setLowBalanceThresholds({
+        pbp:
+          Number.isFinite(configuredPbp) && configuredPbp >= 0
+            ? configuredPbp
+            : 1000,
+        sol:
+          Number.isFinite(configuredSol) && configuredSol >= 0
+            ? configuredSol
+            : 0.01,
+      });
       if (config.firstRunOnboardingCompleted !== true) {
         setOnboardingPreviewOnly(false);
         setOnboardingOpen(true);
@@ -723,7 +745,7 @@ function ControlView() {
       });
       setResetErrorModal((current) => {
         if (!current || String(current.assignedMissionId || "") !== slotKey) {
-          if (Number.isFinite(slot) && Number(current.slot) === slot)
+          if (current && Number.isFinite(slot) && Number(current.slot) === slot)
             return null;
           return current;
         }
@@ -757,6 +779,51 @@ function ControlView() {
     }, 400);
     return () => clearTimeout(timer);
   }, [bridge, status.signerMode, status.fundingWalletSummary?.status]);
+
+  useEffect(() => {
+    if (!fundingWalletSummary) return;
+    const pbp = parseDisplayNumber(fundingWalletSummary?.pbp);
+    const sol = parseDisplayNumber(fundingWalletSummary?.sol);
+    const pbpThreshold = Number(lowBalanceThresholds?.pbp ?? 1000);
+    const solThreshold = Number(lowBalanceThresholds?.sol ?? 0.01);
+    const armed = lowBalanceArmedRef.current;
+
+    if (Number.isFinite(pbp) && pbp >= pbpThreshold) {
+      armed.pbp = true;
+    }
+    if (Number.isFinite(sol) && sol >= solThreshold) {
+      armed.sol = true;
+    }
+
+    const reasons = [];
+    if (Number.isFinite(pbp) && pbp < pbpThreshold && armed.pbp) {
+      reasons.push(
+        `PBP balance dropped below ${pbpThreshold.toLocaleString(undefined, {
+          maximumFractionDigits: 2,
+        })}.`,
+      );
+      armed.pbp = false;
+    }
+    if (Number.isFinite(sol) && sol < solThreshold && armed.sol) {
+      reasons.push(
+        `SOL balance dropped below ${solThreshold.toLocaleString(undefined, {
+          maximumFractionDigits: 4,
+        })}.`,
+      );
+      armed.sol = false;
+    }
+    if (reasons.length === 0) return;
+
+    setLowBalanceModal({
+      reasons,
+      pbp,
+      sol,
+      address: String(
+        fundingWalletSummary?.address || status.signerWallet || "",
+      ).trim(),
+      at: Date.now(),
+    });
+  }, [fundingWalletSummary, status.signerWallet, lowBalanceThresholds]);
 
   useEffect(() => {
     if (!status.running) return;
@@ -2074,26 +2141,6 @@ function ControlView() {
                           : "Press to stop"}
                       </button>
                     </div>
-                    <div className="flex justify-end">
-                      {/* onboarding testing  */}
-                      {/* <button
-                        type="button"
-                        className="btn btn-clear btn-xs"
-                        onClick={() => {
-                          setOnboardingPreviewOnly(true);
-                          setOnboardingOpen(true);
-                          setOnboardingStep(1);
-                          setOnboardingBusy(false);
-                          setOnboardingError(null);
-                          setOnboardingWhoami(null);
-                          setOnboardingMissions([]);
-                          setOnboardingMissionCatalog([]);
-                          setOnboardingSelectedMissions(new Set());
-                        }}
-                      >
-                        Open Setup Flow
-                      </button> */}
-                    </div>
                   </div>
                   <div className="flex items-center justify-center">
                     <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-base ">
@@ -2801,6 +2848,171 @@ function ControlView() {
                     disabled={slotUnlockBusy}
                   >
                     {slotUnlockBusy ? "Preparing..." : "Yes"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : null}
+          {lowBalanceModal ? (
+            <div
+              className="fixed inset-0 z-60 grid place-items-center bg-black/50 p-4"
+              role="dialog"
+              aria-modal="true"
+              onMouseDown={(e) => {
+                if (e.target === e.currentTarget) setLowBalanceModal(null);
+              }}
+            >
+              <div
+                className="p-4  w-full rounded-xl shadow-2xl shadow-black/95 space-y-4 z-10 border-2 border-[#1D1C27]  transition-all duration-250 ease-out"
+                style={{
+                  maxWidth: onboardingStep === 2 ? "680px" : "680px",
+                  backgroundImage: `url(${backImg})`,
+                  backgroundSize: "cover",
+                  backgroundPosition: "center",
+                }}
+              >
+                {/* <div className="card w-full max-w-140 space-y-4 !bg-[#0b1116] border border-warning/50 z-10"> */}
+                <div className="flex items-center justify-between gap-3">
+                  <div className="text-lg font-semibold text-warning">
+                    Low Funding Balance
+                  </div>
+                  <button
+                    type="button"
+                    className="btn btn-clear btn-sm"
+                    onClick={() => setLowBalanceModal(null)}
+                    title="Close"
+                  >
+                    ✕
+                  </button>
+                </div>
+                <div className="text-sm text-slate-200">
+                  Your funding wallet dropped below safe thresholds. Top it up
+                  to avoid failed transactions.
+                </div>
+                <div className="rounded-md border border-warning/40 bg-warning/10 p-3 text-sm text-slate-100">
+                  {lowBalanceModal.reasons.join(" ")}
+                </div>
+                <div>
+                  <label
+                    htmlFor="user-wallet__lock-status"
+                    className="text-sm uppercase text-slate-300"
+                  >
+                    Balances
+                  </label>
+                  <div className="flex gap-3 items-center user-wallet__balances">
+                    <div
+                      className={`flex gap-1 items-center user-wallet__balances-item ${
+                        Number(
+                          lowBalanceModal?.sol ??
+                            fundingWalletSummary?.sol ??
+                            0,
+                        ) < Number(lowBalanceThresholds?.sol ?? 0.01)
+                          ? "rounded-md border border-warning/60 bg-warning/10 px-2 py-1"
+                          : ""
+                      }`}
+                    >
+                      <div className="text-sm">
+                        <SlideNumberFormatted
+                          value={Number(fundingWalletSummary?.sol || 0)}
+                          format={(n) =>
+                            Number(n || 0).toLocaleString(undefined, {
+                              maximumFractionDigits: 4,
+                            })
+                          }
+                        />{" "}
+                        SOL
+                      </div>
+                    </div>
+                    <div
+                      className={`flex gap-1 items-center user-wallet__balances-item ${
+                        Number(
+                          lowBalanceModal?.pbp ??
+                            fundingWalletSummary?.pbp ??
+                            0,
+                        ) < Number(lowBalanceThresholds?.pbp ?? 1000)
+                          ? "rounded-md border border-warning/60 bg-warning/10 px-2 py-1"
+                          : ""
+                      }`}
+                    >
+                      <div className="text-sm">
+                        <SlideNumberFormatted
+                          value={Number(fundingWalletSummary?.pbp || 0)}
+                          format={(n) =>
+                            Number(n || 0).toLocaleString(undefined, {
+                              maximumFractionDigits: 2,
+                            })
+                          }
+                        />{" "}
+                        PBP
+                      </div>
+                    </div>
+                  </div>
+                  {!fundingWalletSummary ? (
+                    <div className="text-xs text-slate-400 mt-1">
+                      Loading app-wallet summary...
+                    </div>
+                  ) : null}
+                </div>
+
+                <label
+                  htmlFor="user__wallet-addres"
+                  className="text-sm uppercase text-slate-300"
+                >
+                  In-App Address
+                </label>
+                <div className="user__wallet-addres text-lg flex flex-wrap gap-y-0 gap-x-5 items-center">
+                  <div className="flex w-full flex-basis">
+                    {appWalletAddress || "—"}
+                  </div>
+                  <button
+                    type="button"
+                    className="fill-white flex  items-center gap-1 font-normal text-xs px-0  py-1 h-min btn btn-clear hover:fill-accent hover:text-accent hover:cursor-pointer"
+                    onClick={() => {
+                      const value = appWalletAddress;
+                      if (!value) return;
+                      void copyText(value).then((ok) => {
+                        setCopiedLabel(ok ? "Copied" : "Copy failed");
+                        setTimeout(() => setCopiedLabel(null), 1200);
+                      });
+                    }}
+                  >
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      viewBox="0 0 640 640"
+                      className="w-4 h-4"
+                    >
+                      <path d="M352 544L128 544C110.3 544 96 529.7 96 512L96 288C96 270.3 110.3 256 128 256L176 256L176 224L128 224C92.7 224 64 252.7 64 288L64 512C64 547.3 92.7 576 128 576L352 576C387.3 576 416 547.3 416 512L416 464L384 464L384 512C384 529.7 369.7 544 352 544zM288 384C270.3 384 256 369.7 256 352L256 128C256 110.3 270.3 96 288 96L512 96C529.7 96 544 110.3 544 128L544 352C544 369.7 529.7 384 512 384L288 384zM224 352C224 387.3 252.7 416 288 416L512 416C547.3 416 576 387.3 576 352L576 128C576 92.7 547.3 64 512 64L288 64C252.7 64 224 92.7 224 128L224 352z" />
+                    </svg>
+                    Copy
+                  </button>
+                  <button
+                    type="button"
+                    className="fill-white flex font-normal items-center gap-1 text-xs btn-clear btn px-0 py-1 h-min hover:fill-accent hover:text-accent hover:cursor-pointer"
+                    disabled={!appWalletAddress}
+                    onClick={() => {
+                      if (!appWalletAddress) return;
+                      const target = `https://solscan.io/account/${encodeURIComponent(appWalletAddress)}`;
+                      void openExternalUrl(target);
+                    }}
+                  >
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      viewBox="0 0 640 640"
+                      className="w-4 h-4"
+                    >
+                      <path d="M574.5 449.2L489.6 537.9C487.8 539.8 485.5 541.4 483 542.4C480.5 543.4 477.8 544 475.1 544L72.9 544C71 544 69.1 543.5 67.5 542.4C65.9 541.3 64.6 539.9 63.9 538.2C63.2 536.5 62.9 534.6 63.2 532.7C63.5 530.8 64.4 529.1 65.7 527.8L150.6 439.1C152.4 437.2 154.7 435.6 157.1 434.6C159.5 433.6 162.2 433 164.9 433L567.3 433C569.2 433 571.1 433.5 572.7 434.6C574.3 435.7 575.6 437.1 576.3 438.8C577 440.5 577.3 442.4 577 444.3C576.7 446.2 575.8 447.9 574.5 449.2zM489.7 270.6C487.9 268.7 485.6 267.1 483.1 266.1C480.6 265.1 477.9 264.5 475.2 264.5L72.8 264.5C70.9 264.5 69 265 67.4 266.1C65.8 267.2 64.5 268.6 63.8 270.3C63.1 272 62.8 273.9 63.1 275.8C63.4 277.7 64.3 279.4 65.6 280.7L150.5 369.4C152.3 371.3 154.6 372.9 157 373.9C159.4 374.9 162.1 375.5 164.8 375.5L567.2 375.5C569.1 375.5 571 375 572.6 373.9C574.2 372.8 575.5 371.4 576.2 369.7C576.9 368 577.2 366.1 576.9 364.2C576.6 362.3 575.7 360.6 574.4 359.3L489.5 270.6zM72.9 206.9L475.3 206.9C478 206.9 480.7 206.4 483.2 205.3C485.7 204.2 487.9 202.7 489.8 200.8L574.7 112.1C576 110.7 576.9 109 577.2 107.2C577.5 105.4 577.3 103.5 576.5 101.7C575.7 99.9 574.5 98.5 572.9 97.5C571.3 96.5 569.4 95.9 567.5 95.9L165 96C162.3 96 159.6 96.5 157.2 97.6C154.8 98.7 152.5 100.2 150.7 102.1L65.7 190.8C64.4 192.2 63.5 193.9 63.2 195.7C62.9 197.5 63.1 199.4 63.9 201.2C64.7 203 65.9 204.4 67.5 205.4C69.1 206.4 71 207 72.9 207z" />
+                    </svg>
+                    Explorer
+                  </button>
+                </div>
+
+                <div className="flex items-center justify-end">
+                  <button
+                    type="button"
+                    className="btn btn-gradient btn-sm"
+                    onClick={() => setLowBalanceModal(null)}
+                  >
+                    OK
                   </button>
                 </div>
               </div>
