@@ -91,6 +91,7 @@ function createEmptyAnalytics() {
       totalClaims: 0,
       totalResets: 0,
       totalResetCostPbp: 0,
+      totalLeased: 0,
       currencyEarned: { pbp: 0, tc: 0, cc: 0 },
       missionClaims: {},
       nftsUsed: [],
@@ -100,6 +101,7 @@ function createEmptyAnalytics() {
       totalClaims: 0,
       totalResets: 0,
       totalResetCostPbp: 0,
+      totalLeased: 0,
       currencyEarned: { pbp: 0, tc: 0, cc: 0 },
       missionClaims: {},
       nftsUsed: [],
@@ -121,6 +123,7 @@ function normalizeAnalytics(raw) {
       totalClaims: Number(src?.lifetime?.totalClaims || 0) || 0,
       totalResets: Number(src?.lifetime?.totalResets || 0) || 0,
       totalResetCostPbp: Number(src?.lifetime?.totalResetCostPbp || 0) || 0,
+      totalLeased: Number(src?.lifetime?.totalLeased || 0) || 0,
       currencyEarned: {
         pbp: Number(src?.lifetime?.currencyEarned?.pbp || 0) || 0,
         tc: Number(src?.lifetime?.currencyEarned?.tc || 0) || 0,
@@ -143,6 +146,7 @@ function normalizeAnalytics(raw) {
       totalClaims: Number(src?.session?.totalClaims || 0) || 0,
       totalResets: Number(src?.session?.totalResets || 0) || 0,
       totalResetCostPbp: Number(src?.session?.totalResetCostPbp || 0) || 0,
+      totalLeased: Number(src?.session?.totalLeased || 0) || 0,
       currencyEarned: {
         pbp: Number(src?.session?.currencyEarned?.pbp || 0) || 0,
         tc: Number(src?.session?.currencyEarned?.tc || 0) || 0,
@@ -202,6 +206,51 @@ function pushOutput(stream, text) {
   if (stream === "stdout" || stream === "stderr") {
     applyAnalyticsFromChunk(stream, text);
   }
+}
+
+function pushSystemLog(message) {
+  const text = String(message || "").trim();
+  if (!text) return;
+  pushOutput("system", `[GUI] ${text}\n`);
+}
+
+function formatConfigValueForLog(value) {
+  if (value === null) return "null";
+  if (value === undefined) return "undefined";
+  if (typeof value === "string") return `"${value}"`;
+  if (
+    typeof value === "number" ||
+    typeof value === "boolean" ||
+    typeof value === "bigint"
+  ) {
+    return String(value);
+  }
+  if (Array.isArray(value)) {
+    const preview = value.slice(0, 6).map((entry) => formatConfigValueForLog(entry));
+    const suffix = value.length > 6 ? `, ... +${value.length - 6} more` : "";
+    return `[${preview.join(", ")}${suffix}]`;
+  }
+  if (typeof value === "object") {
+    try {
+      const json = JSON.stringify(value);
+      return json.length > 220 ? `${json.slice(0, 220)}...` : json;
+    } catch {
+      return "[object]";
+    }
+  }
+  return String(value);
+}
+
+function logConfigPatch(source, patch = {}) {
+  const entries = Object.entries(patch || {});
+  if (!entries.length) {
+    pushSystemLog(`${source}: config update with no fields.`);
+    return;
+  }
+  const summary = entries
+    .map(([key, value]) => `${key}=${formatConfigValueForLog(value)}`)
+    .join(", ");
+  pushSystemLog(`${source}: config updated -> ${summary}`);
 }
 
 function publishStatus() {
@@ -293,6 +342,7 @@ function beginAnalyticsSession() {
     totalClaims: 0,
     totalResets: 0,
     totalResetCostPbp: 0,
+    totalLeased: 0,
     currencyEarned: { pbp: 0, tc: 0, cc: 0 },
     missionClaims: {},
     nftsUsed: [],
@@ -353,9 +403,22 @@ function applyAnalyticsLine(line) {
     }
   }
 
-  const nftMatch = text.match(/nft=([^\s,]+)/i);
-  if (nftMatch && nftMatch[1]) {
-    const nft = String(nftMatch[1]).trim();
+  if (/started rental lease/i.test(text)) {
+    current.lifetime.totalLeased += 1;
+    current.session.totalLeased += 1;
+    changed = true;
+  }
+
+  const nftMatches = [];
+  const nftEq = text.match(/nft=([^\s,]+)/i);
+  if (nftEq && nftEq[1]) nftMatches.push(String(nftEq[1]).trim());
+  const nftAccountEq = text.match(/nftAccount=([^\s,]+)/i);
+  if (nftAccountEq && nftAccountEq[1]) nftMatches.push(String(nftAccountEq[1]).trim());
+  const assignedText = text.match(/Assigned NFT\s+([A-Za-z0-9]+)/i);
+  if (assignedText && assignedText[1]) nftMatches.push(String(assignedText[1]).trim());
+
+  for (const nft of nftMatches) {
+    if (!nft) continue;
     const nextLifetime = addUniqueValue(current.lifetime.nftsUsed, nft);
     const nextSession = addUniqueValue(current.session.nftsUsed, nft);
     if (
@@ -1147,10 +1210,14 @@ async function sendBackendCommand(command) {
 
 async function requestBackend(action, payload = {}, options = {}) {
   const ensureRunning = options?.ensureRunning === true;
+  pushSystemLog(
+    `Backend request: ${action}${ensureRunning ? " (auto-start allowed)" : ""}.`,
+  );
   if ((!backend || !backendStatus.running) && ensureRunning) {
     startBackend();
   }
   if (!backend || !backendStatus.running) {
+    pushSystemLog(`Backend request failed: ${action} -> backend is not running.`);
     throw new Error("Backend is not running.");
   }
   const requestId = `${Date.now()}_${Math.random().toString(16).slice(2)}`;
@@ -1159,15 +1226,20 @@ async function requestBackend(action, payload = {}, options = {}) {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       pendingBackendRequests.delete(requestId);
+      pushSystemLog(`Backend request timed out: ${action}.`);
       reject(new Error(`backend request timeout: ${action}`));
     }, timeoutMs);
     pendingBackendRequests.set(requestId, {
       resolve: (value) => {
         clearTimeout(timer);
+        pushSystemLog(`Backend request complete: ${action}.`);
         resolve(value);
       },
       reject: (err) => {
         clearTimeout(timer);
+        pushSystemLog(
+          `Backend request failed: ${action} -> ${String(err?.message || err)}`,
+        );
         reject(err);
       },
     });
@@ -1378,6 +1450,8 @@ app.whenReady().then(async () => {
     config: readDesktopConfig(),
   }));
   ipcMain.handle("config:update", async (_event, patch) => {
+    const requestedPatch =
+      patch && typeof patch === "object" ? { ...patch } : {};
     const next = applyDesktopConfigPatch(patch || {});
     if (typeof next.level20ResetEnabled === "boolean") {
       backendStatus.level20ResetEnabled = next.level20ResetEnabled;
@@ -1397,10 +1471,12 @@ app.whenReady().then(async () => {
     backendStatus.currentMode = backendStatus.missionModeEnabled
       ? `mission-${backendStatus.currentMissionResetLevel || "11"}`
       : "normal";
+    logConfigPatch("Desktop", requestedPatch);
     publishStatus();
     return { config: next, status: { ...backendStatus } };
   });
   ipcMain.handle("wallet:refresh-summary", async () => {
+    pushSystemLog("Funding wallet summary refresh requested.");
     const config = readDesktopConfig();
     const walletAddress =
       String(
@@ -1409,6 +1485,7 @@ app.whenReady().then(async () => {
       String(config?.walletAddress || "").trim() ||
       null;
     if (!walletAddress) {
+      pushSystemLog("Funding wallet summary refresh skipped: no wallet address set.");
       backendStatus.fundingWalletSummary = null;
       backendStatus.signerMode = config.signerMode || backendStatus.signerMode;
       publishStatus();
@@ -1423,10 +1500,14 @@ app.whenReady().then(async () => {
       };
       backendStatus.signerMode = config.signerMode || backendStatus.signerMode;
       backendStatus.fundingWalletSummary = summary.fundingWalletSummary;
+      pushSystemLog("Funding wallet summary refresh complete.");
       publishStatus();
       return summary;
     } catch (error) {
       // Don't crash the renderer on RPC rate limits; keep the last known good summary.
+      pushSystemLog(
+        `Funding wallet summary refresh failed: ${String(error?.message || error)}`,
+      );
       publishStatus();
       return {
         walletId: null,
@@ -1437,6 +1518,7 @@ app.whenReady().then(async () => {
     }
   });
   ipcMain.handle("wallet:bootstrap-summary", async () => {
+    pushSystemLog("Bootstrap wallet summary requested.");
     const fetchBootstrap = async () => {
       const config = readDesktopConfig();
       const configuredFundingAddress = String(
@@ -1474,9 +1556,14 @@ app.whenReady().then(async () => {
       };
     };
     try {
-      return await fetchBootstrap();
+      const result = await fetchBootstrap();
+      pushSystemLog("Bootstrap wallet summary complete.");
+      return result;
     } catch (error) {
       if (!isAuthFailureMessage(error?.message)) {
+        pushSystemLog(
+          `Bootstrap wallet summary failed: ${String(error?.message || error)}`,
+        );
         return {
           ok: false,
           error: String(error?.message || error),
@@ -1487,15 +1574,19 @@ app.whenReady().then(async () => {
           },
         };
       }
+      pushSystemLog("Bootstrap wallet summary requires login. Opening browser login.");
       await runOnboardingPopupLogin({
         url: "https://pixelbypixel.studio/mcp",
         timeoutMs: 30000,
         loginTimeoutMs: 180000,
       });
-      return await fetchBootstrap();
+      const result = await fetchBootstrap();
+      pushSystemLog("Bootstrap wallet summary complete after login.");
+      return result;
     }
   });
   ipcMain.handle("signer:reveal-backup", async () => {
+    pushSystemLog("Reveal app wallet backup requested.");
     const payload = await requestBackend(
       "signer_reveal_backup",
       {},
@@ -1507,10 +1598,12 @@ app.whenReady().then(async () => {
     return payload;
   });
   ipcMain.handle("signer:create-generated-wallet", async () => {
+    pushSystemLog("Create generated app wallet requested.");
     const payload = await requestBackend("signer_create_generated_wallet", {});
     return payload;
   });
   ipcMain.handle("onboarding:fetch-account", async () => {
+    pushSystemLog("Onboarding account sync started.");
     const emitProgress = (progress, phase, message) => {
       publishEvent({
         type: "onboarding_progress",
@@ -1522,6 +1615,7 @@ app.whenReady().then(async () => {
 
     emitProgress(5, "start", "Starting account sync");
     const loadAccount = async () => {
+      pushSystemLog("Onboarding sync: fetching who_am_i.");
       emitProgress(35, "whoami", "Fetching profile");
       const who = await mcpCallTool(
         "who_am_i",
@@ -1530,6 +1624,7 @@ app.whenReady().then(async () => {
           url: "https://pixelbypixel.studio/mcp",
         },
       );
+      pushSystemLog("Onboarding sync: fetching get_user_missions.");
       emitProgress(65, "missions", "Fetching missions");
       const missionsResult = await mcpCallTool(
         "get_user_missions",
@@ -1538,6 +1633,7 @@ app.whenReady().then(async () => {
           url: "https://pixelbypixel.studio/mcp",
         },
       );
+      pushSystemLog("Onboarding sync: fetching get_mission_catalog.");
       emitProgress(85, "catalog", "Fetching mission catalog");
       const catalogResult = await mcpCallTool(
         "get_mission_catalog",
@@ -1546,6 +1642,7 @@ app.whenReady().then(async () => {
           url: "https://pixelbypixel.studio/mcp",
         },
       );
+      pushSystemLog("Onboarding sync: fetching get_mission_nfts.");
       emitProgress(92, "nfts", "Fetching wallet collections");
       const nftResult = await mcpCallTool(
         "get_mission_nfts",
@@ -1562,6 +1659,7 @@ app.whenReady().then(async () => {
       loaded = await loadAccount();
     } catch (error) {
       if (!isAuthFailureMessage(error?.message)) throw error;
+      pushSystemLog("Onboarding sync requires login. Opening browser login.");
       emitProgress(20, "login", "Login required");
       await runOnboardingPopupLogin({
         url: "https://pixelbypixel.studio/mcp",
@@ -1569,6 +1667,7 @@ app.whenReady().then(async () => {
         loginTimeoutMs: 180000,
       });
       emitProgress(30, "login_complete", "Login complete");
+      pushSystemLog("Onboarding login complete. Resuming account sync.");
       loaded = await loadAccount();
     }
 
@@ -1656,6 +1755,7 @@ app.whenReady().then(async () => {
     }
 
     emitProgress(100, "done", "Sync complete");
+    pushSystemLog("Onboarding account sync complete.");
     return {
       ok: true,
       whoami: { displayName, walletId },
@@ -1665,26 +1765,31 @@ app.whenReady().then(async () => {
     };
   });
   ipcMain.handle("onboarding:apply-selection", async (_event, payload = {}) => {
-    const next = applyDesktopConfigPatch({
+    const configPatch = {
       signerMode: String(payload?.signerMode || "").trim() || undefined,
       targetMissions: Array.isArray(payload?.targetMissions)
         ? payload.targetMissions
         : undefined,
       firstRunOnboardingCompleted: true,
-    });
+    };
+    const next = applyDesktopConfigPatch(configPatch);
     if (typeof next.signerMode === "string") {
       backendStatus.signerMode = next.signerMode;
     }
+    logConfigPatch("Onboarding", configPatch);
     publishStatus();
     return { ok: true, config: next };
   });
   ipcMain.handle("rentals:preview", async () => {
     const loadPreview = async () => {
+      pushSystemLog("Rentals page refresh started.");
+      pushSystemLog("Rentals refresh: fetching get_rentable_nfts.");
       const rentableResult = await mcpCallTool(
         "get_rentable_nfts",
         {},
         { url: "https://pixelbypixel.studio/mcp" },
       );
+      pushSystemLog("Rentals refresh: fetching get_user_missions.");
       const missionsResult = await mcpCallTool(
         "get_user_missions",
         {},
@@ -1791,20 +1896,33 @@ app.whenReady().then(async () => {
     };
 
     try {
-      return await loadPreview();
+      const result = await loadPreview();
+      pushSystemLog(
+        `Rentals page refresh complete. Pool=${Number(result?.rentableCount || 0)}, active rentals=${Array.isArray(result?.activeRentals) ? result.activeRentals.length : 0}.`,
+      );
+      return result;
     } catch (error) {
       if (!isAuthFailureMessage(error?.message)) {
+        pushSystemLog(
+          `Rentals page refresh failed: ${String(error?.message || error)}`,
+        );
         return { ok: false, error: String(error?.message || error) };
       }
+      pushSystemLog("Rentals refresh requires login. Opening browser login.");
       await runOnboardingPopupLogin({
         url: "https://pixelbypixel.studio/mcp",
         timeoutMs: 30000,
         loginTimeoutMs: 180000,
       });
-      return await loadPreview();
+      const result = await loadPreview();
+      pushSystemLog(
+        `Rentals page refresh complete after login. Pool=${Number(result?.rentableCount || 0)}, active rentals=${Array.isArray(result?.activeRentals) ? result.activeRentals.length : 0}.`,
+      );
+      return result;
     }
   });
   ipcMain.handle("slot:prepare-unlock4", async () => {
+    pushSystemLog("Slot 4 unlock requested.");
     const payload = await requestBackend(
       "prepare_slot4_unlock",
       {},

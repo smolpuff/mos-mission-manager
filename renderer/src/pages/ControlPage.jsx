@@ -1011,12 +1011,6 @@ function ControlView() {
       setSlotUnlockError("Unlock flow is not available in this build.");
       return;
     }
-    if (!status.running) {
-      setSlotUnlockError(
-        "Start missions first so backend can prepare the unlock.",
-      );
-      return;
-    }
     setSlotUnlockBusy(true);
     setSlotUnlockError(null);
     setSlotUnlockResult(null);
