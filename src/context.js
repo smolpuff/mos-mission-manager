@@ -3,9 +3,10 @@
 const path = require("path");
 const os = require("os");
 
-const APP_VERSION = "3.0.5";
+const APP_VERSION = "3.1.0";
 const APP_NAME = "missions-v3-mcp";
-const DEFAULT_MISSION_RESET_LEVEL = "20";
+const DEFAULT_MISSION_RESET_LEVEL =
+  String(process.env.PBP_DEFAULT_MISSION_RESET_LEVEL || "").trim() || "11";
 const DEFAULT_SIGNER_MODE = "app_wallet";
 const MCP_URL = "https://pixelbypixel.studio/mcp";
 const MCP_PROTOCOL_VERSION = "2025-03-26";

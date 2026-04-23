@@ -8,6 +8,7 @@ import CompetitionPage from "./CompetitionPage";
 import SettingsPage from "./SettingsPage";
 import StatsPage from "./StatsPage";
 import RentalsPage from "./RentalsPage";
+import NftsPage from "./NftsPage";
 
 import pbpIcon from "../img/icon_pbp.webp";
 import solIcon from "../img/icon-sm__sol.svg";
@@ -2207,6 +2208,7 @@ function ControlView() {
               sessionStartedAtMs={sessionStartedAtRef.current}
             />
           ) : null}
+          {currentPage === "nfts" ? <NftsPage bridge={bridge} /> : null}
           {currentPage === "rentals" ? <RentalsPage bridge={bridge} /> : null}
           {currentPage !== "missions" ? null : (
             <>

@@ -23,6 +23,9 @@ Implemented flows:
 - target-mission assignment
 - mission reroll
 - NFT cooldown reset
+- rental fallback assignment
+- desktop first-run onboarding
+- desktop stats / rentals / NFT views
 
 ## Disclaimer
 
@@ -61,6 +64,11 @@ On first open, the wizard walks you through:
 - funding mode (`app_wallet`, `manual`, `dapp`)
 - login + account/mission sync
 - assigned mission review
+
+Important:
+
+- this onboarding flow does not start the runner
+- it only does sign-in/session init plus read operations like account + mission fetch
 
 If you choose `app_wallet`, the wizard can generate the burner wallet and show the funding address directly in the selection card.
 
@@ -114,6 +122,14 @@ After wallet setup and mission config:
 3. Configure missions on PBP site (for now, feature coming soon)
 4. Press **Start** to begin processing.
 5. Use **Pause/Resume** in the UI as needed.
+
+## Desktop Pages
+
+The desktop app also includes:
+
+- **My NFTs**: wallet NFT inventory, cooldown/level display, collection filters, and sorting
+- **My Rentals**: rental pool totals plus active rental-backed mission view
+- **Stats**: session earnings, claims, resets, leased totals, and mission claim breakdown
 
 ## Low Balance Warning
 

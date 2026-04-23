@@ -239,31 +239,22 @@ export default function StatsPage({ status, logs, missionStats, sessionStartedAt
         <div className="card min-h-0 flex flex-col">
           <div className="text-sm text-slate-300 mb-2">Session Currency Earned</div>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-2 min-h-0">
-            <div className="rounded-lg border border-white/10 bg-black/15 p-3">
+            <div className="rounded-lg border border-white/10 bg-black/15 p-2.5">
               <div className="text-[11px] uppercase tracking-[0.2em] text-slate-500">PBP</div>
-              <div className="mt-2 text-2xl font-semibold text-slate-100">
+              <div className="mt-1 text-xl font-semibold text-slate-100">
                 {formatNumber(rewards.pbp)}
               </div>
-              <div className="mt-1 text-xs text-slate-400">
-                Total earned this app session
-              </div>
             </div>
-            <div className="rounded-lg border border-white/10 bg-black/15 p-3">
+            <div className="rounded-lg border border-white/10 bg-black/15 p-2.5">
               <div className="text-[11px] uppercase tracking-[0.2em] text-slate-500">TC</div>
-              <div className="mt-2 text-2xl font-semibold text-slate-100">
+              <div className="mt-1 text-xl font-semibold text-slate-100">
                 {formatNumber(rewards.tc)}
               </div>
-              <div className="mt-1 text-xs text-slate-400">
-                Total earned this app session
-              </div>
             </div>
-            <div className="rounded-lg border border-white/10 bg-black/15 p-3">
+            <div className="rounded-lg border border-white/10 bg-black/15 p-2.5">
               <div className="text-[11px] uppercase tracking-[0.2em] text-slate-500">CC</div>
-              <div className="mt-2 text-2xl font-semibold text-slate-100">
+              <div className="mt-1 text-xl font-semibold text-slate-100">
                 {formatNumber(rewards.cc)}
-              </div>
-              <div className="mt-1 text-xs text-slate-400">
-                Total earned this app session
               </div>
             </div>
           </div>

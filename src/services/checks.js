@@ -1263,7 +1263,9 @@ function createChecksService(ctx, logger, mcp, services = {}) {
       ctx.missionModeEnabled || ctx.config.missionModeEnabled === true;
     if (mmEnabled) {
       const rawLevel =
-        ctx.currentMissionResetLevel || ctx.config.missionResetLevel || "11";
+        ctx.currentMissionResetLevel ||
+        ctx.config.missionResetLevel ||
+        String(process.env.PBP_DEFAULT_MISSION_RESET_LEVEL || "11");
       const threshold = Number(rawLevel);
       if (Number.isFinite(threshold) && threshold > 0) {
         return { enabled: true, threshold };

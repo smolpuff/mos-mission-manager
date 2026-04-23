@@ -16,6 +16,7 @@ contextBridge.exposeInMainWorld("missionsDesktop", {
   createGeneratedWallet: () => ipcRenderer.invoke("signer:create-generated-wallet"),
   fetchOnboardingAccount: () => ipcRenderer.invoke("onboarding:fetch-account"),
   getRentalsPreview: () => ipcRenderer.invoke("rentals:preview"),
+  getUserNfts: () => ipcRenderer.invoke("nfts:list"),
   applyOnboardingSelection: (payload) =>
     ipcRenderer.invoke("onboarding:apply-selection", payload),
   copyToClipboard: (text) => ipcRenderer.invoke("clipboard:copy", text),

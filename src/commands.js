@@ -612,7 +612,11 @@ function createCommandHandler(ctx, logger, actions, configApi, services = {}) {
           ctx.level20ResetEnabled = false;
         }
         ctx.config.missionModeEnabled = ctx.missionModeEnabled;
-        ctx.config.missionResetLevel = String(ctx.currentMissionResetLevel || "11");
+        ctx.config.missionResetLevel = String(
+          ctx.currentMissionResetLevel ||
+            process.env.PBP_DEFAULT_MISSION_RESET_LEVEL ||
+            "11",
+        );
         ctx.config.level20ResetEnabled = ctx.level20ResetEnabled;
         ctx.currentMode = ctx.missionModeEnabled
           ? `mission-${ctx.currentMissionResetLevel}`

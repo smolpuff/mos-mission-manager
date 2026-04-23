@@ -30,6 +30,10 @@ const RENDERER_DEV_URL =
 const rendererIndexPath = path.join(ROOT_DIR, "dist", "index.html");
 const DESKTOP_DEVTOOLS_ENABLED = process.env.PBP_DESKTOP_DEVTOOLS === "1";
 
+function defaultMissionResetLevel() {
+  return app.isPackaged ? "11" : "6";
+}
+
 let controlWindow = null;
 let cliWindow = null;
 let splashWindow = null;
@@ -478,8 +482,11 @@ function hydrateBackendStatusFromConfig() {
   if (typeof config.missionResetLevel === "string") {
     backendStatus.currentMissionResetLevel = config.missionResetLevel;
   }
+  if (!backendStatus.currentMissionResetLevel) {
+    backendStatus.currentMissionResetLevel = defaultMissionResetLevel();
+  }
   backendStatus.currentMode = backendStatus.missionModeEnabled
-    ? `mission-${backendStatus.currentMissionResetLevel || "11"}`
+    ? `mission-${backendStatus.currentMissionResetLevel || defaultMissionResetLevel()}`
     : "normal";
 }
 
@@ -504,6 +511,80 @@ function extractBalanceNumber(balances, matcher) {
     if (Number.isFinite(n)) return n;
   }
   return null;
+}
+
+function normalizeRemoteImageUrl(raw) {
+  const value = String(raw || "").trim();
+  if (!value) return null;
+  if (/^https?:\/\//i.test(value)) return value;
+  if (/^data:image\//i.test(value)) return value;
+  if (/^\/\//.test(value)) return `https:${value}`;
+  if (/^gateway\.irys\.xyz\//i.test(value)) return `https://${value}`;
+  if (/^ipfs:\/\//i.test(value)) {
+    return `https://ipfs.io/ipfs/${value.replace(/^ipfs:\/\//i, "")}`;
+  }
+  if (/^(Qm[1-9A-HJ-NP-Za-km-z]{44,}|bafy[0-9a-z]{20,})$/i.test(value)) {
+    return `https://ipfs.io/ipfs/${value}`;
+  }
+  return null;
+}
+
+function deepFindRemoteImageUrl(node, depth = 0) {
+  if (!node || depth > 4) return null;
+  if (typeof node === "string") return normalizeRemoteImageUrl(node);
+  if (Array.isArray(node)) {
+    for (const item of node) {
+      const found = deepFindRemoteImageUrl(item, depth + 1);
+      if (found) return found;
+    }
+    return null;
+  }
+  if (typeof node !== "object") return null;
+
+  const preferredKeys = [
+    "image",
+    "imageUrl",
+    "image_url",
+    "imageURI",
+    "image_uri",
+    "thumbnail",
+    "thumbnailUrl",
+    "thumbnail_url",
+    "media",
+    "uri",
+  ];
+  for (const key of preferredKeys) {
+    if (!Object.prototype.hasOwnProperty.call(node, key)) continue;
+    const found = deepFindRemoteImageUrl(node[key], depth + 1);
+    if (found) return found;
+  }
+
+  for (const [key, value] of Object.entries(node)) {
+    if (/image|thumbnail|media|cdn|uri/i.test(String(key))) {
+      const found = deepFindRemoteImageUrl(value, depth + 1);
+      if (found) return found;
+    }
+  }
+  return null;
+}
+
+function deriveCooldownSeconds(entry) {
+  const direct = Number(
+    entry?.cooldownSeconds ?? entry?.cooldown_seconds ?? entry?.cooldown ?? NaN,
+  );
+  if (Number.isFinite(direct)) return Math.max(0, direct);
+
+  const endsAtRaw =
+    entry?.cooldownEndsAt ??
+    entry?.cooldown_ends_at ??
+    entry?.cooldownEndAt ??
+    entry?.cooldown_end_at ??
+    null;
+  const endsAtMs = endsAtRaw ? new Date(endsAtRaw).getTime() : NaN;
+  if (Number.isFinite(endsAtMs)) {
+    return Math.max(0, Math.ceil((endsAtMs - Date.now()) / 1000));
+  }
+  return 0;
 }
 
 function normalizeWalletBalanceEntries(raw = []) {
@@ -951,6 +1032,7 @@ function startBackend() {
       ELECTRON_RUN_AS_NODE: "1",
       PBP_GUI_BRIDGE: "1",
       PBP_CONFIG_DIR: getBackendWorkingDirectory(),
+      PBP_DEFAULT_MISSION_RESET_LEVEL: defaultMissionResetLevel(),
       FORCE_COLOR: "0",
     },
     silent: true,
@@ -1154,7 +1236,9 @@ function applyStoppedModeConfig(parsed) {
       ? false
       : current.level20ResetEnabled === true;
     if (nextMissionEnabled && typeof patch.missionResetLevel !== "string") {
-      patch.missionResetLevel = String(current.missionResetLevel || "11");
+      patch.missionResetLevel = String(
+        current.missionResetLevel || defaultMissionResetLevel(),
+      );
     }
   }
 
@@ -1169,7 +1253,7 @@ function applyStoppedModeConfig(parsed) {
     backendStatus.currentMissionResetLevel = next.missionResetLevel;
   }
   backendStatus.currentMode = backendStatus.missionModeEnabled
-    ? `mission-${backendStatus.currentMissionResetLevel || "11"}`
+    ? `mission-${backendStatus.currentMissionResetLevel || defaultMissionResetLevel()}`
     : "normal";
   publishStatus();
 }
@@ -1469,7 +1553,7 @@ app.whenReady().then(async () => {
       backendStatus.sessionRewardTotals = next.sessionRewardTotals;
     }
     backendStatus.currentMode = backendStatus.missionModeEnabled
-      ? `mission-${backendStatus.currentMissionResetLevel || "11"}`
+      ? `mission-${backendStatus.currentMissionResetLevel || defaultMissionResetLevel()}`
       : "normal";
     logConfigPatch("Desktop", requestedPatch);
     publishStatus();
@@ -1917,6 +2001,124 @@ app.whenReady().then(async () => {
       const result = await loadPreview();
       pushSystemLog(
         `Rentals page refresh complete after login. Pool=${Number(result?.rentableCount || 0)}, active rentals=${Array.isArray(result?.activeRentals) ? result.activeRentals.length : 0}.`,
+      );
+      return result;
+    }
+  });
+  ipcMain.handle("nfts:list", async () => {
+    const loadNfts = async () => {
+      pushSystemLog("NFT page refresh started.");
+      pushSystemLog("NFT page refresh: fetching get_mission_nfts.");
+      const nftResult = await mcpCallTool(
+        "get_mission_nfts",
+        {},
+        { url: "https://pixelbypixel.studio/mcp" },
+      );
+      const nfts = normalizeNftList(nftResult || {}).map((entry, index) => {
+        const cooldownSeconds = deriveCooldownSeconds(entry);
+        const onCooldown =
+          entry?.onCooldown === true ||
+          entry?.on_cooldown === true ||
+          cooldownSeconds > 0;
+        const available = !onCooldown && cooldownSeconds <= 0;
+
+        return {
+        id:
+          entry?.account ||
+          entry?.nftAccount ||
+          entry?.mint ||
+          entry?.mintAddress ||
+          entry?.id ||
+          `nft-${index}`,
+        account:
+          entry?.account ||
+          entry?.nftAccount ||
+          entry?.tokenAddress ||
+          null,
+        mint:
+          entry?.mint ||
+          entry?.mintAddress ||
+          entry?.mint_address ||
+          null,
+        name:
+          entry?.offChainMetadata?.metadata?.name ||
+          entry?.DASMetadata?.name ||
+          entry?.metadata?.name ||
+          entry?.name ||
+          "Unknown NFT",
+        image: (() => {
+          const candidates = [
+            entry?.offChainMetadata?.metadata?.image,
+            entry?.offChainMetadata?.metadata?.imageUrl,
+            entry?.offChainMetadata?.metadata?.image_url,
+            entry?.DASMetadata?.image,
+            entry?.DASMetadata?.content?.files,
+            entry?.metadata?.image,
+            entry?.metadata?.imageUrl,
+            entry?.metadata?.image_url,
+            entry?.image,
+            entry?.imageUrl,
+            entry?.image_url,
+            entry?.thumbnail,
+            entry?.thumbnailUrl,
+            entry?.thumbnail_url,
+            entry,
+          ];
+          for (const candidate of candidates) {
+            const resolved = deepFindRemoteImageUrl(candidate);
+            if (resolved) return resolved;
+          }
+          return null;
+        })(),
+        collection:
+          entry?.collection ||
+          entry?.collectionName ||
+          entry?.collection_name ||
+          entry?.offChainMetadata?.metadata?.symbol ||
+          entry?.DASMetadata?.symbol ||
+          entry?.symbol ||
+          null,
+        level: Number.isFinite(Number(entry?.stats?.level))
+          ? Number(entry.stats.level)
+          : Number.isFinite(Number(entry?.level))
+            ? Number(entry.level)
+            : null,
+        cooldownSeconds,
+        cooldownEndsAt:
+          entry?.cooldownEndsAt ??
+          entry?.cooldown_ends_at ??
+          entry?.cooldownEndAt ??
+          entry?.cooldown_end_at ??
+          null,
+        onCooldown,
+        available,
+      };
+      });
+      return {
+        ok: true,
+        total: nfts.length,
+        nfts,
+      };
+    };
+
+    try {
+      const result = await loadNfts();
+      pushSystemLog(`NFT page refresh complete. NFTs=${Number(result?.total || 0)}.`);
+      return result;
+    } catch (error) {
+      if (!isAuthFailureMessage(error?.message)) {
+        pushSystemLog(`NFT page refresh failed: ${String(error?.message || error)}`);
+        return { ok: false, error: String(error?.message || error) };
+      }
+      pushSystemLog("NFT page refresh requires login. Opening browser login.");
+      await runOnboardingPopupLogin({
+        url: "https://pixelbypixel.studio/mcp",
+        timeoutMs: 30000,
+        loginTimeoutMs: 180000,
+      });
+      const result = await loadNfts();
+      pushSystemLog(
+        `NFT page refresh complete after login. NFTs=${Number(result?.total || 0)}.`,
       );
       return result;
     }
