@@ -73,6 +73,7 @@ const backendStatus = {
   currentMissionStats: null,
   slotUnlockSummary: null,
   currentMode: null,
+  defaultMissionResetLevel: null,
   level20ResetEnabled: null,
   missionModeEnabled: null,
   currentMissionResetLevel: null,
@@ -473,6 +474,7 @@ function applyDesktopConfigPatch(patch = {}) {
 function hydrateBackendStatusFromConfig() {
   const config = readDesktopConfig();
   backendStatus.analytics = loadAnalytics();
+  backendStatus.defaultMissionResetLevel = defaultMissionResetLevel();
   if (typeof config.level20ResetEnabled === "boolean") {
     backendStatus.level20ResetEnabled = config.level20ResetEnabled;
   }

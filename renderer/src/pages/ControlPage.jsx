@@ -363,7 +363,7 @@ function ControlView() {
     await runModeCommand(["mm off", "20r on"]);
   };
   const activateMissionMode = async () => {
-    const resetLevel = String(status.currentMissionResetLevel || "11").trim();
+    const resetLevel = String(status.defaultMissionResetLevel || "11").trim();
     setModeSelection("mission");
     setResetEnabled(false);
     await applyConfigPatch({
@@ -1038,7 +1038,9 @@ function ControlView() {
       if (!bridge?.sendCommand) return;
       if (isMissionMode) {
         const resetLevel = String(
-          status.currentMissionResetLevel || "11",
+          status.currentMissionResetLevel ||
+            status.defaultMissionResetLevel ||
+            "11",
         ).trim();
         const levelNumber = Number(resetLevel);
         const safeLevel =

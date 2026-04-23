@@ -53,6 +53,7 @@ export default function useBackendState() {
     currentUserWalletSummary: null,
     currentMissionStats: null,
     currentMode: null,
+    defaultMissionResetLevel: null,
     level20ResetEnabled: null,
     missionModeEnabled: null,
     currentMissionResetLevel: null,
