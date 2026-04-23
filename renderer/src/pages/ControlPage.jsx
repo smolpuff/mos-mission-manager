@@ -363,14 +363,15 @@ function ControlView() {
     await runModeCommand(["mm off", "20r on"]);
   };
   const activateMissionMode = async () => {
+    const resetLevel = String(status.currentMissionResetLevel || "11").trim();
     setModeSelection("mission");
     setResetEnabled(false);
     await applyConfigPatch({
       missionModeEnabled: true,
-      missionResetLevel: "6",
+      missionResetLevel: resetLevel,
       level20ResetEnabled: false,
     });
-    await runModeCommand(["mm 6"]);
+    await runModeCommand([`mm ${resetLevel}`]);
   };
   const normalizeImageUrl = (raw) => {
     const value = String(raw || "").trim();
@@ -1037,13 +1038,13 @@ function ControlView() {
       if (!bridge?.sendCommand) return;
       if (isMissionMode) {
         const resetLevel = String(
-          status.currentMissionResetLevel || "6",
+          status.currentMissionResetLevel || "11",
         ).trim();
         const levelNumber = Number(resetLevel);
         const safeLevel =
           Number.isFinite(levelNumber) && levelNumber > 0
             ? Math.floor(levelNumber)
-            : 6;
+            : 11;
         await bridge.sendCommand(`mm ${safeLevel}`);
         return;
       }
