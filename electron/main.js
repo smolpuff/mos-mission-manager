@@ -42,6 +42,9 @@ let stopTimer = null;
 let logHistory = [];
 const pendingBackendRequests = new Map();
 const maxLogHistory = 1200;
+let fundingWalletSummaryRefreshPromise = null;
+let fundingWalletSummaryLastAttemptAt = 0;
+const FUNDING_WALLET_REFRESH_MIN_INTERVAL_MS = 30000;
 const execFileAsync = (file, args, options = {}) =>
   new Promise((resolve, reject) => {
     execFile(file, args, options, (error, stdout, stderr) => {
@@ -1562,6 +1565,25 @@ app.whenReady().then(async () => {
     return { config: next, status: { ...backendStatus } };
   });
   ipcMain.handle("wallet:refresh-summary", async () => {
+    const now = Date.now();
+    if (fundingWalletSummaryRefreshPromise) {
+      pushSystemLog("Funding wallet summary refresh coalesced: request already in flight.");
+      return fundingWalletSummaryRefreshPromise;
+    }
+    if (
+      backendStatus.fundingWalletSummary &&
+      now - fundingWalletSummaryLastAttemptAt <
+        FUNDING_WALLET_REFRESH_MIN_INTERVAL_MS
+    ) {
+      pushSystemLog("Funding wallet summary refresh skipped: recent summary already available.");
+      return {
+        walletId: null,
+        displayName: null,
+        fundingWalletSummary: backendStatus.fundingWalletSummary,
+        skipped: true,
+      };
+    }
+    fundingWalletSummaryLastAttemptAt = now;
     pushSystemLog("Funding wallet summary refresh requested.");
     const config = readDesktopConfig();
     const walletAddress =
@@ -1577,31 +1599,36 @@ app.whenReady().then(async () => {
       publishStatus();
       return { walletId: null, displayName: null, fundingWalletSummary: null };
     }
-    try {
-      const rpcSummary = await fetchOnchainFundingWalletSummary(walletAddress);
-      const summary = {
-        walletId: null,
-        displayName: null,
-        fundingWalletSummary: rpcSummary,
-      };
-      backendStatus.signerMode = config.signerMode || backendStatus.signerMode;
-      backendStatus.fundingWalletSummary = summary.fundingWalletSummary;
-      pushSystemLog("Funding wallet summary refresh complete.");
-      publishStatus();
-      return summary;
-    } catch (error) {
-      // Don't crash the renderer on RPC rate limits; keep the last known good summary.
-      pushSystemLog(
-        `Funding wallet summary refresh failed: ${String(error?.message || error)}`,
-      );
-      publishStatus();
-      return {
-        walletId: null,
-        displayName: null,
-        fundingWalletSummary: backendStatus.fundingWalletSummary || null,
-        error: String(error?.message || error),
-      };
-    }
+    fundingWalletSummaryRefreshPromise = (async () => {
+      try {
+        const rpcSummary = await fetchOnchainFundingWalletSummary(walletAddress);
+        const summary = {
+          walletId: null,
+          displayName: null,
+          fundingWalletSummary: rpcSummary,
+        };
+        backendStatus.signerMode = config.signerMode || backendStatus.signerMode;
+        backendStatus.fundingWalletSummary = summary.fundingWalletSummary;
+        pushSystemLog("Funding wallet summary refresh complete.");
+        publishStatus();
+        return summary;
+      } catch (error) {
+        // Don't crash the renderer on RPC rate limits; keep the last known good summary.
+        pushSystemLog(
+          `Funding wallet summary refresh failed: ${String(error?.message || error)}`,
+        );
+        publishStatus();
+        return {
+          walletId: null,
+          displayName: null,
+          fundingWalletSummary: backendStatus.fundingWalletSummary || null,
+          error: String(error?.message || error),
+        };
+      } finally {
+        fundingWalletSummaryRefreshPromise = null;
+      }
+    })();
+    return fundingWalletSummaryRefreshPromise;
   });
   ipcMain.handle("wallet:bootstrap-summary", async () => {
     pushSystemLog("Bootstrap wallet summary requested.");
