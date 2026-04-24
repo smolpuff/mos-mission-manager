@@ -335,6 +335,16 @@ function readDesktopConfig() {
   }
 }
 
+function readDesktopConfigWithMeta() {
+  const file = getConfigPath();
+  try {
+    const raw = fs.readFileSync(file, "utf8");
+    return { config: JSON.parse(raw), parseFailed: false };
+  } catch {
+    return { config: {}, parseFailed: fs.existsSync(file) };
+  }
+}
+
 function loadAnalytics() {
   try {
     const raw = fs.readFileSync(getAnalyticsPath(), "utf8");
@@ -480,11 +490,25 @@ function flushAnalyticsBuffers() {
 }
 
 function applyDesktopConfigPatch(patch = {}) {
+  const { config: current, parseFailed } = readDesktopConfigWithMeta();
+  if (parseFailed) {
+    throw new Error(
+      "Refusing to overwrite config.json because it is not valid JSON. Fix syntax first.",
+    );
+  }
   const next = {
-    ...readDesktopConfig(),
+    ...current,
     ...patch,
   };
-  fs.writeFileSync(getConfigPath(), JSON.stringify(next, null, 2));
+  const file = getConfigPath();
+  const json = JSON.stringify(next, null, 2);
+  try {
+    if (fs.existsSync(file)) {
+      const existing = fs.readFileSync(file, "utf8");
+      if (existing === json) return next;
+    }
+  } catch {}
+  fs.writeFileSync(file, json);
   return next;
 }
 

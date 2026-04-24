@@ -43,6 +43,13 @@ function writeConfigFileAtomic(configPath, config) {
   ensureConfigDir(configPath);
   const file = String(configPath || "").trim();
   if (!file) throw new Error("configPath is required");
+  const json = JSON.stringify(config, null, 2);
+  try {
+    if (fs.existsSync(file)) {
+      const existing = fs.readFileSync(file, "utf8");
+      if (existing === json) return;
+    }
+  } catch {}
   const backup = configBackupPath(file);
   if (fs.existsSync(file)) {
     try {
@@ -50,7 +57,6 @@ function writeConfigFileAtomic(configPath, config) {
     } catch {}
   }
   const tmp = `${file}.tmp.${process.pid}.${Date.now()}`;
-  const json = JSON.stringify(config, null, 2);
   fs.writeFileSync(tmp, json);
   try {
     fs.renameSync(tmp, file);
@@ -179,10 +185,12 @@ function salvageConfigFromBrokenText(rawText) {
 
 function loadConfig(ctx, logWithTimestamp) {
   let parseFailed = false;
+  ctx.configLoadParseFailed = false;
   try {
     ctx.config = tryReadJsonFile(ctx.configPath) || {};
   } catch (err) {
     parseFailed = true;
+    ctx.configLoadParseFailed = true;
     ctx.config = {};
     const rawBrokenConfig = (() => {
       try {
@@ -240,17 +248,10 @@ function loadConfig(ctx, logWithTimestamp) {
       }
     } catch {}
 
-    try {
-      writeConfigFileAtomic(ctx.configPath, ctx.config);
-      if (typeof logWithTimestamp === "function") {
-        logWithTimestamp("[CONFIG] Wrote reconstructed config after parse failure.");
-      }
-    } catch (writeErr) {
-      if (typeof logWithTimestamp === "function") {
-        logWithTimestamp(
-          `[ERROR] Failed to write reconstructed config.json: ${writeErr.message}`,
-        );
-      }
+    if (typeof logWithTimestamp === "function") {
+      logWithTimestamp(
+        "[CONFIG] Parse recovery loaded in-memory only. Existing config.json was left untouched.",
+      );
     }
   }
 
@@ -339,6 +340,14 @@ function loadConfig(ctx, logWithTimestamp) {
 }
 
 function saveConfig(ctx, logDebug) {
+  if (ctx?.configLoadParseFailed) {
+    try {
+      logDebug("config", "save_skipped_parse_failed", {
+        reason: "config_load_parse_failed",
+      });
+    } catch {}
+    return;
+  }
   const existing = pendingSaves.get(ctx);
   if (existing?.timer) clearTimeout(existing.timer);
 
@@ -356,6 +365,14 @@ function saveConfig(ctx, logDebug) {
 }
 
 function flushConfig(ctx, logDebug) {
+  if (ctx?.configLoadParseFailed) {
+    try {
+      logDebug("config", "flush_skipped_parse_failed", {
+        reason: "config_load_parse_failed",
+      });
+    } catch {}
+    return;
+  }
   const pending = pendingSaves.get(ctx);
   if (pending?.timer) {
     clearTimeout(pending.timer);
