@@ -48,10 +48,13 @@ export default function HeaderUser({
 
   const mainSol = findBalance("sol");
   const mainPbp = findBalance("pbp");
+  const displayName = String(status.currentUserDisplayName || "").trim();
+  const walletId = String(status.currentUserWalletId || "").trim();
+  const username = displayName || walletId || "Unknown";
   return (
     <section className="space-y-0 grid grid-cols-[70%_auto]" id="app__header">
       <div className="left">
-        <h1 className="text-2xl user_meta__username">rmrfkorea </h1>
+        <h1 className="text-2xl user_meta__username">{username}</h1>
         {signerMode === "manual" ? (
           <div className="user_meta__funding_wallet flex gap-3 items-center">
             <div className="text-xs mt-1">

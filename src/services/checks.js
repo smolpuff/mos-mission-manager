@@ -1568,27 +1568,10 @@ function createChecksService(ctx, logger, mcp, services = {}) {
       });
 
       if (candidates.length === 0) {
-        const slotUnlockResult = await tryUnlockNextMissionSlot({
+        logDebug("assign", "slot_unlock_skipped_auto", {
           reason,
-          missionsResult: currentMissionResult,
+          summary: extractSlotUnlockSummary(currentMissionResult) || null,
         });
-        if (slotUnlockResult.unlocked) {
-          const refreshed =
-            await loadAssignableCandidates(reason, resolved, null);
-          currentMissionResult = refreshed.result;
-          missions = refreshed.missions;
-          candidates = refreshed.candidates;
-          logDebug("assign", "candidates_rebuilt_after_slot_unlock", {
-            reason,
-            slotNumber: slotUnlockResult.slotNumber,
-            candidates: candidates.map((m) => ({
-              name: missionName(m),
-              assignedMissionId: assignedMissionId(m),
-              catalogMissionId: catalogMissionId(m),
-              slot: m?.slot ?? null,
-            })),
-          });
-        }
       }
 
       if (candidates.length === 0) {
