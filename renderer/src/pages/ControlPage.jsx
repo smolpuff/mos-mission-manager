@@ -117,6 +117,13 @@ function missionKey(value) {
     .replace(/[^a-z0-9 ]/g, "");
 }
 
+function isLikelyRealMissionName(value) {
+  const name = String(value || "").trim();
+  if (!name) return false;
+  const lowered = name.toLowerCase();
+  return lowered !== "unknown mission" && lowered !== "unassigned";
+}
+
 function SlideNumberFormatted({ value, format }) {
   const formatFn = typeof format === "function" ? format : (n) => String(n);
   const [current, setCurrent] = useState(Number(value) || 0);
@@ -1437,20 +1444,41 @@ function ControlView() {
     const selectedMissionNames = Array.from(onboardingSelectedMissions)
       .map((name) => String(name || "").trim())
       .filter(Boolean);
+    const pulledMissionNames = onboardingMissions
+      .slice()
+      .sort((a, b) => Number(a?.slot || 99) - Number(b?.slot || 99))
+      .filter((mission) => {
+        const slot = Number(mission?.slot);
+        const hasSlot = Number.isFinite(slot) && slot >= 1 && slot <= 4;
+        const hasName = isLikelyRealMissionName(mission?.name);
+        return hasSlot && hasName;
+      })
+      .map((mission) => String(mission?.name || "").trim())
+      .filter(Boolean);
+    const targetMissions = Array.from(
+      new Set(
+        (pulledMissionNames.length > 0
+          ? pulledMissionNames
+          : selectedMissionNames.length > 0
+            ? selectedMissionNames
+            : onboardingMissions
+                .map((mission) => String(mission?.name || "").trim())
+                .filter(isLikelyRealMissionName)
+        ).filter(Boolean),
+      ),
+    );
     setOnboardingBusy(true);
     setOnboardingError(null);
     try {
       await applyConfigPatch({
         signerMode: onboardingSignerMode,
-        targetMissions:
-          selectedMissionNames.length > 0 ? selectedMissionNames : undefined,
+        targetMissions: targetMissions.length > 0 ? targetMissions : undefined,
         firstRunOnboardingCompleted: true,
       });
       if (bridge?.applyOnboardingSelection) {
         const response = await bridge.applyOnboardingSelection({
           signerMode: onboardingSignerMode,
-          targetMissions:
-            selectedMissionNames.length > 0 ? selectedMissionNames : undefined,
+          targetMissions: targetMissions.length > 0 ? targetMissions : undefined,
         });
         if (!response?.ok) {
           throw new Error(response?.error || "Failed to apply onboarding.");

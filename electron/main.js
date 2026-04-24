@@ -1892,11 +1892,18 @@ app.whenReady().then(async () => {
     };
   });
   ipcMain.handle("onboarding:apply-selection", async (_event, payload = {}) => {
+    const nextTargets = Array.isArray(payload?.targetMissions)
+      ? Array.from(
+          new Set(
+            payload.targetMissions
+              .map((entry) => String(entry || "").trim())
+              .filter(Boolean),
+          ),
+        )
+      : undefined;
     const configPatch = {
       signerMode: String(payload?.signerMode || "").trim() || undefined,
-      targetMissions: Array.isArray(payload?.targetMissions)
-        ? payload.targetMissions
-        : undefined,
+      targetMissions: nextTargets,
       firstRunOnboardingCompleted: true,
     };
     const next = applyDesktopConfigPatch(configPatch);
