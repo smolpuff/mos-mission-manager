@@ -8,7 +8,7 @@
     "start": "node app.js",
     "start:debug": "node app.js --debug",
     "desktop": "electron .",
-    "desktop:dev": "concurrently -k \"vite\" \"wait-on tcp:5173 && electron . 2>&1 | grep -vE 'task_policy_set TASK_(CATEGORY|SUPPRESSION)_POLICY: \\(os/kern\\) invalid argument \\(4\\)' || true\"",
+    "desktop:dev": "concurrently -k \"vite\" \"wait-on tcp:5173 && electron . 2>&1",
     "desktop:build": "vite build",
     "desktop:dist": "npm run desktop:build && electron-builder",
     "desktop:dist:mac": "npm run desktop:build && electron-builder --mac dir zip",

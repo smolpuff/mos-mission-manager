@@ -30,6 +30,20 @@ const RENDERER_DEV_URL =
 const rendererIndexPath = path.join(ROOT_DIR, "dist", "index.html");
 const DESKTOP_DEVTOOLS_ENABLED = process.env.PBP_DESKTOP_DEVTOOLS === "1";
 
+// Force Chromium cache/session storage to a stable, writable per-user location
+// on Windows to avoid "Unable to move/create cache (0x5)" startup errors.
+if (process.platform === "win32") {
+  try {
+    const appData = app.getPath("appData");
+    const stableUserData = path.join(appData, "missions-v3-mcp");
+    const stableSessionData = path.join(stableUserData, "session");
+    fs.mkdirSync(stableUserData, { recursive: true });
+    fs.mkdirSync(stableSessionData, { recursive: true });
+    app.setPath("userData", stableUserData);
+    app.setPath("sessionData", stableSessionData);
+  } catch {}
+}
+
 function defaultMissionResetLevel() {
   return app.isPackaged ? "11" : "6";
 }

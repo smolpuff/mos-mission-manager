@@ -494,21 +494,16 @@ function createSignerService(ctx, logger) {
       return;
     }
     if (provider === "windows_dpapi") {
-      const file = keyStoreFileAbsolute();
+      const file = path.resolve(keyStoreFileAbsolute());
       const script =
         "$ErrorActionPreference='Stop'; " +
         "$plain=[string]$env:SIGNER_VAULT_KEY_B64; " +
-        "$file=[string]$env:SIGNER_VAULT_KEY_FILE; " +
         "if (-not $plain) { throw 'Vault key text is empty.' }; " +
-        "if (-not $file) { throw 'Vault key path is empty.' }; " +
         "$secure=ConvertTo-SecureString -String $plain -AsPlainText -Force; " +
         "$enc=ConvertFrom-SecureString -SecureString $secure; " +
-        "$dir=[System.IO.Path]::GetDirectoryName($file); " +
-        "if ($dir) { [System.IO.Directory]::CreateDirectory($dir) | Out-Null }; " +
-        "$tmp=$file + '.tmp'; " +
-        "[System.IO.File]::WriteAllText($tmp,$enc); " +
-        "if ([System.IO.File]::Exists($file)) { [System.IO.File]::Replace($tmp,$file,$null,$true) } else { [System.IO.File]::Move($tmp,$file) };";
-      await execFileAsync("powershell", [
+        "if (-not $enc) { throw 'Vault key encryption failed.' }; " +
+        "[Console]::Out.Write($enc);";
+      const encrypted = (await execFileAsync("powershell", [
         "-NoProfile",
         "-NonInteractive",
         "-Command",
@@ -516,9 +511,35 @@ function createSignerService(ctx, logger) {
       ], {
         env: {
           SIGNER_VAULT_KEY_B64: encoded,
-          SIGNER_VAULT_KEY_FILE: file,
         },
-      });
+      })).trim();
+      if (!encrypted) {
+        throw new Error("Vault key encryption output is empty.");
+      }
+      const dir = path.dirname(file);
+      if (dir) fs.mkdirSync(dir, { recursive: true });
+      const tmp = `${file}.tmp.${process.pid}.${Date.now()}`;
+      try {
+        fs.writeFileSync(tmp, encrypted, "utf8");
+        try {
+          fs.renameSync(tmp, file);
+        } catch (error) {
+          if (error && (error.code === "EEXIST" || error.code === "EPERM")) {
+            try {
+              fs.unlinkSync(file);
+            } catch (unlinkError) {
+              if (!unlinkError || unlinkError.code !== "ENOENT") throw unlinkError;
+            }
+            fs.renameSync(tmp, file);
+          } else {
+            throw error;
+          }
+        }
+      } finally {
+        try {
+          if (fs.existsSync(tmp)) fs.unlinkSync(tmp);
+        } catch {}
+      }
       return;
     }
     if (provider === "linux_secret_service") {
