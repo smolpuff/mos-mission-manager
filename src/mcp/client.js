@@ -1,7 +1,11 @@
 "use strict";
 
 const fs = require("fs");
-const { login: mcpLogin, refreshAccessToken } = require("../../lib/mcp");
+const {
+  login: mcpLogin,
+  refreshAccessToken,
+  clearTokenFile,
+} = require("../../lib/mcp");
 
 function createMcpClient(ctx, logger) {
   const { logWithTimestamp, logDebug } = logger;
@@ -332,10 +336,21 @@ function createMcpClient(ctx, logger) {
     }
   }
 
+  function logout() {
+    clearTokenFile(ctx.tokenFilePath);
+    ctx.isAuthenticated = false;
+    ctx.authRefreshSignal = 0;
+    ctx.currentUserDisplayName = "unknown";
+    ctx.currentUserWalletId = "unknown";
+    ctx.currentUserWalletSummary = null;
+    setMcpConnection("disconnected");
+  }
+
   return {
     bearerToken,
     mcpToolCall,
     runLoginFlow,
+    logout,
   };
 }
 

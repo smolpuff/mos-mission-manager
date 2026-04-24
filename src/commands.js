@@ -8,6 +8,7 @@ function createCommandHandler(ctx, logger, actions, configApi, services = {}) {
   const { logWithTimestamp, clearLogBuffer } = logger;
   const {
     runLoginFlow,
+    logout,
     runInitialChecks,
     startWatchLoop,
     runManualProcess,
@@ -17,6 +18,17 @@ function createCommandHandler(ctx, logger, actions, configApi, services = {}) {
   } = actions;
   const { saveConfig, flushConfig } = configApi;
   const { signer = null } = services;
+
+  function looksLikeSignerImportValue(value) {
+    const text = String(value || "").trim();
+    if (!text) return false;
+    const words = text.split(/\s+/).filter(Boolean);
+    if (words.length === 12 || words.length === 24) return true;
+    if (/^\s*\[.*\]\s*$/.test(text)) return true;
+    if (text.includes(",") && text.split(",").length >= 8) return true;
+    if (/^[1-9A-HJ-NP-Za-km-z]{32,128}$/.test(text)) return true;
+    return false;
+  }
 
   async function quitWholeApp({ reason = "user" } = {}) {
     logWithTimestamp("[KILL -9] 🦒 Korea loves you! Goodbye! 👋");
@@ -45,7 +57,7 @@ function createCommandHandler(ctx, logger, actions, configApi, services = {}) {
 
   function showHelp() {
     logWithTimestamp(
-      "[HELP] h/help, clear, status, login, check, c, r, reset20, 20r [on|off], mm [off|on|<level>], pause, resume, q",
+      "[HELP] h/help, clear, status, login, logout, check, c, r, reset20, 20r [on|off], mm [off|on|<level>], pause, resume, q",
     );
     logWithTimestamp(
       "[HELP] signer [status|doctor|setup|create|reveal|app_wallet|manual|dapp|import [path-or-key]|remove|unlock|lock]",
@@ -97,6 +109,22 @@ function createCommandHandler(ctx, logger, actions, configApi, services = {}) {
       signer.setManualApprovalHandler((payload) =>
         confirmSignerApproval(rl, payload),
       );
+    }
+
+    async function confirmYesOrCaptureImportValue(prompt) {
+      const answer = await askQuestion(rl, prompt);
+      const normalized = String(answer || "").trim();
+      const lowered = normalized.toLowerCase();
+      if (lowered === "yes" || lowered === "y") {
+        return { ok: true, capturedImportValue: null };
+      }
+      if (looksLikeSignerImportValue(normalized)) {
+        logWithTimestamp(
+          "[SIGNER] Detected signer import data pasted into a yes/no prompt. Continuing import flow.",
+        );
+        return { ok: true, capturedImportValue: normalized };
+      }
+      return { ok: false, capturedImportValue: null };
     }
 
     async function runAppWalletOnboardingPrompt() {
@@ -162,11 +190,10 @@ function createCommandHandler(ctx, logger, actions, configApi, services = {}) {
     }
 
     async function runSignerImportPrompt() {
-      const riskOk = await confirmYes(
-        rl,
+      const riskResult = await confirmYesOrCaptureImportValue(
         "app_wallet mode is for a dedicated burner wallet only. Continue with key import? This will replace the current imported app wallet if one exists. yes/no ",
       );
-      if (!riskOk) {
+      if (!riskResult.ok) {
         logWithTimestamp("[SIGNER] Import cancelled.");
         return;
       }
@@ -180,10 +207,12 @@ function createCommandHandler(ctx, logger, actions, configApi, services = {}) {
         logWithTimestamp("[SIGNER] Import cancelled.");
         return;
       }
-      const pasted = await askQuestion(
-        rl,
-        "Paste your private key, recovery phrase, keypair text, or key array, then press enter: ",
-      );
+      const pasted =
+        riskResult.capturedImportValue ||
+        (await askQuestion(
+          rl,
+          "Paste your private key, recovery phrase, keypair text, or key array, then press enter: ",
+        ));
       if (!pasted) {
         logWithTimestamp("[SIGNER] Import cancelled.");
         return;
@@ -254,6 +283,20 @@ function createCommandHandler(ctx, logger, actions, configApi, services = {}) {
           await runInitialChecks();
           void startWatchLoop();
         }
+      },
+      logout: async () => {
+        ctx.watchLoopEnabled = false;
+        ctx.config.watchLoopEnabled = false;
+        flushConfig(ctx, logger.logDebug);
+        try {
+          if (typeof stopWatchLoop === "function") {
+            await stopWatchLoop({ persist: false, waitForCycle: true });
+          }
+        } catch {}
+        if (typeof logout === "function") {
+          logout();
+        }
+        logWithTimestamp("[AUTH] Logged out. Saved token cleared.");
       },
       check: async () => {
         await runInitialChecks();
@@ -437,11 +480,10 @@ function createCommandHandler(ctx, logger, actions, configApi, services = {}) {
             await runSignerImportPrompt();
             return;
           }
-          const riskOk = await confirmYes(
-            rl,
+          const riskResult = await confirmYesOrCaptureImportValue(
             "app_wallet mode is for a dedicated burner wallet only. Continue with import? This will replace the current imported app wallet if one exists. yes/no ",
           );
-          if (!riskOk) {
+          if (!riskResult.ok) {
             logWithTimestamp("[SIGNER] Import cancelled.");
             return;
           }
@@ -455,11 +497,16 @@ function createCommandHandler(ctx, logger, actions, configApi, services = {}) {
             logWithTimestamp("[SIGNER] Import cancelled.");
             return;
           }
-          const importPath = importValue && fs.existsSync(importValue) ? importValue : null;
+          const effectiveImportValue =
+            riskResult.capturedImportValue || importValue;
+          const importPath =
+            effectiveImportValue && fs.existsSync(effectiveImportValue)
+              ? effectiveImportValue
+              : null;
           if (!importPath) {
             try {
               signer.setSignerMode("app_wallet", "import");
-              await signer.importFromText(importValue);
+              await signer.importFromText(effectiveImportValue);
               flushConfig(ctx, logger.logDebug);
               await refreshFundingWalletHeader();
             } catch (error) {

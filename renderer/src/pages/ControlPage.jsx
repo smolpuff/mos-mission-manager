@@ -17,7 +17,7 @@ import tcIcon from "../img/icon_tc.webp";
 import backImg from "../img/back.png";
 const debug = false;
 
-const quickCommands = ["login", "check", "pause", "resume", "status", "r", "c"];
+const quickCommands = ["login", "logout", "check", "pause", "resume", "status", "r", "c"];
 
 function useDesktopBridge() {
   return window.missionsDesktop;
@@ -648,6 +648,7 @@ function ControlView() {
   const [onboardingDataLoading, setOnboardingDataLoading] = useState(false);
   const [onboardingBodyHeight, setOnboardingBodyHeight] = useState(null);
   const onboardingBodyRef = useRef(null);
+  const autoFundingRefreshAttemptedRef = useRef(false);
   const onboardingCatalogByName = useMemo(() => {
     const map = new Map();
     for (const mission of onboardingMissionCatalog) {
@@ -873,9 +874,14 @@ function ControlView() {
     // address to config asynchronously. Do one delayed refresh so the balance
     // populates without polling.
     const mode = String(status.signerMode || "").trim();
-    if (mode !== "app_wallet") return;
+    if (mode !== "app_wallet") {
+      autoFundingRefreshAttemptedRef.current = false;
+      return;
+    }
     if (status.fundingWalletSummary?.status === "ok") return;
     if (!bridge?.refreshWalletSummary) return;
+    if (autoFundingRefreshAttemptedRef.current) return;
+    autoFundingRefreshAttemptedRef.current = true;
     const timer = setTimeout(() => {
       void bridge.refreshWalletSummary();
     }, 400);

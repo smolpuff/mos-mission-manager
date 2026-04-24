@@ -32,6 +32,7 @@ const commands = createCommandHandler(
   logger,
   {
     runLoginFlow: mcp.runLoginFlow,
+    logout: mcp.logout,
     runInitialChecks: checks.runInitialChecks,
     startWatchLoop: watch.startWatchLoop,
     runWatchCycle: watch.runWatchCycle,

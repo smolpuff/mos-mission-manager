@@ -3,7 +3,7 @@ import WindowChrome from "../components/WindowChrome/app";
 import useBackendState from "../components/useBackendState/app";
 
 const debug = false;
-const quickCommands = ["login", "check", "pause", "resume", "status", "r", "c"];
+const quickCommands = ["login", "logout", "check", "pause", "resume", "status", "r", "c"];
 
 export default function CliPage() {
   const { bridge, status, logs } = useBackendState();

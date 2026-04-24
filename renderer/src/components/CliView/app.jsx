@@ -16,7 +16,7 @@ export default function CliView({
   bridge,
   status,
   logs,
-  quickCommands = ["login", "check", "pause", "resume", "status", "r", "c"],
+  quickCommands = ["login", "logout", "check", "pause", "resume", "status", "r", "c"],
   onSendCommand,
 }) {
   const [command, setCommand] = useState("");

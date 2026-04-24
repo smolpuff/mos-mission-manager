@@ -3,7 +3,7 @@
 const path = require("path");
 const os = require("os");
 
-const APP_VERSION = "3.1.0";
+const APP_VERSION = "3.2.0";
 const APP_NAME = "missions-v3-mcp";
 const DEFAULT_MISSION_RESET_LEVEL =
   String(process.env.PBP_DEFAULT_MISSION_RESET_LEVEL || "").trim() || "11";

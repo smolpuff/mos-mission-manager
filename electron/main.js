@@ -1607,7 +1607,6 @@ app.whenReady().then(async () => {
   ipcMain.handle("wallet:refresh-summary", async () => {
     const now = Date.now();
     if (fundingWalletSummaryRefreshPromise) {
-      pushSystemLog("Funding wallet summary refresh coalesced: request already in flight.");
       return fundingWalletSummaryRefreshPromise;
     }
     if (
@@ -1615,7 +1614,6 @@ app.whenReady().then(async () => {
       now - fundingWalletSummaryLastAttemptAt <
         FUNDING_WALLET_REFRESH_MIN_INTERVAL_MS
     ) {
-      pushSystemLog("Funding wallet summary refresh skipped: recent summary already available.");
       return {
         walletId: null,
         displayName: null,
@@ -1633,7 +1631,6 @@ app.whenReady().then(async () => {
       String(config?.walletAddress || "").trim() ||
       null;
     if (!walletAddress) {
-      pushSystemLog("Funding wallet summary refresh skipped: no wallet address set.");
       backendStatus.fundingWalletSummary = null;
       backendStatus.signerMode = config.signerMode || backendStatus.signerMode;
       publishStatus();

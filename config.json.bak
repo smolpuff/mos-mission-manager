@@ -1,0 +1,52 @@
+{
+  "targetMissions": [
+    "Do it All!",
+    "Race!",
+    "Get Tilted for Points!",
+    "Race for Points"
+  ],
+  "level20ResetEnabled": false,
+  "missionModeEnabled": true,
+  "nftCooldownResetEnabled": false,
+  "missionResetLevel": "20",
+  "signerMode": "app_wallet",
+  "signer": {
+    "vaultFile": "data/signer-vault.json",
+    "walletRef": "wallet_cb97f1c5dd41",
+    "walletAddress": "ACzspARVboiV7LHuzQzguqJsNgZV6KiR56iStTbcb4tS",
+    "derivationPath": "m/44'/501'/0'/0'",
+    "importSourceType": "mnemonic",
+    "hasRecoveryPhraseBackup": true,
+    "vaultVersion": 1,
+    "algorithm": "aes-256-gcm",
+    "importedAt": "2026-04-24T03:21:59.398Z",
+    "keyStoreProvider": "macos_keychain",
+    "keyStoreService": "missions-v3-mcp.signer.v2.6db4bc4456b23e2e",
+    "keyStoreAccount": "app-wallet-vault-key",
+    "keyStoreFile": null,
+    "allowedActions": [
+      "nft_cooldown_reset",
+      "mission_reroll",
+      "mission_swap",
+      "mission_slot_unlock"
+    ],
+    "enabled": true,
+    "auditFile": "data/signer-audit.log",
+    "replayWindowSeconds": 180,
+    "actionCooldownSeconds": {
+      "nft_cooldown_reset": 10,
+      "mission_reroll": 10,
+      "mission_swap": 15,
+      "mission_slot_unlock": 30
+    },
+    "maxActionCost": {
+      "nft_cooldown_reset": 1000,
+      "mission_reroll": 1000,
+      "mission_swap": 1000,
+      "mission_slot_unlock": 5000
+    }
+  },
+  "totalClaimed": 283,
+  "firstRunOnboardingCompleted": true,
+  "enableRentals": false
+}

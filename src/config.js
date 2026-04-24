@@ -1,19 +1,103 @@
 "use strict";
 
 const fs = require("fs");
+const path = require("path");
 
 const SAVE_DEBOUNCE_MS = 350;
 const pendingSaves = new WeakMap();
 const DEFAULT_TARGET_MISSIONS = ["Do it All!", "Race!"];
 
-function loadConfig(ctx, logWithTimestamp) {
+function configBackupPath(configPath) {
+  return `${String(configPath || "").trim()}.bak`;
+}
+
+function configBrokenPath(configPath) {
+  return `${String(configPath || "").trim()}.broken.${Date.now()}`;
+}
+
+function ensureConfigDir(configPath) {
+  const dir = path.dirname(String(configPath || ""));
+  if (dir) fs.mkdirSync(dir, { recursive: true });
+}
+
+function writeConfigFileAtomic(configPath, config) {
+  ensureConfigDir(configPath);
+  const file = String(configPath || "").trim();
+  if (!file) throw new Error("configPath is required");
+  const backup = configBackupPath(file);
+  if (fs.existsSync(file)) {
+    try {
+      fs.copyFileSync(file, backup);
+    } catch {}
+  }
+  const tmp = `${file}.tmp.${process.pid}.${Date.now()}`;
+  const json = JSON.stringify(config, null, 2);
+  fs.writeFileSync(tmp, json);
   try {
-    ctx.config = fs.existsSync(ctx.configPath)
-      ? JSON.parse(fs.readFileSync(ctx.configPath, "utf8"))
-      : {};
+    fs.renameSync(tmp, file);
+  } catch (error) {
+    if (error && (error.code === "EEXIST" || error.code === "EPERM")) {
+      try {
+        fs.unlinkSync(file);
+      } catch (unlinkError) {
+        if (!unlinkError || unlinkError.code !== "ENOENT") throw unlinkError;
+      }
+      fs.renameSync(tmp, file);
+    } else {
+      throw error;
+    }
+  } finally {
+    try {
+      if (fs.existsSync(tmp)) fs.unlinkSync(tmp);
+    } catch {}
+  }
+}
+
+function tryReadJsonFile(filePath) {
+  const file = String(filePath || "").trim();
+  if (!file || !fs.existsSync(file)) return null;
+  return JSON.parse(fs.readFileSync(file, "utf8"));
+}
+
+function loadConfig(ctx, logWithTimestamp) {
+  let parseFailed = false;
+  try {
+    ctx.config = tryReadJsonFile(ctx.configPath) || {};
   } catch (err) {
+    parseFailed = true;
     ctx.config = {};
-    logWithTimestamp(`[ERROR] Failed to parse config.json: ${err.message}`);
+    if (typeof logWithTimestamp === "function") {
+      logWithTimestamp(`[ERROR] Failed to parse config.json: ${err.message}`);
+    }
+    const backupPath = configBackupPath(ctx.configPath);
+    try {
+      const backup = tryReadJsonFile(backupPath);
+      if (backup && typeof backup === "object" && !Array.isArray(backup)) {
+        ctx.config = backup;
+        if (typeof logWithTimestamp === "function") {
+          logWithTimestamp(
+            `[CONFIG] Recovered config from backup: ${path.basename(backupPath)}`,
+          );
+        }
+      }
+    } catch (backupErr) {
+      if (typeof logWithTimestamp === "function") {
+        logWithTimestamp(
+          `[ERROR] Failed to parse config backup: ${backupErr.message}`,
+        );
+      }
+    }
+    try {
+      if (fs.existsSync(ctx.configPath)) {
+        const brokenPath = configBrokenPath(ctx.configPath);
+        fs.copyFileSync(ctx.configPath, brokenPath);
+        if (typeof logWithTimestamp === "function") {
+          logWithTimestamp(
+            `[CONFIG] Preserved broken config as ${path.basename(brokenPath)}`,
+          );
+        }
+      }
+    } catch {}
   }
 
   if (typeof ctx.config.totalClaimed !== "number") ctx.config.totalClaimed = 0;
@@ -27,13 +111,15 @@ function loadConfig(ctx, logWithTimestamp) {
         `[CONFIG] Seeded default target missions: ${ctx.config.targetMissions.join(", ")}`,
       );
     }
-    try {
-      fs.writeFileSync(ctx.configPath, JSON.stringify(ctx.config, null, 2));
-    } catch (err) {
-      if (typeof logWithTimestamp === "function") {
-        logWithTimestamp(
-          `[ERROR] Failed to save default targetMissions to config.json: ${err.message}`,
-        );
+    if (!parseFailed) {
+      try {
+        writeConfigFileAtomic(ctx.configPath, ctx.config);
+      } catch (err) {
+        if (typeof logWithTimestamp === "function") {
+          logWithTimestamp(
+            `[ERROR] Failed to save default targetMissions to config.json: ${err.message}`,
+          );
+        }
       }
     }
   }
@@ -101,7 +187,7 @@ function saveConfig(ctx, logDebug) {
 
   const timer = setTimeout(() => {
     try {
-      fs.writeFileSync(ctx.configPath, JSON.stringify(ctx.config, null, 2));
+      writeConfigFileAtomic(ctx.configPath, ctx.config);
     } catch (err) {
       logDebug("config", "save_failed", { error: err.message });
     } finally {
@@ -119,7 +205,7 @@ function flushConfig(ctx, logDebug) {
     pendingSaves.delete(ctx);
   }
   try {
-    fs.writeFileSync(ctx.configPath, JSON.stringify(ctx.config, null, 2));
+    writeConfigFileAtomic(ctx.configPath, ctx.config);
   } catch (err) {
     logDebug("config", "save_failed", { error: err.message });
   }
