@@ -5,6 +5,7 @@ const { contextBridge, ipcRenderer } = require("electron");
 contextBridge.exposeInMainWorld("missionsDesktop", {
   startBackend: () => ipcRenderer.invoke("backend:start"),
   stopBackend: () => ipcRenderer.invoke("backend:stop"),
+  restartBackend: () => ipcRenderer.invoke("backend:restart"),
   sendCommand: (command) => ipcRenderer.invoke("backend:send-command", command),
   getState: () => ipcRenderer.invoke("backend:get-state"),
   getConfig: () => ipcRenderer.invoke("config:get"),

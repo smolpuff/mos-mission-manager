@@ -1285,7 +1285,19 @@ function createChecksService(ctx, logger, mcp, services = {}) {
     return Number.isFinite(level) && level >= Number(resetPolicy.threshold);
   }
 
-  function buildAssignCandidates(missions, resolved) {
+  function missionBlockedByLockedSlot(mission, slotUnlockSummary = null) {
+    const summary = normalizeSlotUnlockSummary({
+      structuredContent: { slotUnlockSummary },
+    });
+    if (!summary?.canUnlockMore) return false;
+    const nextUnlockSlot = Number(summary?.nextUnlockSlot);
+    if (!Number.isFinite(nextUnlockSlot) || nextUnlockSlot <= 0) return false;
+    const slot = Number(mission?.slot);
+    if (!Number.isFinite(slot) || slot <= 0) return false;
+    return slot >= nextUnlockSlot;
+  }
+
+  function buildAssignCandidates(missions, resolved, slotUnlockSummary = null) {
     return missions.filter((m) => {
       const name = missionName(m).toLowerCase();
       const key = canonicalNameKey(name);
@@ -1295,7 +1307,8 @@ function createChecksService(ctx, logger, mcp, services = {}) {
       return (
         (selectedById || selectedByName) &&
         !missionHasAssignedNft(m) &&
-        !missionBlockedByResetThreshold(m)
+        !missionBlockedByResetThreshold(m) &&
+        !missionBlockedByLockedSlot(m, slotUnlockSummary)
       );
     });
   }
@@ -1326,7 +1339,8 @@ function createChecksService(ctx, logger, mcp, services = {}) {
     let result =
       initialMissionResult || (await mcp.mcpToolCall("get_user_missions", {}));
     let missions = normalizeMissionList(result);
-    let candidates = buildAssignCandidates(missions, resolved);
+    const slotUnlockSummary = extractSlotUnlockSummary(result);
+    let candidates = buildAssignCandidates(missions, resolved, slotUnlockSummary);
     const resetBlocked = missions
       .filter((m) => {
         const name = missionName(m).toLowerCase();
@@ -1347,11 +1361,34 @@ function createChecksService(ctx, logger, mcp, services = {}) {
         slot: m?.slot ?? null,
         level: missionLevel(m),
       }));
+    const lockedSlotBlocked = missions
+      .filter((m) => {
+        const name = missionName(m).toLowerCase();
+        const key = canonicalNameKey(name);
+        const id = catalogMissionId(m);
+        const selectedById = id ? resolved.targetIds.has(id) : false;
+        const selectedByName = key ? resolved.targetNames.has(key) : false;
+        return (
+          (selectedById || selectedByName) &&
+          !missionHasAssignedNft(m) &&
+          !missionBlockedByResetThreshold(m) &&
+          missionBlockedByLockedSlot(m, slotUnlockSummary)
+        );
+      })
+      .map((m) => ({
+        name: missionName(m),
+        assignedMissionId: assignedMissionId(m),
+        catalogMissionId: catalogMissionId(m),
+        slot: m?.slot ?? null,
+        level: missionLevel(m),
+      }));
     logDebug("assign", "sync_wait_snapshot", {
       reason,
       attempt: 0,
       selected: summarizeSelectedMissionState(missions, resolved),
       resetBlocked,
+      lockedSlotBlocked,
+      slotUnlockSummary,
       candidates: candidates.map((m) => ({
         name: missionName(m),
         assignedMissionId: assignedMissionId(m),
@@ -1366,6 +1403,14 @@ function createChecksService(ctx, logger, mcp, services = {}) {
         .join(", ");
       logWithTimestamp(
         `[ASSIGN] ⏸️ Holding mission(s) for reset threshold; not assigning NFT: ${names}`,
+      );
+    }
+    if (lockedSlotBlocked.length > 0) {
+      const names = lockedSlotBlocked
+        .map((m) => `${m.name} slot=${m.slot ?? "?"}`)
+        .join(", ");
+      logWithTimestamp(
+        `[ASSIGN] ⏸️ Holding mission(s) in locked slot(s); not assigning NFT: ${names}`,
       );
     }
     return { result, missions, candidates };

@@ -1441,6 +1441,7 @@ function ControlView() {
       setOnboardingOpen(false);
       return;
     }
+    const shouldRestartRunner = status.running === true;
     const selectedMissionNames = Array.from(onboardingSelectedMissions)
       .map((name) => String(name || "").trim())
       .filter(Boolean);
@@ -1483,6 +1484,9 @@ function ControlView() {
         if (!response?.ok) {
           throw new Error(response?.error || "Failed to apply onboarding.");
         }
+      }
+      if (shouldRestartRunner && bridge?.restartBackend) {
+        await bridge.restartBackend();
       }
       setOnboardingOpen(false);
     } catch (error) {

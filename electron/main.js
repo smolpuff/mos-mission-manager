@@ -1173,6 +1173,31 @@ function stopBackend() {
   return { ...backendStatus };
 }
 
+async function waitForBackendStopped(timeoutMs = 7000) {
+  const deadline = Date.now() + Math.max(500, Number(timeoutMs) || 7000);
+  while (Date.now() < deadline) {
+    if (!backend || backendStatus.running !== true) {
+      return true;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  return !backend || backendStatus.running !== true;
+}
+
+async function restartBackend() {
+  if (!backend || backendStatus.running !== true) {
+    startBackend();
+    return { ...backendStatus };
+  }
+  stopBackend();
+  const stopped = await waitForBackendStopped(7000);
+  if (!stopped) {
+    throw new Error("Failed to stop backend for restart.");
+  }
+  startBackend();
+  return { ...backendStatus };
+}
+
 async function waitForBackendStdinWritable(timeoutMs = 1500) {
   const deadline = Date.now() + Math.max(100, Number(timeoutMs) || 1500);
   while (Date.now() < deadline) {
@@ -1542,6 +1567,7 @@ app.whenReady().then(async () => {
   installMinimalApplicationMenu();
   ipcMain.handle("backend:start", async () => startBackend());
   ipcMain.handle("backend:stop", async () => stopBackend());
+  ipcMain.handle("backend:restart", async () => restartBackend());
   ipcMain.handle("backend:send-command", async (_event, command) =>
     sendBackendCommand(command),
   );
