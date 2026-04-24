@@ -641,6 +641,9 @@ function ControlView() {
   const [onboardingSelectedMissions, setOnboardingSelectedMissions] = useState(
     new Set(),
   );
+  const [onboardingSlotSelections, setOnboardingSlotSelections] = useState({});
+  const [onboardingMissionPickerSlot, setOnboardingMissionPickerSlot] =
+    useState(null);
   const [onboardingPreviewOnly, setOnboardingPreviewOnly] = useState(false);
   const [onboardingDataLoading, setOnboardingDataLoading] = useState(false);
   const [onboardingBodyHeight, setOnboardingBodyHeight] = useState(null);
@@ -662,6 +665,19 @@ function ControlView() {
       map.set(key, mission);
     }
     return map;
+  }, [onboardingMissionCatalog]);
+  const onboardingCatalogMissionNames = useMemo(() => {
+    const seen = new Set();
+    const out = [];
+    for (const mission of onboardingMissionCatalog) {
+      const name = String(mission?.name || "").trim();
+      if (!isLikelyRealMissionName(name)) continue;
+      const key = missionKey(name);
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      out.push(name);
+    }
+    return out;
   }, [onboardingMissionCatalog]);
 
   const mainStatusLabel = activityLabel
@@ -1151,6 +1167,77 @@ function ControlView() {
     });
   };
 
+  const buildOnboardingSlotSelections = (missions = []) => {
+    const next = {};
+    for (const mission of Array.isArray(missions) ? missions : []) {
+      const slot = Number(mission?.slot);
+      const name = String(mission?.name || "").trim();
+      if (!Number.isFinite(slot) || slot < 1 || slot > 4) continue;
+      if (!isLikelyRealMissionName(name)) continue;
+      next[slot] = name;
+    }
+    return next;
+  };
+
+  const setOnboardingSelectionState = (missions = []) => {
+    const seeded = new Set(
+      missions
+        .map((mission) => String(mission?.name || "").trim())
+        .filter(Boolean),
+    );
+    setOnboardingSelectedMissions(seeded);
+    setOnboardingSlotSelections(buildOnboardingSlotSelections(missions));
+  };
+
+  const updateOnboardingSlotSelection = (slot, name) => {
+    const slotNumber = Number(slot);
+    const nextName = String(name || "").trim();
+    if (!Number.isFinite(slotNumber) || slotNumber < 1 || slotNumber > 4) return;
+    setOnboardingSlotSelections((current) => {
+      const next = { ...current };
+      if (nextName) next[slotNumber] = nextName;
+      else delete next[slotNumber];
+      setOnboardingSelectedMissions(
+        new Set(
+          Object.values(next)
+            .map((value) => String(value || "").trim())
+            .filter(Boolean),
+        ),
+      );
+      return next;
+    });
+  };
+
+  const getOnboardingSlotOptions = (slot, currentName = "") => {
+    const slotNumber = Number(slot);
+    const current = String(currentName || "").trim();
+    const usedByOtherSlots = new Set(
+      Object.entries(onboardingSlotSelections)
+        .filter(([entrySlot, name]) => {
+          return Number(entrySlot) !== slotNumber && String(name || "").trim();
+        })
+        .map(([, name]) => missionKey(name)),
+    );
+    const options = onboardingCatalogMissionNames.filter((name) => {
+      const key = missionKey(name);
+      return key && (name === current || !usedByOtherSlots.has(key));
+    });
+    if (current && !options.some((name) => missionKey(name) === missionKey(current))) {
+      return [current, ...options];
+    }
+    return options;
+  };
+  const getOnboardingMissionCard = (slot) => {
+    const selectedName = String(onboardingSlotSelections[slot] || "").trim();
+    const assigned =
+      onboardingMissions.find((mission) => Number(mission?.slot) === Number(slot)) ||
+      null;
+    const selectedFromCatalog = selectedName
+      ? onboardingCatalogByName.get(missionKey(selectedName))
+      : null;
+    return selectedFromCatalog || assigned || null;
+  };
+
   const missionCollectionsLabel = (
     mission,
     catalogLookupByName = null,
@@ -1314,6 +1401,7 @@ function ControlView() {
         setOnboardingMissionCatalog([]);
         setOnboardingOwnedCollections(new Set());
         setOnboardingSelectedMissions(new Set());
+        setOnboardingSlotSelections({});
         setOnboardingStep(2);
       }
       if (onboardingStep === 1 || onboardingStep === 2) {
@@ -1345,11 +1433,6 @@ function ControlView() {
           const catalog = Array.isArray(response.missionCatalog)
             ? response.missionCatalog
             : [];
-          const seeded = new Set(
-            missions
-              .map((mission) => String(mission?.name || "").trim())
-              .filter(Boolean),
-          );
           setOnboardingWhoami(response.whoami || null);
           setOnboardingMissions(missions);
           setOnboardingMissionCatalog(catalog);
@@ -1363,7 +1446,7 @@ function ControlView() {
                 .filter(Boolean),
             ),
           );
-          setOnboardingSelectedMissions(seeded);
+          setOnboardingSelectionState(missions);
           setOnboardingStep(2);
         } catch (error) {
           setOnboardingError(String(error?.message || error));
@@ -1384,6 +1467,7 @@ function ControlView() {
     setOnboardingMissionCatalog([]);
     setOnboardingOwnedCollections(new Set());
     setOnboardingSelectedMissions(new Set());
+    setOnboardingSlotSelections({});
     setOnboardingStep(2);
     setOnboardingBusy(true);
     setOnboardingDataLoading(true);
@@ -1407,11 +1491,6 @@ function ControlView() {
       const catalog = Array.isArray(response.missionCatalog)
         ? response.missionCatalog
         : [];
-      const seeded = new Set(
-        missions
-          .map((mission) => String(mission?.name || "").trim())
-          .filter(Boolean),
-      );
       setOnboardingWhoami(response.whoami || null);
       setOnboardingMissions(missions);
       setOnboardingMissionCatalog(catalog);
@@ -1425,7 +1504,7 @@ function ControlView() {
             .filter(Boolean),
         ),
       );
-      setOnboardingSelectedMissions(seeded);
+      setOnboardingSelectionState(missions);
       setOnboardingStep(2);
     } catch (error) {
       setOnboardingError(String(error?.message || error));
@@ -1438,11 +1517,15 @@ function ControlView() {
 
   const applyOnboarding = async () => {
     if (onboardingPreviewOnly) {
+      await applyConfigPatch({ firstRunOnboardingCompleted: true });
       setOnboardingOpen(false);
       return;
     }
     const shouldRestartRunner = status.running === true;
-    const selectedMissionNames = Array.from(onboardingSelectedMissions)
+    const selectedMissionNames = Object.values(onboardingSlotSelections)
+      .map((name) => String(name || "").trim())
+      .filter(Boolean);
+    const fallbackSelectedMissionNames = Array.from(onboardingSelectedMissions)
       .map((name) => String(name || "").trim())
       .filter(Boolean);
     const pulledMissionNames = onboardingMissions
@@ -1459,10 +1542,14 @@ function ControlView() {
     const targetMissions = Array.from(
       new Set(
         (pulledMissionNames.length > 0
-          ? pulledMissionNames
+          ? selectedMissionNames.length > 0
+            ? selectedMissionNames
+            : pulledMissionNames
           : selectedMissionNames.length > 0
             ? selectedMissionNames
-            : onboardingMissions
+            : fallbackSelectedMissionNames.length > 0
+              ? fallbackSelectedMissionNames
+              : onboardingMissions
                 .map((mission) => String(mission?.name || "").trim())
                 .filter(isLikelyRealMissionName)
         ).filter(Boolean),
@@ -1494,6 +1581,13 @@ function ControlView() {
     } finally {
       setOnboardingBusy(false);
     }
+  };
+
+  const dismissOnboarding = async () => {
+    try {
+      await applyConfigPatch({ firstRunOnboardingCompleted: true });
+    } catch {}
+    setOnboardingOpen(false);
   };
 
   return (
@@ -1570,7 +1664,7 @@ function ControlView() {
                     <button
                       type="button"
                       className="btn btn-clear btn-sm "
-                      onClick={() => setOnboardingOpen(false)}
+                      onClick={() => void dismissOnboarding()}
                       title="Close"
                     >
                       ✕
@@ -1765,32 +1859,44 @@ function ControlView() {
                               onboardingMissions.find(
                                 (m) => Number(m?.slot) === slot,
                               ) || null;
-                            const imgSrc = assigned
-                              ? pickSlotImage(assigned)
+                            const selectedCard =
+                              getOnboardingMissionCard(slot) || assigned;
+                            const selectedName = String(
+                              onboardingSlotSelections[slot] ||
+                                assigned?.name ||
+                                "",
+                            ).trim();
+                            const imgSrc = selectedCard
+                              ? pickSlotImage(selectedCard)
                               : null;
                             const loadingSlot =
                               onboardingDataLoading ||
                               (!assigned && onboardingMissions.length === 0);
                             return (
-                              <div
+                              <button
+                                type="button"
                                 key={`onboarding-slot-${slot}`}
                                 className="rounded-md border-2 border-white/10 bg-black/20 p-3 h-full flex flex-col gap-2"
+                                onClick={() => setOnboardingMissionPickerSlot(slot)}
+                                disabled={loadingSlot || onboardingBusy}
                               >
                                 <div className="flex gap flex-row justify-between items-center">
                                   <div className="text-[11px] text-slate-400">
-                                    {assigned?.currentLevel !== null &&
-                                    assigned?.currentLevel !== undefined
-                                      ? `Level ${assigned.currentLevel}`
+                                    {selectedCard?.currentLevel !== null &&
+                                    selectedCard?.currentLevel !== undefined
+                                      ? `Level ${selectedCard.currentLevel}`
                                       : "Level —"}
                                   </div>
                                   <div
-                                    className={`${assigned && assigned.isActive ? "badge badge-success" : ""} px-2 h-auto text-[11px] text-slate-900`}
+                                    className={`${assigned && assigned.isActive ? "badge badge-success" : "badge"} px-2 h-auto text-[11px] text-slate-900`}
                                   >
-                                    {assigned
-                                      ? assigned.isActive
+                                    {selectedName
+                                      ? assigned?.isActive
                                         ? "Active"
-                                        : "Assigned"
-                                      : "No NFT"}
+                                        : assigned
+                                          ? "Assigned"
+                                          : "Selected"
+                                      : "No mission"}
                                   </div>
                                 </div>
                                 {loadingSlot ? (
@@ -1799,16 +1905,21 @@ function ControlView() {
                                   </div>
                                 ) : (
                                   <div className="flex flex-col flex-1">
-                                    <div className="text-sm text-slate-100 ">
-                                      {assigned?.name || "Unassigned"}
+                                    <div className="text-[11px] text-slate-400 mb-1">
+                                      Mission
                                     </div>
-
+                                    <div className="text-sm text-slate-100 text-left">
+                                      {selectedName || "Select mission"}
+                                    </div>
                                     <div className="flex text-[11px] text-slate-300 mt-auto">
-                                      {assigned?.reward || "Reward unknown"}
+                                      {selectedCard?.reward || "Reward unknown"}
+                                    </div>
+                                    <div className="text-[11px] text-accent mt-1 text-left">
+                                      Click to change
                                     </div>
                                   </div>
                                 )}
-                              </div>
+                              </button>
                             );
                           })}
                         </div>
@@ -1864,6 +1975,109 @@ function ControlView() {
                     {onboardingError ? (
                       <div className="rounded-md border border-error/40 bg-error/10 p-2 text-sm text-slate-100">
                         {onboardingError}
+                      </div>
+                    ) : null}
+                    {onboardingMissionPickerSlot ? (
+                      <div
+                        className="fixed inset-0 z-70 grid place-items-center bg-black/55 p-4"
+                        role="dialog"
+                        aria-modal="true"
+                        onMouseDown={(event) => {
+                          if (event.target === event.currentTarget) {
+                            setOnboardingMissionPickerSlot(null);
+                          }
+                        }}
+                      >
+                        <div
+                          className="p-4 w-full rounded-xl shadow-2xl shadow-black/95 space-y-4 z-10 border-2 border-[#1D1C27]"
+                          style={{
+                            maxWidth: "760px",
+                            backgroundImage: `url(${backImg})`,
+                            backgroundSize: "cover",
+                            backgroundPosition: "center",
+                          }}
+                        >
+                          <div className="flex items-center justify-between gap-3">
+                            <div>
+                              <div className="text-lg font-semibold text-slate-100">
+                                Select mission for slot {onboardingMissionPickerSlot}
+                              </div>
+                              <div className="text-xs text-slate-400">
+                                Only missions not already used in other slots are shown.
+                              </div>
+                            </div>
+                            <button
+                              type="button"
+                              className="btn btn-clear btn-sm"
+                              onClick={() => setOnboardingMissionPickerSlot(null)}
+                              title="Close"
+                            >
+                              ✕
+                            </button>
+                          </div>
+                          <div className="grid grid-cols-2 gap-2 max-h-[60vh] overflow-y-auto pr-1">
+                            {getOnboardingSlotOptions(
+                              onboardingMissionPickerSlot,
+                              onboardingSlotSelections[
+                                onboardingMissionPickerSlot
+                              ] ||
+                                getOnboardingMissionCard(
+                                  onboardingMissionPickerSlot,
+                                )?.name ||
+                                "",
+                            ).map((name) => {
+                              const mission =
+                                onboardingCatalogByName.get(missionKey(name)) ||
+                                null;
+                              const collections = resolveMissionCollections(
+                                mission,
+                              );
+                              const isSelected =
+                                missionKey(
+                                  onboardingSlotSelections[
+                                    onboardingMissionPickerSlot
+                                  ] || "",
+                                ) === missionKey(name);
+                              return (
+                                <button
+                                  type="button"
+                                  key={`picker-${onboardingMissionPickerSlot}-${name}`}
+                                  className={`rounded-md border-2 ${isSelected ? "border-accent bg-accent/10" : "border-white/10 bg-black/20"} p-3 h-full flex flex-col gap-2 text-left`}
+                                  onClick={() => {
+                                    updateOnboardingSlotSelection(
+                                      onboardingMissionPickerSlot,
+                                      name,
+                                    );
+                                    setOnboardingMissionPickerSlot(null);
+                                  }}
+                                >
+                                  <div className="flex flex-row justify-between items-center">
+                                    <div className="text-[11px] text-slate-400">
+                                      Level —
+                                    </div>
+                                    <div className="badge px-2 h-auto text-[11px] text-slate-900">
+                                      {isSelected ? "Selected" : "Available"}
+                                    </div>
+                                  </div>
+                                  <div className="text-sm text-slate-100">
+                                    {name}
+                                  </div>
+                                  <div className="text-[11px] text-slate-300">
+                                    {mission?.reward || "Reward unknown"}
+                                  </div>
+                                  <div className="text-[11px] text-slate-400 mt-auto">
+                                    {collections.length > 0
+                                      ? collections
+                                          .map((entry) => entry?.name)
+                                          .filter(Boolean)
+                                          .join(", ")
+                                      : "Collection requirements unavailable"}
+                                  </div>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
                       </div>
                     ) : null}
                   </div>
