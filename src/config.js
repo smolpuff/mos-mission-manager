@@ -6,6 +6,25 @@ const path = require("path");
 const SAVE_DEBOUNCE_MS = 350;
 const pendingSaves = new WeakMap();
 const DEFAULT_TARGET_MISSIONS = ["Do it All!", "Race!"];
+const SALVAGE_TOP_LEVEL_KEYS = [
+  "targetMissions",
+  "level20ResetEnabled",
+  "missionModeEnabled",
+  "nftCooldownResetEnabled",
+  "missionResetLevel",
+  "signerMode",
+  "signer",
+  "totalClaimed",
+  "firstRunOnboardingCompleted",
+  "enableRentals",
+  "interactiveAuth",
+  "debugMode",
+  "watchLoopEnabled",
+  "lowBalanceThresholds",
+  "lowBalancePbpThreshold",
+  "lowBalanceSolThreshold",
+  "signerSetupCompleted",
+];
 
 function configBackupPath(configPath) {
   return `${String(configPath || "").trim()}.bak`;
@@ -59,6 +78,105 @@ function tryReadJsonFile(filePath) {
   return JSON.parse(fs.readFileSync(file, "utf8"));
 }
 
+function extractJsonValueText(rawText, key) {
+  const raw = String(rawText || "");
+  const matcher = new RegExp(`"${String(key)}"\\s*:`, "g");
+  const match = matcher.exec(raw);
+  if (!match) return null;
+  let i = match.index + match[0].length;
+  while (i < raw.length && /\s/.test(raw[i])) i += 1;
+  if (i >= raw.length) return null;
+
+  const start = i;
+  const first = raw[i];
+  if (first === "{") {
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+    for (; i < raw.length; i += 1) {
+      const ch = raw[i];
+      if (inString) {
+        if (escaped) escaped = false;
+        else if (ch === "\\") escaped = true;
+        else if (ch === "\"") inString = false;
+        continue;
+      }
+      if (ch === "\"") {
+        inString = true;
+        continue;
+      }
+      if (ch === "{") depth += 1;
+      else if (ch === "}") {
+        depth -= 1;
+        if (depth === 0) return raw.slice(start, i + 1);
+      }
+    }
+    return null;
+  }
+  if (first === "[") {
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+    for (; i < raw.length; i += 1) {
+      const ch = raw[i];
+      if (inString) {
+        if (escaped) escaped = false;
+        else if (ch === "\\") escaped = true;
+        else if (ch === "\"") inString = false;
+        continue;
+      }
+      if (ch === "\"") {
+        inString = true;
+        continue;
+      }
+      if (ch === "[") depth += 1;
+      else if (ch === "]") {
+        depth -= 1;
+        if (depth === 0) return raw.slice(start, i + 1);
+      }
+    }
+    return null;
+  }
+  for (; i < raw.length; i += 1) {
+    const ch = raw[i];
+    if (ch === "\n" || ch === "\r" || ch === "," || ch === "}") {
+      return raw.slice(start, i).trim();
+    }
+  }
+  return raw.slice(start).trim();
+}
+
+function salvageConfigFromBrokenText(rawText) {
+  const salvaged = {};
+  const raw = String(rawText || "");
+  if (!raw.trim()) return salvaged;
+
+  for (const key of SALVAGE_TOP_LEVEL_KEYS) {
+    const valueText = extractJsonValueText(raw, key);
+    if (!valueText) continue;
+    try {
+      salvaged[key] = JSON.parse(valueText);
+    } catch {}
+  }
+
+  if (!Array.isArray(salvaged.targetMissions)) {
+    const arrText = extractJsonValueText(raw, "targetMissions");
+    if (arrText) {
+      const missions = [];
+      const stringMatcher = /"([^"\\]*(?:\\.[^"\\]*)*)"/g;
+      let match;
+      while ((match = stringMatcher.exec(arrText))) {
+        try {
+          missions.push(JSON.parse(`"${match[1]}"`));
+        } catch {}
+      }
+      if (missions.length > 0) salvaged.targetMissions = missions;
+    }
+  }
+
+  return salvaged;
+}
+
 function loadConfig(ctx, logWithTimestamp) {
   let parseFailed = false;
   try {
@@ -66,9 +184,30 @@ function loadConfig(ctx, logWithTimestamp) {
   } catch (err) {
     parseFailed = true;
     ctx.config = {};
+    const rawBrokenConfig = (() => {
+      try {
+        return fs.readFileSync(ctx.configPath, "utf8");
+      } catch {
+        return "";
+      }
+    })();
     if (typeof logWithTimestamp === "function") {
       logWithTimestamp(`[ERROR] Failed to parse config.json: ${err.message}`);
     }
+
+    let brokenPath = null;
+    try {
+      if (fs.existsSync(ctx.configPath)) {
+        brokenPath = configBrokenPath(ctx.configPath);
+        fs.copyFileSync(ctx.configPath, brokenPath);
+        if (typeof logWithTimestamp === "function") {
+          logWithTimestamp(
+            `[CONFIG] Preserved broken config as ${path.basename(brokenPath)}`,
+          );
+        }
+      }
+    } catch {}
+
     const backupPath = configBackupPath(ctx.configPath);
     try {
       const backup = tryReadJsonFile(backupPath);
@@ -87,17 +226,32 @@ function loadConfig(ctx, logWithTimestamp) {
         );
       }
     }
+
     try {
-      if (fs.existsSync(ctx.configPath)) {
-        const brokenPath = configBrokenPath(ctx.configPath);
-        fs.copyFileSync(ctx.configPath, brokenPath);
+      const salvaged = salvageConfigFromBrokenText(rawBrokenConfig);
+      const salvagedKeys = Object.keys(salvaged);
+      if (salvagedKeys.length > 0) {
+        ctx.config = { ...ctx.config, ...salvaged };
         if (typeof logWithTimestamp === "function") {
           logWithTimestamp(
-            `[CONFIG] Preserved broken config as ${path.basename(brokenPath)}`,
+            `[CONFIG] Salvaged readable keys from broken config: ${salvagedKeys.join(", ")}`,
           );
         }
       }
     } catch {}
+
+    try {
+      writeConfigFileAtomic(ctx.configPath, ctx.config);
+      if (typeof logWithTimestamp === "function") {
+        logWithTimestamp("[CONFIG] Wrote reconstructed config after parse failure.");
+      }
+    } catch (writeErr) {
+      if (typeof logWithTimestamp === "function") {
+        logWithTimestamp(
+          `[ERROR] Failed to write reconstructed config.json: ${writeErr.message}`,
+        );
+      }
+    }
   }
 
   if (typeof ctx.config.totalClaimed !== "number") ctx.config.totalClaimed = 0;
@@ -111,15 +265,15 @@ function loadConfig(ctx, logWithTimestamp) {
         `[CONFIG] Seeded default target missions: ${ctx.config.targetMissions.join(", ")}`,
       );
     }
-    if (!parseFailed) {
-      try {
+    try {
+      if (!parseFailed) {
         writeConfigFileAtomic(ctx.configPath, ctx.config);
-      } catch (err) {
-        if (typeof logWithTimestamp === "function") {
-          logWithTimestamp(
-            `[ERROR] Failed to save default targetMissions to config.json: ${err.message}`,
-          );
-        }
+      }
+    } catch (err) {
+      if (typeof logWithTimestamp === "function") {
+        logWithTimestamp(
+          `[ERROR] Failed to save default targetMissions to config.json: ${err.message}`,
+        );
       }
     }
   }
@@ -175,7 +329,10 @@ function loadConfig(ctx, logWithTimestamp) {
   ) {
     ctx.interactiveAuth = ctx.config.interactiveAuth;
   }
-  if (typeof ctx.config.debugMode === "boolean" && !process.argv.includes("--debug")) {
+  if (
+    typeof ctx.config.debugMode === "boolean" &&
+    !process.argv.includes("--debug")
+  ) {
     ctx.debugMode = ctx.config.debugMode;
   }
   ctx.config.signerMode = ctx.signerMode;
