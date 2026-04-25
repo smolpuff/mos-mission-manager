@@ -2332,6 +2332,9 @@ function createWatchService(ctx, logger, mcp, checks, configApi, services = {}) 
     startWatchLoop,
     stopWatchLoop: async ({ persist = true, waitForCycle = true } = {}) => {
       ctx.watchLoopEnabled = false;
+      if (typeof checks.stopRentalFastRefresh === "function") {
+        checks.stopRentalFastRefresh("watch_stopped");
+      }
       if (persist) {
         ctx.config.watchLoopEnabled = false;
         saveConfig(ctx, logDebug);

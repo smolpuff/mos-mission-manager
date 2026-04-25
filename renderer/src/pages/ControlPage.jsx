@@ -17,7 +17,16 @@ import tcIcon from "../img/icon_tc.webp";
 import backImg from "../img/back.png";
 const debug = false;
 
-const quickCommands = ["login", "logout", "check", "pause", "resume", "status", "r", "c"];
+const quickCommands = [
+  "login",
+  "logout",
+  "check",
+  "pause",
+  "resume",
+  "status",
+  "r",
+  "c",
+];
 
 function useDesktopBridge() {
   return window.missionsDesktop;
@@ -206,6 +215,7 @@ function ControlView() {
     sol: 0.01,
   });
   const lowBalanceArmedRef = useRef({ pbp: false, sol: false });
+  const bootstrapWalletSummaryRequestedRef = useRef(false);
   const isMissionMode = modeSelection === "mission";
   const isNormalMode = !isMissionMode;
   const applyConfigPatch = async (patch) => {
@@ -310,7 +320,11 @@ function ControlView() {
         setOnboardingOpen(true);
       }
     });
-    if (bridge?.bootstrapWalletSummary) {
+    if (
+      bridge?.bootstrapWalletSummary &&
+      !bootstrapWalletSummaryRequestedRef.current
+    ) {
+      bootstrapWalletSummaryRequestedRef.current = true;
       void bridge.bootstrapWalletSummary().catch(() => {});
     }
     return () => {
@@ -1200,7 +1214,8 @@ function ControlView() {
   const updateOnboardingSlotSelection = (slot, name) => {
     const slotNumber = Number(slot);
     const nextName = String(name || "").trim();
-    if (!Number.isFinite(slotNumber) || slotNumber < 1 || slotNumber > 4) return;
+    if (!Number.isFinite(slotNumber) || slotNumber < 1 || slotNumber > 4)
+      return;
     setOnboardingSlotSelections((current) => {
       const next = { ...current };
       if (nextName) next[slotNumber] = nextName;
@@ -1230,7 +1245,10 @@ function ControlView() {
       const key = missionKey(name);
       return key && (name === current || !usedByOtherSlots.has(key));
     });
-    if (current && !options.some((name) => missionKey(name) === missionKey(current))) {
+    if (
+      current &&
+      !options.some((name) => missionKey(name) === missionKey(current))
+    ) {
       return [current, ...options];
     }
     return options;
@@ -1238,8 +1256,9 @@ function ControlView() {
   const getOnboardingMissionCard = (slot) => {
     const selectedName = String(onboardingSlotSelections[slot] || "").trim();
     const assigned =
-      onboardingMissions.find((mission) => Number(mission?.slot) === Number(slot)) ||
-      null;
+      onboardingMissions.find(
+        (mission) => Number(mission?.slot) === Number(slot),
+      ) || null;
     const selectedFromCatalog = selectedName
       ? onboardingCatalogByName.get(missionKey(selectedName))
       : null;
@@ -1558,8 +1577,8 @@ function ControlView() {
             : fallbackSelectedMissionNames.length > 0
               ? fallbackSelectedMissionNames
               : onboardingMissions
-                .map((mission) => String(mission?.name || "").trim())
-                .filter(isLikelyRealMissionName)
+                  .map((mission) => String(mission?.name || "").trim())
+                  .filter(isLikelyRealMissionName)
         ).filter(Boolean),
       ),
     );
@@ -1574,7 +1593,8 @@ function ControlView() {
       if (bridge?.applyOnboardingSelection) {
         const response = await bridge.applyOnboardingSelection({
           signerMode: onboardingSignerMode,
-          targetMissions: targetMissions.length > 0 ? targetMissions : undefined,
+          targetMissions:
+            targetMissions.length > 0 ? targetMissions : undefined,
         });
         if (!response?.ok) {
           throw new Error(response?.error || "Failed to apply onboarding.");
@@ -1885,7 +1905,9 @@ function ControlView() {
                                 type="button"
                                 key={`onboarding-slot-${slot}`}
                                 className="rounded-md border-2 border-white/10 bg-black/20 p-3 h-full flex flex-col gap-2"
-                                onClick={() => setOnboardingMissionPickerSlot(slot)}
+                                onClick={() =>
+                                  setOnboardingMissionPickerSlot(slot)
+                                }
                                 disabled={loadingSlot || onboardingBusy}
                               >
                                 <div className="flex gap flex-row justify-between items-center">
@@ -2008,16 +2030,20 @@ function ControlView() {
                           <div className="flex items-center justify-between gap-3">
                             <div>
                               <div className="text-lg font-semibold text-slate-100">
-                                Select mission for slot {onboardingMissionPickerSlot}
+                                Select mission for slot{" "}
+                                {onboardingMissionPickerSlot}
                               </div>
                               <div className="text-xs text-slate-400">
-                                Only missions not already used in other slots are shown.
+                                Only missions not already used in other slots
+                                are shown.
                               </div>
                             </div>
                             <button
                               type="button"
                               className="btn btn-clear btn-sm"
-                              onClick={() => setOnboardingMissionPickerSlot(null)}
+                              onClick={() =>
+                                setOnboardingMissionPickerSlot(null)
+                              }
                               title="Close"
                             >
                               ✕
@@ -2037,9 +2063,8 @@ function ControlView() {
                               const mission =
                                 onboardingCatalogByName.get(missionKey(name)) ||
                                 null;
-                              const collections = resolveMissionCollections(
-                                mission,
-                              );
+                              const collections =
+                                resolveMissionCollections(mission);
                               const isSelected =
                                 missionKey(
                                   onboardingSlotSelections[
@@ -2908,7 +2933,7 @@ function ControlView() {
                         <div className="text-[11px] text-slate-400 -mt-1">
                           {isMissionMode
                             ? "Mission mode forces rentals on when needed."
-                            : "Use rentals only when no owned NFTs are available."}
+                            : "Use rentals when no owned NFTs are available."}
                         </div>
                       </div>
                     </div>
@@ -3254,14 +3279,18 @@ function ControlView() {
                   <button
                     type="button"
                     className="btn btn-clear btn-sm"
-                    onClick={() => void openExternalUrl(bridgeLinkModal.phantomUrl)}
+                    onClick={() =>
+                      void openExternalUrl(bridgeLinkModal.phantomUrl)
+                    }
                   >
                     Open in Phantom
                   </button>
                   <button
                     type="button"
                     className="btn btn-clear btn-sm"
-                    onClick={() => void openExternalUrl(bridgeLinkModal.solflareUrl)}
+                    onClick={() =>
+                      void openExternalUrl(bridgeLinkModal.solflareUrl)
+                    }
                   >
                     Open in Solflare
                   </button>

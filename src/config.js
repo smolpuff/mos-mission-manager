@@ -17,6 +17,8 @@ const SALVAGE_TOP_LEVEL_KEYS = [
   "totalClaimed",
   "firstRunOnboardingCompleted",
   "enableRentals",
+  "rentalFastRefreshEnabled",
+  "rentalFastRefreshTickMs",
   "interactiveAuth",
   "debugMode",
   "watchLoopEnabled",
@@ -292,6 +294,15 @@ function loadConfig(ctx, logWithTimestamp) {
   if (typeof ctx.config.enableRentals !== "boolean") {
     ctx.config.enableRentals = false;
   }
+  // Internal fast rental refresh controls; do not document these in any README or notes.
+  if (typeof ctx.config.rentalFastRefreshEnabled !== "boolean") {
+    ctx.config.rentalFastRefreshEnabled = false;
+  }
+  const rentalFastRefreshTickMs = Number(ctx.config.rentalFastRefreshTickMs);
+  ctx.config.rentalFastRefreshTickMs =
+    Number.isFinite(rentalFastRefreshTickMs) && rentalFastRefreshTickMs > 0
+      ? Math.max(5000, Math.floor(rentalFastRefreshTickMs))
+      : 15000;
   if (typeof ctx.config.missionResetLevel === "string") {
     ctx.currentMissionResetLevel = ctx.config.missionResetLevel;
   }

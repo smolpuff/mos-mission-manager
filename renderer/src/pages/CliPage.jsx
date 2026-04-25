@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import WindowChrome from "../components/WindowChrome/app";
 import useBackendState from "../components/useBackendState/app";
 
@@ -9,6 +9,7 @@ export default function CliPage() {
   const { bridge, status, logs } = useBackendState();
   const [command, setCommand] = useState("");
   const outputRef = useRef(null);
+  const pinnedToBottomRef = useRef(true);
   const dragStateRef = useRef({
     active: false,
     pointerStartX: 0,
@@ -42,7 +43,15 @@ export default function CliPage() {
     };
   }, []);
 
-  useEffect(() => {
+  const handleOutputScroll = () => {
+    const node = outputRef.current;
+    if (!node) return;
+    const distanceFromBottom =
+      node.scrollHeight - (node.scrollTop + node.clientHeight);
+    pinnedToBottomRef.current = distanceFromBottom <= 32;
+  };
+
+  useLayoutEffect(() => {
     const node = outputRef.current;
     if (!node) return;
     const selection = window.getSelection ? window.getSelection() : null;
@@ -50,10 +59,7 @@ export default function CliPage() {
       Boolean(selection && !selection.isCollapsed) &&
       node.contains(selection.anchorNode);
     if (selectingTerminalText) return;
-    const distanceFromBottom =
-      node.scrollHeight - (node.scrollTop + node.clientHeight);
-    const shouldAutoScroll = distanceFromBottom <= 32;
-    if (shouldAutoScroll) {
+    if (pinnedToBottomRef.current) {
       node.scrollTop = node.scrollHeight;
     }
   }, [logs]);
@@ -152,6 +158,7 @@ export default function CliPage() {
           <div
             className="terminal bg-black/75"
             ref={outputRef}
+            onScroll={handleOutputScroll}
             style={{
               flex: 1,
               minHeight: "120px",

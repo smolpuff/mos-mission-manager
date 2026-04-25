@@ -58,7 +58,10 @@ const pendingBackendRequests = new Map();
 const maxLogHistory = 1200;
 let fundingWalletSummaryRefreshPromise = null;
 let fundingWalletSummaryLastAttemptAt = 0;
+let bootstrapWalletSummaryPromise = null;
+let bootstrapWalletSummaryLastAttemptAt = 0;
 const FUNDING_WALLET_REFRESH_MIN_INTERVAL_MS = 30000;
+const BOOTSTRAP_WALLET_REFRESH_MIN_INTERVAL_MS = 30000;
 const execFileAsync = (file, args, options = {}) =>
   new Promise((resolve, reject) => {
     execFile(file, args, options, (error, stdout, stderr) => {
@@ -1692,6 +1695,26 @@ app.whenReady().then(async () => {
     return fundingWalletSummaryRefreshPromise;
   });
   ipcMain.handle("wallet:bootstrap-summary", async () => {
+    const now = Date.now();
+    if (bootstrapWalletSummaryPromise) {
+      return bootstrapWalletSummaryPromise;
+    }
+    if (
+      backendStatus.currentUserWalletSummary &&
+      now - bootstrapWalletSummaryLastAttemptAt <
+        BOOTSTRAP_WALLET_REFRESH_MIN_INTERVAL_MS
+    ) {
+      return {
+        ok: true,
+        summary: {
+          currentUserWalletSummary:
+            backendStatus.currentUserWalletSummary || null,
+          fundingWalletSummary: backendStatus.fundingWalletSummary || null,
+        },
+        skipped: true,
+      };
+    }
+    bootstrapWalletSummaryLastAttemptAt = now;
     pushSystemLog("Bootstrap wallet summary requested.");
     const fetchBootstrap = async () => {
       const config = readDesktopConfig();
@@ -1729,35 +1752,42 @@ app.whenReady().then(async () => {
         skippedMainWalletUpdate: looksLikeFundingWallet,
       };
     };
-    try {
-      const result = await fetchBootstrap();
-      pushSystemLog("Bootstrap wallet summary complete.");
-      return result;
-    } catch (error) {
-      if (!isAuthFailureMessage(error?.message)) {
+    bootstrapWalletSummaryPromise = (async () => {
+      try {
+        const result = await fetchBootstrap();
+        pushSystemLog("Bootstrap wallet summary complete.");
+        return result;
+      } catch (error) {
+        if (!isAuthFailureMessage(error?.message)) {
+          pushSystemLog(
+            `Bootstrap wallet summary failed: ${String(error?.message || error)}`,
+          );
+          return {
+            ok: false,
+            error: String(error?.message || error),
+            summary: {
+              currentUserWalletSummary:
+                backendStatus.currentUserWalletSummary || null,
+              fundingWalletSummary: backendStatus.fundingWalletSummary || null,
+            },
+          };
+        }
         pushSystemLog(
-          `Bootstrap wallet summary failed: ${String(error?.message || error)}`,
+          "Bootstrap wallet summary requires login. Opening browser login.",
         );
-        return {
-          ok: false,
-          error: String(error?.message || error),
-          summary: {
-            currentUserWalletSummary:
-              backendStatus.currentUserWalletSummary || null,
-            fundingWalletSummary: backendStatus.fundingWalletSummary || null,
-          },
-        };
+        await runOnboardingPopupLogin({
+          url: "https://pixelbypixel.studio/mcp",
+          timeoutMs: 30000,
+          loginTimeoutMs: 180000,
+        });
+        const result = await fetchBootstrap();
+        pushSystemLog("Bootstrap wallet summary complete after login.");
+        return result;
+      } finally {
+        bootstrapWalletSummaryPromise = null;
       }
-      pushSystemLog("Bootstrap wallet summary requires login. Opening browser login.");
-      await runOnboardingPopupLogin({
-        url: "https://pixelbypixel.studio/mcp",
-        timeoutMs: 30000,
-        loginTimeoutMs: 180000,
-      });
-      const result = await fetchBootstrap();
-      pushSystemLog("Bootstrap wallet summary complete after login.");
-      return result;
-    }
+    })();
+    return bootstrapWalletSummaryPromise;
   });
   ipcMain.handle("signer:reveal-backup", async () => {
     pushSystemLog("Reveal app wallet backup requested.");
