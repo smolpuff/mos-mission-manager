@@ -362,8 +362,10 @@ function ControlView() {
   const activateNormalMode = async () => {
     setModeSelection("normal");
     setResetEnabled(true);
+    setRentalsEnabled(true);
     await applyConfigPatch({
       missionModeEnabled: false,
+      enableRentals: true,
       missionResetLevel: "20",
       level20ResetEnabled: true,
     });
