@@ -106,10 +106,10 @@ function extractJsonValueText(rawText, key) {
       if (inString) {
         if (escaped) escaped = false;
         else if (ch === "\\") escaped = true;
-        else if (ch === "\"") inString = false;
+        else if (ch === '"') inString = false;
         continue;
       }
-      if (ch === "\"") {
+      if (ch === '"') {
         inString = true;
         continue;
       }
@@ -130,10 +130,10 @@ function extractJsonValueText(rawText, key) {
       if (inString) {
         if (escaped) escaped = false;
         else if (ch === "\\") escaped = true;
-        else if (ch === "\"") inString = false;
+        else if (ch === '"') inString = false;
         continue;
       }
-      if (ch === "\"") {
+      if (ch === '"') {
         inString = true;
         continue;
       }
@@ -294,7 +294,7 @@ function loadConfig(ctx, logWithTimestamp) {
   if (typeof ctx.config.enableRentals !== "boolean") {
     ctx.config.enableRentals = false;
   }
-  // Internal fast rental refresh controls; do not document these in any README or notes.
+  // Internal fast rental
   if (typeof ctx.config.rentalFastRefreshEnabled !== "boolean") {
     ctx.config.rentalFastRefreshEnabled = false;
   }

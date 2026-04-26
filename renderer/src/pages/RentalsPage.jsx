@@ -61,7 +61,9 @@ export default function RentalsPage({ bridge }) {
           >
             {loading ? "Refreshing..." : "Refresh"}
           </button>
-          <div className="text-sm uppercase text-slate-300 pr-28">Rentable Pool</div>
+          <div className="text-sm uppercase text-slate-300 pr-28">
+            Rentable Pool
+          </div>
           <div className="text-2xl font-semibold text-slate-100 mt-1">
             {Number(data.rentableCount || 0).toLocaleString()}
           </div>
@@ -81,7 +83,7 @@ export default function RentalsPage({ bridge }) {
           </div>
         </div>
       </div>
-      <div className="card p-3 border border-white/10 bg-black/30">
+      {/* <div className="card p-3 border border-white/10 bg-black/30">
         <div className="text-xs uppercase text-slate-300">
           Mission Slot State
         </div>
@@ -104,7 +106,7 @@ export default function RentalsPage({ bridge }) {
             ))}
           </div>
         )}
-      </div>
+      </div> */}
 
       {error ? (
         <div className="card p-4 border border-error/40 bg-error/10 text-error">

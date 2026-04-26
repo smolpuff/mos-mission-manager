@@ -54,46 +54,51 @@ function CooldownBadge({ seconds = 0 }) {
   const dashOffset = circumference * (1 - progress);
 
   return (
-    <div className="absolute top-2 left-2 z-20 h-6 w-6 rounded-full bg-black/60 backdrop-blur-[2px] shadow-md shadow-black/40 border border-white/10 grid place-items-center">
-      <svg
-        viewBox="0 0 44 44"
-        className="-rotate-90 absolute inset-0 h-full w-full"
-        aria-hidden="true"
-      >
-        <circle
-          cx="22"
-          cy="22"
-          r={radius}
-          fill="none"
-          stroke="rgba(255,255,255,0.14)"
-          strokeWidth="3"
-        />
-        <circle
-          cx="22"
-          cy="22"
-          r={radius}
-          fill="none"
-          stroke="url(#nftCooldownRing)"
-          strokeWidth="3"
-          strokeLinecap="round"
-          strokeDasharray={circumference}
-          strokeDashoffset={dashOffset}
-          style={{ transition: "stroke-dashoffset 220ms ease-out" }}
-        />
-        <defs>
-          <linearGradient
-            id="nftCooldownRing"
-            x1="0%"
-            y1="0%"
-            x2="100%"
-            y2="100%"
-          >
-            <stop offset="0%" stopColor="#fb7185" />
-            <stop offset="50%" stopColor="#f59e0b" />
-            <stop offset="100%" stopColor="#fde68a" />
-          </linearGradient>
-        </defs>
-      </svg>
+    <div
+      className="tooltip tooltip-neutral tooltip-right absolute top-1.5 left-1.5 z-20 "
+      data-tip={`${formatCooldownLabel(cooldownSeconds)}`}
+    >
+      <div className=" h-6 w-6 rounded-full bg-black/60 backdrop-blur-[2px] shadow-md shadow-black/40 border border-white/10 grid place-items-center">
+        <svg
+          viewBox="0 0 44 44"
+          className="-rotate-90 absolute inset-0 h-full w-full"
+          aria-hidden="true"
+        >
+          <circle
+            cx="22"
+            cy="22"
+            r={radius}
+            fill="none"
+            stroke="rgba(255,255,255,0.14)"
+            strokeWidth="3"
+          />
+          <circle
+            cx="22"
+            cy="22"
+            r={radius}
+            fill="none"
+            stroke="url(#nftCooldownRing)"
+            strokeWidth="3"
+            strokeLinecap="round"
+            strokeDasharray={circumference}
+            strokeDashoffset={dashOffset}
+            style={{ transition: "stroke-dashoffset 220ms ease-out" }}
+          />
+          <defs>
+            <linearGradient
+              id="nftCooldownRing"
+              x1="0%"
+              y1="0%"
+              x2="100%"
+              y2="100%"
+            >
+              <stop offset="0%" stopColor="#fb7185" />
+              <stop offset="50%" stopColor="#f59e0b" />
+              <stop offset="100%" stopColor="#fde68a" />
+            </linearGradient>
+          </defs>
+        </svg>
+      </div>
     </div>
   );
 }
@@ -319,7 +324,7 @@ export default function NftsPage({ bridge }) {
                 });
                 return (
                   <div key={item.id} className="card-mission min-w-0">
-                    <div className="card-mission__header relative overflow-clip relative">
+                    <div className="card-mission__header relative overflow-clip">
                       <NftCardImage src={item.image} alt={item.name || "NFT"} />
                       {!isReady ? (
                         <CooldownBadge seconds={liveCooldownSeconds} />

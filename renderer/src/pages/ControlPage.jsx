@@ -2127,7 +2127,15 @@ function ControlView() {
                 if (e.target === e.currentTarget) setSecretModalOpen(false);
               }}
             >
-              <div className="card w-full max-w-140 space-y-4 !bg-[#0b1116] border border-white/10 z-10">
+              <div
+                className="p-4  max-w-xl w-full rounded-xl shadow-2xl shadow-black/95 space-y-4 z-10 border-2 border-[#1D1C27]  transition-all duration-250 ease-out"
+                style={{
+                  backgroundImage: `url(${backImg})`,
+                  backgroundSize: "cover",
+                  backgroundPosition: "center",
+                }}
+              >
+                {" "}
                 <div className="flex items-center justify-between gap-3">
                   <div className="text-lg font-semibold">Recovery Phrase</div>
                   <button
@@ -2143,11 +2151,9 @@ function ControlView() {
                   Anyone with this phrase can drain the wallet. Only reveal it
                   if you are alone and you trust your screen recording setup.
                 </div>
-
                 {secretModalError ? (
                   <div className="text-sm text-error">{secretModalError}</div>
                 ) : null}
-
                 <div className="space-y-2">
                   <div className="flex items-center justify-between gap-3">
                     <div className="text-xs uppercase text-slate-300">
@@ -2240,7 +2246,6 @@ function ControlView() {
                     )}
                   </div>
                 </div>
-
                 <div className="space-y-2">
                   <div className="text-xs uppercase text-slate-300">
                     Address
@@ -2290,7 +2295,15 @@ function ControlView() {
                 if (e.target === e.currentTarget) setCreateWalletOpen(false);
               }}
             >
-              <div className="card w-full max-w-150 space-y-4 !bg-[#0b1116] border border-white/10 z-10">
+              <div
+                className="p-4  w-full max-w-xl  rounded-xl shadow-2xl shadow-black/95 space-y-4 z-10 border-2 border-[#1D1C27]  transition-all duration-250 ease-out"
+                style={{
+                  backgroundImage: `url(${backImg})`,
+                  backgroundSize: "cover",
+                  backgroundPosition: "center",
+                }}
+              >
+                {" "}
                 <div className="flex items-center justify-between gap-3">
                   <div className="text-lg font-semibold">
                     Generate New App Wallet
@@ -2304,7 +2317,6 @@ function ControlView() {
                     ✕
                   </button>
                 </div>
-
                 {createWalletResult ? (
                   <div className="flex flex-col items-center gap-2">
                     <div className="w-10 h-10 rounded-full bg-success/20 border border-success/60 grid place-items-center">
@@ -2322,33 +2334,36 @@ function ControlView() {
                     </div>
                   </div>
                 ) : (
-                  <div className="text-xs text-slate-300">
+                  <div className="border border-warning/40 bg-warning/10 p-3 text-sm text-slate-100 rounded-md">
                     {createWalletOnboarding
                       ? "No app-wallet is configured yet. Generate one now to enable app-wallet mode."
                       : "This replaces your current app-wallet in the app. Save the recovery phrase immediately."}
                   </div>
                 )}
-
                 {createWalletError ? (
                   <div className="text-sm text-error">{createWalletError}</div>
                 ) : null}
-
                 {!createWalletResult && !createWalletOnboarding ? (
-                  <label className="flex items-start gap-2 text-sm">
-                    <input
+                  <label className="items-center gap-2 text-sm flex w-full max-w-full  ">
+                    {/* <input
                       type="checkbox"
                       className="mt-1"
                       checked={createWalletConfirm}
                       onChange={(e) => setCreateWalletConfirm(e.target.checked)}
                       disabled={createWalletBusy}
                     />
-                    <span>
-                      I understand this will replace the current app-wallet and
-                      I must save the recovery phrase now.
-                    </span>
+                     */}
+                    <input
+                      type="checkbox"
+                      className="checkbox"
+                      checked={createWalletConfirm}
+                      onChange={(e) => setCreateWalletConfirm(e.target.checked)}
+                      disabled={createWalletBusy}
+                    />
+                    I understand this will replace the current app-wallet and I
+                    must save the recovery phrase now.
                   </label>
                 ) : null}
-
                 {createWalletResult ? (
                   <div className="space-y-3">
                     <div className="space-y-2">
@@ -2446,7 +2461,6 @@ function ControlView() {
                     </div>
                   </div>
                 ) : null}
-
                 <div className="flex items-center justify-end gap-2 pt-2">
                   {!createWalletResult ? (
                     <button
@@ -3322,9 +3336,8 @@ function ControlView() {
               }}
             >
               <div
-                className="p-4  w-full rounded-xl shadow-2xl shadow-black/95 space-y-4 z-10 border-2 border-[#1D1C27]  transition-all duration-250 ease-out"
+                className="p-4  w-full max-w-xl rounded-xl shadow-2xl shadow-black/95 space-y-4 z-10 border-2 border-[#1D1C27]  transition-all duration-250 ease-out"
                 style={{
-                  maxWidth: onboardingStep === 2 ? "680px" : "680px",
                   backgroundImage: `url(${backImg})`,
                   backgroundSize: "cover",
                   backgroundPosition: "center",

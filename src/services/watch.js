@@ -13,7 +13,14 @@ const {
 } = require("../mission-page");
 const { createMissionActionExecutor } = require("../mission-actions");
 
-function createWatchService(ctx, logger, mcp, checks, configApi, services = {}) {
+function createWatchService(
+  ctx,
+  logger,
+  mcp,
+  checks,
+  configApi,
+  services = {},
+) {
   const { logWithTimestamp, logDebug, redrawHeaderAndLog } = logger;
   const { saveConfig } = configApi;
   const { signer = null } = services;
@@ -22,11 +29,14 @@ function createWatchService(ctx, logger, mcp, checks, configApi, services = {}) 
     mcp,
     signer,
   );
-  const WATCH_MAX_LIMIT_SECONDS = 600;
-  const WATCH_MAX_CLAIMS = 3;
+  const WATCH_MAX_LIMIT_SECONDS = 120;
+  // const WATCH_MAX_LIMIT_SECONDS = 600;
+
+  const WATCH_MAX_CLAIMS = 4;
   const WATCH_FALLBACK_CLAIMS = true;
   const WATCH_MIN_CYCLE_SECONDS = 30;
   const WATCH_DEFAULT_POLL_SECONDS = 30;
+  // const WATCH_DEFAULT_POLL_SECONDS = 45;
   const RESET_PROMPT_REOPEN_COOLDOWN_MS = 60_000;
   const DEFAULT_SESSION_REWARD_TOTALS = { pbp: 0, tc: 0, cc: 0 };
   const DEFAULT_SESSION_SPEND_TOTALS = { pbp: 0, tc: 0, cc: 0 };
@@ -129,7 +139,8 @@ function createWatchService(ctx, logger, mcp, checks, configApi, services = {}) 
 
   async function waitForDappRerollSettlement(assignedMissionId, opts = {}) {
     const wantedId = String(assignedMissionId || "").trim();
-    if (!wantedId) return { settled: false, reason: "missing_assigned_mission_id" };
+    if (!wantedId)
+      return { settled: false, reason: "missing_assigned_mission_id" };
     const timeoutMs = Math.max(0, Number(opts.timeoutMs) || 12_000);
     const pollMs = Math.max(250, Number(opts.pollMs) || 1_500);
     const deadline = Date.now() + timeoutMs;
@@ -183,7 +194,11 @@ function createWatchService(ctx, logger, mcp, checks, configApi, services = {}) 
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, "_");
     if (!value) return null;
-    if (value === "pbp" || value === "pbp_token" || value === "pixel_by_pixel") {
+    if (
+      value === "pbp" ||
+      value === "pbp_token" ||
+      value === "pixel_by_pixel"
+    ) {
       return "pbp";
     }
     if (
@@ -206,7 +221,10 @@ function createWatchService(ctx, logger, mcp, checks, configApi, services = {}) 
   }
 
   function ensureSessionRewardTotals() {
-    if (!ctx.sessionRewardTotals || typeof ctx.sessionRewardTotals !== "object") {
+    if (
+      !ctx.sessionRewardTotals ||
+      typeof ctx.sessionRewardTotals !== "object"
+    ) {
       ctx.sessionRewardTotals = { ...DEFAULT_SESSION_REWARD_TOTALS };
     }
     for (const key of Object.keys(DEFAULT_SESSION_REWARD_TOTALS)) {
@@ -237,7 +255,10 @@ function createWatchService(ctx, logger, mcp, checks, configApi, services = {}) 
     ctx.sessionSpendTotals = { ...DEFAULT_SESSION_SPEND_TOTALS };
   }
 
-  function addSessionSpendTotals(cost, { actionName = "prepared_action" } = {}) {
+  function addSessionSpendTotals(
+    cost,
+    { actionName = "prepared_action" } = {},
+  ) {
     const amount = Number(cost);
     if (!Number.isFinite(amount) || amount <= 0) return null;
     const totals = ensureSessionSpendTotals();
@@ -271,7 +292,9 @@ function createWatchService(ctx, logger, mcp, checks, configApi, services = {}) 
         totals: { ...totals },
       });
       if (ctx.guiBridge?.emitNow) ctx.guiBridge.emitNow();
-      scheduleFundingWalletRefresh(`reward_${String(logLabel || "claim").toLowerCase()}`);
+      scheduleFundingWalletRefresh(
+        `reward_${String(logLabel || "claim").toLowerCase()}`,
+      );
     }
     return totals;
   }
@@ -477,7 +500,11 @@ function createWatchService(ctx, logger, mcp, checks, configApi, services = {}) 
     for (const c of Array.isArray(claims) ? claims : []) {
       if (c?.success === false) continue;
       const missionId =
-        c?.assignedMissionId || c?.assigned_mission_id || c?.missionId || c?.id || null;
+        c?.assignedMissionId ||
+        c?.assigned_mission_id ||
+        c?.missionId ||
+        c?.id ||
+        null;
       const lookup =
         missionId && lookupByAssignedMissionId instanceof Map
           ? lookupByAssignedMissionId.get(missionId) || null
@@ -1222,12 +1249,16 @@ function createWatchService(ctx, logger, mcp, checks, configApi, services = {}) 
       signerMode: ctx.signerMode,
       args: rerollArgs,
     });
-    const prepared = await mcp.mcpToolCall("prepare_mission_reroll", rerollArgs);
+    const prepared = await mcp.mcpToolCall(
+      "prepare_mission_reroll",
+      rerollArgs,
+    );
     manualBridgeUrl = String(
       prepared?.structuredContent?.signingBridgeUrl ||
-      prepared?.structuredContent?.signingUrl ||
-      prepared?.structuredContent?.signingMethods?.browserBridge?.signingUrl ||
-      "",
+        prepared?.structuredContent?.signingUrl ||
+        prepared?.structuredContent?.signingMethods?.browserBridge
+          ?.signingUrl ||
+        "",
     ).trim();
     if (!manualBridgeUrl) {
       const bridgePath = String(
@@ -1340,10 +1371,8 @@ function createWatchService(ctx, logger, mcp, checks, configApi, services = {}) 
     snapshotMap,
     { reason = "cycle", threshold = 20, label = "reset" } = {},
   ) {
-    const { ready: thresholdHits, blocked: blockedHits } = evaluateResetCandidates(
-      snapshotMap,
-      threshold,
-    );
+    const { ready: thresholdHits, blocked: blockedHits } =
+      evaluateResetCandidates(snapshotMap, threshold);
     // Once the mission NFT is cleared, this mission is reroll-eligible even if
     // the source payload still reports stale active/completed flags.
     const resetHits = thresholdHits;
@@ -1400,7 +1429,8 @@ function createWatchService(ctx, logger, mcp, checks, configApi, services = {}) 
     const withinReopenCooldown =
       samePrompt &&
       Number.isFinite(Number(ctx.lastResetPromptAt || 0)) &&
-      now - Number(ctx.lastResetPromptAt || 0) < RESET_PROMPT_REOPEN_COOLDOWN_MS;
+      now - Number(ctx.lastResetPromptAt || 0) <
+        RESET_PROMPT_REOPEN_COOLDOWN_MS;
     if (withinReopenCooldown) {
       logDebug("watch", "reset_prompt_suppressed", {
         reason,
@@ -1620,9 +1650,7 @@ function createWatchService(ctx, logger, mcp, checks, configApi, services = {}) 
 
     const watchTimeoutMs = Math.max(
       90000,
-      opts.watchSeconds * 1000 +
-        opts.pollIntervalSeconds * 1000 +
-        30000,
+      opts.watchSeconds * 1000 + opts.pollIntervalSeconds * 1000 + 30000,
     );
     const startedAt = Date.now();
     let watchTick = 0;
@@ -1698,8 +1726,12 @@ function createWatchService(ctx, logger, mcp, checks, configApi, services = {}) 
       ctx.config.clientMissionPollIntervalSeconds,
     );
     const clientPollIntervalSeconds =
-      Number.isFinite(clientConfiguredPollSeconds) && clientConfiguredPollSeconds > 0
-        ? Math.max(WATCH_MIN_CYCLE_SECONDS, Math.floor(clientConfiguredPollSeconds))
+      Number.isFinite(clientConfiguredPollSeconds) &&
+      clientConfiguredPollSeconds > 0
+        ? Math.max(
+            WATCH_MIN_CYCLE_SECONDS,
+            Math.floor(clientConfiguredPollSeconds),
+          )
         : 0;
     const clientPollingEnabled = ctx.debugMode || clientPollIntervalSeconds > 0;
 
@@ -1712,9 +1744,13 @@ function createWatchService(ctx, logger, mcp, checks, configApi, services = {}) 
       const pollPromise = (async () => {
         const result = await mcp.mcpToolCall("get_user_missions", {});
         if (ctx.debugMode) {
-          missionStateById = await pollMissionStateChanges(missionStateById, reason, {
-            missionResult: result,
-          });
+          missionStateById = await pollMissionStateChanges(
+            missionStateById,
+            reason,
+            {
+              missionResult: result,
+            },
+          );
         }
         return result;
       })();
@@ -1812,12 +1848,14 @@ function createWatchService(ctx, logger, mcp, checks, configApi, services = {}) 
         const snapshot = ctx.currentMissionStats || {};
         const claimable = Number(snapshot.claimable || 0);
         const available = Number(snapshot.available || 0);
-        const chance = claimable > 0 ? "high" : available > 0 ? "medium" : "low";
+        const chance =
+          claimable > 0 ? "high" : available > 0 ? "medium" : "low";
         logDebug("watch", "poll_tick", {
           tick: watchTick,
           elapsedMs: Date.now() - startedAt,
           watchSeconds: opts.watchSeconds,
-          pollIntervalSeconds: clientPollIntervalSeconds || opts.pollIntervalSeconds,
+          pollIntervalSeconds:
+            clientPollIntervalSeconds || opts.pollIntervalSeconds,
           chance,
           claimable,
           available,

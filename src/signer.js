@@ -51,10 +51,10 @@ const DEFAULT_ACTION_COOLDOWN_SECONDS = {
   mission_slot_unlock: 30,
 };
 const DEFAULT_MAX_ACTION_COST = {
-  nft_cooldown_reset: 1000,
-  mission_reroll: 1000,
-  mission_swap: 1000,
-  mission_slot_unlock: 5000,
+  nft_cooldown_reset: 500,
+  mission_reroll: 5500,
+  mission_swap: 500,
+  mission_slot_unlock: 2500,
 };
 const DEFAULT_MNEMONIC_DERIVATION_PATH = "m/44'/501'/0'/0'";
 const COMMON_MNEMONIC_DERIVATION_PATHS = [
@@ -232,7 +232,9 @@ function createSignerService(ctx, logger) {
     const digest = crypto.createHash("sha256");
     digest.update(String(actionName || ""));
     digest.update("|");
-    digest.update(String(validated.structuredContent?.[validated.tokenField] || ""));
+    digest.update(
+      String(validated.structuredContent?.[validated.tokenField] || ""),
+    );
     digest.update("|");
     digest.update(String(validated.structuredContent?.transaction || ""));
     return digest.digest("hex");
@@ -315,7 +317,8 @@ function createSignerService(ctx, logger) {
     const summary = ctx.fundingWalletSummary || {};
     const expectedWallet = String(ctx.signerConfig?.walletAddress || "").trim();
     const summaryWallet = String(summary.address || "").trim();
-    if (!expectedWallet || !summaryWallet || summaryWallet !== expectedWallet) return;
+    if (!expectedWallet || !summaryWallet || summaryWallet !== expectedWallet)
+      return;
     if (summary.status !== "ok") {
       logDebug("signer", "sign_funds_unknown", {
         actionName,
@@ -414,9 +417,10 @@ function createSignerService(ctx, logger) {
   }
 
   function getBrowserBridgeUrl(structuredContent) {
-    const sc = structuredContent && typeof structuredContent === "object"
-      ? structuredContent
-      : {};
+    const sc =
+      structuredContent && typeof structuredContent === "object"
+        ? structuredContent
+        : {};
     const candidates = [
       sc.signingBridgeUrl,
       sc.signingUrl,
@@ -503,16 +507,17 @@ function createSignerService(ctx, logger) {
         "$enc=ConvertFrom-SecureString -SecureString $secure; " +
         "if (-not $enc) { throw 'Vault key encryption failed.' }; " +
         "[Console]::Out.Write($enc);";
-      const encrypted = (await execFileAsync("powershell", [
-        "-NoProfile",
-        "-NonInteractive",
-        "-Command",
-        script,
-      ], {
-        env: {
-          SIGNER_VAULT_KEY_B64: encoded,
-        },
-      })).trim();
+      const encrypted = (
+        await execFileAsync(
+          "powershell",
+          ["-NoProfile", "-NonInteractive", "-Command", script],
+          {
+            env: {
+              SIGNER_VAULT_KEY_B64: encoded,
+            },
+          },
+        )
+      ).trim();
       if (!encrypted) {
         throw new Error("Vault key encryption output is empty.");
       }
@@ -528,7 +533,8 @@ function createSignerService(ctx, logger) {
             try {
               fs.unlinkSync(file);
             } catch (unlinkError) {
-              if (!unlinkError || unlinkError.code !== "ENOENT") throw unlinkError;
+              if (!unlinkError || unlinkError.code !== "ENOENT")
+                throw unlinkError;
             }
             fs.renameSync(tmp, file);
           } else {
@@ -599,16 +605,15 @@ function createSignerService(ctx, logger) {
         "try { $plain=[Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr) } finally { if ($bstr -ne [IntPtr]::Zero) { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr) } }; " +
         "if (-not $plain) { throw 'Vault key decrypt failed.' }; " +
         "[Console]::Out.Write($plain);";
-      const stdout = await execFileAsync("powershell", [
-        "-NoProfile",
-        "-NonInteractive",
-        "-Command",
-        script,
-      ], {
-        env: {
-          SIGNER_VAULT_KEY_FILE: file,
+      const stdout = await execFileAsync(
+        "powershell",
+        ["-NoProfile", "-NonInteractive", "-Command", script],
+        {
+          env: {
+            SIGNER_VAULT_KEY_FILE: file,
+          },
         },
-      });
+      );
       return String(stdout || "").trim();
     }
     if (provider === "linux_secret_service") {
@@ -722,11 +727,8 @@ function createSignerService(ctx, logger) {
         !Array.isArray(parsed.mnemonicBackup)
       ) {
         const mnemonicBackup = {
-          version:
-            Number(parsed.mnemonicBackup.version) || VAULT_VERSION,
-          algorithm: String(
-            parsed.mnemonicBackup.algorithm || VAULT_ALGORITHM,
-          ),
+          version: Number(parsed.mnemonicBackup.version) || VAULT_VERSION,
+          algorithm: String(parsed.mnemonicBackup.algorithm || VAULT_ALGORITHM),
           nonce: String(parsed.mnemonicBackup.nonce || ""),
           authTag: String(parsed.mnemonicBackup.authTag || ""),
           ciphertext: String(parsed.mnemonicBackup.ciphertext || ""),
@@ -874,7 +876,10 @@ function createSignerService(ctx, logger) {
   async function walletAddressFromSecret(secretBytes) {
     const signer =
       secretBytes.length === 64
-        ? await createKeyPairSignerFromBytes(Uint8Array.from(secretBytes), false)
+        ? await createKeyPairSignerFromBytes(
+            Uint8Array.from(secretBytes),
+            false,
+          )
         : await createKeyPairSignerFromPrivateKeyBytes(
             Uint8Array.from(secretBytes),
             false,
@@ -923,22 +928,25 @@ function createSignerService(ctx, logger) {
       }
     }
 
-    if (
-      parsed &&
-      typeof parsed === "object" &&
-      !Array.isArray(parsed)
-    ) {
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
       if (Array.isArray(parsed.secretKey)) parsed = parsed.secretKey;
       else if (Array.isArray(parsed.privateKey)) parsed = parsed.privateKey;
       else if (Array.isArray(parsed.keypair)) parsed = parsed.keypair;
       else if (Array.isArray(parsed.secret)) parsed = parsed.secret;
-      else if (typeof parsed.mnemonic === "string") stringCandidate = parsed.mnemonic;
-      else if (typeof parsed.seedPhrase === "string") stringCandidate = parsed.seedPhrase;
-      else if (typeof parsed.recoveryPhrase === "string") stringCandidate = parsed.recoveryPhrase;
-      else if (typeof parsed.secretKey === "string") stringCandidate = parsed.secretKey;
-      else if (typeof parsed.privateKey === "string") stringCandidate = parsed.privateKey;
-      else if (typeof parsed.keypair === "string") stringCandidate = parsed.keypair;
-      else if (typeof parsed.secret === "string") stringCandidate = parsed.secret;
+      else if (typeof parsed.mnemonic === "string")
+        stringCandidate = parsed.mnemonic;
+      else if (typeof parsed.seedPhrase === "string")
+        stringCandidate = parsed.seedPhrase;
+      else if (typeof parsed.recoveryPhrase === "string")
+        stringCandidate = parsed.recoveryPhrase;
+      else if (typeof parsed.secretKey === "string")
+        stringCandidate = parsed.secretKey;
+      else if (typeof parsed.privateKey === "string")
+        stringCandidate = parsed.privateKey;
+      else if (typeof parsed.keypair === "string")
+        stringCandidate = parsed.keypair;
+      else if (typeof parsed.secret === "string")
+        stringCandidate = parsed.secret;
     }
 
     if (Array.isArray(parsed)) {
@@ -949,7 +957,9 @@ function createSignerService(ctx, logger) {
       return bytes;
     }
 
-    const candidate = String(stringCandidate || text).trim().replace(/^["']|["']$/g, "");
+    const candidate = String(stringCandidate || text)
+      .trim()
+      .replace(/^["']|["']$/g, "");
     if (candidate) {
       try {
         const decoded = Buffer.from(base58Decoder.decode(candidate));
@@ -962,7 +972,8 @@ function createSignerService(ctx, logger) {
         const decoded = Buffer.from(candidate, "base64");
         if (
           (decoded.length === 64 || decoded.length === 32) &&
-          decoded.toString("base64").replace(/=+$/g, "") === candidate.replace(/=+$/g, "")
+          decoded.toString("base64").replace(/=+$/g, "") ===
+            candidate.replace(/=+$/g, "")
         ) {
           return decoded;
         }
@@ -983,10 +994,15 @@ function createSignerService(ctx, logger) {
     if (looksLikeRecoveryPhrase(text)) {
       const candidates = await deriveMnemonicCandidates(stringCandidate);
       const matched = expectedWalletAddress
-        ? candidates.find((entry) => entry.walletAddress === expectedWalletAddress)
+        ? candidates.find(
+            (entry) => entry.walletAddress === expectedWalletAddress,
+          )
         : candidates.find(
-            (entry) => entry.derivationPath === DEFAULT_MNEMONIC_DERIVATION_PATH,
-          ) || candidates[0] || null;
+            (entry) =>
+              entry.derivationPath === DEFAULT_MNEMONIC_DERIVATION_PATH,
+          ) ||
+          candidates[0] ||
+          null;
       if (!matched && expectedWalletAddress) {
         throw new Error(
           `Recovery phrase did not match wallet ${expectedWalletAddress} on supported Solana derivation paths.`,
@@ -1059,9 +1075,9 @@ function createSignerService(ctx, logger) {
       replayWindowSeconds:
         Number(ctx.signerConfig?.replayWindowSeconds) || replayWindowSeconds(),
       actionCooldownSeconds:
-        ctx.signerConfig?.actionCooldownSeconds || DEFAULT_ACTION_COOLDOWN_SECONDS,
-      maxActionCost:
-        ctx.signerConfig?.maxActionCost || DEFAULT_MAX_ACTION_COST,
+        ctx.signerConfig?.actionCooldownSeconds ||
+        DEFAULT_ACTION_COOLDOWN_SECONDS,
+      maxActionCost: ctx.signerConfig?.maxActionCost || DEFAULT_MAX_ACTION_COST,
     };
     const vaultPath = vaultFileAbsolute();
     const hadPreviousVault = fs.existsSync(vaultPath);
@@ -1138,7 +1154,10 @@ function createSignerService(ctx, logger) {
       }
       if (provider === "macos_keychain") {
         try {
-          if (hadPreviousMacKeychain && typeof previousMacKeychainRaw === "string") {
+          if (
+            hadPreviousMacKeychain &&
+            typeof previousMacKeychainRaw === "string"
+          ) {
             await writeVaultKeyToSecureStorage(
               Buffer.from(previousMacKeychainRaw, "base64"),
             );
@@ -1186,7 +1205,9 @@ function createSignerService(ctx, logger) {
   }
 
   function updateSignerState() {
-    ctx.signerMode = normalizeSignerMode(ctx.signerMode || ctx.config.signerMode);
+    ctx.signerMode = normalizeSignerMode(
+      ctx.signerMode || ctx.config.signerMode,
+    );
     ctx.config.signerMode = ctx.signerMode;
     ctx.signerConfig =
       ctx.config.signer &&
@@ -1260,7 +1281,9 @@ function createSignerService(ctx, logger) {
   }
 
   function modeSummary() {
-    const walletAddress = normalizeWalletAddress(ctx.signerConfig?.walletAddress);
+    const walletAddress = normalizeWalletAddress(
+      ctx.signerConfig?.walletAddress,
+    );
     const walletRef =
       typeof ctx.signerConfig?.walletRef === "string"
         ? ctx.signerConfig.walletRef
@@ -1308,8 +1331,7 @@ function createSignerService(ctx, logger) {
   }
 
   function setManualApprovalHandler(handler) {
-    approvalPromptHandler =
-      typeof handler === "function" ? handler : null;
+    approvalPromptHandler = typeof handler === "function" ? handler : null;
     logDebug("signer", "approval_handler_set", {
       active: Boolean(approvalPromptHandler),
     });
@@ -1366,7 +1388,10 @@ function createSignerService(ctx, logger) {
       walletAddress,
       derivationPath,
       sourceType,
-      mnemonic: sourceType === "mnemonic" ? extractImportStringCandidate(rawText) : null,
+      mnemonic:
+        sourceType === "mnemonic"
+          ? extractImportStringCandidate(rawText)
+          : null,
       successVerb: "pasted",
     });
   }
@@ -1382,7 +1407,9 @@ function createSignerService(ctx, logger) {
       throw new Error("Unlock is only available in app_wallet mode.");
     }
     if (!ctx.signerConfig?.walletRef) {
-      throw new Error("No app wallet found. Run 'signer create' or 'signer import'.");
+      throw new Error(
+        "No app wallet found. Run 'signer create' or 'signer import'.",
+      );
     }
     const now = Date.now();
     if (ctx.signerUnlockAllowedAt > now) {
@@ -1396,7 +1423,8 @@ function createSignerService(ctx, logger) {
     let secretKey = null;
     try {
       const vault = loadVaultRecord();
-      if (!vault) throw new Error("Encrypted signer vault is missing or unreadable.");
+      if (!vault)
+        throw new Error("Encrypted signer vault is missing or unreadable.");
       vaultKey = await readVaultKeyFromSecureStorage();
       if (vaultKey.length !== VAULT_KEY_BYTES) {
         throw new Error("Vault key length is invalid.");
@@ -1476,7 +1504,12 @@ function createSignerService(ctx, logger) {
         provider === "macos_keychain"
           ? fs.existsSync("/usr/bin/security")
           : provider === "windows_dpapi"
-            ? await checkCommandAvailable("powershell", ["-NoProfile", "-NonInteractive", "-Command", "$PSVersionTable.PSVersion.ToString()"])
+            ? await checkCommandAvailable("powershell", [
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                "$PSVersionTable.PSVersion.ToString()",
+              ])
             : provider === "linux_secret_service"
               ? await checkCommandAvailable("secret-tool", ["--help"])
               : false,
@@ -1512,7 +1545,9 @@ function createSignerService(ctx, logger) {
       walletRef: ctx.signerConfig?.walletRef || null,
     });
     if (ctx.signerMode !== "app_wallet") {
-      throw new Error("Switch signer mode to app_wallet before creating a wallet.");
+      throw new Error(
+        "Switch signer mode to app_wallet before creating a wallet.",
+      );
     }
     const mnemonic = bip39.generateMnemonic(128);
     const candidates = await deriveMnemonicCandidates(mnemonic);
@@ -1542,7 +1577,8 @@ function createSignerService(ctx, logger) {
       throw new Error("No app wallet found. Create or import one first.");
     }
     const vault = loadVaultRecord();
-    if (!vault) throw new Error("Encrypted signer vault is missing or unreadable.");
+    if (!vault)
+      throw new Error("Encrypted signer vault is missing or unreadable.");
     let vaultKey = null;
     try {
       vaultKey = await readVaultKeyFromSecureStorage();
@@ -1551,7 +1587,8 @@ function createSignerService(ctx, logger) {
           ? decryptUtf8(vault.mnemonicBackup, vaultKey)
           : null;
       return {
-        walletAddress: normalizeWalletAddress(ctx.signerConfig?.walletAddress) || null,
+        walletAddress:
+          normalizeWalletAddress(ctx.signerConfig?.walletAddress) || null,
         derivationPath:
           typeof ctx.signerConfig?.derivationPath === "string"
             ? ctx.signerConfig.derivationPath
@@ -1648,11 +1685,17 @@ function createSignerService(ctx, logger) {
       throw new Error(`Unsupported signer mode: ${ctx.signerMode}`);
     }
     if (!ctx.signerConfig?.walletRef) {
-      throw new Error("No app wallet found. Run 'signer create' or 'signer import'.");
+      throw new Error(
+        "No app wallet found. Run 'signer create' or 'signer import'.",
+      );
     }
   }
 
-  function validatePreparedMissionActionPayload(actionName, result, expected = {}) {
+  function validatePreparedMissionActionPayload(
+    actionName,
+    result,
+    expected = {},
+  ) {
     const expectedSignerAddress =
       ctx.signerMode === "dapp"
         ? String(ctx.currentUserWalletId || "").trim() || null
@@ -1717,12 +1760,12 @@ function createSignerService(ctx, logger) {
       actionName === "nft_cooldown_reset"
         ? "this NFT cooldown reset tx"
         : actionName === "mission_reroll"
-        ? "this mission reroll tx"
-        : actionName === "mission_swap"
-          ? "this mission swap tx"
-          : actionName === "mission_slot_unlock"
-            ? "this mission slot unlock tx"
-            : "this tx";
+          ? "this mission reroll tx"
+          : actionName === "mission_swap"
+            ? "this mission swap tx"
+            : actionName === "mission_slot_unlock"
+              ? "this mission slot unlock tx"
+              : "this tx";
     const approved = await approvalPromptHandler({
       actionName,
       prompt: manualApprovalPrompt(actionLabel),
@@ -1749,9 +1792,7 @@ function createSignerService(ctx, logger) {
       );
       throw new Error("Manual approval rejected.");
     }
-    logWithTimestamp(
-      `[SIGNER] ✅ Manual approval accepted for ${actionName}.`,
-    );
+    logWithTimestamp(`[SIGNER] ✅ Manual approval accepted for ${actionName}.`);
   }
 
   async function signPreparedMissionActionPayload(
@@ -1770,7 +1811,10 @@ function createSignerService(ctx, logger) {
     if (ctx.signerMode === "dapp") {
       const directBridgeUrl = getBrowserBridgeUrl(validated.structuredContent);
       if (!directBridgeUrl) {
-        const keys = Object.keys(validated.structuredContent || {}).slice(0, 40);
+        const keys = Object.keys(validated.structuredContent || {}).slice(
+          0,
+          40,
+        );
         logDebug("dapp", "signing_url_missing", {
           actionName: normalizedAction,
           topLevelKeys: keys,
@@ -1866,7 +1910,9 @@ function createSignerService(ctx, logger) {
         signerMatchesExpectation: validated.decode.signerMatchesExpectation,
       });
       signer = await createUnlockedKeyPairSigner();
-      const decoded = decodePreparedTransaction(validated.structuredContent.transaction);
+      const decoded = decodePreparedTransaction(
+        validated.structuredContent.transaction,
+      );
       const signedTransaction = await signTransactionWithSigners(
         [signer],
         decoded.decodedTransaction,
@@ -1874,7 +1920,8 @@ function createSignerService(ctx, logger) {
       const encodedSignedTransaction =
         getBase58EncodedWireTransaction(signedTransaction);
       const submitArgs = {
-        [validated.tokenField]: validated.structuredContent[validated.tokenField],
+        [validated.tokenField]:
+          validated.structuredContent[validated.tokenField],
         encodedSignedTransaction,
       };
       markSignedAction(normalizedAction, replayFingerprint, nowMs);
@@ -1923,7 +1970,11 @@ function createSignerService(ctx, logger) {
       });
       throw error;
     } finally {
-      if (ctx.signerMode === "app_wallet" && ctx.signerReady && !ctx.signerLocked) {
+      if (
+        ctx.signerMode === "app_wallet" &&
+        ctx.signerReady &&
+        !ctx.signerLocked
+      ) {
         lock("post_sign");
       } else if (ctx.signerMode === "app_wallet" && unlockedForSign) {
         clearSignerSessionSecretKey();
