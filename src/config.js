@@ -11,6 +11,9 @@ const SALVAGE_TOP_LEVEL_KEYS = [
   "level20ResetEnabled",
   "missionModeEnabled",
   "nftCooldownResetEnabled",
+  "nftCooldownResetMissionModeEnabled",
+  "nftCooldownResetMaxPbp",
+  "nftCooldownResetProbeLimit",
   "missionResetLevel",
   "signerMode",
   "signer",
@@ -290,7 +293,13 @@ function loadConfig(ctx, logWithTimestamp) {
     ctx.nftCooldownResetEnabled = ctx.config.nftCooldownResetEnabled;
   } else {
     ctx.config.nftCooldownResetEnabled = false;
+    ctx.nftCooldownResetEnabled = false;
   }
+  const nftCooldownResetMaxPbp = Number(ctx.config.nftCooldownResetMaxPbp);
+  ctx.config.nftCooldownResetMaxPbp =
+    Number.isFinite(nftCooldownResetMaxPbp) && nftCooldownResetMaxPbp >= 0
+      ? nftCooldownResetMaxPbp
+      : 20;
   if (typeof ctx.config.enableRentals !== "boolean") {
     ctx.config.enableRentals = false;
   }
@@ -298,11 +307,13 @@ function loadConfig(ctx, logWithTimestamp) {
   if (typeof ctx.config.rentalFastRefreshEnabled !== "boolean") {
     ctx.config.rentalFastRefreshEnabled = false;
   }
+  const rentalFastRefreshMinMs =
+    ctx.runtimeDefaults?.rentalFastRefreshTickMs || 15000;
   const rentalFastRefreshTickMs = Number(ctx.config.rentalFastRefreshTickMs);
   ctx.config.rentalFastRefreshTickMs =
     Number.isFinite(rentalFastRefreshTickMs) && rentalFastRefreshTickMs > 0
-      ? Math.max(5000, Math.floor(rentalFastRefreshTickMs))
-      : 15000;
+      ? Math.max(rentalFastRefreshMinMs, Math.floor(rentalFastRefreshTickMs))
+      : rentalFastRefreshMinMs;
   if (typeof ctx.config.missionResetLevel === "string") {
     ctx.currentMissionResetLevel = ctx.config.missionResetLevel;
   }

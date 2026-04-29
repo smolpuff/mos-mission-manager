@@ -74,6 +74,8 @@ function createGuiStateEmitter(ctx) {
       currentMode: ctx.currentMode,
       level20ResetEnabled: ctx.level20ResetEnabled,
       missionModeEnabled: ctx.missionModeEnabled,
+      nftCooldownResetEnabled: ctx.nftCooldownResetEnabled,
+      nftCooldownResetMaxPbp: ctx.config?.nftCooldownResetMaxPbp ?? 20,
       currentMissionResetLevel: ctx.currentMissionResetLevel,
       sessionRewardTotals: ctx.sessionRewardTotals,
       sessionSpendTotals: ctx.sessionSpendTotals,
@@ -188,6 +190,54 @@ if (process.env.PBP_GUI_BRIDGE === "1" && typeof process.send === "function") {
           reason: "ui_slot4_unlock",
         });
         sendGuiResponse(requestId, { ok: true, prepared });
+        return;
+      }
+      if (action === "reset_nft_cooldown") {
+        if (!checks || typeof checks.resetCooldownNftFromUi !== "function") {
+          throw new Error("NFT cooldown reset service unavailable.");
+        }
+        const reset = await checks.resetCooldownNftFromUi(message.payload || {});
+        sendGuiResponse(requestId, { ok: true, reset });
+        return;
+      }
+      if (action === "prepare_nft_cooldown_reset") {
+        if (
+          !checks ||
+          typeof checks.prepareCooldownResetNftFromUi !== "function"
+        ) {
+          throw new Error("NFT cooldown reset service unavailable.");
+        }
+        const prepared = await checks.prepareCooldownResetNftFromUi(
+          message.payload || {},
+        );
+        sendGuiResponse(requestId, { ok: true, prepared });
+        return;
+      }
+      if (action === "update_runtime_config") {
+        const payload = message.payload && typeof message.payload === "object"
+          ? message.payload
+          : {};
+        if (typeof payload.nftCooldownResetEnabled === "boolean") {
+          ctx.nftCooldownResetEnabled = payload.nftCooldownResetEnabled;
+          ctx.config.nftCooldownResetEnabled = payload.nftCooldownResetEnabled;
+        }
+        if (payload.nftCooldownResetMaxPbp !== undefined) {
+          const maxPbp = Number(payload.nftCooldownResetMaxPbp);
+          if (Number.isFinite(maxPbp) && maxPbp >= 0) {
+            ctx.config.nftCooldownResetMaxPbp = maxPbp;
+          }
+        }
+        flushConfig(ctx, logger.logDebug);
+        logger.logWithTimestamp(
+          `[CONFIG] Auto NFT cooldown resets ${ctx.nftCooldownResetEnabled ? "enabled" : "disabled"} (max ${Number(ctx.config.nftCooldownResetMaxPbp ?? 20)} PBP).`,
+        );
+        sendGuiResponse(requestId, {
+          ok: true,
+          config: {
+            nftCooldownResetEnabled: ctx.nftCooldownResetEnabled,
+            nftCooldownResetMaxPbp: ctx.config.nftCooldownResetMaxPbp,
+          },
+        });
         return;
       }
       sendGuiResponse(requestId, {

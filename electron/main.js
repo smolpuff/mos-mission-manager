@@ -23,6 +23,7 @@ const {
   missionHasAssignedNft,
   missionIsActive,
 } = require("../src/missions/normalize");
+const { runtimeDefaults } = require("../src/runtime-defaults");
 
 const ROOT_DIR = path.resolve(__dirname, "..");
 const RENDERER_DEV_URL =
@@ -45,7 +46,17 @@ if (process.platform === "win32") {
 }
 
 function defaultMissionResetLevel() {
-  return app.isPackaged ? "11" : "6";
+  return runtimeDefaults(isDev()).missionResetLevel;
+}
+
+function desktopWindowFrameOptions() {
+  return {
+    frame: false,
+    titleBarStyle: "hidden",
+    ...(process.platform === "darwin"
+      ? { trafficLightPosition: { x: -100, y: -100 } }
+      : {}),
+  };
 }
 
 let controlWindow = null;
@@ -96,6 +107,8 @@ const backendStatus = {
   defaultMissionResetLevel: null,
   level20ResetEnabled: null,
   missionModeEnabled: null,
+  nftCooldownResetEnabled: null,
+  nftCooldownResetMaxPbp: null,
   currentMissionResetLevel: null,
   sessionRewardTotals: null,
   sessionSpendTotals: null,
@@ -438,7 +451,7 @@ function applyAnalyticsLine(line) {
     }
   }
 
-  if (/started rental lease/i.test(text)) {
+  if (/(started rental lease|lease started)/i.test(text)) {
     current.lifetime.totalLeased += 1;
     current.session.totalLeased += 1;
     changed = true;
@@ -524,6 +537,18 @@ function hydrateBackendStatusFromConfig() {
   }
   if (typeof config.missionModeEnabled === "boolean") {
     backendStatus.missionModeEnabled = config.missionModeEnabled;
+  }
+  if (typeof config.nftCooldownResetEnabled === "boolean") {
+    backendStatus.nftCooldownResetEnabled = config.nftCooldownResetEnabled;
+  } else {
+    backendStatus.nftCooldownResetEnabled = false;
+  }
+  if (config.nftCooldownResetMaxPbp !== undefined) {
+    const maxPbp = Number(config.nftCooldownResetMaxPbp);
+    backendStatus.nftCooldownResetMaxPbp =
+      Number.isFinite(maxPbp) && maxPbp >= 0 ? maxPbp : 20;
+  } else {
+    backendStatus.nftCooldownResetMaxPbp = 20;
   }
   if (typeof config.missionResetLevel === "string") {
     backendStatus.currentMissionResetLevel = config.missionResetLevel;
@@ -1077,6 +1102,7 @@ function startBackend() {
       ...process.env,
       ELECTRON_RUN_AS_NODE: "1",
       PBP_GUI_BRIDGE: "1",
+      PBP_DEV_MODE: isDev() ? "1" : "0",
       PBP_CONFIG_DIR: getBackendWorkingDirectory(),
       PBP_DEFAULT_MISSION_RESET_LEVEL: defaultMissionResetLevel(),
       FORCE_COLOR: "0",
@@ -1103,6 +1129,8 @@ function startBackend() {
   backendStatus.currentMode = null;
   backendStatus.level20ResetEnabled = null;
   backendStatus.missionModeEnabled = null;
+  backendStatus.nftCooldownResetEnabled = null;
+  backendStatus.nftCooldownResetMaxPbp = null;
   backendStatus.currentMissionResetLevel = null;
   backendStatus.sessionRewardTotals = null;
   backendStatus.sessionSpendTotals = null;
@@ -1413,9 +1441,7 @@ async function createControlWindow() {
     title: "missions-v3-mcp",
     backgroundColor: "#0b1116",
     autoHideMenuBar: true,
-    frame: false,
-    titleBarStyle: "hidden",
-    trafficLightPosition: { x: -100, y: -100 },
+    ...desktopWindowFrameOptions(),
     maximizable: false,
     fullscreenable: false,
     resizable: false,
@@ -1561,9 +1587,7 @@ async function createCliWindow() {
     title: "missions-v3-mcp CLI",
     backgroundColor: "#061017",
     autoHideMenuBar: true,
-    frame: false,
-    titleBarStyle: "hidden",
-    trafficLightPosition: { x: -100, y: -100 },
+    ...desktopWindowFrameOptions(),
     maximizable: false,
     fullscreenable: false,
     resizable: false,
@@ -1615,6 +1639,14 @@ app.whenReady().then(async () => {
     if (typeof next.missionModeEnabled === "boolean") {
       backendStatus.missionModeEnabled = next.missionModeEnabled;
     }
+    if (typeof next.nftCooldownResetEnabled === "boolean") {
+      backendStatus.nftCooldownResetEnabled = next.nftCooldownResetEnabled;
+    }
+    if (next.nftCooldownResetMaxPbp !== undefined) {
+      const maxPbp = Number(next.nftCooldownResetMaxPbp);
+      backendStatus.nftCooldownResetMaxPbp =
+        Number.isFinite(maxPbp) && maxPbp >= 0 ? maxPbp : 20;
+    }
     if (typeof next.missionResetLevel === "string") {
       backendStatus.currentMissionResetLevel = next.missionResetLevel;
     }
@@ -1629,6 +1661,27 @@ app.whenReady().then(async () => {
       : "normal";
     logConfigPatch("Desktop", requestedPatch);
     publishStatus();
+    if (
+      backend &&
+      backendStatus.running &&
+      (Object.prototype.hasOwnProperty.call(
+        requestedPatch,
+        "nftCooldownResetEnabled",
+      ) ||
+        Object.prototype.hasOwnProperty.call(
+          requestedPatch,
+          "nftCooldownResetMaxPbp",
+        ))
+    ) {
+      requestBackend("update_runtime_config", {
+        nftCooldownResetEnabled: next.nftCooldownResetEnabled,
+        nftCooldownResetMaxPbp: next.nftCooldownResetMaxPbp,
+      }).catch((error) => {
+        pushSystemLog(
+          `Runtime config sync failed: ${String(error?.message || error)}`,
+        );
+      });
+    }
     return { config: next, status: { ...backendStatus } };
   });
   ipcMain.handle("wallet:refresh-summary", async () => {
@@ -2249,6 +2302,58 @@ app.whenReady().then(async () => {
       );
       return result;
     }
+  });
+  ipcMain.handle("nfts:reset-cooldown", async (_event, payload = {}) => {
+    const nftId = String(
+      payload?.nftId || payload?.nftAccount || payload?.account || "",
+    ).trim();
+    if (!nftId) {
+      return { ok: false, error: "Missing NFT id." };
+    }
+    pushSystemLog(`NFT cooldown reset requested: ${nftId}.`);
+    const response = await requestBackend(
+      "reset_nft_cooldown",
+      {
+        nftId,
+        nftName: String(payload?.nftName || payload?.name || "NFT").trim(),
+        cooldownSeconds: Number(payload?.cooldownSeconds || 0),
+        nft:
+          payload?.nft && typeof payload.nft === "object"
+            ? payload.nft
+            : undefined,
+      },
+      {
+        ensureRunning: true,
+        timeoutMs: 180000,
+      },
+    );
+    return response;
+  });
+  ipcMain.handle("nfts:prepare-cooldown-reset", async (_event, payload = {}) => {
+    const nftId = String(
+      payload?.nftId || payload?.nftAccount || payload?.account || "",
+    ).trim();
+    if (!nftId) {
+      return { ok: false, error: "Missing NFT id." };
+    }
+    pushSystemLog(`NFT cooldown reset prepare requested: ${nftId}.`);
+    const response = await requestBackend(
+      "prepare_nft_cooldown_reset",
+      {
+        nftId,
+        nftName: String(payload?.nftName || payload?.name || "NFT").trim(),
+        cooldownSeconds: Number(payload?.cooldownSeconds || 0),
+        nft:
+          payload?.nft && typeof payload.nft === "object"
+            ? payload.nft
+            : undefined,
+      },
+      {
+        ensureRunning: true,
+        timeoutMs: 45000,
+      },
+    );
+    return response;
   });
   ipcMain.handle("slot:prepare-unlock4", async () => {
     pushSystemLog("Slot 4 unlock requested.");

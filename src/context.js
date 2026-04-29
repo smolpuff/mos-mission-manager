@@ -2,11 +2,11 @@
 
 const path = require("path");
 const os = require("os");
+const { detectNodeDevMode, runtimeDefaults } = require("./runtime-defaults");
 
 const APP_VERSION = "3.2.0";
 const APP_NAME = "missions-v3-mcp";
-const DEFAULT_MISSION_RESET_LEVEL =
-  String(process.env.PBP_DEFAULT_MISSION_RESET_LEVEL || "").trim() || "11";
+const DEV_MODE = detectNodeDevMode();
 const DEFAULT_SIGNER_MODE = "app_wallet";
 const MCP_URL = "https://pixelbypixel.studio/mcp";
 const MCP_PROTOCOL_VERSION = "2025-03-26";
@@ -15,6 +15,7 @@ const LOG_BUFFER_SIZE_DEBUG = 400;
 
 function createContext() {
   const configDir = process.env.PBP_CONFIG_DIR || process.cwd();
+  const defaults = runtimeDefaults(DEV_MODE);
   return {
     APP_VERSION,
     APP_NAME,
@@ -24,6 +25,7 @@ function createContext() {
     tokenFilePath: path.join(os.homedir(), ".pbp-mcp", "token.json"),
     LOG_BUFFER_SIZE,
     LOG_BUFFER_SIZE_DEBUG,
+    runtimeDefaults: defaults,
 
     logBuffer: [],
     config: {},
@@ -41,7 +43,9 @@ function createContext() {
     level20ResetEnabled: false,
     missionModeEnabled: false,
     nftCooldownResetEnabled: false,
-    currentMissionResetLevel: DEFAULT_MISSION_RESET_LEVEL,
+    currentMissionResetLevel:
+      String(process.env.PBP_DEFAULT_MISSION_RESET_LEVEL || "").trim() ||
+      defaults.missionResetLevel,
     signerMode: DEFAULT_SIGNER_MODE,
     signerStatus: "uninitialized",
     signerReady: false,
@@ -58,6 +62,7 @@ function createContext() {
     signerUnlockAllowedAt: 0,
     signerRecentActionFingerprints: {},
     signerActionLastAt: {},
+    devMode: DEV_MODE,
     debugMode: process.argv.includes("--debug"),
     interactiveAuth: process.argv.includes("--interactive-auth"),
     plainOutputMode:

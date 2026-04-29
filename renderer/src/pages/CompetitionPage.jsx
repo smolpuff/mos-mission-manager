@@ -42,11 +42,15 @@ export default function CompetitionPage({
         <div className="gap-1 text-xs justify-self-end  flex flex-col flex-0">
           <div>
             Start{" "}
-            {latestCompetition?.start || latestCompetition?.datesText || "Unknown"}
+            {latestCompetition?.start ||
+              latestCompetition?.datesText ||
+              "Unknown"}
           </div>
           <div>
             End{" "}
-            {latestCompetition?.end || latestCompetition?.datesText || "Unknown"}
+            {latestCompetition?.end ||
+              latestCompetition?.datesText ||
+              "Unknown"}
           </div>
         </div>
       </div>
@@ -83,14 +87,17 @@ export default function CompetitionPage({
             <div className="h-full min-h-0 flex flex-col gap-3">
               {latestCompetition.debug?.challenge ? (
                 <div className="text-sm text-amber-200">
-                  Headless scrape looks blocked ({latestCompetition.debug.challenge}
-                  ). Try again after opening the competitions page once in-app, or
-                  disable bot protection.
+                  Headless scrape looks blocked (
+                  {latestCompetition.debug.challenge}
+                  ). Try again after opening the competitions page once in-app,
+                  or disable bot protection.
                 </div>
               ) : null}
 
               <div className="w-full flex-1 min-h-0 card flex flex-col">
-                <div className="text-sm text-slate-400 w-full | hidden">Results</div>
+                <div className="text-sm text-slate-400 w-full | hidden">
+                  Results
+                </div>
                 {latestCompetition.resultsStatus ? (
                   <div className="text-sm text-slate-300">
                     {latestCompetition.resultsStatus}
@@ -101,7 +108,9 @@ export default function CompetitionPage({
                     <table className="results-table w-full text-xs border-collapse h-full">
                       <thead className="">
                         <tr className="text-slate-400 border-b border-slate-700/70 ">
-                          <th className="text-left font-normal py-1 pr-2">Place</th>
+                          <th className="text-left font-normal py-1 pr-2">
+                            Place
+                          </th>
                           <th className="text-left   font-normal py-1 pr-2">
                             Player
                           </th>
@@ -163,7 +172,7 @@ export default function CompetitionPage({
             </div>
           )}
         </div>
-        <div className="space-y-1 max-w-[200px] w-full">
+        <div className="space-y-1 max-w-50 w-full">
           <div className="text-sm text-slate-400 mish-gradient !text-2xl">
             Prizes
           </div>
@@ -184,4 +193,3 @@ export default function CompetitionPage({
     </section>
   );
 }
-

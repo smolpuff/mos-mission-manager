@@ -100,9 +100,9 @@ export default function HeaderUser({
         ) : fundingSummary ? (
           <div className="user_meta__funding_wallet flex gap-3 items-center">
             <div className="text-xs mt-1">
-              <span className="user_meta__funding_wallet_lockstate text-xs">
+              {/* <span className="user_meta__funding_wallet_lockstate text-xs">
                 {lockLabel}
-              </span>{" "}
+              </span>{" "} */}
               Funding Wallet Balance
             </div>
             <div className="flex gap-3 items-center">

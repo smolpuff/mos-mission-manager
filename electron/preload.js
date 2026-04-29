@@ -3,6 +3,7 @@
 const { contextBridge, ipcRenderer } = require("electron");
 
 contextBridge.exposeInMainWorld("missionsDesktop", {
+  platform: process.platform,
   startBackend: () => ipcRenderer.invoke("backend:start"),
   stopBackend: () => ipcRenderer.invoke("backend:stop"),
   restartBackend: () => ipcRenderer.invoke("backend:restart"),
@@ -18,6 +19,10 @@ contextBridge.exposeInMainWorld("missionsDesktop", {
   fetchOnboardingAccount: () => ipcRenderer.invoke("onboarding:fetch-account"),
   getRentalsPreview: () => ipcRenderer.invoke("rentals:preview"),
   getUserNfts: () => ipcRenderer.invoke("nfts:list"),
+  prepareNftCooldownReset: (payload) =>
+    ipcRenderer.invoke("nfts:prepare-cooldown-reset", payload),
+  resetNftCooldown: (payload) =>
+    ipcRenderer.invoke("nfts:reset-cooldown", payload),
   applyOnboardingSelection: (payload) =>
     ipcRenderer.invoke("onboarding:apply-selection", payload),
   copyToClipboard: (text) => ipcRenderer.invoke("clipboard:copy", text),

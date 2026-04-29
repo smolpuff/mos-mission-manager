@@ -29,14 +29,9 @@ function createWatchService(
     mcp,
     signer,
   );
-  const WATCH_MAX_LIMIT_SECONDS = 120;
-  // const WATCH_MAX_LIMIT_SECONDS = 600;
-
   const WATCH_MAX_CLAIMS = 4;
   const WATCH_FALLBACK_CLAIMS = true;
-  const WATCH_MIN_CYCLE_SECONDS = 30;
-  const WATCH_DEFAULT_POLL_SECONDS = 30;
-  // const WATCH_DEFAULT_POLL_SECONDS = 45;
+  const WATCH_MIN_CYCLE_SECONDS = ctx.runtimeDefaults?.watchMinCycleSeconds || 30;
   const RESET_PROMPT_REOPEN_COOLDOWN_MS = 60_000;
   const DEFAULT_SESSION_REWARD_TOTALS = { pbp: 0, tc: 0, cc: 0 };
   const DEFAULT_SESSION_SPEND_TOTALS = { pbp: 0, tc: 0, cc: 0 };
@@ -530,12 +525,12 @@ function createWatchService(
   }
 
   function watchConfig() {
-    const maxLimitSeconds = WATCH_MAX_LIMIT_SECONDS;
+    const maxLimitSeconds = ctx.runtimeDefaults?.watchMaxLimitSeconds || 600;
     const configuredPoll = Number(ctx.config.watchPollIntervalSeconds);
     const rawPollIntervalSeconds =
       Number.isFinite(configuredPoll) && configuredPoll > 0
         ? configuredPoll
-        : WATCH_DEFAULT_POLL_SECONDS;
+        : ctx.runtimeDefaults?.watchDefaultPollSeconds || 45;
     // Server-facing poll interval: keep this conservative by default.
     const pollIntervalSeconds = Math.max(
       WATCH_MIN_CYCLE_SECONDS,
@@ -1081,6 +1076,17 @@ function createWatchService(
           claimed: currentClaimed,
         });
       }
+      try {
+        missionResult = await mcp.mcpToolCall("get_user_missions", {});
+        trace("watch", "claim_followup_refetched_after_claim", {
+          traceId,
+          assignReason,
+        });
+      } catch (error) {
+        logDebug("watch", "post_claim_missions_refresh_failed", {
+          error: error.message,
+        });
+      }
       logWithTimestamp(assignIntro);
       try {
         logDebug("watch", "assign_check_start", { reason: assignReason });
@@ -1103,13 +1109,12 @@ function createWatchService(
           assigned,
           skipped: assignResult?.skipped === true,
         });
-        if (assigned > 0) {
-          missionResult = await mcp.mcpToolCall("get_user_missions", {});
-          trace("watch", "claim_followup_refetched_after_assign", {
-            traceId,
-            assignReason,
-          });
-        }
+        missionResult = await mcp.mcpToolCall("get_user_missions", {});
+        trace("watch", "claim_followup_refetched_after_assign", {
+          traceId,
+          assignReason,
+          assigned,
+        });
       } catch (error) {
         logWithTimestamp(
           `[ASSIGN] ❌ Post-claim assign error: ${error.message}`,
@@ -1349,7 +1354,11 @@ function createWatchService(
       const rawLevel =
         ctx.currentMissionResetLevel ||
         ctx.config.missionResetLevel ||
-        String(process.env.PBP_DEFAULT_MISSION_RESET_LEVEL || "11");
+        String(
+          process.env.PBP_DEFAULT_MISSION_RESET_LEVEL ||
+            ctx.runtimeDefaults?.missionResetLevel ||
+            "11",
+        );
       const threshold = Number(rawLevel);
       if (Number.isFinite(threshold) && threshold > 0) {
         return {
@@ -1515,27 +1524,31 @@ function createWatchService(
         `[ASSIGN] ▶ Post-reset assign check (rerolled=${rerolledCount})...`,
       );
       try {
-        const immediateMissionResult = await mcp.mcpToolCall(
+        let latestMissionResult = await mcp.mcpToolCall(
           "get_user_missions",
           {},
         );
         let assignResult = await checks.autoAssignConfiguredMissions({
           reason: `post_reset_${reason}`,
-          missionsResult: immediateMissionResult,
+          missionsResult: latestMissionResult,
         });
         logAssignCheckResult(assignResult);
         if (Number(assignResult?.assigned || 0) === 0) {
           await sleep(1200);
-          const retryMissionResult = await mcp.mcpToolCall(
+          latestMissionResult = await mcp.mcpToolCall(
             "get_user_missions",
             {},
           );
           assignResult = await checks.autoAssignConfiguredMissions({
             reason: `post_reset_${reason}_retry`,
-            missionsResult: retryMissionResult,
+            missionsResult: latestMissionResult,
           });
           logAssignCheckResult(assignResult);
         }
+        latestMissionResult = await mcp.mcpToolCall("get_user_missions", {});
+        await checks.refreshMissionHeaderStats({
+          missionsResult: latestMissionResult,
+        });
       } catch (error) {
         logWithTimestamp(
           `[ASSIGN] ❌ Post-reset assign check failed: ${error.message}`,

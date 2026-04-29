@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 
 const NFT_COOLDOWN_RING_MAX_SECONDS = 24 * 60 * 60;
-
 function formatAccount(value) {
   const text = String(value || "").trim();
   if (!text) return "n/a";
@@ -23,6 +22,12 @@ function formatCooldownLabel(totalSeconds) {
     return remSeconds > 0 ? `${minutes}m ${remSeconds}s` : `${minutes}m`;
   }
   return `${seconds}s`;
+}
+
+function formatTokenAmount(value, token = "PBP") {
+  const amount = Number(value);
+  if (!Number.isFinite(amount)) return "n/a";
+  return `${amount.toLocaleString(undefined, { maximumFractionDigits: 2 })} ${token}`;
 }
 
 function remainingCooldownSeconds(item, nowMs) {
@@ -130,6 +135,9 @@ function NftCardImage({ src, alt }) {
 export default function NftsPage({ bridge }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [resetModal, setResetModal] = useState(null);
+  const [resetBusy, setResetBusy] = useState(false);
+  const [resetError, setResetError] = useState(null);
   const [nowMs, setNowMs] = useState(Date.now());
   const [selectedCollection, setSelectedCollection] = useState("all");
   const [sortBy, setSortBy] = useState("cooldown_remaining");
@@ -166,6 +174,111 @@ export default function NftsPage({ bridge }) {
     const timer = setInterval(() => setNowMs(Date.now()), 1000);
     return () => clearInterval(timer);
   }, []);
+
+  const openResetModal = async (item, cooldownSeconds) => {
+    if (!item || Number(cooldownSeconds || 0) <= 0) return;
+    const nftId = String(item.account || item.id || item.mint || "").trim();
+    setResetError(null);
+    setResetModal({
+      item,
+      cooldownSeconds: Math.max(0, Math.round(Number(cooldownSeconds || 0))),
+      preparing: true,
+      resetCost: null,
+    });
+    if (!bridge?.prepareNftCooldownReset) {
+      setResetModal((current) =>
+        current?.item === item ? { ...current, preparing: false } : current,
+      );
+      setResetError("NFT cooldown reset preparation is not available.");
+      return;
+    }
+    try {
+      const response = await bridge.prepareNftCooldownReset({
+        nftId,
+        nftName: item.name || "NFT",
+        cooldownSeconds,
+        nft: {
+          ...item,
+          nftAccount: nftId,
+          cooldownSeconds,
+        },
+      });
+      if (!response?.ok) {
+        throw new Error(response?.error || "Cooldown reset preparation failed.");
+      }
+      const prepared = response.prepared || null;
+      if (!prepared?.ok || !prepared?.ready) {
+        throw new Error(prepared?.reason || "Cooldown reset is not available.");
+      }
+      const resetCost = Number(prepared.resetCost);
+      if (!Number.isFinite(resetCost)) {
+        throw new Error("Cooldown reset cost was not returned.");
+      }
+      setResetModal((current) =>
+        current?.item === item
+          ? { ...current, preparing: false, resetCost }
+          : current,
+      );
+    } catch (err) {
+      const message = String(err?.message || err);
+      if (/No handler registered.*nfts:prepare-cooldown-reset/i.test(message)) {
+        setResetError(
+          "NFT cooldown reset needs the updated desktop backend. Restart the app, then try again.",
+        );
+        return;
+      }
+      setResetModal((current) =>
+        current?.item === item ? { ...current, preparing: false } : current,
+      );
+      setResetError(message);
+    }
+  };
+
+  const closeResetModal = () => {
+    if (resetBusy) return;
+    setResetModal(null);
+    setResetError(null);
+  };
+
+  const confirmResetCooldown = async () => {
+    if (!bridge?.resetNftCooldown || !resetModal?.item) {
+      setResetError("NFT cooldown reset is not available in this build.");
+      return;
+    }
+    const item = resetModal.item;
+    const nftId = String(item.account || item.id || item.mint || "").trim();
+    if (!nftId) {
+      setResetError("Missing NFT account.");
+      return;
+    }
+    setResetBusy(true);
+    setResetError(null);
+    try {
+      const response = await bridge.resetNftCooldown({
+        nftId,
+        nftName: item.name || "NFT",
+        cooldownSeconds: resetModal.cooldownSeconds,
+        nft: {
+          ...item,
+          nftAccount: nftId,
+          cooldownSeconds: resetModal.cooldownSeconds,
+        },
+      });
+      if (!response?.ok) {
+        throw new Error(response?.error || "Cooldown reset failed.");
+      }
+      const reset = response.reset || null;
+      if (!reset?.ok || reset?.reset !== true) {
+        throw new Error(reset?.reason || "Cooldown reset did not complete.");
+      }
+      setResetModal(null);
+      await load();
+    } catch (err) {
+      setResetError(String(err?.message || err));
+    } finally {
+      setResetBusy(false);
+    }
+  };
 
   const collectionOptions = [];
   const collectionSeen = new Set();
@@ -323,7 +436,31 @@ export default function NftsPage({ bridge }) {
                   cooldownSeconds: liveCooldownSeconds,
                 });
                 return (
-                  <div key={item.id} className="card-mission min-w-0">
+                  <div
+                    key={item.id}
+                    className={`card-mission min-w-0 ${
+                      !isReady ? "cursor-pointer hover:border-warning/50" : ""
+                    }`}
+                    role={!isReady ? "button" : undefined}
+                    tabIndex={!isReady ? 0 : undefined}
+                    title={
+                      !isReady
+                        ? `Reset cooldown for ${item.name || "NFT"}`
+                        : undefined
+                    }
+                    onClick={() =>
+                      !isReady
+                        ? void openResetModal(item, liveCooldownSeconds)
+                        : undefined
+                    }
+                    onKeyDown={(event) => {
+                      if (isReady) return;
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        void openResetModal(item, liveCooldownSeconds);
+                      }
+                    }}
+                  >
                     <div className="card-mission__header relative overflow-clip">
                       <NftCardImage src={item.image} alt={item.name || "NFT"} />
                       {!isReady ? (
@@ -345,18 +482,6 @@ export default function NftsPage({ bridge }) {
                       <div className="card-mission__title truncate">
                         {item.name || "Unknown NFT"}
                       </div>
-
-                      <div className="mt-1 flex items-center justify-center gap-2 text-[11px]">
-                        <span
-                          className={
-                            !isReady ? "text-amber-300" : "text-emerald-300"
-                          }
-                        >
-                          {!isReady
-                            ? `CD ${liveCooldownSeconds > 0 ? ` ${formatCooldownLabel(liveCooldownSeconds)}` : ""}`
-                            : ""}
-                        </span>
-                      </div>
                     </div>
                   </div>
                 );
@@ -365,6 +490,96 @@ export default function NftsPage({ bridge }) {
           </div>
         )}
       </div>
+      {resetModal ? (
+        <div
+          className="fixed inset-0 z-60 grid place-items-center bg-black/50 p-4"
+          role="dialog"
+          aria-modal="true"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) closeResetModal();
+          }}
+        >
+          <div className="card w-full max-w-140 space-y-4 !bg-[#0b1116] border border-white/15 z-10">
+            <div className="flex items-center justify-between gap-3">
+              <div className="text-lg font-semibold text-white">
+                Reset NFT Cooldown
+              </div>
+              <button
+                type="button"
+                className="btn btn-clear btn-sm"
+                onClick={closeResetModal}
+                title="Close"
+                disabled={resetBusy}
+              >
+                x
+              </button>
+            </div>
+            <div className="flex items-center gap-3">
+              {resetModal.item?.image ? (
+                <img
+                  src={resetModal.item.image}
+                  alt={resetModal.item?.name || "NFT"}
+                  className="h-14 w-14 rounded-md object-cover border border-white/10"
+                />
+              ) : (
+                <div className="h-14 w-14 rounded-md border border-white/10 bg-white/5" />
+              )}
+              <div className="min-w-0">
+                <div className="truncate text-sm font-semibold text-slate-100">
+                  {resetModal.item?.name || "Unknown NFT"}
+                </div>
+                <div className="text-xs text-slate-400">
+                  {formatAccount(
+                    resetModal.item?.account ||
+                      resetModal.item?.id ||
+                      resetModal.item?.mint,
+                  )}
+                </div>
+              </div>
+            </div>
+            <div className="text-sm text-slate-200">
+              Reset cooldown{" "}
+              <span className="font-semibold text-white">
+                {formatCooldownLabel(resetModal.cooldownSeconds)}
+              </span>{" "}
+              for{" "}
+              <span className="font-semibold text-white">
+                {resetModal.preparing
+                  ? "checking cost..."
+                  : formatTokenAmount(resetModal.resetCost)}
+              </span>
+              ?
+            </div>
+            {resetError ? (
+              <div className="rounded-md border border-error/40 bg-error/10 p-3 text-sm text-slate-100">
+                {resetError}
+              </div>
+            ) : null}
+            <div className="flex items-center justify-end gap-2">
+              <button
+                type="button"
+                className="btn btn-clear btn-sm"
+                onClick={closeResetModal}
+                disabled={resetBusy}
+              >
+                No
+              </button>
+              <button
+                type="button"
+                className="btn btn-gradient btn-sm"
+                onClick={() => void confirmResetCooldown()}
+                disabled={
+                  resetBusy ||
+                  resetModal.preparing ||
+                  !Number.isFinite(Number(resetModal.resetCost))
+                }
+              >
+                {resetBusy ? "Resetting..." : "Yes"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </section>
   );
 }

@@ -3,12 +3,27 @@ function formatNumber(value, max = 2) {
   return n.toLocaleString(undefined, { maximumFractionDigits: max });
 }
 
+function finiteNumber(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function firstFiniteNumber(...values) {
+  for (const value of values) {
+    const n = finiteNumber(value);
+    if (n !== null) return n;
+  }
+  return 0;
+}
+
 function parseClaimEvents(logs = []) {
   const events = [];
   for (const entry of Array.isArray(logs) ? logs : []) {
     const text = String(entry?.text || "");
-    if (!/\[WATCH\]\s+✅\s+Claimed:/i.test(text)) continue;
-    const body = text.split("Claimed:")[1] || "";
+    const claimMatch = text.match(/\[WATCH\]\s+✅\s+Claimed:\s*(.+)$/i);
+    if (!claimMatch) continue;
+    const body = String(claimMatch[1] || "").trim();
+    if (!body || body.startsWith("+")) continue;
     const mission = body.split(" slot=")[0]?.trim() || "unknown mission";
     const rewardMatch = body.match(/([0-9]+(?:\.[0-9]+)?)\s+([A-Z]{2,4})/);
     const amount = Number(rewardMatch?.[1] || 0);
@@ -31,9 +46,9 @@ function parseRentalLeaseEvents(logs = []) {
   let count = 0;
   for (const entry of Array.isArray(logs) ? logs : []) {
     const text = String(entry?.text || "");
-    if (!/started rental lease/i.test(text)) continue;
+    if (!/(started rental lease|lease started)/i.test(text)) continue;
     const idMatch = text.match(
-      /started rental lease\s+([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i,
+      /(?:started rental lease|lease started)[\s,:]+([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i,
     );
     const leaseId = String(idMatch?.[1] || "").trim().toLowerCase();
     if (leaseId) {
@@ -104,8 +119,11 @@ function buildMissionEfficiency(events = [], claimRows = []) {
 }
 
 export default function StatsPage({ status, logs, missionStats, sessionStartedAtMs }) {
-  const analytics = status?.analytics && typeof status.analytics === "object"
-    ? status.analytics
+  const safeStatus = status && typeof status === "object" ? status : {};
+  const safeMissionStats =
+    missionStats && typeof missionStats === "object" ? missionStats : {};
+  const analytics = safeStatus?.analytics && typeof safeStatus.analytics === "object"
+    ? safeStatus.analytics
     : null;
   const sessionAnalytics =
     analytics?.session && typeof analytics.session === "object"
@@ -116,7 +134,7 @@ export default function StatsPage({ status, logs, missionStats, sessionStartedAt
       ? analytics.lifetime
       : null;
 
-  const rewardsFromStatus = status.sessionRewardTotals || {};
+  const rewardsFromStatus = safeStatus.sessionRewardTotals || {};
   const rewardsFromAnalytics = sessionAnalytics?.currencyEarned || {};
   const rewards = {
     pbp: Number(
@@ -138,7 +156,7 @@ export default function StatsPage({ status, logs, missionStats, sessionStartedAt
         0,
     ),
   };
-  const spendFromStatus = status.sessionSpendTotals || {};
+  const spendFromStatus = safeStatus.sessionSpendTotals || {};
   const spend = {
     pbp: Number(
       spendFromStatus.pbp ??
@@ -150,11 +168,14 @@ export default function StatsPage({ status, logs, missionStats, sessionStartedAt
     cc: Number(spendFromStatus.cc ?? 0),
   };
   const netPbp = Number(rewards.pbp || 0) - Number(spend.pbp || 0);
-  const claims = Number(
-    sessionAnalytics?.totalClaims ?? missionStats?.claimed ?? 0,
+  const claims = firstFiniteNumber(
+    safeMissionStats?.claimed,
+    sessionAnalytics?.totalClaims,
+    0,
   );
-  const lifetimeClaims = Number(
-    lifetimeAnalytics?.totalClaims ?? missionStats?.totalClaimed ?? 0,
+  const lifetimeClaims = Math.max(
+    firstFiniteNumber(safeMissionStats?.totalClaimed, 0),
+    firstFiniteNumber(lifetimeAnalytics?.totalClaims, 0),
   );
   const lifetimeStartedAt = Number(lifetimeAnalytics?.startedAt || 0);
   const elapsedHours = Math.max(
@@ -183,10 +204,10 @@ export default function StatsPage({ status, logs, missionStats, sessionStartedAt
   const sessionResetCount = Number(sessionAnalytics?.totalResets || 0);
   const sessionResetCostPbp = Number(sessionAnalytics?.totalResetCostPbp || 0);
   const leasedFromLogs = parseRentalLeaseEvents(logs);
-  const totalLeasedAllTime = Number(
-    lifetimeAnalytics?.totalLeased ??
-      lifetimeAnalytics?.totalRentalLeases ??
-      leasedFromLogs,
+  const totalLeasedAllTime = Math.max(
+    firstFiniteNumber(lifetimeAnalytics?.totalLeased, 0),
+    firstFiniteNumber(lifetimeAnalytics?.totalRentalLeases, 0),
+    firstFiniteNumber(leasedFromLogs, 0),
   );
 
   return (

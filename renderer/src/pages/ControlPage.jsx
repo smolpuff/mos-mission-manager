@@ -185,6 +185,12 @@ function ControlView() {
     status.level20ResetEnabled === true,
   );
   const [rentalsEnabled, setRentalsEnabled] = useState(false);
+  const [nftResetEnabled, setNftResetEnabled] = useState(
+    status.nftCooldownResetEnabled === true,
+  );
+  const [nftResetMaxPbp, setNftResetMaxPbp] = useState(
+    String(status.nftCooldownResetMaxPbp ?? 20),
+  );
   const [modeSelection, setModeSelection] = useState(
     status.missionModeEnabled === true ? "mission" : "normal",
   );
@@ -285,6 +291,19 @@ function ControlView() {
   }, [status.missionModeEnabled]);
 
   useEffect(() => {
+    if (typeof status.nftCooldownResetEnabled === "boolean") {
+      setNftResetEnabled(status.nftCooldownResetEnabled);
+    }
+  }, [status.nftCooldownResetEnabled]);
+
+  useEffect(() => {
+    const maxPbp = Number(status.nftCooldownResetMaxPbp);
+    if (Number.isFinite(maxPbp) && maxPbp >= 0) {
+      setNftResetMaxPbp(String(maxPbp));
+    }
+  }, [status.nftCooldownResetMaxPbp]);
+
+  useEffect(() => {
     let cancelled = false;
     if (!bridge?.getConfig) return undefined;
     bridge.getConfig().then((response) => {
@@ -299,6 +318,15 @@ function ControlView() {
       if (typeof config.missionModeEnabled === "boolean") {
         setModeSelection(config.missionModeEnabled ? "mission" : "normal");
       }
+      if (typeof config.nftCooldownResetEnabled === "boolean") {
+        setNftResetEnabled(config.nftCooldownResetEnabled);
+      }
+      const cooldownMaxPbp = Number(config.nftCooldownResetMaxPbp);
+      setNftResetMaxPbp(
+        Number.isFinite(cooldownMaxPbp) && cooldownMaxPbp >= 0
+          ? String(cooldownMaxPbp)
+          : "10",
+      );
       const configuredPbp = Number(
         config?.lowBalanceThresholds?.pbp ?? config?.lowBalancePbpThreshold,
       );
@@ -365,34 +393,74 @@ function ControlView() {
   ]);
 
   const setMissionResetEnabled = async (enabled) => {
+    if (isMissionMode) return;
     setResetEnabled(enabled);
     await applyConfigPatch({ level20ResetEnabled: enabled });
     await runModeCommand(enabled ? "20r on" : "20r off");
   };
   const setRentalsFallbackEnabled = async (enabled) => {
+    if (isMissionMode) return;
     setRentalsEnabled(enabled);
     await applyConfigPatch({ enableRentals: enabled });
   };
+  const setAutoNftResetEnabled = async (enabled) => {
+    setNftResetEnabled(enabled);
+    await applyConfigPatch({
+      nftCooldownResetEnabled: enabled,
+      ...(isMissionMode ? { nftCooldownResetMissionModeEnabled: enabled } : {}),
+    });
+  };
+  const setAutoNftResetMaxPbp = async (value) => {
+    const raw = String(value ?? "").trim();
+    setNftResetMaxPbp(raw);
+    const next = Number(raw);
+    if (!Number.isFinite(next) || next < 0) return;
+    await applyConfigPatch({ nftCooldownResetMaxPbp: next });
+  };
   const activateNormalMode = async () => {
+    const missionModeNftResetEnabled = isMissionMode
+      ? nftResetEnabled
+      : undefined;
     setModeSelection("normal");
     setResetEnabled(true);
     setRentalsEnabled(true);
+    setNftResetEnabled(false);
     await applyConfigPatch({
       missionModeEnabled: false,
       enableRentals: true,
       missionResetLevel: "20",
       level20ResetEnabled: true,
+      nftCooldownResetEnabled: false,
+      ...(typeof missionModeNftResetEnabled === "boolean"
+        ? { nftCooldownResetMissionModeEnabled: missionModeNftResetEnabled }
+        : {}),
     });
     await runModeCommand(["mm off", "20r on"]);
   };
   const activateMissionMode = async () => {
     const resetLevel = String(status.defaultMissionResetLevel || "11").trim();
+    const cooldownMaxPbp = Number(nftResetMaxPbp);
+    let restoredNftResetEnabled = false;
+    try {
+      const response = await bridge?.getConfig?.();
+      const stored =
+        response?.config?.nftCooldownResetMissionModeEnabled ??
+        response?.config?.nftCooldownResetEnabled;
+      if (typeof stored === "boolean") restoredNftResetEnabled = stored;
+    } catch {}
     setModeSelection("mission");
     setResetEnabled(false);
+    setNftResetEnabled(restoredNftResetEnabled);
     await applyConfigPatch({
       missionModeEnabled: true,
       missionResetLevel: resetLevel,
       level20ResetEnabled: false,
+      nftCooldownResetEnabled: restoredNftResetEnabled,
+      nftCooldownResetMissionModeEnabled: restoredNftResetEnabled,
+      nftCooldownResetMaxPbp:
+        Number.isFinite(cooldownMaxPbp) && cooldownMaxPbp >= 0
+          ? cooldownMaxPbp
+          : 20,
     });
     await runModeCommand([`mm ${resetLevel}`]);
   };
@@ -1682,8 +1750,8 @@ function ControlView() {
                 <div className="flex items-center justify-between gap-3">
                   <div className="text-lg font-semibold">
                     {onboardingStep == 2
-                      ? "Assigned Mission Setup"
-                      : "Funding Source Setup"}
+                      ? "Select your Target Missions"
+                      : "Select your Funding Wallet/Source"}
                   </div>
                   <div className="flex items-center gap-2">
                     <div className="text-xs text-slate-400">
@@ -1826,7 +1894,8 @@ function ControlView() {
                                       </div>
                                     ) : null}
                                     <div className="text-[11px] text-slate-400">
-                                      Recovery keys are available in Settings.
+                                      Your recovery keys can also be found in
+                                      the Settings.
                                     </div>
                                     {onboardingAppWalletError ? (
                                       <div className="text-xs text-error">
@@ -1859,8 +1928,8 @@ function ControlView() {
                       <div className="space-y-4">
                         <div className="rounded-md border border-warning/30 bg-warning/10 p-3 text-sm text-slate-200 flex gap-2">
                           <div>
-                            Make sure these are the active you to watch and they
-                            are assigned. If not, change them on the{" "}
+                            Make sure these are the missions you want to watch
+                            &amp; claim. If not, change them on the{" "}
                             <a
                               href="https://www.pixelbypixel.studio"
                               className="text-accent underline"
@@ -2915,12 +2984,48 @@ function ControlView() {
                       </div>
                     </button>
                     <button
-                      className="h-26 card items-center justify-center opacity-30 col-span-2 hidden"
+                      className="h-full  items-center justify-center opacity-30  "
                       type="button"
                       disabled
+                    ></button>
+                    {debug && "hiasdasds"}
+                    <div
+                      className={`{h-full w-full  !p-0 items-center  ${!isMissionMode ? "grayscale opacity-60" : ""}`}
                     >
-                      auto optimize (from tool) coming soon
-                    </button>
+                      <div class=" w-full">
+                        <ToggleSwitch
+                          switchID="enableNFTReset"
+                          checked={nftResetEnabled}
+                          title="NFT Resets"
+                          styling="text-xs flex !flex-row"
+                          disabled={!isMissionMode}
+                          onChange={(event) =>
+                            void setAutoNftResetEnabled(event.target.checked)
+                          }
+                        />
+                      </div>
+                      <div class=" w-full flex  text-xs items-center gap-3 ">
+                        <label class="flex gap-3 items-center">
+                          <div class="relative">
+                            <input
+                              type="number"
+                              min="0"
+                              step="1"
+                              value={nftResetMaxPbp}
+                              onChange={(event) =>
+                                void setAutoNftResetMaxPbp(event.target.value)
+                              }
+                              class="relative input bg-transparent text-xs w-17 p-1 pr-3 h-auto !text-white text-center !rounded-full outline-none"
+                            />
+                            <img
+                              src={pbpIcon}
+                              class="h-3.5 w-3.5 absolute right-2 top-1/2 -translate-y-1/2 "
+                            />
+                          </div>
+                          Max Cost
+                        </label>
+                      </div>
+                    </div>
                   </div>
                   <div className="flex flex-col items-center px-9 ">
                     <div className="flex flex-1  mx-8  user__wallet-balance h-1/2 items-center">
@@ -2934,6 +3039,11 @@ function ControlView() {
                           onChange={(event) =>
                             void setMissionResetEnabled(event.target.checked)
                           }
+                          helperText={
+                            isMissionMode
+                              ? "Level Reset locked"
+                              : "Reset mission at level 20"
+                          }
                         />
                         <ToggleSwitch
                           switchID="enableRentals"
@@ -2943,12 +3053,12 @@ function ControlView() {
                           onChange={(event) =>
                             void setRentalsFallbackEnabled(event.target.checked)
                           }
+                          helperText={
+                            isMissionMode
+                              ? "Rentals locked"
+                              : "Rentals will be used last"
+                          }
                         />
-                        <div className="text-[11px] text-slate-400 -mt-1">
-                          {isMissionMode
-                            ? "Mission mode forces rentals on when needed."
-                            : "Use rentals when no owned NFTs are available."}
-                        </div>
                       </div>
                     </div>
                     <div className="grid  grid-cols-2 gap-x-2 gap-y-1 mx-8  user__wallet-balance  h-1/2 items-center">

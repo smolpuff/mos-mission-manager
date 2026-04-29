@@ -4,6 +4,7 @@ export default function ToggleSwitch({
   switchID,
   forID,
   title,
+  helperText,
   defaultChecked,
   checked,
   onChange,
@@ -11,6 +12,7 @@ export default function ToggleSwitch({
   disabled = false,
   name,
   value,
+  styling,
 }) {
   const stopDisabledInteraction = (event) => {
     if (!disabled) return;
@@ -22,9 +24,7 @@ export default function ToggleSwitch({
     <label
       htmlFor={forID || switchID}
       className={`inline-flex items-center gap-3 select-none ${
-        disabled
-          ? "cursor-not-allowed opacity-35 grayscale pointer-events-none"
-          : "cursor-pointer"
+        disabled ? "cursor-not-allowed" : "cursor-pointer"
       }`}
       aria-disabled={disabled}
       onClickCapture={stopDisabledInteraction}
@@ -54,8 +54,18 @@ export default function ToggleSwitch({
         <span className="switch-track" />
       </span>
 
-      <span className={`text-sm font-medium ${disabled ? "opacity-70" : ""}`}>
-        {title}
+      <span
+        className={`flex flex-col gap-0 text-sm font-medium ${
+          disabled ? "" : ""
+        } ${styling}`}
+      >
+        <span>{title}</span>
+
+        {helperText ? (
+          <span className="text-[11px] text-slate-400 leading-tight font-normal">
+            {helperText}
+          </span>
+        ) : null}
       </span>
     </label>
   );

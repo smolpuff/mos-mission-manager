@@ -3,6 +3,7 @@ import useDesktopBridge from "../useDesktopBridge";
 
 export default function WindowChrome({ title, subtitle, styling }) {
   const bridge = useDesktopBridge();
+  const isWindows = bridge?.platform === "win32";
   const dragStateRef = useRef({
     active: false,
     pointerStartX: 0,
@@ -85,31 +86,59 @@ export default function WindowChrome({ title, subtitle, styling }) {
   };
 
   return (
-    <header className={`window-chrome ${styling}`} onMouseDown={onHeaderMouseDown}>
-      <div className="window-actions">
-        <button
-          className="window-button window-button-close"
-          type="button"
-          aria-label="Close window"
-          onClick={() => bridge.closeWindow()}
-        >
-          <span />
-        </button>
-        <button
-          className="window-button window-button-min"
-          type="button"
-          aria-label="Minimize window"
-          onClick={() => bridge.minimizeWindow()}
-        >
-          <span />
-        </button>
-      </div>
+    <header
+      className={`window-chrome ${isWindows ? "window-chrome--windows" : ""} ${styling || ""}`}
+      onMouseDown={onHeaderMouseDown}
+    >
+      {!isWindows ? (
+        <div className="window-actions">
+          <button
+            className="window-button window-button-close"
+            type="button"
+            aria-label="Close window"
+            onClick={() => bridge.closeWindow()}
+          >
+            <span />
+          </button>
+          <button
+            className="window-button window-button-min"
+            type="button"
+            aria-label="Minimize window"
+            onClick={() => bridge.minimizeWindow()}
+          >
+            <span />
+          </button>
+        </div>
+      ) : (
+        <div className="window-actions-spacer" />
+      )}
       <div className="window-drag">
         <div className="window-title-wrap">
           <h1 className="chrome-title">{title}</h1>
         </div>
       </div>
-      <div className="window-actions-spacer" />
+      {isWindows ? (
+        <div className="window-actions window-actions--windows">
+          <button
+            className="window-button window-button-min window-button--windows"
+            type="button"
+            aria-label="Minimize window"
+            onClick={() => bridge.minimizeWindow()}
+          >
+            <span />
+          </button>
+          <button
+            className="window-button window-button-close window-button--windows"
+            type="button"
+            aria-label="Close window"
+            onClick={() => bridge.closeWindow()}
+          >
+            <span />
+          </button>
+        </div>
+      ) : (
+        <div className="window-actions-spacer" />
+      )}
     </header>
   );
 }
