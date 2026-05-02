@@ -177,6 +177,7 @@ function SlideNumberFormatted({ value, format }) {
 
 function ControlView() {
   const { bridge, status, logs, lastEvent } = useBackendState();
+  const desktopDevMode = bridge?.desktopDevMode === true;
   const [currentPage, setCurrentPage] = useState("missions");
   const [isCliActive, setIsCliActive] = useState(false);
   const [fundingSource, setFundingSource] = useState("browser");
@@ -3123,49 +3124,53 @@ function ControlView() {
                         </svg>
                       </div>
                     </button>
-                    <button
-                      className="h-full  items-center justify-center opacity-30  "
-                      type="button"
-                      disabled
-                    ></button>
-                    {debug && "hiasdasds"}
-                    <div
-                      className={`{h-full w-full  !p-0 items-center  ${!isMissionMode ? "grayscale opacity-60" : ""}`}
-                    >
-                      <div class=" w-full">
-                        <ToggleSwitch
-                          switchID="enableNFTReset"
-                          checked={nftResetEnabled}
-                          title="NFT Resets"
-                          styling="text-xs flex !flex-row"
-                          disabled={!isMissionMode}
-                          onChange={(event) =>
-                            void setAutoNftResetEnabled(event.target.checked)
-                          }
-                        />
-                      </div>
-                      <div class=" w-full flex  text-xs items-center gap-3 ">
-                        <label class="flex gap-3 items-center">
-                          <div class="relative">
-                            <input
-                              type="number"
-                              min="0"
-                              step="1"
-                              value={nftResetMaxPbp}
+                    {desktopDevMode ? (
+                      <>
+                        <button
+                          className="h-full  items-center justify-center opacity-30  "
+                          type="button"
+                          disabled
+                        ></button>
+                        {debug && "hiasdasds"}
+                        <div
+                          className={`{h-full w-full  !p-0 items-center  ${!isMissionMode ? "grayscale opacity-60" : ""}`}
+                        >
+                          <div class=" w-full">
+                            <ToggleSwitch
+                              switchID="enableNFTReset"
+                              checked={nftResetEnabled}
+                              title="NFT Resets"
+                              styling="text-xs flex !flex-row"
+                              disabled={!isMissionMode}
                               onChange={(event) =>
-                                void setAutoNftResetMaxPbp(event.target.value)
+                                void setAutoNftResetEnabled(event.target.checked)
                               }
-                              class="relative input bg-transparent text-xs w-17 p-1 pr-3 h-auto !text-white text-center !rounded-full outline-none"
-                            />
-                            <img
-                              src={pbpIcon}
-                              class="h-3.5 w-3.5 absolute right-2 top-1/2 -translate-y-1/2 "
                             />
                           </div>
-                          Max Cost
-                        </label>
-                      </div>
-                    </div>
+                          <div class=" w-full flex  text-xs items-center gap-3 ">
+                            <label class="flex gap-3 items-center">
+                              <div class="relative">
+                                <input
+                                  type="number"
+                                  min="0"
+                                  step="1"
+                                  value={nftResetMaxPbp}
+                                  onChange={(event) =>
+                                    void setAutoNftResetMaxPbp(event.target.value)
+                                  }
+                                  class="relative input bg-transparent text-xs w-17 p-1 pr-3 h-auto !text-white text-center !rounded-full outline-none"
+                                />
+                                <img
+                                  src={pbpIcon}
+                                  class="h-3.5 w-3.5 absolute right-2 top-1/2 -translate-y-1/2 "
+                                />
+                              </div>
+                              Max Cost
+                            </label>
+                          </div>
+                        </div>
+                      </>
+                    ) : null}
                   </div>
                   <div className="flex flex-col items-center px-9 ">
                     <div className="flex flex-1  mx-8  user__wallet-balance h-1/2 items-center">

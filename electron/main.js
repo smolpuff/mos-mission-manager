@@ -1,6 +1,7 @@
 "use strict";
 
 const fs = require("fs");
+const net = require("net");
 const path = require("path");
 const { fork, execFile } = require("child_process");
 const {
@@ -31,6 +32,12 @@ const RENDERER_DEV_URL =
 const rendererIndexPath = path.join(ROOT_DIR, "dist", "index.html");
 const DESKTOP_DEVTOOLS_ENABLED = process.env.PBP_DESKTOP_DEVTOOLS === "1";
 
+function isDesktopDevMode() {
+  if (process.env.PBP_DESKTOP_DEV_MODE === "1") return true;
+  const lifecycle = String(process.env.npm_lifecycle_event || "").trim();
+  return lifecycle === "desktop:dev";
+}
+
 // Force Chromium cache/session storage to a stable, writable per-user location
 // on Windows to avoid "Unable to move/create cache (0x5)" startup errors.
 if (process.platform === "win32") {
@@ -46,7 +53,7 @@ if (process.platform === "win32") {
 }
 
 function defaultMissionResetLevel() {
-  return runtimeDefaults(isDev()).missionResetLevel;
+  return runtimeDefaults(isDesktopDevMode()).missionResetLevel;
 }
 
 function desktopWindowFrameOptions() {
@@ -71,8 +78,17 @@ let fundingWalletSummaryRefreshPromise = null;
 let fundingWalletSummaryLastAttemptAt = 0;
 let bootstrapWalletSummaryPromise = null;
 let bootstrapWalletSummaryLastAttemptAt = 0;
+let missionCatalogResultCache = null;
+let missionCatalogResultPromise = null;
+let rentalsPreviewCache = null;
+let rentalsPreviewCacheAt = 0;
+let rentalsPreviewPromise = null;
+let nftListCache = null;
+let nftListCacheAt = 0;
+let nftListPromise = null;
 const FUNDING_WALLET_REFRESH_MIN_INTERVAL_MS = 30000;
 const BOOTSTRAP_WALLET_REFRESH_MIN_INTERVAL_MS = 30000;
+const PAGE_PREVIEW_CACHE_TTL_MS = 2000;
 const execFileAsync = (file, args, options = {}) =>
   new Promise((resolve, reject) => {
     execFile(file, args, options, (error, stdout, stderr) => {
@@ -120,6 +136,32 @@ const backendStatus = {
 
 const ANALYTICS_VERSION = 1;
 const OUTPUT_LINE_BUFFER = { stdout: "", stderr: "", system: "", stdin: "" };
+
+async function getMissionCatalogCached() {
+  if (missionCatalogResultCache) {
+    pushSystemLog("Mission catalog cache hit.");
+    return missionCatalogResultCache;
+  }
+  if (missionCatalogResultPromise) {
+    pushSystemLog("Mission catalog cache wait: lookup already running.");
+    return missionCatalogResultPromise;
+  }
+  missionCatalogResultPromise = mcpCallTool(
+    "get_mission_catalog",
+    {},
+    {
+      url: "https://pixelbypixel.studio/mcp",
+    },
+  )
+    .then((result) => {
+      missionCatalogResultCache = result;
+      return result;
+    })
+    .finally(() => {
+      missionCatalogResultPromise = null;
+    });
+  return missionCatalogResultPromise;
+}
 
 function createEmptyAnalytics() {
   return {
@@ -252,18 +294,50 @@ function isDev() {
   return !app.isPackaged;
 }
 
+function canConnectToUrl(targetUrl, timeoutMs = 250) {
+  return new Promise((resolve) => {
+    try {
+      const parsed = new URL(targetUrl);
+      const socket = net.createConnection({
+        host: parsed.hostname,
+        port:
+          Number(parsed.port) ||
+          (parsed.protocol === "https:" ? 443 : 80),
+      });
+      let settled = false;
+      const finish = (ok) => {
+        if (settled) return;
+        settled = true;
+        try {
+          socket.destroy();
+        } catch {}
+        resolve(ok);
+      };
+      socket.setTimeout(timeoutMs);
+      socket.once("connect", () => finish(true));
+      socket.once("timeout", () => finish(false));
+      socket.once("error", () => finish(false));
+    } catch {
+      resolve(false);
+    }
+  });
+}
+
 function getRendererUrl(hash = "") {
-  if (isDev()) {
-    return `${RENDERER_DEV_URL}/${hash ? `#${hash}` : ""}`;
-  }
-  return `${rendererIndexPath}${hash ? `#${hash}` : ""}`;
+  return `${RENDERER_DEV_URL}/${hash ? `#${hash}` : ""}`;
 }
 
 async function loadWindow(win, hash = "") {
-  const target = getRendererUrl(hash);
-  if (isDev()) {
-    await win.loadURL(target);
+  const devTarget = getRendererUrl(hash);
+  const builtRendererExists = fs.existsSync(rendererIndexPath);
+  if (isDesktopDevMode() && (await canConnectToUrl(RENDERER_DEV_URL))) {
+    await win.loadURL(devTarget);
     return;
+  }
+  if (!builtRendererExists) {
+    throw new Error(
+      `Renderer build not found at ${rendererIndexPath}. Run "npm run desktop:build" or use "npm run desktop:dev".`,
+    );
   }
   await win.loadFile(rendererIndexPath, { hash });
 }
@@ -423,11 +497,29 @@ function saveAnalytics(analytics) {
     fs.mkdirSync(path.dirname(target), { recursive: true });
     fs.writeFileSync(target, JSON.stringify(next, null, 2));
     backendStatus.analytics = next;
+    backendStatus.sessionRewardTotals = {
+      pbp: Number(next?.session?.currencyEarned?.pbp || 0) || 0,
+      tc: Number(next?.session?.currencyEarned?.tc || 0) || 0,
+      cc: Number(next?.session?.currencyEarned?.cc || 0) || 0,
+    };
+    backendStatus.sessionSpendTotals = {
+      pbp: Number(next?.session?.totalResetCostPbp || 0) || 0,
+      tc: 0,
+      cc: 0,
+    };
   } catch {}
 }
 
-function beginAnalyticsSession() {
+function beginAnalyticsSession({ force = false } = {}) {
   const current = normalizeAnalytics(backendStatus.analytics || loadAnalytics());
+  if (
+    !force &&
+    Number.isFinite(Number(current?.session?.startedAt)) &&
+    Number(current.session.startedAt) > 0
+  ) {
+    backendStatus.analytics = current;
+    return current;
+  }
   if (!Number.isFinite(Number(current?.lifetime?.startedAt))) {
     current.lifetime.startedAt = Date.now();
   }
@@ -445,6 +537,14 @@ function beginAnalyticsSession() {
     nftsUsed: [],
   };
   saveAnalytics(current);
+  return current;
+}
+
+function shouldServeCachedPagePreview(cachedAt) {
+  return (
+    Number.isFinite(Number(cachedAt)) &&
+    Date.now() - Number(cachedAt) <= PAGE_PREVIEW_CACHE_TTL_MS
+  );
 }
 
 function addUniqueValue(list, value) {
@@ -609,6 +709,7 @@ function applyDesktopConfigPatch(patch = {}) {
 function hydrateBackendStatusFromConfig() {
   const config = readDesktopConfig();
   backendStatus.analytics = loadAnalytics();
+  beginAnalyticsSession({ force: true });
   backendStatus.defaultMissionResetLevel = defaultMissionResetLevel();
   if (typeof config.level20ResetEnabled === "boolean") {
     backendStatus.level20ResetEnabled = config.level20ResetEnabled;
@@ -1014,7 +1115,7 @@ async function runOnboardingPopupLogin({
 }
 
 function installMinimalApplicationMenu() {
-  const template = isDev()
+  const template = isDesktopDevMode()
     ? [
         ...(process.platform === "darwin"
           ? [
@@ -1140,7 +1241,7 @@ function installMinimalApplicationMenu() {
 }
 
 function hardenWindow(win) {
-  const hideMenuBar = !isDev();
+  const hideMenuBar = !isDesktopDevMode();
   if (typeof win.setMenuBarVisibility === "function") {
     win.setMenuBarVisibility(!hideMenuBar);
   }
@@ -1148,7 +1249,7 @@ function hardenWindow(win) {
     win.setAutoHideMenuBar(hideMenuBar);
   }
   win.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
-  if (!isDev()) {
+  if (!isDesktopDevMode()) {
     win.webContents.on("before-input-event", (event, input) => {
       const key = String(input.key || "").toLowerCase();
       const blockedDevtools =
@@ -1180,7 +1281,7 @@ function startBackend() {
       ...process.env,
       ELECTRON_RUN_AS_NODE: "1",
       PBP_GUI_BRIDGE: "1",
-      PBP_DEV_MODE: isDev() ? "1" : "0",
+      PBP_DEV_MODE: isDesktopDevMode() ? "1" : "0",
       PBP_CONFIG_DIR: getBackendWorkingDirectory(),
       PBP_DEFAULT_MISSION_RESET_LEVEL: defaultMissionResetLevel(),
       FORCE_COLOR: "0",
@@ -1215,7 +1316,6 @@ function startBackend() {
   backendStatus.fundingWalletSummary = null;
   backendStatus.guiMissionSlots = null;
   backendStatus.slotUnlockSummary = null;
-  beginAnalyticsSession();
   publishStatus();
   pushOutput("system", "[GUI] Backend started.\n");
 
@@ -1970,13 +2070,7 @@ app.whenReady().then(async () => {
       );
       pushSystemLog("Onboarding sync: fetching get_mission_catalog.");
       emitProgress(85, "catalog", "Fetching mission catalog");
-      const catalogResult = await mcpCallTool(
-        "get_mission_catalog",
-        {},
-        {
-          url: "https://pixelbypixel.studio/mcp",
-        },
-      );
+      const catalogResult = await getMissionCatalogCached();
       pushSystemLog("Onboarding sync: fetching get_mission_nfts.");
       emitProgress(92, "nfts", "Fetching wallet collections");
       const nftResult = await mcpCallTool(
@@ -2257,31 +2351,52 @@ app.whenReady().then(async () => {
       };
     };
 
-    try {
-      const result = await loadPreview();
-      pushSystemLog(
-        `Rentals page refresh complete. Pool=${Number(result?.rentableCount || 0)}, active rentals=${Array.isArray(result?.activeRentals) ? result.activeRentals.length : 0}.`,
-      );
-      return result;
-    } catch (error) {
-      if (!isAuthFailureMessage(error?.message)) {
-        pushSystemLog(
-          `Rentals page refresh failed: ${String(error?.message || error)}`,
-        );
-        return { ok: false, error: String(error?.message || error) };
-      }
-      pushSystemLog("Rentals refresh requires login. Opening browser login.");
-      await runOnboardingPopupLogin({
-        url: "https://pixelbypixel.studio/mcp",
-        timeoutMs: 30000,
-        loginTimeoutMs: 180000,
-      });
-      const result = await loadPreview();
-      pushSystemLog(
-        `Rentals page refresh complete after login. Pool=${Number(result?.rentableCount || 0)}, active rentals=${Array.isArray(result?.activeRentals) ? result.activeRentals.length : 0}.`,
-      );
-      return result;
+    if (rentalsPreviewPromise) {
+      pushSystemLog("Rentals preview wait: refresh already running.");
+      return rentalsPreviewPromise;
     }
+    if (
+      rentalsPreviewCache &&
+      shouldServeCachedPagePreview(rentalsPreviewCacheAt)
+    ) {
+      pushSystemLog("Rentals preview cache hit.");
+      return rentalsPreviewCache;
+    }
+
+    rentalsPreviewPromise = (async () => {
+      try {
+        const result = await loadPreview();
+        rentalsPreviewCache = result;
+        rentalsPreviewCacheAt = Date.now();
+        pushSystemLog(
+          `Rentals page refresh complete. Pool=${Number(result?.rentableCount || 0)}, active rentals=${Array.isArray(result?.activeRentals) ? result.activeRentals.length : 0}.`,
+        );
+        return result;
+      } catch (error) {
+        if (!isAuthFailureMessage(error?.message)) {
+          pushSystemLog(
+            `Rentals page refresh failed: ${String(error?.message || error)}`,
+          );
+          return { ok: false, error: String(error?.message || error) };
+        }
+        pushSystemLog("Rentals refresh requires login. Opening browser login.");
+        await runOnboardingPopupLogin({
+          url: "https://pixelbypixel.studio/mcp",
+          timeoutMs: 30000,
+          loginTimeoutMs: 180000,
+        });
+        const result = await loadPreview();
+        rentalsPreviewCache = result;
+        rentalsPreviewCacheAt = Date.now();
+        pushSystemLog(
+          `Rentals page refresh complete after login. Pool=${Number(result?.rentableCount || 0)}, active rentals=${Array.isArray(result?.activeRentals) ? result.activeRentals.length : 0}.`,
+        );
+        return result;
+      } finally {
+        rentalsPreviewPromise = null;
+      }
+    })();
+    return rentalsPreviewPromise;
   });
   ipcMain.handle("nfts:list", async () => {
     const loadNfts = async () => {
@@ -2379,27 +2494,49 @@ app.whenReady().then(async () => {
       };
     };
 
-    try {
-      const result = await loadNfts();
-      pushSystemLog(`NFT page refresh complete. NFTs=${Number(result?.total || 0)}.`);
-      return result;
-    } catch (error) {
-      if (!isAuthFailureMessage(error?.message)) {
-        pushSystemLog(`NFT page refresh failed: ${String(error?.message || error)}`);
-        return { ok: false, error: String(error?.message || error) };
-      }
-      pushSystemLog("NFT page refresh requires login. Opening browser login.");
-      await runOnboardingPopupLogin({
-        url: "https://pixelbypixel.studio/mcp",
-        timeoutMs: 30000,
-        loginTimeoutMs: 180000,
-      });
-      const result = await loadNfts();
-      pushSystemLog(
-        `NFT page refresh complete after login. NFTs=${Number(result?.total || 0)}.`,
-      );
-      return result;
+    if (nftListPromise) {
+      pushSystemLog("NFT page refresh wait: refresh already running.");
+      return nftListPromise;
     }
+    if (nftListCache && shouldServeCachedPagePreview(nftListCacheAt)) {
+      pushSystemLog("NFT page refresh cache hit.");
+      return nftListCache;
+    }
+
+    nftListPromise = (async () => {
+      try {
+        const result = await loadNfts();
+        nftListCache = result;
+        nftListCacheAt = Date.now();
+        pushSystemLog(
+          `NFT page refresh complete. NFTs=${Number(result?.total || 0)}.`,
+        );
+        return result;
+      } catch (error) {
+        if (!isAuthFailureMessage(error?.message)) {
+          pushSystemLog(
+            `NFT page refresh failed: ${String(error?.message || error)}`,
+          );
+          return { ok: false, error: String(error?.message || error) };
+        }
+        pushSystemLog("NFT page refresh requires login. Opening browser login.");
+        await runOnboardingPopupLogin({
+          url: "https://pixelbypixel.studio/mcp",
+          timeoutMs: 30000,
+          loginTimeoutMs: 180000,
+        });
+        const result = await loadNfts();
+        nftListCache = result;
+        nftListCacheAt = Date.now();
+        pushSystemLog(
+          `NFT page refresh complete after login. NFTs=${Number(result?.total || 0)}.`,
+        );
+        return result;
+      } finally {
+        nftListPromise = null;
+      }
+    })();
+    return nftListPromise;
   });
   ipcMain.handle("nfts:reset-cooldown", async (_event, payload = {}) => {
     const nftId = String(

@@ -8,34 +8,13 @@
 
 ##
 
-`missions-v3-mcp` is a CLI + desktop app for Pixel by Pixel mission automation over MCP. IT IS ENTIRELY STAND ALONE AND DOES NOT REQUIRE AN AGENT (bc thats gross)
+`missions-v3-mcp` is a an app for Pixel by Pixel mission automation over MCP. it is entirely stand-alone and does not require a gross agent to run.
 
 ## SUPER DUPER WONDER WARNING
 
 ONLY USE A BURNER WALLET FOR FUNDING.
 
-## Current state
-
-Implemented flows:
-
-- auth + startup checks
-- watch + claim
-- target-mission assignment
-- mission reroll
-- NFT cooldown reset
-- rental fallback assignment
-- desktop first-run onboarding
-- desktop stats / rentals / NFT views
-
-## Disclaimer
-
-USE THIS AT YOUR OWN RISK.
-
-THIS TOOL CAN BREAK, FAIL, MISFIRE, OR DO THE WRONG THING.
-IT MAY MESS UP YOUR WORKFLOW, MISS ACTIONS, OR CREATE BAD STATE.
-
-YOU ARE 100% RESPONSIBLE FOR EVERYTHING THAT HAPPENS WHEN YOU RUN IT.
-THE AUTHOR IS NOT RESPONSIBLE FOR ANY LOSS, DAMAGE, OR ISSUES.
+USE THIS AT YOUR OWN RISK. ONLY USE A BURNER WALLET. NEVER IMPORT YOUR MAIN WALLET KEYS.
 
 This software is provided as-is, with no warranty of any kind.
 
@@ -49,57 +28,81 @@ By using it, you accept that:
 The author is not responsible for any damage, loss, or issues caused by use of this project.
 This project was heavily vibe-coded and is still evolving.
 
-## Requirements for working on
+## Requirements for Source
 
 - Node.js 25 recommended
 - access to the Pixel by Pixel MCP endpoint
 - local `config.json` (create from `config.sample.json`)
 
-## Desktop Usage FIRST USE
+## Build from Source
 
-### 1) First-run wizard
+### Install deps
 
-On first open, the wizard walks you through:
-
-- funding mode (`app_wallet`, `manual`, `dapp`)
-- login + account/mission sync
-- assigned mission review
-
-Important:
-
-- this onboarding flow does not start the runner
-- it only does sign-in/session init plus read operations like account + mission fetch
-
-If you choose `app_wallet`, the wizard can generate the burner wallet and show the funding address directly in the selection card.
-
-Wizard only saves signer mode when you click **Done/Apply**.  
-If you close the wizard, existing settings stay unchanged.
-
-The wizard auto-opens based on this config flag:
-
-```json
-{
-  "firstRunOnboardingCompleted": true
-}
+```bash
+npm install
 ```
 
-Set/delete this flag to retrigger wizard behavior.
+### Desktop App
 
-### 2) Configure wallet mode in Settings (any time)
+```bash
+npm run desktop
+```
 
-In **Settings > Wallet**, choose your signer flow:
+Build the renderer only:
 
-- `app_wallet`: app-managed burner wallet for supported signing
-- `manual`: browser/manual flow
-- `dapp`: browser-wallet signing flow
+```bash
+npm run desktop:build
+```
 
-If using `app_wallet`, use the UI to generate or import the wallet and confirm it is active. Use a dedicated burner wallet if you run `app_wallet` mode.
-If signer vault/keychain state becomes corrupted or inaccessible, the current recovery path is to re-import your wallet.
+## Config / Data Paths
 
-## Configure Target Missions (Required for now)
+In development, the desktop app reads and writes from the repo root.
 
-For now, mission targeting is configured manually in `config.json`.
-Edit `targetMissions` to add the mission names you want the bot to prioritize.
+- config: `./config.json`
+- analytics/data: `./data/`
+
+In packaged builds, Electron uses the platform user-data directory. Typical locations:
+
+- macOS: `~/Library/Application Support/missions-v3-mcp/`
+- Windows: `%APPDATA%\\missions-v3-mcp\\`
+
+Important packaged files:
+
+- `config.json`
+- `data/stats-analytics.json`
+
+If you are debugging a packaged install, check those locations first.
+
+## First Run Wizard
+
+- Select your funding type you would like for automation
+- BE SURE TO WRITE DOWN YOUR RECOVERY KEYS SOMEWHERE SAFE IF YOU USE APP-WALLET. YOU NEED TO KEEP THESE IN A SAFE PLACE INCASE YOU EVER NEED TO IMPORT THE WALLET
+- next will pull your currently set up missions from the website as your targetMission. Confirm
+- Select your mission mode; normal with level 20 resets on by default, or mission mode with level 11 reset and use rentals by default
+- Press the start missionininining button to start automation
+- If you chose app-wallet, fund it now to cover transations (0.1sol, whatever pbp)
+
+- find the rest of your own secret sauce because you're not getting mine
+
+## Features
+
+- first-run onboarding wizard
+- built-in app-wallet usign secureStorage methods
+- wallet import/recovery via 12/24 keys
+- missions watch + claim
+- target-mission assignment
+- low balance warning
+- mission level reset
+- mission assignment/change mission
+- rentals support (lease side)
+- NFT cooldown reset
+- NFT inventory view with cooldowns, filtering, and sorting
+- Mission competition live results from for those who are #notgrinding
+- session stats
+
+## Mission Targeting
+
+On first start, the wizard will automatically pull your selected missions from your account adn assign them. You can click on a mission card at anytime when a mission is assigned to change missions. You can also manually edit your config.json to target the mission
 
 Example:
 
@@ -108,28 +111,6 @@ Example:
   "targetMissions": ["Do it All!", "Race!"]
 }
 ```
-
-After editing `config.json`, restart the app if it is already running.
-
-Note: mission swap in wizard is intentionally not wired yet. Mission choices should be set on the Pixel by Pixel site, then refreshed in-app.
-
-## Running Missions
-
-After wallet setup and mission config:
-
-1. Open the app.
-2. Go to the main missions pane.
-3. Configure missions on PBP site (for now, feature coming soon)
-4. Press **Start** to begin processing.
-5. Use **Pause/Resume** in the UI as needed.
-
-## Desktop Pages
-
-The desktop app also includes:
-
-- **My NFTs**: wallet NFT inventory, cooldown/level display, collection filters, and sorting
-- **My Rentals**: rental pool totals plus active rental-backed mission view
-- **Stats**: session earnings, claims, resets, leased totals, and mission claim breakdown
 
 ## Low Balance Warning
 
@@ -151,35 +132,16 @@ You can customize in `config.json`:
 }
 ```
 
-Alert behavior is one-shot per threshold:
+## Commands
 
-- it only triggers after balance was previously above threshold
-- it triggers once when balance falls below
-- it will not re-trigger until balance goes above threshold again
-
-## Bridge Link Signing (dapp/manual)
-
-Bridge URLs need a wallet-enabled browser context.
-
-- Do **not** open in plain Chrome with no wallet provider.
-- Use wallet browser options (Phantom/Solflare) or a browser with wallet extension connected.
-
-The app provides bridge-link actions in dialog:
-
-- open in wallet browser option
-- open normally
-- copy link
-
-## Command Reference
-
-General CLI COommands:
+General CLI commands:
 
 - `help`
 - `clear`
 - `status`
 - `login`
+- `logout`
 - `check`
-- `signer <action>`
 - `c`
 - `r`
 - `reset20`
@@ -188,6 +150,47 @@ General CLI COommands:
 - `pause`
 - `resume`
 - `q`
+- `signer`
+
+### Signer commands
+
+Use `signer status` to view the current signer mode/state.
+
+- `signer status`
+  - show current signer mode/state summary
+- `signer doctor`
+  - run signer diagnostics / repair checks
+- `signer setup`
+  - rerun the CLI signer setup flow
+- `signer app_wallet`
+  - switch to app-managed wallet mode
+- `signer manual`
+  - switch to manual/browser mode
+- `signer dapp`
+  - switch to browser-wallet bridge signing mode
+- `signer create`
+  - create a new burner app wallet
+  - confirms before replacing an existing imported app wallet
+- `signer import`
+  - open the interactive import prompt
+  - accepts pasted private key, recovery phrase, keypair text, or key array
+- `signer import [path-or-key]`
+  - import directly from a file path or pasted key value
+  - if the argument matches a real file path, file import is used
+- `signer reveal`
+  - reveal the app-wallet address / derivation path / recovery phrase in the terminal after confirmation
+- `signer unlock`
+  - unlock the app-wallet vault for signing
+- `signer lock`
+  - lock the app-wallet vault again
+- `signer remove`
+  - remove the imported app-wallet vault and stored vault key after confirmation
+
+Signer notes:
+
+- `app_wallet` mode is intended for a dedicated burner wallet only
+- import/create flows switch signer mode to `app_wallet`
+- if you switch to `app_wallet` and no wallet exists yet, the CLI will prompt you to create or import one
 
 ## Notes
 

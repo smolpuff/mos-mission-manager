@@ -130,11 +130,17 @@ function buildClaimBuckets(history = []) {
         .sort((a, b) => a.at - b.at)
     : [];
   if (list.length === 0) {
-    return { points: [], labels: { start: "", end: "now" }, max: 0, mode: "hourly" };
+    return {
+      points: [],
+      labels: { start: "", end: "now" },
+      max: 0,
+      mode: "hourly",
+    };
   }
   const spanMs = Math.max(1, Date.now() - list[0].at);
   const bucketMs = spanMs > 48 * 3600000 ? 24 * 3600000 : 3600000;
-  const bucketCount = bucketMs === 3600000 ? 24 : Math.min(14, Math.ceil(spanMs / bucketMs));
+  const bucketCount =
+    bucketMs === 3600000 ? 24 : Math.min(14, Math.ceil(spanMs / bucketMs));
   const endBucket = Math.floor(Date.now() / bucketMs) * bucketMs;
   const startBucket = endBucket - (bucketCount - 1) * bucketMs;
   const counts = Array.from({ length: bucketCount }, (_, index) => ({
@@ -150,7 +156,10 @@ function buildClaimBuckets(history = []) {
   const lastClaimIndex = counts.findLastIndex((bucket) => bucket.count > 0);
   const visibleCounts =
     firstClaimIndex >= 0
-      ? counts.slice(firstClaimIndex, Math.min(counts.length, lastClaimIndex + 1))
+      ? counts.slice(
+          firstClaimIndex,
+          Math.min(counts.length, lastClaimIndex + 1),
+        )
       : counts.slice(-Math.min(6, counts.length));
   const max = Math.max(1, ...visibleCounts.map((bucket) => bucket.count));
   const denom = Math.max(1, visibleCounts.length - 1);
@@ -208,10 +217,16 @@ function DetailRow({ icon, label, value, tone = "text-slate-100" }) {
   return (
     <div className="flex items-center justify-between gap-3 text-xs leading-5">
       <span className="flex min-w-0 items-center gap-1.5 whitespace-nowrap text-slate-400">
-        {icon ? <span className="flex h-4 w-4 shrink-0 items-center justify-center">{icon}</span> : null}
+        {icon ? (
+          <span className="flex h-4 w-4 shrink-0 items-center justify-center">
+            {icon}
+          </span>
+        ) : null}
         {label}
       </span>
-      <span className={`shrink-0 text-right font-semibold ${tone}`}>{value}</span>
+      <span className={`shrink-0 text-right font-semibold ${tone}`}>
+        {value}
+      </span>
     </div>
   );
 }
@@ -225,7 +240,12 @@ function DetailCard({ title, children }) {
   );
 }
 
-export default function StatsPage({ status, logs, missionStats, sessionStartedAtMs }) {
+export default function StatsPage({
+  status,
+  logs,
+  missionStats,
+  sessionStartedAtMs,
+}) {
   const safeStatus = status && typeof status === "object" ? status : {};
   const safeMissionStats =
     missionStats && typeof missionStats === "object" ? missionStats : {};
@@ -237,32 +257,13 @@ export default function StatsPage({ status, logs, missionStats, sessionStartedAt
     analytics.session && typeof analytics.session === "object"
       ? analytics.session
       : {};
-  const lifetimeAnalytics =
-    analytics.lifetime && typeof analytics.lifetime === "object"
-      ? analytics.lifetime
-      : {};
 
   const statusRewards = safeStatus.sessionRewardTotals || {};
   const analyticsRewards = sessionAnalytics.currencyEarned || {};
   const rewards = {
-    pbp: asNumber(
-      statusRewards.pbp ??
-        analyticsRewards.pbp ??
-        lifetimeAnalytics?.currencyEarned?.pbp,
-      0,
-    ),
-    tc: asNumber(
-      statusRewards.tc ??
-        analyticsRewards.tc ??
-        lifetimeAnalytics?.currencyEarned?.tc,
-      0,
-    ),
-    cc: asNumber(
-      statusRewards.cc ??
-        analyticsRewards.cc ??
-        lifetimeAnalytics?.currencyEarned?.cc,
-      0,
-    ),
+    pbp: asNumber(statusRewards.pbp ?? analyticsRewards.pbp, 0),
+    tc: asNumber(statusRewards.tc ?? analyticsRewards.tc, 0),
+    cc: asNumber(statusRewards.cc ?? analyticsRewards.cc, 0),
   };
 
   const statusSpend = safeStatus.sessionSpendTotals || {};
@@ -282,34 +283,27 @@ export default function StatsPage({ status, logs, missionStats, sessionStartedAt
     1 / 60,
     (Date.now() - asNumber(sessionStartedAtMs, Date.now())) / 3600000,
   );
-  const lifetimeHistory = Array.isArray(lifetimeAnalytics.claimHistory)
-    ? lifetimeAnalytics.claimHistory
-    : [];
   const sessionHistory = Array.isArray(sessionAnalytics.claimHistory)
     ? sessionAnalytics.claimHistory
     : [];
-  const chartHistory = lifetimeHistory.length ? lifetimeHistory : sessionHistory;
   const sessionMissionClaims =
-    sessionAnalytics.missionClaims && typeof sessionAnalytics.missionClaims === "object"
+    sessionAnalytics.missionClaims &&
+    typeof sessionAnalytics.missionClaims === "object"
       ? sessionAnalytics.missionClaims
       : {};
-  const lifetimeMissionClaims =
-    lifetimeAnalytics.missionClaims && typeof lifetimeAnalytics.missionClaims === "object"
-      ? lifetimeAnalytics.missionClaims
-      : {};
-  const missionClaimSource = Object.keys(sessionMissionClaims).length
-    ? sessionMissionClaims
-    : lifetimeMissionClaims;
-  const rows = buildMissionRows(claimEvents, missionClaimSource, chartHistory);
-  const rankedClaims = rows.reduce((sum, row) => sum + asNumber(row.claims, 0), 0);
+  const rows = buildMissionRows(claimEvents, sessionMissionClaims, sessionHistory);
+  const rankedClaims = rows.reduce(
+    (sum, row) => sum + asNumber(row.claims, 0),
+    0,
+  );
   const maxClaims = Math.max(1, ...rows.map((row) => asNumber(row.claims, 0)));
   const chartClaimTotal = Math.max(
     claims,
-    asNumber(lifetimeAnalytics.totalClaims, 0),
-    ...chartHistory.map((entry) => asNumber(entry?.claims, 0)),
+    asNumber(sessionAnalytics.totalClaims, 0),
+    ...sessionHistory.map((entry) => asNumber(entry?.claims, 0)),
   );
-  const timelineData = chartHistory.length
-    ? buildTimelineFromHistory(chartHistory)
+  const timelineData = sessionHistory.length
+    ? buildTimelineFromHistory(sessionHistory)
     : buildTimelineFromEvents(claimEvents);
   const chartBuckets = Array.isArray(timelineData.buckets)
     ? timelineData.buckets
@@ -323,9 +317,13 @@ export default function StatsPage({ status, logs, missionStats, sessionStartedAt
   const resets = asNumber(sessionAnalytics.totalResets, 0);
   const missionResets = asNumber(sessionAnalytics.resetTypes?.mission, 0);
   const nftResets = asNumber(sessionAnalytics.resetTypes?.nft, 0);
-  const resetCost = asNumber(sessionAnalytics.totalResetCostPbp ?? spend.pbp, 0);
+  const resetCost = asNumber(
+    sessionAnalytics.totalResetCostPbp ?? spend.pbp,
+    0,
+  );
   const spendByAction =
-    sessionAnalytics.spendByAction && typeof sessionAnalytics.spendByAction === "object"
+    sessionAnalytics.spendByAction &&
+    typeof sessionAnalytics.spendByAction === "object"
       ? sessionAnalytics.spendByAction
       : {};
   const missionResetPbp = asNumber(spendByAction.mission_reroll, 0);
@@ -335,7 +333,6 @@ export default function StatsPage({ status, logs, missionStats, sessionStartedAt
   );
   const slotUnlockPbp = asNumber(spendByAction.mission_slot_unlock, 0);
   const sessionRentals = asNumber(sessionAnalytics.totalLeased, 0);
-  const lifetimeRentals = asNumber(lifetimeAnalytics.totalLeased, 0);
   const netPerHour = netPbp / elapsedHours;
   const tokenIconClass = "h-3.5 w-3.5 object-contain";
 
@@ -400,7 +397,9 @@ export default function StatsPage({ status, logs, missionStats, sessionStartedAt
                   Claims per {timelineData.mode === "daily" ? "Day" : "Hour"}
                 </div>
                 <div className="text-[11px] text-slate-500">
-                  {timelineData.mode === "daily" ? "Recent active days" : "Recent active hours"}
+                  {timelineData.mode === "daily"
+                    ? "Recent active days"
+                    : "Recent active hours"}
                 </div>
               </div>
               <div className="text-right text-xs text-slate-400">
@@ -411,39 +410,48 @@ export default function StatsPage({ status, logs, missionStats, sessionStartedAt
             <div className="mt-2 h-[calc(100%-38px)] rounded-md bg-black/20 p-2.5 overflow-hidden">
               {chartBuckets.length ? (
                 <div className="relative h-full min-w-0">
-                    <div className="absolute inset-x-0 top-0 border-t border-slate-400/10" />
-                    <div className="absolute inset-x-0 top-1/2 border-t border-slate-400/10" />
-                    <div className="absolute inset-x-0 bottom-0 border-t border-slate-400/20" />
-                    <div className="relative z-10 flex h-full items-end justify-end gap-0.5 overflow-hidden">
-                      {chartBuckets.map((bucket, index) => {
-                        const count = asNumber(bucket.count, 0);
-                        const height = count > 0
-                          ? Math.max(16, (count / Math.max(1, timelineData.max)) * 100)
+                  <div className="absolute inset-x-0 top-0 border-t border-slate-400/10" />
+                  <div className="absolute inset-x-0 top-1/2 border-t border-slate-400/10" />
+                  <div className="absolute inset-x-0 bottom-0 border-t border-slate-400/20" />
+                  <div className="relative z-10 flex h-full items-end justify-end gap-0.5 overflow-hidden">
+                    {chartBuckets.map((bucket, index) => {
+                      const count = asNumber(bucket.count, 0);
+                      const height =
+                        count > 0
+                          ? Math.max(
+                              16,
+                              (count / Math.max(1, timelineData.max)) * 100,
+                            )
                           : 0;
-                        return (
-                          <div
-                            className="flex h-full w-7 shrink-0 flex-col items-center justify-end gap-1"
-                            key={`claim_bucket_${bucket.at}_${index}`}
-                            title={`${bucketLabel(bucket, timelineData.mode, index, chartBuckets.length)}: ${formatNumber(count, 0)} claims`}
-                          >
-                            <div className="flex h-[calc(100%-14px)] w-full flex-col justify-end">
-                              {count > 0 ? (
-                                <div className="mb-1 text-center text-[10px] font-semibold leading-none text-slate-100">
-                                  {formatNumber(count, 0)}
-                                </div>
-                              ) : null}
-                              <div
-                                className="claim-bar mx-auto w-4 rounded-t-sm"
-                                style={{ height: `${height}%` }}
-                              />
-                            </div>
-                            <div className="h-3 max-w-full truncate text-[9px] leading-3 text-slate-500">
-                              {bucketLabel(bucket, timelineData.mode, index, chartBuckets.length)}
-                            </div>
+                      return (
+                        <div
+                          className="flex h-full w-7 shrink-0 flex-col items-center justify-end gap-1"
+                          key={`claim_bucket_${bucket.at}_${index}`}
+                          title={`${bucketLabel(bucket, timelineData.mode, index, chartBuckets.length)}: ${formatNumber(count, 0)} claims`}
+                        >
+                          <div className="flex h-[calc(100%-14px)] w-full flex-col justify-end">
+                            {count > 0 ? (
+                              <div className="mb-1 text-center text-[10px] font-semibold leading-none text-slate-100">
+                                {formatNumber(count, 0)}
+                              </div>
+                            ) : null}
+                            <div
+                              className="claim-bar mx-auto w-4 rounded-t-sm"
+                              style={{ height: `${height}%` }}
+                            />
                           </div>
-                        );
-                      })}
-                    </div>
+                          <div className="h-3 max-w-full truncate text-[9px] leading-3 text-slate-500">
+                            {bucketLabel(
+                              bucket,
+                              timelineData.mode,
+                              index,
+                              chartBuckets.length,
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
               ) : (
                 <div className="flex h-full items-center justify-center text-xs text-slate-500">
@@ -456,9 +464,12 @@ export default function StatsPage({ status, logs, missionStats, sessionStartedAt
           <div className="grid min-h-0 grid-rows-1 overflow-hidden">
             <section className="card min-h-0 overflow-hidden">
               <div className="flex items-center justify-between gap-2">
-                <div className="text-sm font-semibold text-slate-200">Session Mission Ranking</div>
+                <div className="text-sm font-semibold text-slate-200">
+                  Session Mission Ranking
+                </div>
                 <div className="text-xs text-slate-500">
-                  {formatNumber(rankedClaims, 0)}/{formatNumber(claims, 0)} claims
+                  {formatNumber(rankedClaims, 0)}/{formatNumber(claims, 0)}{" "}
+                  claims
                 </div>
               </div>
               <div className="mt-2 space-y-1 overflow-hidden">
@@ -466,14 +477,21 @@ export default function StatsPage({ status, logs, missionStats, sessionStartedAt
                   rows.slice(0, 4).map((row, index) => {
                     const progress = Math.max(
                       0,
-                      Math.min(100, (asNumber(row.claims, 0) / maxClaims) * 100),
+                      Math.min(
+                        100,
+                        (asNumber(row.claims, 0) / maxClaims) * 100,
+                      ),
                     );
                     return (
                       <div className="min-w-0" key={row.mission}>
                         <div className="flex items-center justify-between gap-2 text-xs leading-4">
                           <div className="min-w-0 flex items-center gap-1.5">
-                            <span className="shrink-0 text-slate-500">#{index + 1}</span>
-                            <span className="text-slate-200">{row.mission}</span>
+                            <span className="shrink-0 text-slate-500">
+                              #{index + 1}
+                            </span>
+                            <span className="text-slate-200">
+                              {row.mission}
+                            </span>
                           </div>
                           <div className="shrink-0 font-semibold text-slate-100">
                             {formatNumber(row.claims, 0)}
@@ -502,23 +520,49 @@ export default function StatsPage({ status, logs, missionStats, sessionStartedAt
         <div className="grid grid-cols-3 gap-2 overflow-hidden">
           <DetailCard title="Session Activity">
             <DetailRow label="Claims" value={formatNumber(claims, 0)} />
-            <DetailRow label="Mission resets" value={formatNumber(missionResets, 0)} />
+            <DetailRow
+              label="Mission resets"
+              value={formatNumber(missionResets, 0)}
+            />
             <DetailRow label="NFT resets" value={formatNumber(nftResets, 0)} />
-            <DetailRow label="Claims / hr" value={formatNumber(claimsPerHour)} />
-            <DetailRow label="Session length" value={formatAge(elapsedHours)} />
+            <DetailRow
+              label="Claims / hr"
+              value={formatNumber(claimsPerHour)}
+            />
           </DetailCard>
 
-          <DetailCard title="Session Spend">
-            <DetailRow label="Mission reset PBP" value={formatNumber(missionResetPbp)} />
-            <DetailRow label="NFT reset PBP" value={formatNumber(nftResetPbp)} />
-            <DetailRow label="Slot unlock PBP" value={formatNumber(slotUnlockPbp)} />
-            <DetailRow label="Total spent PBP" value={formatNumber(resetCost)} />
+          <DetailCard title="Session Costs">
+            <DetailRow
+              label="Mission reset PBP"
+              value={formatNumber(missionResetPbp)}
+            />
+            <DetailRow
+              label="NFT reset PBP"
+              value={formatNumber(nftResetPbp)}
+            />
+            <DetailRow
+              label="Slot unlock PBP"
+              value={formatNumber(slotUnlockPbp)}
+            />
+            <DetailRow
+              label="Total spent PBP"
+              value={formatNumber(resetCost)}
+            />
           </DetailCard>
 
           <DetailCard title="Rentals">
-            <DetailRow label="Session leases" value={formatNumber(sessionRentals, 0)} />
-            <DetailRow label="All-time leases" value={formatNumber(lifetimeRentals, 0)} />
-            <DetailRow label="Claims saved" value={formatNumber(chartHistory.length, 0)} />
+            <DetailRow
+              label="Session leases"
+              value={formatNumber(sessionRentals, 0)}
+            />
+            <DetailRow
+              label="Tracked claims"
+              value={formatNumber(sessionHistory.length, 0)}
+            />
+            <DetailRow
+              label="Ranked claims"
+              value={formatNumber(rankedClaims, 0)}
+            />
             <DetailRow label="Reset actions" value={formatNumber(resets, 0)} />
           </DetailCard>
         </div>

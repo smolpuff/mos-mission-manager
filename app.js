@@ -26,7 +26,14 @@ const logger = createLogger(ctx);
 const signer = createSignerService(ctx, logger);
 const mcp = createMcpClient(ctx, logger);
 const checks = createChecksService(ctx, logger, mcp, { signer });
-const watch = createWatchService(ctx, logger, mcp, checks, { saveConfig }, { signer });
+const watch = createWatchService(
+  ctx,
+  logger,
+  mcp,
+  checks,
+  { saveConfig },
+  { signer },
+);
 const commands = createCommandHandler(
   ctx,
   logger,
@@ -83,7 +90,8 @@ function createGuiStateEmitter(ctx) {
       signerReady: ctx.signerReady,
       signerMode: ctx.signerMode,
       signerStatus: ctx.signerStatus,
-      signerWallet: ctx.signerConfig?.walletAddress || ctx.signerConfig?.walletRef || null,
+      signerWallet:
+        ctx.signerConfig?.walletAddress || ctx.signerConfig?.walletRef || null,
       fundingWalletSummary: ctx.fundingWalletSummary,
     };
     return state;
@@ -97,7 +105,7 @@ function createGuiStateEmitter(ctx) {
     last = json;
     lastSentAt = Date.now();
     process.send({ type: "pbp_state", state });
-  };
+  }
 
   function emitSoon() {
     if (pending) return;
@@ -196,7 +204,9 @@ if (process.env.PBP_GUI_BRIDGE === "1" && typeof process.send === "function") {
         if (!checks || typeof checks.applyMissionSelection !== "function") {
           throw new Error("Mission selection service unavailable.");
         }
-        const result = await checks.applyMissionSelection(message.payload || {});
+        const result = await checks.applyMissionSelection(
+          message.payload || {},
+        );
         sendGuiResponse(requestId, { ok: true, result });
         return;
       }
@@ -204,7 +214,9 @@ if (process.env.PBP_GUI_BRIDGE === "1" && typeof process.send === "function") {
         if (!checks || typeof checks.resetCooldownNftFromUi !== "function") {
           throw new Error("NFT cooldown reset service unavailable.");
         }
-        const reset = await checks.resetCooldownNftFromUi(message.payload || {});
+        const reset = await checks.resetCooldownNftFromUi(
+          message.payload || {},
+        );
         sendGuiResponse(requestId, { ok: true, reset });
         return;
       }
@@ -222,9 +234,10 @@ if (process.env.PBP_GUI_BRIDGE === "1" && typeof process.send === "function") {
         return;
       }
       if (action === "update_runtime_config") {
-        const payload = message.payload && typeof message.payload === "object"
-          ? message.payload
-          : {};
+        const payload =
+          message.payload && typeof message.payload === "object"
+            ? message.payload
+            : {};
         if (typeof payload.nftCooldownResetEnabled === "boolean") {
           ctx.nftCooldownResetEnabled = payload.nftCooldownResetEnabled;
           ctx.config.nftCooldownResetEnabled = payload.nftCooldownResetEnabled;
@@ -429,7 +442,9 @@ async function runStartupSequence() {
         logger.logWithTimestamp("[READY] Watcher running.");
         shouldStartWatch = true;
       } else {
-        logger.logWithTimestamp("[READY] Ready. Click Start Missions to begin.");
+        logger.logWithTimestamp(
+          "[READY] Ready. Click Start Missions to begin.",
+        );
       }
     } else {
       logger.logWithTimestamp("[READY] Type 'login' then 'check'.");

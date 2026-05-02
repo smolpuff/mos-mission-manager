@@ -34,6 +34,11 @@ function createChecksService(ctx, logger, mcp, services = {}) {
   let rentalFastRefreshFailedListings = new Set();
   let walletRefreshTimer = null;
   let walletRefreshPendingReason = null;
+  let missionCatalogRefreshPromise = null;
+  let ownedMissionNftsCache = null;
+  let ownedMissionNftsCacheAt = 0;
+  let ownedMissionNftsPromise = null;
+  const OWNED_MISSION_NFTS_CACHE_TTL_MS = 2000;
 
   function missionPageCooldownMs() {
     const sec = Number(ctx.config?.missionPageOpenCooldownSeconds);
@@ -422,6 +427,15 @@ function createChecksService(ctx, logger, mcp, services = {}) {
     return id || null;
   }
 
+  function assignedNftAccountSetFromMissions(missions = []) {
+    const assigned = new Set();
+    for (const mission of Array.isArray(missions) ? missions : []) {
+      const account = missionAssignedNftAccount(mission);
+      if (account) assigned.add(account);
+    }
+    return assigned;
+  }
+
   function computeGuiMissionSlots(
     missions,
     progressByAssignedMissionId = null,
@@ -758,6 +772,35 @@ function createChecksService(ctx, logger, mcp, services = {}) {
       : normalized;
   }
 
+  async function refreshRentalCandidateBeforeLease(meta = {}) {
+    const startedAt = Date.now();
+    const result = await mcp.mcpToolCall("get_rentable_nfts", {
+      hideCooldowned: false,
+      showRented: false,
+      showOwned: false,
+      sortOrder: "cooldown_asc",
+      pageSize: 100,
+    });
+    const candidates = normalizeRentalCandidates(normalizeRentableList(result), {
+      limit: 0,
+    });
+    const selected =
+      candidates.find((entry) => nftIsAvailable(entry.nft)) ||
+      (autoNftCooldownResetEnabled() ? candidates[0] : null) ||
+      null;
+    logDebug("assign", "rental_prelease_refresh", {
+      ...meta,
+      candidateCount: candidates.length,
+      selectedListingId: selected?.listingId || null,
+      selectedAvailable: selected ? nftIsAvailable(selected.nft) : null,
+      timingMs: timingMs(startedAt),
+    });
+    logWithTimestamp(
+      `[TIMING] rental pre-lease refresh ${meta.missionName || "mission"}: ${timingMs(startedAt)}ms`,
+    );
+    return selected;
+  }
+
   function autoNftCooldownResetEnabled() {
     return (
       (ctx.missionModeEnabled === true ||
@@ -765,6 +808,38 @@ function createChecksService(ctx, logger, mcp, services = {}) {
       (ctx.nftCooldownResetEnabled === true ||
         ctx.config?.nftCooldownResetEnabled === true)
     );
+  }
+
+  async function loadOwnedMissionNfts({ forceFresh = false } = {}) {
+    const cacheFresh =
+      !forceFresh &&
+      ownedMissionNftsCache &&
+      Date.now() - ownedMissionNftsCacheAt <= OWNED_MISSION_NFTS_CACHE_TTL_MS;
+    if (cacheFresh) {
+      logDebug("check", "owned_mission_nfts_cache_hit", {
+        count: ownedMissionNftsCache.length,
+        ageMs: Date.now() - ownedMissionNftsCacheAt,
+      });
+      return ownedMissionNftsCache.slice();
+    }
+    if (!forceFresh && ownedMissionNftsPromise) {
+      logDebug("check", "owned_mission_nfts_cache_wait", {});
+      const pending = await ownedMissionNftsPromise;
+      return pending.slice();
+    }
+    ownedMissionNftsPromise = (async () => {
+      const nftResult = await mcp.mcpToolCall("get_mission_nfts", {});
+      const nfts = normalizeNftList(nftResult);
+      ownedMissionNftsCache = nfts;
+      ownedMissionNftsCacheAt = Date.now();
+      return nfts;
+    })();
+    try {
+      const loaded = await ownedMissionNftsPromise;
+      return loaded.slice();
+    } finally {
+      ownedMissionNftsPromise = null;
+    }
   }
 
   function autoNftCooldownResetMaxPbp() {
@@ -905,8 +980,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
 
   async function countAvailableOwnedNftsForAssignments() {
     try {
-      const allNftsResult = await mcp.mcpToolCall("get_mission_nfts", {});
-      const allNfts = normalizeNftList(allNftsResult);
+      const allNfts = await loadOwnedMissionNfts();
       return allNfts
         .map((nft) => ({ nft, account: nftAccountId(nft) }))
         .filter((entry) => entry.account)
@@ -2136,19 +2210,42 @@ function createChecksService(ctx, logger, mcp, services = {}) {
     return null;
   }
 
-  async function refreshMissionCatalog() {
-    try {
+  async function refreshMissionCatalog({ force = false } = {}) {
+    if (
+      !force &&
+      Array.isArray(ctx.missionCatalogEntries) &&
+      ctx.missionCatalogEntries.length > 0
+    ) {
+      logDebug("catalog", "cache_hit", {
+        total: ctx.missionCatalogEntries.length,
+      });
+      return {
+        ok: true,
+        total: ctx.missionCatalogEntries.length,
+        cached: true,
+      };
+    }
+    if (!force && missionCatalogRefreshPromise) {
+      logDebug("catalog", "cache_wait", {});
+      return missionCatalogRefreshPromise;
+    }
+    missionCatalogRefreshPromise = (async () => {
       const result = await mcp.mcpToolCall("get_mission_catalog", {});
       const missions = normalizeMissionCatalogList(result);
       ctx.missionCatalogEntries = missions;
       logWithTimestamp(`[CATALOG] ✅ Loaded ${missions.length} missions`);
-      return { ok: true, total: missions.length };
+      return { ok: true, total: missions.length, cached: false };
+    })();
+    try {
+      return await missionCatalogRefreshPromise;
     } catch (error) {
       logWithTimestamp(
         `[CATALOG] ❌ Failed to load mission catalog: ${error.message}`,
       );
       logDebug("catalog", "load_failed", { error: error.message });
       return { ok: false, total: 0 };
+    } finally {
+      missionCatalogRefreshPromise = null;
     }
   }
 
@@ -2214,6 +2311,9 @@ function createChecksService(ctx, logger, mcp, services = {}) {
     const initialPrefetchedRentalCandidates = normalizeRentalCandidates(
       prefetchedRentalCandidates,
     );
+    const usePrefetchedRentalOnly =
+      reason === "rental_fast_refresh" &&
+      initialPrefetchedRentalCandidates.length > 0;
     const prefetchedRentalCandidateQueue =
       initialPrefetchedRentalCandidates.slice();
     let rentalLookupCache = null;
@@ -2222,6 +2322,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
       configured: resolved.configured.length,
       targets: resolved.targetIds.size || resolved.targetNames.size,
       prefetchedRentalCandidates: initialPrefetchedRentalCandidates.length,
+      usePrefetchedRentalOnly,
     });
     if (resolved.targetIds.size === 0 && resolved.targetNames.size === 0) {
       return { ok: true, attempted: 0, assigned: 0 };
@@ -2304,6 +2405,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
       let assigned = 0;
       const startedMissionNames = [];
       const startedMissionDetails = [];
+      const alreadyAssignedNftAccounts = assignedNftAccountSetFromMissions(missions);
       const rentalFallbackEnabled =
         ctx.missionModeEnabled === true ||
         ctx.config?.missionModeEnabled === true ||
@@ -2339,35 +2441,19 @@ function createChecksService(ctx, logger, mcp, services = {}) {
           `[ASSIGN] 🔢 ${name}: order=ready owned → ready rental → owned cooldown reset → rental cooldown reset.`,
         );
 
-        try {
-          const freshMissionResult = await mcp.mcpToolCall(
-            "get_user_missions",
-            {},
+        const currentMission = findMissionByAssignedMissionId(missions, id);
+        if (currentMission && missionBlockedByResetThreshold(currentMission)) {
+          const currentLevel = missionLevel(currentMission);
+          logWithTimestamp(
+            `[ASSIGN] ⏸️ Skipping mission held for reset threshold: ${name}${currentLevel === null ? "" : ` lvl=${currentLevel}`}`,
           );
-          const freshMission = findMissionByAssignedMissionId(
-            normalizeMissionList(freshMissionResult),
-            id,
-          );
-          if (freshMission && missionBlockedByResetThreshold(freshMission)) {
-            const freshLevel = missionLevel(freshMission);
-            logWithTimestamp(
-              `[ASSIGN] ⏸️ Skipping mission held for reset threshold: ${name}${freshLevel === null ? "" : ` lvl=${freshLevel}`}`,
-            );
-            logDebug("assign", "assign_blocked_by_fresh_reset_threshold", {
-              reason,
-              missionName: name,
-              missionId: id,
-              level: freshLevel,
-            });
-            continue;
-          }
-        } catch (error) {
-          logDebug("assign", "fresh_mission_recheck_failed", {
+          logDebug("assign", "assign_blocked_by_reset_threshold", {
             reason,
             missionName: name,
             missionId: id,
-            error: error.message,
+            level: currentLevel,
           });
+          continue;
         }
 
         let nfts = [];
@@ -2385,6 +2471,10 @@ function createChecksService(ctx, logger, mcp, services = {}) {
             nftCount: nfts.length,
             eligibleCount: nfts.filter(nftIsAvailable).length,
             cooldownCount: nfts.filter((nft) => !nftIsAvailable(nft)).length,
+            assignedElsewhereCount: nfts
+              .map((nft) => nftAccountId(nft))
+              .filter((account) => account && alreadyAssignedNftAccounts.has(account))
+              .length,
           });
         } catch (error) {
           logDebug("assign", "nft_list_failed", {
@@ -2396,6 +2486,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
         }
         const readyOwnedCandidates = nfts
           .map((nft) => ({ nft, account: nftAccountId(nft) }))
+          .filter((entry) => !alreadyAssignedNftAccounts.has(entry.account))
           .filter((entry) => nftIsAvailable(entry.nft))
           .filter((entry) => entry.account)
           .slice(0, 3);
@@ -2413,6 +2504,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
           const ownedCooldownCandidates = nfts
             .map((nft) => ({ nft, account: nftAccountId(nft) }))
             .filter((entry) => entry.account)
+            .filter((entry) => !alreadyAssignedNftAccounts.has(entry.account))
             .filter((entry) => !nftIsAvailable(entry.nft))
             .sort(
               (a, b) => nftCooldownSeconds(a.nft) - nftCooldownSeconds(b.nft),
@@ -2439,10 +2531,12 @@ function createChecksService(ctx, logger, mcp, services = {}) {
               logWithTimestamp(
                 `[RENTAL] 🔎 ${name}: no ready owned NFT; checking rental pool before cooldown resets...`,
               );
-              if (prefetchedRentalCandidateQueue.length > 0) {
+              while (prefetchedRentalCandidateQueue.length > 0) {
                 loadedRentalCandidates.push(
                   prefetchedRentalCandidateQueue.shift(),
                 );
+              }
+              if (loadedRentalCandidates.length > 0) {
                 logDebug("assign", "rental_candidates_prefetched", {
                   reason,
                   missionName: name,
@@ -2458,7 +2552,21 @@ function createChecksService(ctx, logger, mcp, services = {}) {
                 : Infinity;
               let rentableEntries = null;
               const rentalLookupStartedAt = Date.now();
-              if (rentalLookupCache && cacheAgeMs >= 0 && cacheAgeMs <= 2000) {
+              let usedPrefetchedOnly = false;
+              if (usePrefetchedRentalOnly) {
+                rentableEntries = [];
+                usedPrefetchedOnly = true;
+                logDebug("assign", "rental_fast_refresh_prefetched_only", {
+                  reason,
+                  missionName: name,
+                  missionId: id,
+                  prefetchedCount: loadedRentalCandidates.length,
+                });
+              } else if (
+                rentalLookupCache &&
+                cacheAgeMs >= 0 &&
+                cacheAgeMs <= 2000
+              ) {
                 rentableEntries = rentalLookupCache.entries;
                 logDebug("assign", "rental_candidates_cache_hit", {
                   reason,
@@ -2513,7 +2621,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
                 ...rentableEntries,
               ], { limit: 0 });
               logWithTimestamp(
-                `[TIMING] rental lookup ${name}: ${timingMs(rentalLookupStartedAt)}ms${rentalLookupCache && cacheAgeMs >= 0 && cacheAgeMs <= 2000 ? " (cache)" : ""}`,
+                `[TIMING] rental lookup ${name}: ${timingMs(rentalLookupStartedAt)}ms${usedPrefetchedOnly ? " (prefetched)" : rentalLookupCache && cacheAgeMs >= 0 && cacheAgeMs <= 2000 ? " (cache)" : ""}`,
               );
               readyRentalCandidates = loadedRentalCandidates
                 .filter((entry) => nftIsAvailable(entry.nft))
@@ -2673,7 +2781,26 @@ function createChecksService(ctx, logger, mcp, services = {}) {
               );
             }
             if (option.source === "rental") {
-              if (!nftIsAvailable(nft)) {
+              const freshRental = await refreshRentalCandidateBeforeLease({
+                reason,
+                missionName: name,
+                missionId: id,
+                attempt: index + 1,
+                maxAttempts: assignmentOptions.length,
+              });
+              if (!freshRental) {
+                const error = new Error(
+                  "Rental listing disappeared before lease; waiting for the next fast refresh tick.",
+                );
+                error.rentalRefreshEmpty = true;
+                throw error;
+              }
+              option.nft = freshRental.nft || option.nft;
+              option.account = freshRental.account || option.account;
+              option.listingId = freshRental.listingId || option.listingId;
+              account = option.account;
+              const freshNft = option.nft;
+              if (!nftIsAvailable(freshNft)) {
                 if (!autoNftCooldownResetEnabled()) {
                   throw new Error(
                     "Rental NFT is on cooldown and auto NFT cooldown reset is disabled.",
@@ -2693,7 +2820,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
                   missionName: name,
                   missionId: id,
                   nft: {
-                    ...nft,
+                    ...freshNft,
                     account,
                     nftAccount: account,
                   },
@@ -2706,7 +2833,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
                   );
                 }
                 option.nft = {
-                  ...nft,
+                  ...freshNft,
                   account,
                   nftAccount: account,
                   onCooldown: false,
@@ -2760,7 +2887,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
                     missionName: name,
                     missionId: id,
                     nft: {
-                      ...nft,
+                      ...(option.nft || nft),
                       account,
                       nftAccount: account,
                     },
@@ -2924,6 +3051,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
               );
             }
             assigned += 1;
+            if (account) alreadyAssignedNftAccounts.add(account);
             missionAssigned = true;
             startedMissionNames.push(name);
             startedMissionDetails.push({ name, level, slot });
@@ -2988,9 +3116,11 @@ function createChecksService(ctx, logger, mcp, services = {}) {
             );
             const hasNext = index + 1 < assignmentOptions.length;
             const shouldTryNext =
-              option.source === "rental" || option.source === "owned_cooldown"
-                ? hasNext
-                : retryable && hasNext;
+              error.rentalRefreshEmpty === true
+                ? false
+                : option.source === "rental" || option.source === "owned_cooldown"
+                  ? hasNext
+                  : retryable && hasNext;
             logDebug("assign", "assign_failed", {
               missionName: name,
               missionId: id,
@@ -3007,9 +3137,15 @@ function createChecksService(ctx, logger, mcp, services = {}) {
               if (option.listingId) {
                 rentalFastRefreshFailedListings.add(String(option.listingId));
               }
-              logWithTimestamp(
-                `[RENTAL] ❌ ${name}: rental attempt failed: ${error.message}`,
-              );
+              if (error.rentalRefreshEmpty === true) {
+                logWithTimestamp(
+                  `[RENTAL] ℹ️ ${name}: prefetched rental was gone before lease; staying on fast refresh.`,
+                );
+              } else {
+                logWithTimestamp(
+                  `[RENTAL] ❌ ${name}: rental attempt failed: ${error.message}`,
+                );
+              }
               if (!shouldTryNext) {
                 startRentalFastRefresh({
                   reason: "rental_attempt_failed",
@@ -3029,9 +3165,15 @@ function createChecksService(ctx, logger, mcp, services = {}) {
         }
 
         if (!missionAssigned && lastError) {
-          logWithTimestamp(
-            `[ASSIGN] ❌ Failed assign for ${name} (missionId=${id}): ${lastError.message}`,
-          );
+          if (lastError.rentalRefreshEmpty === true) {
+            logWithTimestamp(
+              `[ASSIGN] ℹ️ ${name}: rental disappeared before lease; continuing fast refresh.`,
+            );
+          } else {
+            logWithTimestamp(
+              `[ASSIGN] ❌ Failed assign for ${name} (missionId=${id}): ${lastError.message}`,
+            );
+          }
         }
       }
       assignedCountForEvent = assigned;
@@ -3276,8 +3418,9 @@ function createChecksService(ctx, logger, mcp, services = {}) {
       let nftAvailable = ctx.currentMissionStats.nftsAvailable || 0;
       if (refreshNftCount || missionNftByAccount.size === 0) {
         try {
-          const nftResult = await mcp.mcpToolCall("get_mission_nfts", {});
-          const nfts = normalizeNftList(nftResult);
+          const nfts = await loadOwnedMissionNfts({
+            forceFresh: refreshNftCount === true,
+          });
           missionNftByAccount.clear();
           for (const nft of nfts) {
             const key = nftAccountId(nft);

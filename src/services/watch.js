@@ -517,7 +517,11 @@ function createWatchService(
         lookup?.reward ??
         lookup?.prizeAmount ??
         null;
-      const amount = Number(amountRaw);
+      let amount = Number(amountRaw);
+      if (!Number.isFinite(amount) && typeof amountRaw === "string") {
+        const match = amountRaw.match(/([0-9]+(?:\.[0-9]+)?)/);
+        amount = match ? Number(match[1]) : NaN;
+      }
       if (!bucket || !Number.isFinite(amount) || amount <= 0) continue;
       totals[bucket] += amount;
     }

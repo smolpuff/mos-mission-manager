@@ -5,15 +5,15 @@ const NORMAL_DEFAULTS = {
   rentalFastRefreshTickMs: 15000,
   rentalBatchLimit: 2,
   watchMaxLimitSeconds: 60,
-  watchMinCycleSeconds: 15,
-  watchDefaultPollSeconds: 15,
+  watchMinCycleSeconds: 30,
+  watchDefaultPollSeconds: 30,
 };
 
 const DEV_DEFAULTS = {
   missionResetLevel: "6",
   rentalFastRefreshTickMs: 1500,
   rentalBatchLimit: 4,
-  watchMaxLimitSeconds: 120,
+  watchMaxLimitSeconds: 60,
   watchMinCycleSeconds: 15,
   watchDefaultPollSeconds: 15,
 };

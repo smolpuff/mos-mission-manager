@@ -2,8 +2,15 @@
 
 const { contextBridge, ipcRenderer } = require("electron");
 
+function isDesktopDevMode() {
+  if (process.env.PBP_DESKTOP_DEV_MODE === "1") return true;
+  const lifecycle = String(process.env.npm_lifecycle_event || "").trim();
+  return lifecycle === "desktop:dev";
+}
+
 contextBridge.exposeInMainWorld("missionsDesktop", {
   platform: process.platform,
+  desktopDevMode: isDesktopDevMode(),
   startBackend: () => ipcRenderer.invoke("backend:start"),
   stopBackend: () => ipcRenderer.invoke("backend:stop"),
   restartBackend: () => ipcRenderer.invoke("backend:restart"),
