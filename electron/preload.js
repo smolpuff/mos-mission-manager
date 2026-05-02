@@ -17,6 +17,8 @@ contextBridge.exposeInMainWorld("missionsDesktop", {
   prepareSlot4Unlock: () => ipcRenderer.invoke("slot:prepare-unlock4"),
   createGeneratedWallet: () => ipcRenderer.invoke("signer:create-generated-wallet"),
   fetchOnboardingAccount: () => ipcRenderer.invoke("onboarding:fetch-account"),
+  applyMissionSelection: (payload) =>
+    ipcRenderer.invoke("missions:apply-selection", payload),
   getRentalsPreview: () => ipcRenderer.invoke("rentals:preview"),
   getUserNfts: () => ipcRenderer.invoke("nfts:list"),
   prepareNftCooldownReset: (payload) =>

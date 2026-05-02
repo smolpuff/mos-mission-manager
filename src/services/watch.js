@@ -541,7 +541,7 @@ function createWatchService(
     const configuredCycleSeconds = Number(ctx.config.watchCycleSeconds);
     const derivedCycleSeconds = Math.max(
       WATCH_MIN_CYCLE_SECONDS,
-      Math.ceil(pollIntervalSeconds * 2),
+      Math.ceil(pollIntervalSeconds),
     );
     const watchSeconds =
       Number.isFinite(configuredCycleSeconds) && configuredCycleSeconds > 0
@@ -1662,8 +1662,8 @@ function createWatchService(
     }
 
     const watchTimeoutMs = Math.max(
-      90000,
-      opts.watchSeconds * 1000 + opts.pollIntervalSeconds * 1000 + 30000,
+      45000,
+      opts.watchSeconds * 1000 + opts.pollIntervalSeconds * 1000 + 15000,
     );
     const startedAt = Date.now();
     let watchTick = 0;

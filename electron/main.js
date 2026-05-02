@@ -132,6 +132,9 @@ function createEmptyAnalytics() {
       totalLeased: 0,
       currencyEarned: { pbp: 0, tc: 0, cc: 0 },
       missionClaims: {},
+      claimHistory: [],
+      resetTypes: { mission: 0, nft: 0 },
+      spendByAction: {},
       nftsUsed: [],
     },
     session: {
@@ -142,9 +145,40 @@ function createEmptyAnalytics() {
       totalLeased: 0,
       currencyEarned: { pbp: 0, tc: 0, cc: 0 },
       missionClaims: {},
+      claimHistory: [],
+      resetTypes: { mission: 0, nft: 0 },
+      spendByAction: {},
       nftsUsed: [],
     },
   };
+}
+
+function normalizeCounterObject(raw) {
+  const out = {};
+  if (!raw || typeof raw !== "object") return out;
+  for (const [key, value] of Object.entries(raw)) {
+    const normalizedKey = String(key || "").trim();
+    if (!normalizedKey) continue;
+    const n = Number(value);
+    out[normalizedKey] = Number.isFinite(n) && n > 0 ? n : 0;
+  }
+  return out;
+}
+
+function normalizeClaimHistory(raw) {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((entry) => {
+      const at = Number(entry?.at);
+      const claims = Number(entry?.claims);
+      return {
+        at: Number.isFinite(at) ? at : null,
+        claims: Number.isFinite(claims) ? Math.max(0, claims) : 0,
+        mission: String(entry?.mission || "").trim(),
+      };
+    })
+    .filter((entry) => entry.at && entry.claims > 0)
+    .slice(-1000);
 }
 
 function normalizeAnalytics(raw) {
@@ -171,6 +205,12 @@ function normalizeAnalytics(raw) {
         src?.lifetime?.missionClaims && typeof src.lifetime.missionClaims === "object"
           ? src.lifetime.missionClaims
           : {},
+      claimHistory: normalizeClaimHistory(src?.lifetime?.claimHistory),
+      resetTypes: {
+        mission: Number(src?.lifetime?.resetTypes?.mission || 0) || 0,
+        nft: Number(src?.lifetime?.resetTypes?.nft || 0) || 0,
+      },
+      spendByAction: normalizeCounterObject(src?.lifetime?.spendByAction),
       nftsUsed: Array.isArray(src?.lifetime?.nftsUsed)
         ? src.lifetime.nftsUsed.map((v) => String(v || "").trim()).filter(Boolean)
         : [],
@@ -194,6 +234,12 @@ function normalizeAnalytics(raw) {
         src?.session?.missionClaims && typeof src.session.missionClaims === "object"
           ? src.session.missionClaims
           : {},
+      claimHistory: normalizeClaimHistory(src?.session?.claimHistory),
+      resetTypes: {
+        mission: Number(src?.session?.resetTypes?.mission || 0) || 0,
+        nft: Number(src?.session?.resetTypes?.nft || 0) || 0,
+      },
+      spendByAction: normalizeCounterObject(src?.session?.spendByAction),
       nftsUsed: Array.isArray(src?.session?.nftsUsed)
         ? src.session.nftsUsed.map((v) => String(v || "").trim()).filter(Boolean)
         : [],
@@ -393,6 +439,9 @@ function beginAnalyticsSession() {
     totalLeased: 0,
     currencyEarned: { pbp: 0, tc: 0, cc: 0 },
     missionClaims: {},
+    claimHistory: [],
+    resetTypes: { mission: 0, nft: 0 },
+    spendByAction: {},
     nftsUsed: [],
   };
   saveAnalytics(current);
@@ -425,6 +474,22 @@ function applyAnalyticsLine(line) {
       Number(current.lifetime.missionClaims[mission] || 0) + 1;
     current.session.missionClaims[mission] =
       Number(current.session.missionClaims[mission] || 0) + 1;
+    current.lifetime.claimHistory = normalizeClaimHistory([
+      ...(current.lifetime.claimHistory || []),
+      {
+        at: Date.now(),
+        claims: current.lifetime.totalClaims,
+        mission,
+      },
+    ]);
+    current.session.claimHistory = normalizeClaimHistory([
+      ...(current.session.claimHistory || []),
+      {
+        at: Date.now(),
+        claims: current.session.totalClaims,
+        mission,
+      },
+    ]);
     if (Number.isFinite(amount) && amount > 0 && ["pbp", "tc", "cc"].includes(token)) {
       current.lifetime.currencyEarned[token] += amount;
       current.session.currencyEarned[token] += amount;
@@ -432,12 +497,19 @@ function applyAnalyticsLine(line) {
     changed = true;
   }
 
-  if (
-    /\[RESET\]\s+✅\s+Rerolled:/i.test(text) ||
-    /\[RESET\]\s+✅\s+Cooldown reset complete:/i.test(text)
-  ) {
+  if (/\[RESET\]\s+✅\s+Rerolled:/i.test(text)) {
     current.lifetime.totalResets += 1;
     current.session.totalResets += 1;
+    current.lifetime.resetTypes.mission += 1;
+    current.session.resetTypes.mission += 1;
+    changed = true;
+  }
+
+  if (/\[RESET\]\s+✅\s+Cooldown reset complete:/i.test(text)) {
+    current.lifetime.totalResets += 1;
+    current.session.totalResets += 1;
+    current.lifetime.resetTypes.nft += 1;
+    current.session.resetTypes.nft += 1;
     changed = true;
   }
 
@@ -445,8 +517,14 @@ function applyAnalyticsLine(line) {
   if (spendMatch) {
     const amount = Number(spendMatch[1] || 0);
     if (Number.isFinite(amount) && amount > 0) {
+      const actionMatch = text.match(/\[SPEND\].*?([a-z0-9_]+):\s*-/i);
+      const action = String(actionMatch?.[1] || "other").trim() || "other";
       current.lifetime.totalResetCostPbp += amount;
       current.session.totalResetCostPbp += amount;
+      current.lifetime.spendByAction[action] =
+        Number(current.lifetime.spendByAction[action] || 0) + amount;
+      current.session.spendByAction[action] =
+        Number(current.session.spendByAction[action] || 0) + amount;
       changed = true;
     }
   }
@@ -2043,6 +2121,26 @@ app.whenReady().then(async () => {
     logConfigPatch("Onboarding", configPatch);
     publishStatus();
     return { ok: true, config: next };
+  });
+  ipcMain.handle("missions:apply-selection", async (_event, payload = {}) => {
+    const slot = Number(payload?.slot);
+    const missionName = String(payload?.missionName || payload?.name || "").trim();
+    const missionId = String(payload?.missionId || "").trim();
+    if (!Number.isFinite(slot) || slot < 1 || slot > 4) {
+      return { ok: false, error: "Invalid mission slot." };
+    }
+    if (!missionName && !missionId) {
+      return { ok: false, error: "Select a mission first." };
+    }
+    const response = await requestBackend(
+      "apply_mission_selection",
+      { slot: Math.floor(slot), missionName, missionId },
+      {
+        ensureRunning: true,
+        timeoutMs: 90000,
+      },
+    );
+    return response;
   });
   ipcMain.handle("rentals:preview", async () => {
     const loadPreview = async () => {

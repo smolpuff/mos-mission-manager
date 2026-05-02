@@ -192,6 +192,14 @@ if (process.env.PBP_GUI_BRIDGE === "1" && typeof process.send === "function") {
         sendGuiResponse(requestId, { ok: true, prepared });
         return;
       }
+      if (action === "apply_mission_selection") {
+        if (!checks || typeof checks.applyMissionSelection !== "function") {
+          throw new Error("Mission selection service unavailable.");
+        }
+        const result = await checks.applyMissionSelection(message.payload || {});
+        sendGuiResponse(requestId, { ok: true, result });
+        return;
+      }
       if (action === "reset_nft_cooldown") {
         if (!checks || typeof checks.resetCooldownNftFromUi !== "function") {
           throw new Error("NFT cooldown reset service unavailable.");

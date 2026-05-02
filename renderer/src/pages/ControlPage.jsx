@@ -668,6 +668,14 @@ function ControlView() {
   const canUnlockSlot4 =
     slotUnlockSummary?.canUnlockMore === true &&
     Number(slotUnlockSummary?.nextUnlockSlot) === 4;
+  const isMissionSlotLocked = (slot) => {
+    const nextUnlockSlot = Number(slotUnlockSummary?.nextUnlockSlot);
+    return (
+      slotUnlockSummary?.canUnlockMore === true &&
+      Number.isFinite(nextUnlockSlot) &&
+      Number(slot) >= nextUnlockSlot
+    );
+  };
   const missionStats = status.currentMissionStats || {};
   const fundingWalletSummary =
     status.fundingWalletSummary?.status === "ok"
@@ -730,6 +738,10 @@ function ControlView() {
     useState(null);
   const [onboardingPreviewOnly, setOnboardingPreviewOnly] = useState(false);
   const [onboardingDataLoading, setOnboardingDataLoading] = useState(false);
+  const [missionPickerSlot, setMissionPickerSlot] = useState(null);
+  const [missionPickerPendingName, setMissionPickerPendingName] = useState("");
+  const [missionPickerBusy, setMissionPickerBusy] = useState(false);
+  const [missionPickerError, setMissionPickerError] = useState(null);
   const [onboardingBodyHeight, setOnboardingBodyHeight] = useState(null);
   const onboardingBodyRef = useRef(null);
   const autoFundingRefreshAttemptedRef = useRef(false);
@@ -1134,11 +1146,12 @@ function ControlView() {
       if (!res?.ok) throw new Error(res?.error || "Unlock preparation failed.");
       const prepared = res.prepared || null;
       setSlotUnlockResult(prepared);
-      if (!prepared?.ok) {
-        throw new Error(prepared?.reason || "Unlock preparation failed.");
-      }
-      if (prepared?.reason === "no_more_to_unlock") {
+      if (prepared?.reason === "no_more_to_unlock" || prepared?.reason === "not_unlockable") {
         setSlotUnlockError("No more slots to unlock.");
+      } else if (!prepared?.ok) {
+        throw new Error(prepared?.reason || "Unlock failed.");
+      } else if (prepared?.unlocked) {
+        setSlotUnlockModalOpen(false);
       }
     } catch (e) {
       setSlotUnlockError(String(e?.message || e));
@@ -1331,6 +1344,133 @@ function ControlView() {
       ? onboardingCatalogByName.get(missionKey(selectedName))
       : null;
     return selectedFromCatalog || assigned || null;
+  };
+
+  const seedMissionSelectionState = (missions = [], targetMissions = []) => {
+    const sourceMissions = Array.isArray(missions) && missions.length ? missions : slots;
+    const selections = buildOnboardingSlotSelections(
+      sourceMissions.map((mission) => ({
+        ...mission,
+        name: mission?.name || mission?.missionName,
+      })),
+    );
+    if (Array.isArray(targetMissions)) {
+      targetMissions.forEach((name, index) => {
+        const slot = index + 1;
+        const value = String(name || "").trim();
+        if (slot >= 1 && slot <= 4 && value && !selections[slot]) {
+          selections[slot] = value;
+        }
+      });
+    }
+    setOnboardingSlotSelections(selections);
+    setOnboardingSelectedMissions(
+      new Set(
+        Object.values(selections)
+          .map((name) => String(name || "").trim())
+          .filter(Boolean),
+      ),
+    );
+  };
+
+  const openMissionPicker = async (slot) => {
+    const slotNumber = Number(slot);
+    if (!Number.isFinite(slotNumber) || slotNumber < 1 || slotNumber > 4) return;
+    if (isMissionSlotLocked(slotNumber)) return;
+    const currentName = String(
+      onboardingSlotSelections[slotNumber] ||
+        slots.find((entry) => Number(entry?.slot) === slotNumber)?.missionName ||
+        "",
+    ).trim();
+    setMissionPickerPendingName(currentName);
+    setMissionPickerSlot(slotNumber);
+    setMissionPickerBusy(true);
+    setMissionPickerError(null);
+    try {
+      const [accountResponse, configResponse] = await Promise.all([
+        bridge?.fetchOnboardingAccount
+          ? bridge.fetchOnboardingAccount()
+          : Promise.resolve(null),
+        bridge?.getConfig ? bridge.getConfig() : Promise.resolve(null),
+      ]);
+      if (accountResponse?.ok) {
+        const missions = Array.isArray(accountResponse.missions)
+          ? accountResponse.missions
+          : [];
+        const catalog = Array.isArray(accountResponse.missionCatalog)
+          ? accountResponse.missionCatalog
+          : [];
+        setOnboardingMissions(missions);
+        setOnboardingMissionCatalog(catalog);
+        setOnboardingOwnedCollections(
+          new Set(
+            (Array.isArray(accountResponse.ownedCollections)
+              ? accountResponse.ownedCollections
+              : []
+            )
+              .map((entry) => normalizeCollectionKey(entry))
+              .filter(Boolean),
+          ),
+        );
+        seedMissionSelectionState(
+          missions,
+          configResponse?.config?.targetMissions || [],
+        );
+      } else {
+        seedMissionSelectionState([], configResponse?.config?.targetMissions || []);
+        if (!onboardingMissionCatalog.length) {
+          throw new Error(
+            accountResponse?.error || "Failed to load mission catalog.",
+          );
+        }
+      }
+    } catch (error) {
+      setMissionPickerError(String(error?.message || error));
+    } finally {
+      setMissionPickerBusy(false);
+    }
+  };
+
+  const applyMissionPickerSelection = async () => {
+    const slotNumber = Number(missionPickerSlot);
+    const selectedName = String(missionPickerPendingName || "").trim();
+    if (!Number.isFinite(slotNumber) || !selectedName) return;
+    if (!bridge?.applyMissionSelection) {
+      setMissionPickerError("Mission selection is not available in this build.");
+      return;
+    }
+    const mission = onboardingCatalogByName.get(missionKey(selectedName)) || null;
+    setMissionPickerBusy(true);
+    setMissionPickerError(null);
+    try {
+      const response = await bridge.applyMissionSelection({
+        slot: slotNumber,
+        missionName: selectedName,
+        missionId: mission?.id || mission?.missionId || mission?.mission_id || "",
+      });
+      if (!response?.ok) {
+        throw new Error(response?.error || "Mission change failed.");
+      }
+      const result = response.result || null;
+      if (!result?.ok) {
+        const reason = String(result?.reason || "Mission change failed.");
+        throw new Error(
+          reason === "slot_locked"
+            ? "This slot is locked."
+            : reason === "mission_not_found"
+              ? "Mission was not found in the catalog."
+              : reason,
+        );
+      }
+      updateOnboardingSlotSelection(slotNumber, selectedName);
+      setMissionPickerSlot(null);
+      setMissionPickerPendingName("");
+      if (bridge?.refreshWalletSummary) void bridge.refreshWalletSummary();
+    } catch (error) {
+      setMissionPickerError(String(error?.message || error));
+    } finally {
+      setMissionPickerBusy(false);
+    }
   };
 
   const missionCollectionsLabel = (
@@ -3143,10 +3283,28 @@ function ControlView() {
                         )
                       : 0;
                     const imgSrc = pickSlotImage(entry);
+                    const slotLocked = isMissionSlotLocked(slot);
                     return (
                       <div
-                        className={`card-mission ${slotError ? "card-mission--error" : ""}`}
+                        className={`card-mission ${slotError ? "card-mission--error" : ""} ${slotLocked ? "opacity-70" : "cursor-pointer"}`}
                         key={slot}
+                        role={slotLocked ? undefined : "button"}
+                        tabIndex={slotLocked ? undefined : 0}
+                        title={
+                          slotLocked
+                            ? "Slot locked"
+                            : "Click to change mission"
+                        }
+                        onClick={() => {
+                          if (!slotLocked) void openMissionPicker(slot);
+                        }}
+                        onKeyDown={(event) => {
+                          if (slotLocked) return;
+                          if (event.key === "Enter" || event.key === " ") {
+                            event.preventDefault();
+                            void openMissionPicker(slot);
+                          }
+                        }}
                       >
                         <div className="card-mission__header relative overflow-clip">
                           <MissionSlotImage src={imgSrc} />
@@ -3158,7 +3316,10 @@ function ControlView() {
                               type="button"
                               className="mission-error-badge"
                               title="Reset error details"
-                              onClick={() => setResetErrorModal(slotError)}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                setResetErrorModal(slotError);
+                              }}
                             >
                               i
                             </button>
@@ -3186,7 +3347,8 @@ function ControlView() {
                             <button
                               type="button"
                               className="absolute inset-0 z-30 grid place-items-center bg-black/55 text-white font-semibold tracking-wide uppercase text-xs"
-                              onClick={() => {
+                              onClick={(event) => {
+                                event.stopPropagation();
                                 setSlotUnlockModalOpen(true);
                                 setSlotUnlockBusy(false);
                                 setSlotUnlockError(null);
@@ -3212,6 +3374,154 @@ function ControlView() {
               </section>
             </>
           )}
+          {missionPickerSlot ? (
+            <div
+              className="fixed inset-0 z-60 grid place-items-center bg-black/55 p-4"
+              role="dialog"
+              aria-modal="true"
+              onMouseDown={(event) => {
+                if (event.target === event.currentTarget && !missionPickerBusy) {
+                  setMissionPickerSlot(null);
+                }
+              }}
+            >
+              <div
+                className="p-4 w-full rounded-xl shadow-2xl shadow-black/95 space-y-4 z-10 border-2 border-[#1D1C27]"
+                style={{
+                  maxWidth: "760px",
+                  backgroundImage: `url(${backImg})`,
+                  backgroundSize: "cover",
+                  backgroundPosition: "center",
+                }}
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <div className="text-lg font-semibold text-slate-100">
+                      Change mission for slot {missionPickerSlot}
+                    </div>
+                    <div className="text-xs text-slate-400">
+                      Pick the mission this slot should run.
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    className="btn btn-clear btn-sm"
+                    onClick={() => {
+                      setMissionPickerSlot(null);
+                      setMissionPickerPendingName("");
+                    }}
+                    title="Close"
+                    disabled={missionPickerBusy}
+                  >
+                    ✕
+                  </button>
+                </div>
+                {missionPickerError ? (
+                  <div className="rounded-md border border-error/40 bg-error/10 p-3 text-sm text-slate-100">
+                    {missionPickerError}
+                  </div>
+                ) : null}
+                {missionPickerBusy ? (
+                  <div className="grid h-48 place-items-center">
+                    <span className="loading loading-spinner loading-md text-success" />
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-2 gap-2 max-h-[60vh] overflow-y-auto pr-1">
+                    {getOnboardingSlotOptions(
+                      missionPickerSlot,
+                      onboardingSlotSelections[missionPickerSlot] ||
+                        getOnboardingMissionCard(missionPickerSlot)?.name ||
+                        "",
+                    ).map((name) => {
+                      const mission =
+                        onboardingCatalogByName.get(missionKey(name)) || null;
+                      const collections = resolveMissionCollections(mission);
+                      const isSelected =
+                        missionKey(missionPickerPendingName) ===
+                        missionKey(name);
+                      return (
+                        <button
+                          type="button"
+                          key={`mission-picker-${missionPickerSlot}-${name}`}
+                          className={`mission-choice-card ${
+                            isSelected ? "mission-choice-card--selected" : ""
+                          } rounded-md p-3 h-full flex gap-2 text-left`}
+                          onClick={() => setMissionPickerPendingName(name)}
+                        >
+                          <input
+                            type="radio"
+                            name="mission_picker_selection"
+                            className="fake-checkbox-radio"
+                            checked={isSelected}
+                            onChange={() => setMissionPickerPendingName(name)}
+                            tabIndex={-1}
+                          />
+                          <div className="flex min-w-0 flex-1 flex-col gap-2">
+                          <div className="flex flex-row justify-between items-center">
+                            <div className="text-[11px] text-slate-400">
+                              Level —
+                            </div>
+                            <div className="badge px-2 h-auto text-[11px] text-slate-900">
+                              {isSelected ? "Pending" : "Available"}
+                            </div>
+                          </div>
+                          <div className="text-sm text-slate-100">{name}</div>
+                          <div className="text-[11px] text-slate-300">
+                            {mission?.reward || "Reward unknown"}
+                          </div>
+                          <div className="text-[11px] text-slate-400 mt-auto">
+                            {collections.length > 0
+                              ? collections
+                                  .map((entry) => entry?.name)
+                                  .filter(Boolean)
+                                  .join(", ")
+                              : "Collection requirements unavailable"}
+                          </div>
+                          </div>
+                        </button>
+                      );
+                    })}
+                    {getOnboardingSlotOptions(
+                      missionPickerSlot,
+                      onboardingSlotSelections[missionPickerSlot] || "",
+                    ).length === 0 ? (
+                      <div className="col-span-2 rounded-md border border-white/10 bg-black/20 p-4 text-sm text-slate-300">
+                        No missions available.
+                      </div>
+                    ) : null}
+                  </div>
+                )}
+                <div className="flex items-center justify-between gap-3 border-t border-white/10 pt-3">
+                  <div className="min-w-0 text-xs text-slate-400">
+                    {missionPickerPendingName
+                      ? `Selected: ${missionPickerPendingName}`
+                      : "Select a mission before confirming."}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      className="btn btn-clear btn-sm"
+                      disabled={missionPickerBusy}
+                      onClick={() => {
+                        setMissionPickerSlot(null);
+                        setMissionPickerPendingName("");
+                      }}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-gradient btn-sm text-shadow-sm text-shadow-black/40"
+                      disabled={missionPickerBusy || !missionPickerPendingName}
+                      onClick={() => void applyMissionPickerSelection()}
+                    >
+                      {missionPickerBusy ? "Applying..." : "Confirm"}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          ) : null}
           {resetErrorModal ? (
             <div
               className="fixed inset-0 z-60 grid place-items-center bg-black/50 p-4"
@@ -3355,7 +3665,7 @@ function ControlView() {
                     onClick={() => void confirmUnlockSlot4()}
                     disabled={slotUnlockBusy}
                   >
-                    {slotUnlockBusy ? "Preparing..." : "Yes"}
+                    {slotUnlockBusy ? "Unlocking..." : "Yes"}
                   </button>
                 </div>
               </div>
