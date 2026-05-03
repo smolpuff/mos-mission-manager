@@ -55,7 +55,7 @@ export default function ToggleSwitch({
       </span>
 
       <span
-        className={`flex flex-col gap-0 text-sm font-medium ${
+        className={`flex flex-col gap-0 text-sm  ${
           disabled ? "" : ""
         } ${styling}`}
       >

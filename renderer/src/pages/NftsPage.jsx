@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import backImg from "../img/back.png";
 
 const NFT_COOLDOWN_RING_MAX_SECONDS = 24 * 60 * 60;
 function formatAccount(value) {
@@ -204,7 +205,9 @@ export default function NftsPage({ bridge }) {
         },
       });
       if (!response?.ok) {
-        throw new Error(response?.error || "Cooldown reset preparation failed.");
+        throw new Error(
+          response?.error || "Cooldown reset preparation failed.",
+        );
       }
       const prepared = response.prepared || null;
       if (!prepared?.ok || !prepared?.ready) {
@@ -499,7 +502,15 @@ export default function NftsPage({ bridge }) {
             if (event.target === event.currentTarget) closeResetModal();
           }}
         >
-          <div className="card w-full max-w-140 space-y-4 !bg-[#0b1116] border border-white/15 z-10">
+          <div
+            className="p-4 w-full rounded-xl shadow-2xl shadow-black/95 space-y-4 z-10 border-2 border-[#1D1C27]"
+            style={{
+              maxWidth: "600px",
+              backgroundImage: `url(${backImg})`,
+              backgroundSize: "cover",
+              backgroundPosition: "center",
+            }}
+          >
             <div className="flex items-center justify-between gap-3">
               <div className="text-lg font-semibold text-white">
                 Reset NFT Cooldown

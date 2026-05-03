@@ -798,9 +798,15 @@ button.btn.btn-gradient {
         content: "";
         @apply absolute inset-0 p-0.5 pointer-events-none z-0;
         border-radius: inherit;
-        background: linear-gradient(120deg,
-            rgba(255, 255, 255, 0.1) 40%,
-            rgba(255, 255, 255, 0.05) 100%);
+        background: linear-gradient(105deg,
+            var(--color-success),
+            var(--color-info),
+            var(--color-primary),
+            var(--color-secondary),
+            var(--color-accent));
+        background-size: 100% 100%;
+
+
       }
     }
   }
@@ -920,6 +926,12 @@ button.btn.btn-gradient {
 
 /* settings page */
 
+@property --selected-border-angle {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
+}
+
 .signer-type {
   @apply flex gap-4;
 
@@ -930,16 +942,20 @@ button.btn.btn-gradient {
       content: "";
       @apply absolute inset-0 p-0.5 pointer-events-none z-0;
       border-radius: inherit;
+
       background: linear-gradient(165deg,
           rgba(255, 255, 255, 0.07) 30%,
-          rgba(255, 255, 255, 0.15) 70%, rgba(255, 255, 255, 0.06) 80%);
-      -webkit-mask: linear-gradient(#fff 0 0) content-box,
+          rgba(255, 255, 255, 0.15) 70%,
+          rgba(255, 255, 255, 0.06) 80%);
+
+      -webkit-mask:
+        linear-gradient(#fff 0 0) content-box,
         linear-gradient(#fff 0 0);
       -webkit-mask-composite: xor;
       mask-composite: exclude;
+
       backdrop-filter: blur(1rem);
       -webkit-backdrop-filter: blur(1rem);
-
     }
 
     &::before {
@@ -951,16 +967,13 @@ button.btn.btn-gradient {
     }
 
     &:has(input:checked) {
-      /* @apply bg-red-100; */
-
       &::after {
-        content: "";
-        @apply absolute inset-0 p-0.5 pointer-events-none z-0;
+        background: conic-gradient(from var(--selected-border-angle),
+            #519E6F 0deg,
+            var(--color-success) 180deg,
+            #519E6F 360deg);
 
-        background: linear-gradient(165deg,
-            #519E6F 30%,
-            var(--color-success) 70%, #519E6F 80%);
-
+        animation: selectedGradientShift 2s linear infinite;
       }
     }
 
@@ -985,14 +998,11 @@ button.btn.btn-gradient {
       content: "";
       width: 1.25rem;
       height: 1.25rem;
-
       background-repeat: no-repeat;
-
       border-radius: 100%;
       background-position: center;
       background-size: 14px 14px;
       background-image: none;
-
       @apply border-2 border-white/10 transition-all;
     }
 
@@ -1016,9 +1026,17 @@ button.btn.btn-gradient {
       appearance: none !important;
       -webkit-appearance: none !important;
       -moz-appearance: none !important;
-
     }
+  }
+}
 
+@keyframes selectedGradientShift {
+  from {
+    --selected-border-angle: 0deg;
+  }
+
+  to {
+    --selected-border-angle: 360deg;
   }
 }
 
@@ -1067,11 +1085,30 @@ button.btn.btn-gradient {
   z-index: 2;
 }
 
+@property --mission-choice-border-angle {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
+}
+
 .mission-choice-card--selected::after {
-  background: linear-gradient(165deg,
-      #519E6F 30%,
-      var(--color-success) 70%,
-      #519E6F 80%);
+  background: conic-gradient(from var(--mission-choice-border-angle),
+      #519E6F 0deg,
+
+      var(--color-success)180deg,
+      #519E6F 360deg);
+
+  animation: missionChoiceSelectedGradientShift 2s linear infinite;
+}
+
+@keyframes missionChoiceSelectedGradientShift {
+  from {
+    --mission-choice-border-angle: 0deg;
+  }
+
+  to {
+    --mission-choice-border-angle: 360deg;
+  }
 }
 
 .mission-choice-card .fake-checkbox-radio {
@@ -1242,6 +1279,7 @@ button.btn.btn-gradient {
 }
 
 @keyframes claimBarPulse {
+
   0%,
   100% {
     opacity: 0.72;
@@ -1259,6 +1297,7 @@ button.btn.btn-gradient {
 }
 
 @keyframes statsCardBreath {
+
   0%,
   100% {
     opacity: 0.42;

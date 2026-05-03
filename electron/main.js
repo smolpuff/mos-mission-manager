@@ -2533,6 +2533,13 @@ app.whenReady().then(async () => {
           mission?.title ||
           `${index}`,
         name,
+        description: String(
+          mission?.description ||
+            mission?.summary ||
+            mission?.taskDescription ||
+            mission?.task_description ||
+            "",
+        ).trim(),
         reward: missionRewardLabel(mission),
         collections: missionCollectionEntries(mission),
       });

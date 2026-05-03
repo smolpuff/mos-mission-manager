@@ -742,7 +742,9 @@ function ControlView() {
   const [missionPickerSlot, setMissionPickerSlot] = useState(null);
   const [missionPickerPendingName, setMissionPickerPendingName] = useState("");
   const [missionPickerBusy, setMissionPickerBusy] = useState(false);
+  const [missionPickerApplying, setMissionPickerApplying] = useState(false);
   const [missionPickerError, setMissionPickerError] = useState(null);
+  const [collectionImageByKey, setCollectionImageByKey] = useState({});
   const [onboardingBodyHeight, setOnboardingBodyHeight] = useState(null);
   const onboardingBodyRef = useRef(null);
   const autoFundingRefreshAttemptedRef = useRef(false);
@@ -1393,14 +1395,30 @@ function ControlView() {
     setMissionPickerPendingName(currentName);
     setMissionPickerSlot(slotNumber);
     setMissionPickerBusy(true);
+    setMissionPickerApplying(false);
     setMissionPickerError(null);
     try {
-      const [accountResponse, configResponse] = await Promise.all([
-        bridge?.fetchOnboardingAccount
-          ? bridge.fetchOnboardingAccount()
-          : Promise.resolve(null),
-        bridge?.getConfig ? bridge.getConfig() : Promise.resolve(null),
-      ]);
+      const [accountResponse, configResponse, nftsResponse] = await Promise.all(
+        [
+          bridge?.fetchOnboardingAccount
+            ? bridge.fetchOnboardingAccount()
+            : Promise.resolve(null),
+          bridge?.getConfig ? bridge.getConfig() : Promise.resolve(null),
+          bridge?.getUserNfts ? bridge.getUserNfts() : Promise.resolve(null),
+        ],
+      );
+      if (nftsResponse?.ok && Array.isArray(nftsResponse.nfts)) {
+        const nextImages = {};
+        for (const item of nftsResponse.nfts) {
+          const key = normalizeCollectionKey(
+            String(item?.collection || "unknown").trim() || "unknown",
+          );
+          if (!key || nextImages[key]) continue;
+          const image = String(item?.image || "").trim();
+          if (image) nextImages[key] = image;
+        }
+        setCollectionImageByKey(nextImages);
+      }
       if (accountResponse?.ok) {
         const missions = Array.isArray(accountResponse.missions)
           ? accountResponse.missions
@@ -1457,6 +1475,7 @@ function ControlView() {
     const mission =
       onboardingCatalogByName.get(missionKey(selectedName)) || null;
     setMissionPickerBusy(true);
+    setMissionPickerApplying(true);
     setMissionPickerError(null);
     try {
       const response = await bridge.applyMissionSelection({
@@ -1487,6 +1506,7 @@ function ControlView() {
       setMissionPickerError(String(error?.message || error));
     } finally {
       setMissionPickerBusy(false);
+      setMissionPickerApplying(false);
     }
   };
   const currentMissionPickerName = missionPickerSlot
@@ -1496,6 +1516,26 @@ function ControlView() {
           "",
       ).trim()
     : "";
+  const currentMissionPickerLevel = missionPickerSlot
+    ? (() => {
+        const slotNumber = Number(missionPickerSlot);
+        const liveEntry =
+          slots.find((entry) => Number(entry?.slot) === slotNumber) || null;
+        const onboardingEntry =
+          onboardingMissions.find(
+            (entry) => Number(entry?.slot) === slotNumber,
+          ) || null;
+        const raw =
+          liveEntry?.missionLevel ??
+          liveEntry?.currentLevel ??
+          onboardingEntry?.currentLevel ??
+          onboardingEntry?.current_level ??
+          onboardingEntry?.level ??
+          null;
+        const n = Number(raw);
+        return Number.isFinite(n) ? n : null;
+      })()
+    : null;
   const missionPickerHasActualChange =
     missionKey(missionPickerPendingName) !==
     missionKey(currentMissionPickerName);
@@ -1551,17 +1591,20 @@ function ControlView() {
       if (!entry) return null;
       if (typeof entry === "string") {
         const name = entry.trim();
-        return name ? { name, image: null } : null;
+        const key = normalizeCollectionKey(name);
+        return name ? { name, image: collectionImageByKey[key] || null } : null;
       }
       const name = String(
         entry?.name || entry?.title || entry?.collection || entry?.symbol || "",
       ).trim();
       if (!name) return null;
+      const key = normalizeCollectionKey(name);
       const image = String(
         entry?.image ||
           entry?.imageUrl ||
           entry?.image_url ||
           entry?.logo ||
+          collectionImageByKey[key] ||
           "",
       ).trim();
       return { name, image: image || null };
@@ -2815,7 +2858,7 @@ function ControlView() {
                   </div>
                 </section>
 
-                <section className="card grid grid-cols-[auto_min-content] gap-2 items-center !py-0.5">
+                <section className="card grid grid-cols-[auto_min-content] gap-2 items-center !py-3">
                   <div
                     className={`text-xs w-full truncate ${
                       latestLog?.stream === "stderr"
@@ -2827,22 +2870,6 @@ function ControlView() {
                   >
                     {latestLog ? latestLog.text : "No backend output yet."}
                   </div>
-                  <button
-                    className="btn btn-clear btn-sm uppercase !tracking-wider font-light 
-             text-slate-300 flex gap-1 w-min p-0"
-                    onClick={openCliWindow}
-                    type="button"
-                  >
-                    <svg
-                      xmlns="http://www.w3.org/2000/svg"
-                      viewBox="0 0 640 640"
-                      className="w-4 h-4"
-                      fill="currentColor"
-                    >
-                      <path d="M68.8 155.3L57.5 144L80.1 121.4L91.4 132.7L267.4 308.7L278.8 320L267.4 331.3L91.4 507.3L80.1 518.6L57.5 496L68.8 484.7L233.5 320L68.8 155.3zM272.1 480L576.1 480L576.1 512L256.1 512L256.1 480L272.1 480z" />
-                    </svg>
-                    Logs
-                  </button>
                 </section>
               </div>
 
@@ -3283,7 +3310,7 @@ function ControlView() {
                                 value={tile.balanceNumber}
                                 format={(n) =>
                                   Number(n || 0).toLocaleString(undefined, {
-                                    maximumFractionDigits: 2,
+                                    maximumFractionDigits: 3,
                                   })
                                 }
                               />
@@ -3437,7 +3464,7 @@ function ControlView() {
               <div
                 className="p-4 w-full rounded-xl shadow-2xl shadow-black/95 space-y-4 z-10 border-2 border-[#1D1C27]"
                 style={{
-                  maxWidth: "760px",
+                  maxWidth: "680px",
                   backgroundImage: `url(${backImg})`,
                   backgroundSize: "cover",
                   backgroundPosition: "center",
@@ -3446,7 +3473,7 @@ function ControlView() {
                 <div className="flex items-center justify-between gap-3">
                   <div>
                     <div className="text-lg font-semibold text-slate-100">
-                      Change mission for slot {missionPickerSlot}
+                      Change mission for 250PBP
                     </div>
                     <div className="text-xs text-slate-400">
                       Pick the mission this slot should run.
@@ -3485,6 +3512,13 @@ function ControlView() {
                       const mission =
                         onboardingCatalogByName.get(missionKey(name)) || null;
                       const collections = resolveMissionCollections(mission);
+                      const description = String(
+                        mission?.description ||
+                          mission?.summary ||
+                          mission?.taskDescription ||
+                          mission?.task_description ||
+                          "",
+                      ).trim();
                       const isCurrent =
                         missionKey(currentMissionPickerName) ===
                         missionKey(name);
@@ -3508,7 +3542,7 @@ function ControlView() {
                             onChange={() => setMissionPickerPendingName(name)}
                             tabIndex={-1}
                           />
-                          <div className="flex min-w-0 flex-1 flex-col gap-2">
+                          <div className="flex min-w-0 flex-1 flex-col gap-1">
                             {isCurrent ? (
                               <div className="absolute right-0 top-0 badge px-2 h-auto text-[11px] text-slate-900">
                                 CURRENT
@@ -3520,24 +3554,31 @@ function ControlView() {
                               </div>
                             ) : null}
                             <div className="text-sm text-slate-100 flex justify-between">
-                              {name}{" "}
-                              <div className="text-[11px] text-slate-300">
-                                {mission?.reward || "Reward unknown"}
+                              <span>{name}</span>
+                              <div className="flex shrink-0 items-center gap-2 text-[11px] text-slate-300">
+                                <span>
+                                  {mission?.reward || "Reward unknown"}
+                                </span>
                               </div>
                             </div>
+                            {description ? (
+                              <div className="text-xs leading-4 text-slate-400">
+                                {description}
+                              </div>
+                            ) : null}
 
-                            <div className="text-[11px] text-slate-400 mt-auto flex flex-wrap gap-0.5">
+                            <div className=" text-slate-400 flex flex-wrap gap-0.5">
                               {collections.length > 0 ? (
                                 collections
                                   .filter((entry) => entry?.name)
                                   .map((entry) => (
                                     <span
                                       key={entry.id ?? entry.name}
-                                      className={`collection-pill flex flex-col items-center justify-center rounded-full ${
+                                      className={`flex flex-col items-center justify-center overflow-hidden border-2 gap-0.5 border-white/10 rounded-full w-5 h-5 ${
                                         onboardingOwnedCollections.has(
                                           normalizeCollectionKey(entry.name),
                                         )
-                                          ? "border-2 border-emerald-300/90"
+                                          ? "!border-success"
                                           : ""
                                       }`}
                                       title={entry.name}
@@ -3546,14 +3587,13 @@ function ControlView() {
                                         <img
                                           src={entry.image}
                                           alt={entry.name}
-                                          className="w-5 h-5  object-cover border border-white/10"
+                                          className=" object-cover "
                                           loading="lazy"
                                           decoding="async"
                                         />
                                       ) : (
-                                        <span className="w-5 h-5 rounded-full bg-white/10 border border-white/10" />
+                                        ""
                                       )}
-                                      {/* {entry.name} */}
                                     </span>
                                   ))
                               ) : (
@@ -3598,7 +3638,13 @@ function ControlView() {
                     </button>
                     <button
                       type="button"
-                      className="btn btn-gradient btn-sm text-shadow-sm text-shadow-black/40"
+                      className={`${
+                        missionPickerBusy ||
+                        !missionPickerPendingName ||
+                        !missionPickerHasActualChange
+                          ? "disabled opacity-40 grayscale"
+                          : ""
+                      } btn btn-gradient btn-sm text-shadow-sm text-shadow-black/40`}
                       disabled={
                         missionPickerBusy ||
                         !missionPickerPendingName ||
@@ -3606,7 +3652,7 @@ function ControlView() {
                       }
                       onClick={() => void applyMissionPickerSelection()}
                     >
-                      {missionPickerBusy ? "Applying..." : "Confirm"}
+                      {missionPickerApplying ? "Applying..." : "Confirm "}
                     </button>
                   </div>
                 </div>
