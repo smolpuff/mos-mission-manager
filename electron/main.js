@@ -24,6 +24,9 @@ const {
   missionHasAssignedNft,
   missionIsActive,
 } = require("../src/missions/normalize");
+const {
+  computeGuiMissionSlots: computeGuiMissionSlotsShared,
+} = require("../src/missions/gui-slots");
 const { runtimeDefaults } = require("../src/runtime-defaults");
 
 const ROOT_DIR = path.resolve(__dirname, "..");
@@ -78,6 +81,7 @@ let fundingWalletSummaryRefreshPromise = null;
 let fundingWalletSummaryLastAttemptAt = 0;
 let bootstrapWalletSummaryPromise = null;
 let bootstrapWalletSummaryLastAttemptAt = 0;
+let startupMissionBootstrapPromise = null;
 let missionCatalogResultCache = null;
 let missionCatalogResultPromise = null;
 let rentalsPreviewCache = null;
@@ -130,6 +134,7 @@ const backendStatus = {
   sessionSpendTotals: null,
   fundingWalletSummary: null,
   guiMissionSlots: null,
+  startupMissionSlotsLoading: false,
   cliWindowOpen: false,
   analytics: null,
 };
@@ -415,6 +420,99 @@ function publishStatus() {
   publish("backend:status", { ...backendStatus });
 }
 
+async function bootstrapStartupMissionSlots() {
+  if (backendStatus.running) return { ok: true, skipped: "backend_running" };
+  if (startupMissionBootstrapPromise) return startupMissionBootstrapPromise;
+  startupMissionBootstrapPromise = (async () => {
+    pushSystemLog("Startup mission sync: fetching user missions.");
+    backendStatus.startupMissionSlotsLoading = true;
+    publishStatus();
+    const loadStartupState = async () => {
+      const who = await mcpCallTool(
+        "who_am_i",
+        {},
+        {
+          url: "https://pixelbypixel.studio/mcp",
+        },
+      );
+      const missionsResult = await mcpCallTool(
+        "get_user_missions",
+        {},
+        {
+          url: "https://pixelbypixel.studio/mcp",
+        },
+      );
+      const nftResult = await mcpCallTool(
+        "get_mission_nfts",
+        {},
+        {
+          url: "https://pixelbypixel.studio/mcp",
+        },
+      );
+      return { who, missionsResult, nftResult };
+    };
+
+    try {
+      let loaded = null;
+      try {
+        loaded = await loadStartupState();
+      } catch (error) {
+        if (!isAuthFailureMessage(error?.message)) throw error;
+        pushSystemLog("Startup mission sync requires login. Opening browser login.");
+        await runOnboardingPopupLogin({
+          url: "https://pixelbypixel.studio/mcp",
+          timeoutMs: 30000,
+          loginTimeoutMs: 180000,
+        });
+        loaded = await loadStartupState();
+      }
+
+      const whoInfo = loaded?.who?.structuredContent || {};
+      const missionList = normalizeMissionList(loaded?.missionsResult || {});
+      const nftList = normalizeNftList(loaded?.nftResult || {});
+      const nftByAccount = new Map(
+        nftList
+          .map((entry) => {
+            const account = String(
+              entry?.account ||
+                entry?.nftAccount ||
+                entry?.nft_account ||
+                entry?.tokenAddress ||
+                entry?.token_address ||
+                "",
+            ).trim();
+            return account ? [account, entry] : null;
+          })
+          .filter(Boolean),
+      );
+      backendStatus.isAuthenticated = true;
+      backendStatus.currentUserDisplayName =
+        whoInfo.display_name || whoInfo.displayName || whoInfo.username || null;
+      backendStatus.currentUserWalletId =
+        whoInfo.wallet_id || whoInfo.walletId || null;
+      backendStatus.guiMissionSlots = computeGuiMissionSlotsShared(missionList, {
+        missionNftByAccount: nftByAccount,
+        assignedNftMetadataByAccount: nftByAccount,
+      });
+      backendStatus.startupMissionSlotsLoading = false;
+      publishStatus();
+      pushSystemLog("Startup mission sync complete.");
+      return { ok: true };
+    } catch (error) {
+      backendStatus.startupMissionSlotsLoading = false;
+      publishStatus();
+      pushSystemLog(
+        `Startup mission sync failed: ${String(error?.message || error)}`,
+      );
+      return { ok: false, error: String(error?.message || error) };
+    } finally {
+      backendStatus.startupMissionSlotsLoading = false;
+      startupMissionBootstrapPromise = null;
+    }
+  })();
+  return startupMissionBootstrapPromise;
+}
+
 function updateBackendStateFromIpc(payload) {
   if (!payload || payload.type !== "pbp_state") return;
   const next = payload.state || {};
@@ -555,85 +653,150 @@ function addUniqueValue(list, value) {
   return Array.from(set);
 }
 
+function normalizeRewardToken(value) {
+  const token = String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_");
+  if (token === "pbp" || token === "pbp_token" || token === "pixel_by_pixel") {
+    return "pbp";
+  }
+  if (
+    token === "tc" ||
+    token === "tc_token" ||
+    token === "tournament_coin" ||
+    token === "tournament_coins"
+  ) {
+    return "tc";
+  }
+  if (
+    token === "cc" ||
+    token === "cc_token" ||
+    token === "community_coin" ||
+    token === "community_coins"
+  ) {
+    return "cc";
+  }
+  return null;
+}
+
+function rewardFromStatsPayload(payload = {}) {
+  const reward = payload?.reward && typeof payload.reward === "object"
+    ? payload.reward
+    : {};
+  const directAmount =
+    payload?.rewardAmount ??
+    payload?.amount ??
+    reward?.amount ??
+    reward?.value ??
+    null;
+  const directToken =
+    payload?.rewardToken ??
+    payload?.token ??
+    payload?.prize ??
+    reward?.token ??
+    reward?.symbol ??
+    reward?.currency ??
+    null;
+  const text = String(payload?.rewardText || payload?.reward || "").trim();
+  const textMatch = text.match(/([0-9]+(?:\.[0-9]+)?)\s*([A-Z_]{2,20})/i);
+  const amount = Number(directAmount ?? textMatch?.[1] ?? 0);
+  const token = normalizeRewardToken(directToken ?? textMatch?.[2] ?? "");
+  return {
+    amount: Number.isFinite(amount) ? amount : 0,
+    token,
+  };
+}
+
+function applyAnalyticsClaimEvent(payload = {}) {
+  const current = normalizeAnalytics(backendStatus.analytics || loadAnalytics());
+  const mission =
+    String(
+      payload?.missionName ||
+        payload?.name ||
+        payload?.mission ||
+        payload?.assignedMissionId ||
+        "unknown mission",
+    ).trim() || "unknown mission";
+  const at = Number(payload?.at || Date.now());
+  const reward = rewardFromStatsPayload(payload);
+
+  current.lifetime.totalClaims += 1;
+  current.session.totalClaims += 1;
+  current.lifetime.missionClaims[mission] =
+    Number(current.lifetime.missionClaims[mission] || 0) + 1;
+  current.session.missionClaims[mission] =
+    Number(current.session.missionClaims[mission] || 0) + 1;
+  current.lifetime.claimHistory = normalizeClaimHistory([
+    ...(current.lifetime.claimHistory || []),
+    {
+      at: Number.isFinite(at) ? at : Date.now(),
+      claims: current.lifetime.totalClaims,
+      mission,
+    },
+  ]);
+  current.session.claimHistory = normalizeClaimHistory([
+    ...(current.session.claimHistory || []),
+    {
+      at: Number.isFinite(at) ? at : Date.now(),
+      claims: current.session.totalClaims,
+      mission,
+    },
+  ]);
+  if (reward.token && reward.amount > 0) {
+    current.lifetime.currencyEarned[reward.token] += reward.amount;
+    current.session.currencyEarned[reward.token] += reward.amount;
+  }
+  saveAnalytics(current);
+  publishStatus();
+  return true;
+}
+
+function applyAnalyticsSpendEvent(payload = {}) {
+  const amount = Number(payload?.amount ?? payload?.cost ?? payload?.pbp ?? 0);
+  if (!Number.isFinite(amount) || amount <= 0) return false;
+  const action = String(payload?.actionName || payload?.action || "other").trim() || "other";
+  const current = normalizeAnalytics(backendStatus.analytics || loadAnalytics());
+  current.lifetime.totalResetCostPbp += amount;
+  current.session.totalResetCostPbp += amount;
+  current.lifetime.spendByAction[action] =
+    Number(current.lifetime.spendByAction[action] || 0) + amount;
+  current.session.spendByAction[action] =
+    Number(current.session.spendByAction[action] || 0) + amount;
+  saveAnalytics(current);
+  publishStatus();
+  return true;
+}
+
+function applyAnalyticsResetEvent(payload = {}) {
+  const kind = String(payload?.resetType || payload?.kind || payload?.type || "mission")
+    .trim()
+    .toLowerCase();
+  const bucket = kind.includes("nft") || kind.includes("cooldown") ? "nft" : "mission";
+  const current = normalizeAnalytics(backendStatus.analytics || loadAnalytics());
+  current.lifetime.totalResets += 1;
+  current.session.totalResets += 1;
+  current.lifetime.resetTypes[bucket] += 1;
+  current.session.resetTypes[bucket] += 1;
+  saveAnalytics(current);
+  publishStatus();
+  return true;
+}
+
+function applyAnalyticsRentalEvent() {
+  const current = normalizeAnalytics(backendStatus.analytics || loadAnalytics());
+  current.lifetime.totalLeased += 1;
+  current.session.totalLeased += 1;
+  saveAnalytics(current);
+  publishStatus();
+  return true;
+}
+
 function applyAnalyticsLine(line) {
   const text = String(line || "").trim();
   if (!text) return false;
   const current = normalizeAnalytics(backendStatus.analytics || loadAnalytics());
   let changed = false;
-
-  const claimMatch = text.match(/\[WATCH\]\s+✅\s+Claimed:\s*(.+)$/i);
-  if (claimMatch) {
-    const body = String(claimMatch[1] || "").trim();
-    const mission = String(body.split(" slot=")[0] || "unknown mission").trim() || "unknown mission";
-    const rewardMatch = body.match(/([0-9]+(?:\.[0-9]+)?)\s+([A-Z]{2,4})/);
-    const amount = Number(rewardMatch?.[1] || 0);
-    const token = String(rewardMatch?.[2] || "").toLowerCase();
-    current.lifetime.totalClaims += 1;
-    current.session.totalClaims += 1;
-    current.lifetime.missionClaims[mission] =
-      Number(current.lifetime.missionClaims[mission] || 0) + 1;
-    current.session.missionClaims[mission] =
-      Number(current.session.missionClaims[mission] || 0) + 1;
-    current.lifetime.claimHistory = normalizeClaimHistory([
-      ...(current.lifetime.claimHistory || []),
-      {
-        at: Date.now(),
-        claims: current.lifetime.totalClaims,
-        mission,
-      },
-    ]);
-    current.session.claimHistory = normalizeClaimHistory([
-      ...(current.session.claimHistory || []),
-      {
-        at: Date.now(),
-        claims: current.session.totalClaims,
-        mission,
-      },
-    ]);
-    if (Number.isFinite(amount) && amount > 0 && ["pbp", "tc", "cc"].includes(token)) {
-      current.lifetime.currencyEarned[token] += amount;
-      current.session.currencyEarned[token] += amount;
-    }
-    changed = true;
-  }
-
-  if (/\[RESET\]\s+✅\s+Rerolled:/i.test(text)) {
-    current.lifetime.totalResets += 1;
-    current.session.totalResets += 1;
-    current.lifetime.resetTypes.mission += 1;
-    current.session.resetTypes.mission += 1;
-    changed = true;
-  }
-
-  if (/\[RESET\]\s+✅\s+Cooldown reset complete:/i.test(text)) {
-    current.lifetime.totalResets += 1;
-    current.session.totalResets += 1;
-    current.lifetime.resetTypes.nft += 1;
-    current.session.resetTypes.nft += 1;
-    changed = true;
-  }
-
-  const spendMatch = text.match(/\[SPEND\].*-\s*([0-9]+(?:\.[0-9]+)?)\s+PBP/i);
-  if (spendMatch) {
-    const amount = Number(spendMatch[1] || 0);
-    if (Number.isFinite(amount) && amount > 0) {
-      const actionMatch = text.match(/\[SPEND\].*?([a-z0-9_]+):\s*-/i);
-      const action = String(actionMatch?.[1] || "other").trim() || "other";
-      current.lifetime.totalResetCostPbp += amount;
-      current.session.totalResetCostPbp += amount;
-      current.lifetime.spendByAction[action] =
-        Number(current.lifetime.spendByAction[action] || 0) + amount;
-      current.session.spendByAction[action] =
-        Number(current.session.spendByAction[action] || 0) + amount;
-      changed = true;
-    }
-  }
-
-  if (/(started rental lease|lease started)/i.test(text)) {
-    current.lifetime.totalLeased += 1;
-    current.session.totalLeased += 1;
-    changed = true;
-  }
 
   const nftMatches = [];
   const nftEq = text.match(/nft=([^\s,]+)/i);
@@ -930,6 +1093,206 @@ function missionDisplayName(mission = {}) {
     mission?.label ||
     "Unknown mission"
   );
+}
+
+function missionAssignedNftAccount(mission = {}) {
+  const directId = String(
+    mission?.assigned_nft ||
+      mission?.assignedNft ||
+      mission?.nftAccount ||
+      mission?.nft_account ||
+      mission?.assignedNftAccount ||
+      mission?.assigned_nft_account ||
+      mission?.currentAssignedNftAccount ||
+      mission?.current_assigned_nft_account ||
+      mission?.nftId ||
+      mission?.nft_id ||
+      "",
+  ).trim();
+  if (directId && directId !== "[object Object]") return directId;
+
+  const directObject =
+    mission?.currentAssignedNft && typeof mission.currentAssignedNft === "object"
+      ? mission.currentAssignedNft
+      : mission?.current_assigned_nft &&
+          typeof mission.current_assigned_nft === "object"
+        ? mission.current_assigned_nft
+        : mission?.assigned_nft && typeof mission.assigned_nft === "object"
+          ? mission.assigned_nft
+          : mission?.assignedNft && typeof mission.assignedNft === "object"
+            ? mission.assignedNft
+            : mission?.nft && typeof mission.nft === "object"
+              ? mission.nft
+              : null;
+  return (
+    mission?.currentAssignedNftAccount ||
+    mission?.current_assigned_nft_account ||
+    mission?.assigned_nft_account ||
+    mission?.assignedNftAccount ||
+    mission?.nft_account ||
+    mission?.nftAccount ||
+    directObject?.account ||
+    directObject?.nftAccount ||
+    directObject?.nft_account ||
+    directObject?.tokenAddress ||
+    directObject?.token_address ||
+    null
+  );
+}
+
+function assignedNftImageFromMission(mission = {}) {
+  function normalizeImageUrl(raw) {
+    const value = String(raw || "").trim();
+    if (!value) return null;
+    if (/^https?:\/\//i.test(value)) return value;
+    if (/^ipfs:\/\//i.test(value)) return value;
+    if (/^data:image\//i.test(value)) return value;
+    if (/^\/\//.test(value)) return `https:${value}`;
+    if (/^gateway\.irys\.xyz\//i.test(value)) return `https://${value}`;
+    if (/^(Qm[1-9A-HJ-NP-Za-km-z]{44,}|bafy[0-9a-z]{20,})$/i.test(value)) {
+      return `ipfs://${value}`;
+    }
+    return null;
+  }
+
+  function deepFindImageUrl(node, depth = 0) {
+    if (!node || depth > 4) return null;
+    if (typeof node === "string") return normalizeImageUrl(node);
+    if (Array.isArray(node)) {
+      for (const item of node) {
+        const found = deepFindImageUrl(item, depth + 1);
+        if (found) return found;
+      }
+      return null;
+    }
+    if (typeof node !== "object") return null;
+
+    const preferredKeys = [
+      "image",
+      "imageUrl",
+      "image_url",
+      "imageURI",
+      "image_uri",
+      "thumbnail",
+      "thumbnailUrl",
+      "thumbnail_url",
+      "avatar",
+      "avatarUrl",
+      "avatar_url",
+    ];
+    for (const key of preferredKeys) {
+      if (!Object.prototype.hasOwnProperty.call(node, key)) continue;
+      const found = deepFindImageUrl(node[key], depth + 1);
+      if (found) return found;
+    }
+
+    for (const [key, value] of Object.entries(node)) {
+      if (/image|thumbnail|avatar|media|cdn|uri/i.test(String(key))) {
+        const found = deepFindImageUrl(value, depth + 1);
+        if (found) return found;
+      }
+    }
+    return null;
+  }
+
+  const nft =
+    mission?.currentAssignedNft && typeof mission.currentAssignedNft === "object"
+      ? mission.currentAssignedNft
+      : mission?.current_assigned_nft &&
+          typeof mission.current_assigned_nft === "object"
+        ? mission.current_assigned_nft
+        : mission?.assigned_nft && typeof mission.assigned_nft === "object"
+          ? mission.assigned_nft
+          : mission?.assignedNft && typeof mission.assignedNft === "object"
+            ? mission.assignedNft
+            : mission?.nft && typeof mission.nft === "object"
+              ? mission.nft
+              : null;
+
+  const candidates = [
+    nft?.image,
+    nft?.imageUrl,
+    nft?.image_url,
+    nft?.imageURI,
+    nft?.image_uri,
+    nft?.img,
+    nft?.thumbnail,
+    nft?.thumbnailUrl,
+    nft?.thumbnail_url,
+    nft?.metadata?.image,
+    nft?.metadata?.imageUrl,
+    nft?.metadata?.image_url,
+    nft?.offChainMetadata?.metadata?.image,
+    nft?.DASMetadata?.image,
+    mission?.nftImage,
+    mission?.nft_image,
+    mission?.assignedNftImage,
+    mission?.assigned_nft_image,
+    mission?.currentAssignedNftImage,
+    mission?.current_assigned_nft_image,
+    mission?.currentAssignedNFT?.image,
+    mission?.currentAssignedNFT?.imageUrl,
+    mission?.currentAssignedNFT?.image_url,
+    mission?.currentAssignedNFT?.imageURI,
+    mission?.currentAssignedNFT?.image_uri,
+    mission?.current_assigned_nft?.image,
+    mission?.current_assigned_nft?.imageUrl,
+    mission?.current_assigned_nft?.image_url,
+    mission?.current_assigned_nft?.imageURI,
+    mission?.current_assigned_nft?.image_uri,
+  ];
+
+  for (const value of candidates) {
+    const normalized = normalizeImageUrl(value);
+    if (normalized) return normalized;
+  }
+
+  return (
+    deepFindImageUrl(nft) ||
+    deepFindImageUrl(mission?.currentAssignedNFT) ||
+    deepFindImageUrl(mission?.current_assigned_nft) ||
+    deepFindImageUrl(mission?.metadata) ||
+    deepFindImageUrl(mission)
+  );
+}
+
+function slotSummaryFromMissionList(missionList = [], nftByAccount = new Map()) {
+  return missionList
+    .map((mission, index) => {
+      const assignedAccount = String(missionAssignedNftAccount(mission) || "").trim();
+      const matchedNft = assignedAccount ? nftByAccount.get(assignedAccount) : null;
+      return {
+        id:
+          mission?.assignedMissionId ||
+          mission?.assigned_mission_id ||
+          `slot-${index}`,
+        slot: Number.isFinite(Number(mission?.slot)) ? Number(mission.slot) : null,
+        missionName: missionDisplayName(mission),
+        assignedNft: mission?.assigned_nft || mission?.assignedNft || null,
+        assignedNftAccount: assignedAccount || null,
+        nftSource: mission?.nft_source || mission?.nftSource || null,
+        rentalLeaseId: mission?.rental_lease_id || mission?.rentalLeaseId || null,
+        missionLevel: Number.isFinite(Number(mission?.current_level))
+          ? Number(mission.current_level)
+          : Number.isFinite(Number(mission?.level))
+            ? Number(mission.level)
+            : null,
+        nftImage:
+          assignedNftImageFromMission(mission) ||
+          assignedNftImageFromMission(matchedNft) ||
+          null,
+        assignedNftImage:
+          assignedNftImageFromMission(mission) ||
+          assignedNftImageFromMission(matchedNft) ||
+          null,
+        image:
+          assignedNftImageFromMission(mission) ||
+          assignedNftImageFromMission(matchedNft) ||
+          mission?.image ||
+          null,
+      };
+    })
+    .sort((a, b) => Number(a.slot || 99) - Number(b.slot || 99));
 }
 
 function missionRewardLabel(mission = {}) {
@@ -1330,6 +1693,15 @@ function startBackend() {
   backend.on("message", (message) => {
     updateBackendStateFromIpc(message);
     if (message && message.type === "pbp_event") {
+      if (message.event === "stats_claim") {
+        applyAnalyticsClaimEvent(message.payload || {});
+      } else if (message.event === "stats_spend") {
+        applyAnalyticsSpendEvent(message.payload || {});
+      } else if (message.event === "stats_reset") {
+        applyAnalyticsResetEvent(message.payload || {});
+      } else if (message.event === "stats_rental") {
+        applyAnalyticsRentalEvent(message.payload || {});
+      }
       if (message.event === "app_quit") {
         try {
           stopBackend();
@@ -2672,6 +3044,7 @@ app.whenReady().then(async () => {
   hydrateBackendStatusFromConfig();
   publishStatus();
   await createControlWindow();
+  void bootstrapStartupMissionSlots();
   try {
     const launchConfig = readDesktopConfig();
     const walletAddress =

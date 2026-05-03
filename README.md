@@ -102,7 +102,7 @@ If you are debugging a packaged install, check those locations first.
 
 ## Mission Targeting
 
-On first start, the wizard will automatically pull your selected missions from your account adn assign them. You can click on a mission card at anytime when a mission is assigned to change missions. You can also manually edit your config.json to target the mission
+First start, the wizard will automatically pull your selected missions from your account adn assign them. You can click on a mission card at anytime when a mission is assigned to change missions. You can also manually edit your config.json to target the mission
 
 Example:
 

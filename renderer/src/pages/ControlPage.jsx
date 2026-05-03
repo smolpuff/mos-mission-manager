@@ -617,7 +617,7 @@ function ControlView() {
       : status.signerLocked === false
         ? "Unlocked"
         : "";
-  const slots = Array.isArray(status.guiMissionSlots)
+  const liveSlots = Array.isArray(status.guiMissionSlots)
     ? status.guiMissionSlots
     : [];
 
@@ -777,6 +777,7 @@ function ControlView() {
     }
     return out;
   }, [onboardingMissionCatalog]);
+  const slots = liveSlots;
 
   const mainStatusLabel = activityLabel
     ? activityLabel
@@ -1147,7 +1148,10 @@ function ControlView() {
       if (!res?.ok) throw new Error(res?.error || "Unlock preparation failed.");
       const prepared = res.prepared || null;
       setSlotUnlockResult(prepared);
-      if (prepared?.reason === "no_more_to_unlock" || prepared?.reason === "not_unlockable") {
+      if (
+        prepared?.reason === "no_more_to_unlock" ||
+        prepared?.reason === "not_unlockable"
+      ) {
         setSlotUnlockError("No more slots to unlock.");
       } else if (!prepared?.ok) {
         throw new Error(prepared?.reason || "Unlock failed.");
@@ -1348,7 +1352,8 @@ function ControlView() {
   };
 
   const seedMissionSelectionState = (missions = [], targetMissions = []) => {
-    const sourceMissions = Array.isArray(missions) && missions.length ? missions : slots;
+    const sourceMissions =
+      Array.isArray(missions) && missions.length ? missions : slots;
     const selections = buildOnboardingSlotSelections(
       sourceMissions.map((mission) => ({
         ...mission,
@@ -1376,11 +1381,13 @@ function ControlView() {
 
   const openMissionPicker = async (slot) => {
     const slotNumber = Number(slot);
-    if (!Number.isFinite(slotNumber) || slotNumber < 1 || slotNumber > 4) return;
+    if (!Number.isFinite(slotNumber) || slotNumber < 1 || slotNumber > 4)
+      return;
     if (isMissionSlotLocked(slotNumber)) return;
     const currentName = String(
       onboardingSlotSelections[slotNumber] ||
-        slots.find((entry) => Number(entry?.slot) === slotNumber)?.missionName ||
+        slots.find((entry) => Number(entry?.slot) === slotNumber)
+          ?.missionName ||
         "",
     ).trim();
     setMissionPickerPendingName(currentName);
@@ -1409,7 +1416,9 @@ function ControlView() {
               ? accountResponse.ownedCollections
               : []
             )
-              .map((entry) => normalizeCollectionKey(entry))
+              .map((entry) =>
+                normalizeCollectionKey(collectionNameFromEntry(entry)),
+              )
               .filter(Boolean),
           ),
         );
@@ -1418,7 +1427,10 @@ function ControlView() {
           configResponse?.config?.targetMissions || [],
         );
       } else {
-        seedMissionSelectionState([], configResponse?.config?.targetMissions || []);
+        seedMissionSelectionState(
+          [],
+          configResponse?.config?.targetMissions || [],
+        );
         if (!onboardingMissionCatalog.length) {
           throw new Error(
             accountResponse?.error || "Failed to load mission catalog.",
@@ -1437,17 +1449,21 @@ function ControlView() {
     const selectedName = String(missionPickerPendingName || "").trim();
     if (!Number.isFinite(slotNumber) || !selectedName) return;
     if (!bridge?.applyMissionSelection) {
-      setMissionPickerError("Mission selection is not available in this build.");
+      setMissionPickerError(
+        "Mission selection is not available in this build.",
+      );
       return;
     }
-    const mission = onboardingCatalogByName.get(missionKey(selectedName)) || null;
+    const mission =
+      onboardingCatalogByName.get(missionKey(selectedName)) || null;
     setMissionPickerBusy(true);
     setMissionPickerError(null);
     try {
       const response = await bridge.applyMissionSelection({
         slot: slotNumber,
         missionName: selectedName,
-        missionId: mission?.id || mission?.missionId || mission?.mission_id || "",
+        missionId:
+          mission?.id || mission?.missionId || mission?.mission_id || "",
       });
       if (!response?.ok) {
         throw new Error(response?.error || "Mission change failed.");
@@ -1473,6 +1489,16 @@ function ControlView() {
       setMissionPickerBusy(false);
     }
   };
+  const currentMissionPickerName = missionPickerSlot
+    ? String(
+        onboardingSlotSelections[missionPickerSlot] ||
+          getOnboardingMissionCard(missionPickerSlot)?.name ||
+          "",
+      ).trim()
+    : "";
+  const missionPickerHasActualChange =
+    missionKey(missionPickerPendingName) !==
+    missionKey(currentMissionPickerName);
 
   const missionCollectionsLabel = (
     mission,
@@ -1513,6 +1539,13 @@ function ControlView() {
       .toLowerCase()
       .replace(/\s+/g, " ")
       .replace(/[^a-z0-9 ]/g, "");
+  const collectionNameFromEntry = (entry) => {
+    if (!entry) return "";
+    if (typeof entry === "string") return entry.trim();
+    return String(
+      entry?.name || entry?.title || entry?.collection || entry?.symbol || "",
+    ).trim();
+  };
   const resolveMissionCollections = (mission) => {
     const toEntry = (entry) => {
       if (!entry) return null;
@@ -1678,7 +1711,9 @@ function ControlView() {
                 ? response.ownedCollections
                 : []
               )
-                .map((entry) => normalizeCollectionKey(entry))
+                .map((entry) =>
+                  normalizeCollectionKey(collectionNameFromEntry(entry)),
+                )
                 .filter(Boolean),
             ),
           );
@@ -3143,7 +3178,9 @@ function ControlView() {
                               styling="text-xs flex !flex-row"
                               disabled={!isMissionMode}
                               onChange={(event) =>
-                                void setAutoNftResetEnabled(event.target.checked)
+                                void setAutoNftResetEnabled(
+                                  event.target.checked,
+                                )
                               }
                             />
                           </div>
@@ -3156,7 +3193,9 @@ function ControlView() {
                                   step="1"
                                   value={nftResetMaxPbp}
                                   onChange={(event) =>
-                                    void setAutoNftResetMaxPbp(event.target.value)
+                                    void setAutoNftResetMaxPbp(
+                                      event.target.value,
+                                    )
                                   }
                                   class="relative input bg-transparent text-xs w-17 p-1 pr-3 h-auto !text-white text-center !rounded-full outline-none"
                                 />
@@ -3289,6 +3328,10 @@ function ControlView() {
                       : 0;
                     const imgSrc = pickSlotImage(entry);
                     const slotLocked = isMissionSlotLocked(slot);
+                    const slotImageLoading =
+                      status.startupMissionSlotsLoading === true &&
+                      !status.running &&
+                      (!entry || !imgSrc);
                     return (
                       <div
                         className={`card-mission ${slotError ? "card-mission--error" : ""} ${slotLocked ? "opacity-70" : "cursor-pointer"}`}
@@ -3296,9 +3339,7 @@ function ControlView() {
                         role={slotLocked ? undefined : "button"}
                         tabIndex={slotLocked ? undefined : 0}
                         title={
-                          slotLocked
-                            ? "Slot locked"
-                            : "Click to change mission"
+                          slotLocked ? "Slot locked" : "Click to change mission"
                         }
                         onClick={() => {
                           if (!slotLocked) void openMissionPicker(slot);
@@ -3313,7 +3354,7 @@ function ControlView() {
                       >
                         <div className="card-mission__header relative overflow-clip">
                           <MissionSlotImage src={imgSrc} />
-                          {isStarting ? (
+                          {isStarting || slotImageLoading ? (
                             <span className="loading loading-spinner loading-xs text-white/30 absolute top-2 right-2 z-20" />
                           ) : null}
                           {slotError ? (
@@ -3385,7 +3426,10 @@ function ControlView() {
               role="dialog"
               aria-modal="true"
               onMouseDown={(event) => {
-                if (event.target === event.currentTarget && !missionPickerBusy) {
+                if (
+                  event.target === event.currentTarget &&
+                  !missionPickerBusy
+                ) {
                   setMissionPickerSlot(null);
                 }
               }}
@@ -3431,7 +3475,7 @@ function ControlView() {
                     <span className="loading loading-spinner loading-md text-success" />
                   </div>
                 ) : (
-                  <div className="grid grid-cols-2 gap-2 max-h-[60vh] overflow-y-auto pr-1">
+                  <div className="grid grid-cols-2 gap-2  overflow-y-auto pr-1">
                     {getOnboardingSlotOptions(
                       missionPickerSlot,
                       onboardingSlotSelections[missionPickerSlot] ||
@@ -3441,6 +3485,9 @@ function ControlView() {
                       const mission =
                         onboardingCatalogByName.get(missionKey(name)) || null;
                       const collections = resolveMissionCollections(mission);
+                      const isCurrent =
+                        missionKey(currentMissionPickerName) ===
+                        missionKey(name);
                       const isSelected =
                         missionKey(missionPickerPendingName) ===
                         missionKey(name);
@@ -3462,26 +3509,59 @@ function ControlView() {
                             tabIndex={-1}
                           />
                           <div className="flex min-w-0 flex-1 flex-col gap-2">
-                          <div className="flex flex-row justify-between items-center">
-                            <div className="text-[11px] text-slate-400">
-                              Level —
+                            {isCurrent ? (
+                              <div className="absolute right-0 top-0 badge px-2 h-auto text-[11px] text-slate-900">
+                                CURRENT
+                              </div>
+                            ) : null}
+                            {isSelected && !isCurrent ? (
+                              <div className="absolute right-0 top-0 badge px-2 h-auto text-[11px] text-slate-900">
+                                SELECTED
+                              </div>
+                            ) : null}
+                            <div className="text-sm text-slate-100 flex justify-between">
+                              {name}{" "}
+                              <div className="text-[11px] text-slate-300">
+                                {mission?.reward || "Reward unknown"}
+                              </div>
                             </div>
-                            <div className="badge px-2 h-auto text-[11px] text-slate-900">
-                              {isSelected ? "Pending" : "Available"}
+
+                            <div className="text-[11px] text-slate-400 mt-auto flex flex-wrap gap-0.5">
+                              {collections.length > 0 ? (
+                                collections
+                                  .filter((entry) => entry?.name)
+                                  .map((entry) => (
+                                    <span
+                                      key={entry.id ?? entry.name}
+                                      className={`collection-pill flex flex-col items-center justify-center rounded-full ${
+                                        onboardingOwnedCollections.has(
+                                          normalizeCollectionKey(entry.name),
+                                        )
+                                          ? "border-2 border-emerald-300/90"
+                                          : ""
+                                      }`}
+                                      title={entry.name}
+                                    >
+                                      {entry.image ? (
+                                        <img
+                                          src={entry.image}
+                                          alt={entry.name}
+                                          className="w-5 h-5  object-cover border border-white/10"
+                                          loading="lazy"
+                                          decoding="async"
+                                        />
+                                      ) : (
+                                        <span className="w-5 h-5 rounded-full bg-white/10 border border-white/10" />
+                                      )}
+                                      {/* {entry.name} */}
+                                    </span>
+                                  ))
+                              ) : (
+                                <span className="collection-unavailable">
+                                  Collection requirements unavailable
+                                </span>
+                              )}
                             </div>
-                          </div>
-                          <div className="text-sm text-slate-100">{name}</div>
-                          <div className="text-[11px] text-slate-300">
-                            {mission?.reward || "Reward unknown"}
-                          </div>
-                          <div className="text-[11px] text-slate-400 mt-auto">
-                            {collections.length > 0
-                              ? collections
-                                  .map((entry) => entry?.name)
-                                  .filter(Boolean)
-                                  .join(", ")
-                              : "Collection requirements unavailable"}
-                          </div>
                           </div>
                         </button>
                       );
@@ -3498,9 +3578,11 @@ function ControlView() {
                 )}
                 <div className="flex items-center justify-between gap-3 border-t border-white/10 pt-3">
                   <div className="min-w-0 text-xs text-slate-400">
-                    {missionPickerPendingName
+                    {missionPickerPendingName && missionPickerHasActualChange
                       ? `Selected: ${missionPickerPendingName}`
-                      : "Select a mission before confirming."}
+                      : missionPickerPendingName
+                        ? `Current: ${missionPickerPendingName}`
+                        : "Select a mission before confirming."}
                   </div>
                   <div className="flex items-center gap-2">
                     <button
@@ -3517,7 +3599,11 @@ function ControlView() {
                     <button
                       type="button"
                       className="btn btn-gradient btn-sm text-shadow-sm text-shadow-black/40"
-                      disabled={missionPickerBusy || !missionPickerPendingName}
+                      disabled={
+                        missionPickerBusy ||
+                        !missionPickerPendingName ||
+                        !missionPickerHasActualChange
+                      }
                       onClick={() => void applyMissionPickerSelection()}
                     >
                       {missionPickerBusy ? "Applying..." : "Confirm"}

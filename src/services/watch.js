@@ -263,6 +263,14 @@ function createWatchService(
       cost: amount,
       totals: { ...totals },
     });
+    if (ctx.guiBridge?.sendEvent) {
+      ctx.guiBridge.sendEvent("stats_spend", {
+        source: "watch",
+        at: Date.now(),
+        actionName,
+        amount,
+      });
+    }
     if (ctx.guiBridge?.emitNow) ctx.guiBridge.emitNow();
     logWithTimestamp(
       `[SPEND] 💸 ${actionName}: -${amount} PBP (session spend ${totals.pbp})`,
@@ -482,6 +490,18 @@ function createWatchService(
         );
       } else {
         successCount += 1;
+        if (ctx.guiBridge && typeof ctx.guiBridge.sendEvent === "function") {
+          ctx.guiBridge.sendEvent("stats_claim", {
+            source: "watch_claims",
+            at: Date.now(),
+            assignedMissionId: d.missionId || null,
+            missionName: d.name || d.missionId || "unknown mission",
+            slot: d.slot ?? null,
+            level: d.level ?? null,
+            rewardAmount: d.reward ?? null,
+            rewardToken: d.prize ?? null,
+          });
+        }
         logWithTimestamp(
           `[WATCH] ✅ Claimed: ${missionText}${slotText}${levelText}${rewardText}${messageText}`.trim(),
         );
@@ -896,6 +916,16 @@ function createWatchService(
         entry?.toLevel === null || entry?.toLevel === entry?.fromLevel
           ? ""
           : ` -> lvl=${Number(entry.toLevel || 0)}`;
+      if (ctx.guiBridge && typeof ctx.guiBridge.sendEvent === "function") {
+        ctx.guiBridge.sendEvent("stats_claim", {
+          source: String(prefix || "").replace(/^\[WATCH\]\s+✅\s+/, ""),
+          at: Date.now(),
+          assignedMissionId: entry?.assignedMissionId || entry?.id || null,
+          missionName: missionText,
+          slot: entry?.slot ?? null,
+          level: entry?.fromLevel ?? null,
+        });
+      }
       logWithTimestamp(
         `${prefix}: ${missionText}${slotText}${fromText}${toText}`,
       );
@@ -1332,6 +1362,17 @@ function createWatchService(
     logWithTimestamp(
       `[RESET] ✅ Rerolled: ${name} lvl=${level}${slot === null ? "" : ` slot=${slot}`}`,
     );
+    if (ctx.guiBridge?.sendEvent) {
+      ctx.guiBridge.sendEvent("stats_reset", {
+        source: "watch_reroll",
+        at: Date.now(),
+        resetType: "mission",
+        missionName: name,
+        slot,
+        level,
+        assignedMissionId,
+      });
+    }
     logDebug("watch", "mission_reroll_ok", {
       reason,
       label,

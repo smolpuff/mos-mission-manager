@@ -36,7 +36,9 @@ function parseClaimEvents(logs = []) {
   const events = [];
   for (const entry of Array.isArray(logs) ? logs : []) {
     const text = String(entry?.text || "");
-    const match = text.match(/\[WATCH\]\s+✅\s+Claimed:\s*(.+)$/i);
+    const match = text.match(
+      /\[WATCH\]\s+✅\s+Claimed(?:\s+\([^)]+\))?:\s*(.+)$/i,
+    );
     if (!match) continue;
     const body = String(match[1] || "").trim();
     if (!body || body.startsWith("+")) continue;
@@ -274,9 +276,9 @@ export default function StatsPage({
   };
 
   const claimEvents = parseClaimEvents(logs);
-  const claims = firstNumber(
-    sessionAnalytics.totalClaims,
-    safeMissionStats.claimed,
+  const claims = Math.max(
+    asNumber(sessionAnalytics.totalClaims, 0),
+    asNumber(safeMissionStats.claimed, 0),
     claimEvents.length,
   );
   const elapsedHours = Math.max(

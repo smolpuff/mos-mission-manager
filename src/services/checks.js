@@ -9,6 +9,10 @@ const {
   missionHasAssignedNft,
   missionIsClaimable,
 } = require("../missions/normalize");
+const {
+  missionAssignedNftAccount: sharedMissionAssignedNftAccount,
+  computeGuiMissionSlots: computeGuiMissionSlotsShared,
+} = require("../missions/gui-slots");
 const { parseResetLevel } = require("./reset");
 const {
   openMissionPlayPage,
@@ -411,20 +415,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
   }
 
   function missionAssignedNftAccount(mission) {
-    const id = String(
-      mission?.assigned_nft ||
-        mission?.assignedNft ||
-        mission?.nftAccount ||
-        mission?.nft_account ||
-        mission?.assignedNftAccount ||
-        mission?.assigned_nft_account ||
-        mission?.currentAssignedNftAccount ||
-        mission?.current_assigned_nft_account ||
-        mission?.nftId ||
-        mission?.nft_id ||
-        "",
-    ).trim();
-    return id || null;
+    return sharedMissionAssignedNftAccount(mission);
   }
 
   function assignedNftAccountSetFromMissions(missions = []) {
@@ -440,74 +431,11 @@ function createChecksService(ctx, logger, mcp, services = {}) {
     missions,
     progressByAssignedMissionId = null,
   ) {
-    function missionCardImageFromMission(mission) {
-      if (!mission || typeof mission !== "object") return null;
-      return assignedNftImageFromMission({
-        image: mission?.image,
-        imageUrl: mission?.imageUrl,
-        image_url: mission?.image_url,
-        thumbnail: mission?.thumbnail,
-        thumbnailUrl: mission?.thumbnailUrl,
-        thumbnail_url: mission?.thumbnail_url,
-        missionImage: mission?.missionImage,
-        mission_image: mission?.mission_image,
-        mission: mission?.mission,
-        metadata: mission?.metadata,
-      });
-    }
-
-    const slots = [];
-    for (let slot = 1; slot <= 4; slot += 1) {
-      const mission = missions.find((m) => Number(m?.slot) === slot) || null;
-      const missionLvl = missionLevel(mission);
-      const { progress, goal } = missionProgressFromMission(
-        mission,
-        progressByAssignedMissionId,
-      );
-      const assignedAccount = missionAssignedNftAccount(mission);
-      const nftFromLookup = assignedAccount
-        ? missionNftByAccount.get(assignedAccount) || null
-        : null;
-      const nftFromAssignedCache = assignedAccount
-        ? assignedNftMetadataByAccount.get(assignedAccount) || null
-        : null;
-      const missionImage = missionCardImageFromMission(mission);
-      const nftImage =
-        assignedNftImageFromMission(mission) ||
-        assignedNftImageFromMission({ nft: nftFromLookup }) ||
-        assignedNftImageFromMission({ nft: nftFromAssignedCache }) ||
-        missionImage ||
-        null;
-      const nftLabel =
-        assignedNftLabelFromMission(mission) ||
-        (nftFromLookup
-          ? nftDisplayName(nftFromLookup)
-          : nftFromAssignedCache
-            ? nftDisplayName(nftFromAssignedCache)
-            : null);
-      const nftLevel =
-        assignedNftLevelFromMission(mission) ||
-        (Number.isFinite(Number(nftFromLookup?.level))
-          ? Number(nftFromLookup.level)
-          : Number.isFinite(Number(nftFromAssignedCache?.level))
-            ? Number(nftFromAssignedCache.level)
-            : null);
-      slots.push({
-        slot,
-        missionId:
-          mission?.assignedMissionId || mission?.assigned_mission_id || null,
-        missionName: missionName(mission) || null,
-        missionLevel: missionLvl,
-        progress,
-        goal,
-        missionImage,
-        image: missionImage,
-        assignedNft: nftLabel,
-        nftLevel,
-        nftImage,
-      });
-    }
-    return slots;
+    return computeGuiMissionSlotsShared(missions, {
+      progressByAssignedMissionId,
+      missionNftByAccount,
+      assignedNftMetadataByAccount,
+    });
   }
 
   function nftIsAvailable(n) {
@@ -1113,6 +1041,14 @@ function createChecksService(ctx, logger, mcp, services = {}) {
       cost: amount,
       totals: { ...totals },
     });
+    if (ctx.guiBridge?.sendEvent) {
+      ctx.guiBridge.sendEvent("stats_spend", {
+        source: "checks",
+        at: Date.now(),
+        actionName,
+        amount,
+      });
+    }
     if (ctx.guiBridge?.emitNow) ctx.guiBridge.emitNow();
     logWithTimestamp(
       `[SPEND] 💸 ${actionName}: -${amount} PBP (session spend ${totals.pbp})`,
@@ -1479,6 +1415,16 @@ function createChecksService(ctx, logger, mcp, services = {}) {
       logWithTimestamp(
         `[RESET] ✅ Cooldown reset complete: ${missionName} nft=${nftName}`,
       );
+      if (ctx.guiBridge?.sendEvent) {
+        ctx.guiBridge.sendEvent("stats_reset", {
+          source: "cooldown_reset",
+          at: Date.now(),
+          resetType: "nft",
+          missionName,
+          nftName,
+          nftId,
+        });
+      }
       logWithTimestamp(
         `[TIMING] reset total ${source} ${missionName}: ${timingMs(resetStartedAt)}ms`,
       );
@@ -2989,6 +2935,15 @@ function createChecksService(ctx, logger, mcp, services = {}) {
               logWithTimestamp(
                 `[RENTAL] ✅ ${name}: lease started, nftAccount=${account}.`,
               );
+              if (ctx.guiBridge?.sendEvent) {
+                ctx.guiBridge.sendEvent("stats_rental", {
+                  source: "lease_started",
+                  at: Date.now(),
+                  missionName: name,
+                  missionId: id,
+                  nftAccount: account,
+                });
+              }
               logDebug("assign", "rental_lease_done", {
                 reason,
                 missionName: name,
@@ -3299,6 +3254,19 @@ function createChecksService(ctx, logger, mcp, services = {}) {
           const levelText =
             mission.level === null ? "" : ` lvl=${mission.level}`;
           const slotText = mission.slot === null ? "" : ` slot=${mission.slot}`;
+          if (
+            ctx.guiBridge &&
+            typeof ctx.guiBridge.sendEvent === "function"
+          ) {
+            ctx.guiBridge.sendEvent("stats_claim", {
+              source: "fallback_claim",
+              at: Date.now(),
+              assignedMissionId: mission.id || null,
+              missionName: mission.name || "unknown mission",
+              slot: mission.slot ?? null,
+              level: mission.level ?? null,
+            });
+          }
           logWithTimestamp(
             `[WATCH] ✅ Claimed (fallback): ${mission.name}${slotText}${levelText}`,
           );

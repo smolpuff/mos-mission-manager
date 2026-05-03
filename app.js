@@ -7,8 +7,6 @@
  * - Prefer small focused helpers; avoid many competing patterns for same task.
  * - Use early returns and flat control flow where possible.
  * - Keep logging format and command handling style uniform.
- * - Do not introduce new frameworks/patterns unless required and documented in TODO.md.
- * - When features change, update FEATURES.md in the same commit/session.
  */
 
 const { createContext } = require("./src/context");
