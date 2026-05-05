@@ -133,6 +133,69 @@ function isLikelyRealMissionName(value) {
   return lowered !== "unknown mission" && lowered !== "unassigned";
 }
 
+function normalizeRewardToken(value) {
+  const token = String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_");
+  if (token === "pbp" || token === "pbp_token" || token === "pixel_by_pixel")
+    return "pbp";
+  if (
+    token === "tc" ||
+    token === "tc_token" ||
+    token === "tournament_coin" ||
+    token === "tournament_coins"
+  )
+    return "tc";
+  if (
+    token === "cc" ||
+    token === "cc_token" ||
+    token === "community_coin" ||
+    token === "community_coins"
+  )
+    return "cc";
+  return token || "";
+}
+
+function parseRewardLabel(value) {
+  const label = String(value || "").trim();
+  if (!label) return null;
+  const match = label.match(/([0-9]+(?:\.[0-9]+)?)\s*([A-Za-z_]+)/);
+  if (!match) return { amount: label, token: "" };
+  return {
+    amount: Number(match[1]).toLocaleString(undefined, {
+      maximumFractionDigits: 2,
+    }),
+    token: normalizeRewardToken(match[2]),
+  };
+}
+
+function RewardBadge({ reward }) {
+  const parsed = parseRewardLabel(reward);
+  if (!parsed) return <span>Reward unknown</span>;
+  const icon =
+    parsed.token === "pbp"
+      ? pbpIcon
+      : parsed.token === "tc"
+        ? tcIcon
+        : parsed.token === "cc"
+          ? ccIcon
+          : null;
+  return (
+    <span className="inline-flex items-center gap-1 whitespace-nowrap">
+      {icon ? (
+        <img
+          src={icon}
+          alt=""
+          className="h-3.5 w-3.5 shrink-0 object-contain"
+        />
+      ) : null}
+      <span>{parsed.amount}</span>
+      {parsed.token ? <span>{parsed.token.toUpperCase()}</span> : null}
+    </span>
+  );
+}
+
 function SlideNumberFormatted({ value, format }) {
   const formatFn = typeof format === "function" ? format : (n) => String(n);
   const [current, setCurrent] = useState(Number(value) || 0);
@@ -2230,7 +2293,9 @@ function ControlView() {
                                       {selectedName || "Select mission"}
                                     </div>
                                     <div className="flex text-[11px] text-slate-300 mt-auto">
-                                      {selectedCard?.reward || "Reward unknown"}
+                                      <RewardBadge
+                                        reward={selectedCard?.reward}
+                                      />
                                     </div>
                                     <div className="text-[11px] text-accent mt-1 text-left">
                                       Click to change
@@ -2384,7 +2449,7 @@ function ControlView() {
                                     {name}
                                   </div>
                                   <div className="text-[11px] text-slate-300">
-                                    {mission?.reward || "Reward unknown"}
+                                    <RewardBadge reward={mission?.reward} />
                                   </div>
                                   <div className="text-[11px] text-slate-400 mt-auto">
                                     {collections.length > 0
@@ -3556,9 +3621,7 @@ function ControlView() {
                             <div className="text-sm text-slate-100 flex justify-between">
                               <span>{name}</span>
                               <div className="flex shrink-0 items-center gap-2 text-[11px] text-slate-300">
-                                <span>
-                                  {mission?.reward || "Reward unknown"}
-                                </span>
+                                <RewardBadge reward={mission?.reward} />
                               </div>
                             </div>
                             {description ? (

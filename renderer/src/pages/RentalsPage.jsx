@@ -48,10 +48,10 @@ export default function RentalsPage({ bridge }) {
         <div className="card p-4 border border-white/10 bg-black/30 relative">
           <button
             type="button"
-            className="btn btn-xs btn-outline z-10 !w-fit min-h-0 h-6 px-3 inline-flex ml-0 mr-0"
+            className="btn btn-xs btn-black z-10 !w-fit min-h-0 h-6 px-3 inline-flex ml-0 mr-0"
             style={{
               position: "absolute",
-              top: "8px",
+              top: "18px",
               right: "8px",
               left: "auto",
               width: "auto",
@@ -67,19 +67,13 @@ export default function RentalsPage({ bridge }) {
           <div className="text-2xl font-semibold text-slate-100 mt-1">
             {Number(data.rentableCount || 0).toLocaleString()}
           </div>
-          <div className="text-xs text-slate-400 mt-1">
-            Pool size only (preview list hidden)
-          </div>
         </div>
         <div className="card p-4 border border-white/10 bg-black/30">
           <div className="text-sm uppercase text-slate-300">
-            Active Rental Missions
+            Active Rental NFTs
           </div>
           <div className="text-2xl font-semibold text-slate-100 mt-1">
             {data.activeRentals.length}
-          </div>
-          <div className="text-xs text-slate-400 mt-1">
-            Based on missions with `nft_source = rental`
           </div>
         </div>
       </div>

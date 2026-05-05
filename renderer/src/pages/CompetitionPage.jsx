@@ -6,7 +6,7 @@ export default function CompetitionPage({
   isCurrentCompetitionRow,
 }) {
   return (
-    <section className=" h-160 flex flex-col gap-6">
+    <section className=" h-160 flex flex-col gap-3">
       <div className="competition__header grid gap-4 grid-cols-2 items-center">
         <div className="-mt-6">
           <h1 className="text-2xl font-normal competition__h leading-tight">
@@ -55,7 +55,7 @@ export default function CompetitionPage({
         </div>
       </div>
 
-      <div className="card gap-4 competition__missions -mt-4">
+      <div className="card gap-4 competition__missions">
         <div className="text-sm text-slate-400 hidden">Missions</div>
         {Array.isArray(latestCompetition?.missions) &&
         latestCompetition.missions.length ? (
@@ -71,7 +71,7 @@ export default function CompetitionPage({
         )}
       </div>
 
-      <div className="flex gap-4 h-101.5 overflow-x-visible overflow-y-hidden">
+      <div className="flex gap-4 h-108 overflow-x-visible overflow-y-hidden">
         <div className="gap-4 rounded-lg w-full h-full min-h-0 flex flex-col">
           {latestCompetitionError ? (
             <div className="text-sm text-red-300">{latestCompetitionError}</div>

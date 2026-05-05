@@ -293,7 +293,11 @@ export default function StatsPage({
     typeof sessionAnalytics.missionClaims === "object"
       ? sessionAnalytics.missionClaims
       : {};
-  const rows = buildMissionRows(claimEvents, sessionMissionClaims, sessionHistory);
+  const rows = buildMissionRows(
+    claimEvents,
+    sessionMissionClaims,
+    sessionHistory,
+  );
   const rankedClaims = rows.reduce(
     (sum, row) => sum + asNumber(row.claims, 0),
     0,
@@ -340,10 +344,10 @@ export default function StatsPage({
 
   return (
     <section className="h-full min-h-0 overflow-hidden">
-      <div className="grid h-full min-h-0 grid-rows-[118px_210px_minmax(0,1fr)] gap-2 overflow-hidden">
+      <div className="grid h-full min-h-0 grid-rows-[118px_210px_minmax(0,1fr)] gap-3 overflow-hidden">
         <section className="card grid grid-cols-[minmax(195px,0.28fr)_minmax(0,1fr)] items-center gap-4 overflow-hidden">
           <div className="min-w-0">
-            <div className="text-xs font-semibold text-slate-400">Net PBP</div>
+            <div className="text-xs  text-slate-400">Net PBP</div>
             <div
               className={`mt-1 text-4xl font-semibold leading-none ${
                 netPbp >= 0 ? "text-success" : "text-error"
@@ -391,7 +395,7 @@ export default function StatsPage({
           </div>
         </section>
 
-        <div className="grid min-h-0 grid-cols-[minmax(0,1fr)_minmax(300px,0.9fr)] gap-2 overflow-hidden">
+        <div className="grid min-h-0 grid-cols-[minmax(0,1fr)_minmax(300px,0.9fr)] gap-3 overflow-hidden">
           <section className="card stats-live-card min-h-0 overflow-hidden">
             <div className="flex items-center justify-between gap-2">
               <div>
@@ -404,9 +408,10 @@ export default function StatsPage({
                     : "Recent active hours"}
                 </div>
               </div>
-              <div className="text-right text-xs text-slate-400">
-                <div>{formatNumber(chartTotalClaims, 0)} claims shown</div>
-                <div>peak {formatNumber(timelineData.max, 0)}</div>
+              <div className="text-right  text-slate-400">
+                <div className="text-[11px]">
+                  {formatNumber(chartTotalClaims, 0)} claims shown
+                </div>
               </div>
             </div>
             <div className="mt-2 h-[calc(100%-38px)] rounded-md bg-black/20 p-2.5 overflow-hidden">
@@ -469,10 +474,6 @@ export default function StatsPage({
                 <div className="text-sm font-semibold text-slate-200">
                   Session Mission Ranking
                 </div>
-                <div className="text-xs text-slate-500">
-                  {formatNumber(rankedClaims, 0)}/{formatNumber(claims, 0)}{" "}
-                  claims
-                </div>
               </div>
               <div className="mt-2 space-y-1 overflow-hidden">
                 {rows.length ? (
@@ -519,7 +520,7 @@ export default function StatsPage({
           </div>
         </div>
 
-        <div className="grid grid-cols-3 gap-2 overflow-hidden">
+        <div className="grid grid-cols-3 gap-3 overflow-hidden">
           <DetailCard title="Session Activity">
             <DetailRow label="Claims" value={formatNumber(claims, 0)} />
             <DetailRow

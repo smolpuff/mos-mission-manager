@@ -3213,6 +3213,13 @@ function createChecksService(ctx, logger, mcp, services = {}) {
           name: missionName(m) || "unknown mission",
           level: missionLevel(m),
           slot: m?.slot ?? null,
+          prize: m?.prize ?? m?.rewardToken ?? m?.reward_token ?? null,
+          prizeAmount:
+            m?.prize_amount ??
+            m?.prizeAmount ??
+            m?.rewardAmount ??
+            m?.reward_amount ??
+            null,
         }))
         .filter((m) => m.id)
         .slice(0, limit);
@@ -3265,6 +3272,8 @@ function createChecksService(ctx, logger, mcp, services = {}) {
               missionName: mission.name || "unknown mission",
               slot: mission.slot ?? null,
               level: mission.level ?? null,
+              rewardAmount: mission.prizeAmount ?? null,
+              rewardToken: mission.prize ?? null,
             });
           }
           logWithTimestamp(

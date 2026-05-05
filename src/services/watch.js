@@ -902,12 +902,14 @@ function createWatchService(
   function logClaimTransitionDetails(
     claimedTransitions,
     prefix = "[WATCH] ✅ Claimed",
+    lookupByAssignedMissionId = null,
   ) {
     if (!Array.isArray(claimedTransitions) || claimedTransitions.length === 0) {
       return 0;
     }
     let logged = 0;
     for (const entry of claimedTransitions) {
+      const d = compactClaimDetails(entry, lookupByAssignedMissionId);
       const missionText = String(entry?.name || "unknown mission").trim();
       const slotText = entry?.slot === null ? "" : ` slot=${entry.slot}`;
       const fromText =
@@ -924,6 +926,8 @@ function createWatchService(
           missionName: missionText,
           slot: entry?.slot ?? null,
           level: entry?.fromLevel ?? null,
+          rewardAmount: d.reward ?? null,
+          rewardToken: d.prize ?? null,
         });
       }
       logWithTimestamp(
@@ -1178,6 +1182,7 @@ function createWatchService(
           logClaimTransitionDetails(
             transitions.claimed,
             "[WATCH] ✅ Claimed (state fallback)",
+            claimLookupByAssignedMissionId,
           );
           addSessionRewardTotals(
             collectClaimRewardDeltas(
@@ -1742,9 +1747,12 @@ function createWatchService(
         });
         if (transitions.claimedTransitions > 0) {
           liveStateRecoveryRunning = true;
+          const liveClaimLookup =
+            await loadAssignedMissionLookup(missionResult);
           logClaimTransitionDetails(
             transitions.claimed,
             "[WATCH] ✅ Claimed (live state)",
+            liveClaimLookup,
           );
           applyClaimCountUpdate(transitions.claimedTransitions, {
             logLabel: "Claimed count updated",
