@@ -458,13 +458,11 @@ async function bootstrapStartupMissionSlots() {
         loaded = await loadStartupState();
       } catch (error) {
         if (!isAuthFailureMessage(error?.message)) throw error;
-        pushSystemLog("Startup mission sync requires login. Opening browser login.");
-        await runOnboardingPopupLogin({
-          url: "https://pixelbypixel.studio/mcp",
-          timeoutMs: 30000,
-          loginTimeoutMs: 180000,
-        });
-        loaded = await loadStartupState();
+        pushSystemLog(
+          "Startup mission sync skipped until login is available.",
+        );
+        backendStatus.isAuthenticated = false;
+        return { ok: false, skipped: "auth_required" };
       }
 
       const whoInfo = loaded?.who?.structuredContent || {};
@@ -508,6 +506,7 @@ async function bootstrapStartupMissionSlots() {
     } finally {
       backendStatus.startupMissionSlotsLoading = false;
       startupMissionBootstrapPromise = null;
+      publishStatus();
     }
   })();
   return startupMissionBootstrapPromise;
@@ -2376,16 +2375,17 @@ app.whenReady().then(async () => {
           };
         }
         pushSystemLog(
-          "Bootstrap wallet summary requires login. Opening browser login.",
+          "Bootstrap wallet summary skipped until login is available.",
         );
-        await runOnboardingPopupLogin({
-          url: "https://pixelbypixel.studio/mcp",
-          timeoutMs: 30000,
-          loginTimeoutMs: 180000,
-        });
-        const result = await fetchBootstrap();
-        pushSystemLog("Bootstrap wallet summary complete after login.");
-        return result;
+        return {
+          ok: false,
+          skipped: "auth_required",
+          summary: {
+            currentUserWalletSummary:
+              backendStatus.currentUserWalletSummary || null,
+            fundingWalletSummary: backendStatus.fundingWalletSummary || null,
+          },
+        };
       } finally {
         bootstrapWalletSummaryPromise = null;
       }

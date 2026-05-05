@@ -596,6 +596,52 @@ function createChecksService(ctx, logger, mcp, services = {}) {
     ).trim();
   }
 
+  function nftCollectionText(nft) {
+    const values = [
+      nft?.collection,
+      nft?.collectionName,
+      nft?.collection_name,
+      nft?.collectionSymbol,
+      nft?.collection_symbol,
+      nft?.symbol,
+      nft?.metadata?.collection,
+      nft?.metadata?.collectionName,
+      nft?.metadata?.collection_name,
+      nft?.DASMetadata?.collection,
+      nft?.DASMetadata?.collectionName,
+      nft?.offChainMetadata?.metadata?.collection,
+      nft?.offChainMetadata?.metadata?.collectionName,
+    ];
+    return values
+      .map((value) => String(value || "").trim())
+      .filter(Boolean)
+      .join(" ");
+  }
+
+  function isLevel20ReservedCollectionNft(nft) {
+    const text = `${nftCollectionText(nft)} ${nftDisplayName(nft)}`
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, " ");
+    return /\b100k\b/.test(text) || /\b500k\b/.test(text);
+  }
+
+  function shouldReserveLevel20CollectionNfts() {
+    const resetPolicy = getResetPolicy();
+    if (!resetPolicy.enabled) return true;
+    const threshold = Number(resetPolicy.threshold);
+    return !Number.isFinite(threshold) || threshold > 20;
+  }
+
+  function ownedCandidateReservePriority(entry, mission) {
+    const reserveLevel20Collections = shouldReserveLevel20CollectionNfts();
+    if (!reserveLevel20Collections) return 0;
+    const level = Number(missionLevel(mission));
+    const level20Mission = Number.isFinite(level) && level >= 20;
+    const reserved = isLevel20ReservedCollectionNft(entry.nft);
+    if (level20Mission) return reserved ? 0 : 1;
+    return reserved ? 1 : 0;
+  }
+
   function assignFailureMessage(assignResult) {
     return (
       assignResult?.structuredContent?.details?.message ||
@@ -2435,6 +2481,11 @@ function createChecksService(ctx, logger, mcp, services = {}) {
           .filter((entry) => !alreadyAssignedNftAccounts.has(entry.account))
           .filter((entry) => nftIsAvailable(entry.nft))
           .filter((entry) => entry.account)
+          .sort(
+            (a, b) =>
+              ownedCandidateReservePriority(a, mission) -
+              ownedCandidateReservePriority(b, mission),
+          )
           .slice(0, 3);
 
         if (readyOwnedCandidates.length > 0) {
@@ -2453,7 +2504,10 @@ function createChecksService(ctx, logger, mcp, services = {}) {
             .filter((entry) => !alreadyAssignedNftAccounts.has(entry.account))
             .filter((entry) => !nftIsAvailable(entry.nft))
             .sort(
-              (a, b) => nftCooldownSeconds(a.nft) - nftCooldownSeconds(b.nft),
+              (a, b) =>
+                ownedCandidateReservePriority(a, mission) -
+                  ownedCandidateReservePriority(b, mission) ||
+                nftCooldownSeconds(a.nft) - nftCooldownSeconds(b.nft),
             )
             .slice(0, autoNftCooldownResetProbeLimit());
 

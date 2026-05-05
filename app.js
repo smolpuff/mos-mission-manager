@@ -361,7 +361,9 @@ async function runStartupSequence() {
 
     let loginOk = false;
 
-    if (ctx.debugMode) {
+    const hasSavedToken = Boolean(mcp.bearerToken());
+
+    if (ctx.debugMode && !hasSavedToken) {
       logger.logWithTimestamp(
         "[STARTUP] Debug mode: running interactive login (URL mode)...",
       );
@@ -372,7 +374,7 @@ async function runStartupSequence() {
         { floor: 35, ceiling: 54, step: 1 },
       );
       if (loginOk) ctx.startupFxProgress = 55;
-    } else if (ctx.interactiveAuth) {
+    } else if (ctx.interactiveAuth && !hasSavedToken) {
       logger.logWithTimestamp("[STARTUP] Running required login...");
       ctx.startupFxProgress = 35;
       loginOk = await runWithProgressPulse(() => mcp.runLoginFlow(), ctx, {
@@ -384,9 +386,8 @@ async function runStartupSequence() {
     }
 
     if (!ctx.interactiveAuth && !ctx.debugMode) {
-      const hasToken = Boolean(mcp.bearerToken());
-      logger.logDebug("startup", "token_mode", { hasToken });
-      if (!hasToken) {
+      logger.logDebug("startup", "token_mode", { hasToken: hasSavedToken });
+      if (!hasSavedToken) {
         logger.logWithTimestamp("[STARTUP] Missing token: running login...");
         ctx.startupFxProgress = 35;
         loginOk = await runWithProgressPulse(
@@ -408,23 +409,29 @@ async function runStartupSequence() {
 
     if (!ctx.isAuthenticated) {
       logger.logWithTimestamp("[STARTUP] Auth unavailable.");
-      logger.logWithTimestamp(
-        "[STARTUP] Attempting interactive login fallback...",
-      );
-      ctx.startupFxProgress = 90;
-      const fallbackOk = await runWithProgressPulse(
-        () => mcp.runLoginFlow({ forceInteractive: true }),
-        ctx,
-        { floor: 90, ceiling: 96, step: 1 },
-      );
-      if (fallbackOk) {
-        ctx.startupFxProgress = 94;
-        await runWithProgressPulse(() => checks.runInitialChecks(), ctx, {
-          floor: 94,
-          ceiling: 98,
-          step: 1,
-        });
-        ctx.startupFxProgress = 98;
+      if (mcp.bearerToken()) {
+        logger.logWithTimestamp(
+          "[STARTUP] Saved token exists; skipping interactive login fallback.",
+        );
+      } else {
+        logger.logWithTimestamp(
+          "[STARTUP] Attempting interactive login fallback...",
+        );
+        ctx.startupFxProgress = 90;
+        const fallbackOk = await runWithProgressPulse(
+          () => mcp.runLoginFlow({ forceInteractive: true }),
+          ctx,
+          { floor: 90, ceiling: 96, step: 1 },
+        );
+        if (fallbackOk) {
+          ctx.startupFxProgress = 94;
+          await runWithProgressPulse(() => checks.runInitialChecks(), ctx, {
+            floor: 94,
+            ceiling: 98,
+            step: 1,
+          });
+          ctx.startupFxProgress = 98;
+        }
       }
     }
     ctx.isIdle = true;
