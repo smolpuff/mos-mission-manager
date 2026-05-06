@@ -1,5 +1,5 @@
 {
-  "version": "3.2.1",
+  "version": "3.2.2",
   "downloadUrl": "https://github.com/smolpuff/mos-mission-manager/releases/latest",
-  "notes": "Added version check; Added 500k/100k filtering for level 20 when possible; Added windows window controls"
+  "notes": "Update for MCP protocol changes, flow optimizations, 100k/500k level 20 reservation"
 }
