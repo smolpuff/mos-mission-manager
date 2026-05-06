@@ -16,6 +16,7 @@ const {
   fetchOnchainFundingWalletSummary,
 } = require("../src/wallet/onchain-summary");
 const { scrapeLatestCompetition } = require("./scrapeCompetitions");
+const { checkForUpdates } = require("./update-checker");
 const { login: mcpLogin, callTool: mcpCallTool } = require("../lib/mcp");
 const {
   normalizeMissionList,
@@ -568,6 +569,13 @@ function readDesktopConfig() {
   }
 }
 
+function autoUpdateCheckEnabledFromConfig(config = {}) {
+  if (typeof config?.autoUpdateCheckEnabled === "boolean") {
+    return config.autoUpdateCheckEnabled;
+  }
+  return true;
+}
+
 function readDesktopConfigWithMeta() {
   const file = getConfigPath();
   try {
@@ -910,6 +918,27 @@ function hydrateBackendStatusFromConfig() {
   backendStatus.currentMode = backendStatus.missionModeEnabled
     ? `mission-${backendStatus.currentMissionResetLevel || defaultMissionResetLevel()}`
     : "normal";
+}
+
+async function runDesktopUpdateCheck({ manual = false } = {}) {
+  const currentVersion = app.getVersion();
+  const result = await checkForUpdates({
+    currentVersion,
+    logger: isDesktopDevMode()
+      ? (message) =>
+          pushSystemLog(`Update check failed: ${String(message || "unknown")}`)
+      : null,
+  });
+  return {
+    ok: result.ok === true,
+    manual: manual === true,
+    currentVersion: String(result.currentVersion || currentVersion || "").trim(),
+    latestVersion: String(result.latestVersion || "").trim() || null,
+    downloadUrl: String(result.downloadUrl || "").trim() || null,
+    notes: String(result.notes || "").trim() || "",
+    updateAvailable: result.updateAvailable === true,
+    reason: result.reason || null,
+  };
 }
 
 // Note: MCP `get_wallet_summary` is identity-based (no args) and returns the
@@ -2195,9 +2224,16 @@ app.whenReady().then(async () => {
     status: { ...backendStatus },
     logs: logHistory,
   }));
-  ipcMain.handle("config:get", async () => ({
-    config: readDesktopConfig(),
-  }));
+  ipcMain.handle("config:get", async () => {
+    const config = readDesktopConfig();
+    if (typeof config.autoUpdateCheckEnabled !== "boolean") {
+      config.autoUpdateCheckEnabled = true;
+      try {
+        applyDesktopConfigPatch({ autoUpdateCheckEnabled: true });
+      } catch {}
+    }
+    return { config };
+  });
   ipcMain.handle("config:update", async (_event, patch) => {
     const requestedPatch =
       patch && typeof patch === "object" ? { ...patch } : {};
@@ -2256,6 +2292,20 @@ app.whenReady().then(async () => {
       });
     }
     return { config: next, status: { ...backendStatus } };
+  });
+  ipcMain.handle("updates:check", async (_event, payload = {}) => {
+    const config = readDesktopConfig();
+    const manual = payload?.manual === true;
+    if (!manual && !autoUpdateCheckEnabledFromConfig(config)) {
+      return {
+        ok: true,
+        skipped: true,
+        reason: "disabled",
+        currentVersion: app.getVersion(),
+        updateAvailable: false,
+      };
+    }
+    return await runDesktopUpdateCheck({ manual });
   });
   ipcMain.handle("wallet:refresh-summary", async () => {
     const now = Date.now();

@@ -29,6 +29,7 @@ const SALVAGE_TOP_LEVEL_KEYS = [
   "lowBalancePbpThreshold",
   "lowBalanceSolThreshold",
   "signerSetupCompleted",
+  "autoUpdateCheckEnabled",
 ];
 
 function configBackupPath(configPath) {

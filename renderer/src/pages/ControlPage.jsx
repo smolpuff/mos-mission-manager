@@ -255,6 +255,11 @@ function ControlView() {
   const [nftResetMaxPbp, setNftResetMaxPbp] = useState(
     String(status.nftCooldownResetMaxPbp ?? 20),
   );
+  const [autoUpdateCheckEnabled, setAutoUpdateCheckEnabledState] =
+    useState(true);
+  const [updateCheckBusy, setUpdateCheckBusy] = useState(false);
+  const [updateCheckMessage, setUpdateCheckMessage] = useState(null);
+  const [updateModal, setUpdateModal] = useState(null);
   const [modeSelection, setModeSelection] = useState(
     status.missionModeEnabled === true ? "mission" : "normal",
   );
@@ -287,6 +292,7 @@ function ControlView() {
   });
   const lowBalanceArmedRef = useRef({ pbp: false, sol: false });
   const bootstrapWalletSummaryRequestedRef = useRef(false);
+  const startupUpdateCheckRequestedRef = useRef(false);
   const isMissionMode = modeSelection === "mission";
   const isNormalMode = !isMissionMode;
   const applyConfigPatch = async (patch) => {
@@ -386,6 +392,11 @@ function ControlView() {
       if (typeof config.nftCooldownResetEnabled === "boolean") {
         setNftResetEnabled(config.nftCooldownResetEnabled);
       }
+      if (typeof config.autoUpdateCheckEnabled === "boolean") {
+        setAutoUpdateCheckEnabledState(config.autoUpdateCheckEnabled);
+      } else {
+        setAutoUpdateCheckEnabledState(true);
+      }
       const cooldownMaxPbp = Number(config.nftCooldownResetMaxPbp);
       setNftResetMaxPbp(
         Number.isFinite(cooldownMaxPbp) && cooldownMaxPbp >= 0
@@ -423,6 +434,16 @@ function ControlView() {
     return () => {
       cancelled = true;
     };
+  }, [bridge]);
+
+  useEffect(() => {
+    if (startupUpdateCheckRequestedRef.current) return;
+    if (!bridge?.checkForUpdates) return;
+    const timer = setTimeout(() => {
+      startupUpdateCheckRequestedRef.current = true;
+      void runUpdateCheck({ manual: false });
+    }, 300);
+    return () => clearTimeout(timer);
   }, [bridge]);
 
   const refreshLatestCompetition = async () => {
@@ -481,6 +502,42 @@ function ControlView() {
     const next = Number(raw);
     if (!Number.isFinite(next) || next < 0) return;
     await applyConfigPatch({ nftCooldownResetMaxPbp: next });
+  };
+  const setAutoUpdateCheckEnabled = async (enabled) => {
+    const next = enabled === true;
+    setAutoUpdateCheckEnabledState(next);
+    await applyConfigPatch({ autoUpdateCheckEnabled: next });
+  };
+  const runUpdateCheck = async ({ manual = false } = {}) => {
+    if (!bridge?.checkForUpdates) return null;
+    setUpdateCheckBusy(true);
+    if (manual) setUpdateCheckMessage(null);
+    try {
+      const result = await bridge.checkForUpdates({ manual });
+      if (result?.updateAvailable) {
+        setUpdateModal({
+          currentVersion: String(result.currentVersion || "").trim(),
+          latestVersion: String(result.latestVersion || "").trim(),
+          downloadUrl: String(result.downloadUrl || "").trim(),
+          notes: String(result.notes || "").trim(),
+        });
+        if (manual) setUpdateCheckMessage("Update available.");
+        return result;
+      }
+      if (manual) {
+        setUpdateCheckMessage(
+          result?.ok ? "You are up to date." : "Unable to check for updates right now.",
+        );
+      }
+      return result;
+    } catch {
+      if (manual) {
+        setUpdateCheckMessage("Unable to check for updates right now.");
+      }
+      return null;
+    } finally {
+      setUpdateCheckBusy(false);
+    }
   };
   const activateNormalMode = async () => {
     const missionModeNftResetEnabled = isMissionMode
@@ -2134,6 +2191,11 @@ function ControlView() {
               SlideNumberFormatted={SlideNumberFormatted}
               openSecretModal={openSecretModal}
               openCreateWalletModal={openCreateWalletModal}
+              autoUpdateCheckEnabled={autoUpdateCheckEnabled}
+              setAutoUpdateCheckEnabled={setAutoUpdateCheckEnabled}
+              onManualUpdateCheck={() => runUpdateCheck({ manual: true })}
+              updateCheckBusy={updateCheckBusy}
+              updateCheckMessage={updateCheckMessage}
             />
           ) : null}
           {onboardingOpen ? (
@@ -4153,6 +4215,83 @@ function ControlView() {
                     onClick={() => void copyText(bridgeLinkModal.url)}
                   >
                     Copy Link
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : null}
+          {updateModal ? (
+            <div
+              className="fixed inset-0 z-60 grid place-items-center bg-black/50 p-4"
+              role="dialog"
+              aria-modal="true"
+              onMouseDown={(e) => {
+                if (e.target === e.currentTarget) setUpdateModal(null);
+              }}
+            >
+              <div
+                className="p-4 w-full rounded-xl shadow-2xl shadow-black/95 space-y-4 z-10 border-2 border-[#1D1C27] transition-all duration-250 ease-out"
+                style={{
+                  maxWidth: "640px",
+                  backgroundImage: `url(${backImg})`,
+                  backgroundSize: "cover",
+                  backgroundPosition: "center",
+                }}
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <div className="text-lg font-semibold">Update Available</div>
+                  <button
+                    type="button"
+                    className="btn btn-clear btn-sm"
+                    onClick={() => setUpdateModal(null)}
+                    title="Close"
+                  >
+                    ✕
+                  </button>
+                </div>
+                <div className="text-sm text-slate-200">
+                  A newer version of the app is available.
+                </div>
+                <div className="rounded-md border border-white/10 bg-black/20 p-3 space-y-1 text-sm text-slate-200">
+                  <div>
+                    Version{" "}
+                    <span className="font-semibold">
+                      {updateModal.latestVersion || "unknown"}
+                    </span>{" "}
+                    is available
+                  </div>
+                  {updateModal.currentVersion ? (
+                    <div className="text-xs text-slate-400">
+                      Installed: {updateModal.currentVersion}
+                    </div>
+                  ) : null}
+                </div>
+                <div className="rounded-md border border-white/10 bg-black/20 p-3 text-sm text-slate-100 whitespace-pre-wrap">
+                  {updateModal.notes || "No update notes were provided."}
+                </div>
+                <div className="rounded-md border border-white/10 bg-black/20 p-2 text-xs break-all text-slate-200">
+                  {updateModal.downloadUrl}
+                </div>
+                <div className="flex items-center justify-end gap-2">
+                  <button
+                    type="button"
+                    className="btn btn-clear btn-sm"
+                    onClick={() => setUpdateModal(null)}
+                  >
+                    Later
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-gradient btn-sm text-shadow-sm text-shadow-black/40"
+                    onClick={() => {
+                      const url = String(updateModal.downloadUrl || "").trim();
+                      if (url) {
+                        void openExternalUrl(url);
+                      }
+                      setUpdateModal(null);
+                    }}
+                  >
+                    Download Update
                   </button>
                 </div>
               </div>

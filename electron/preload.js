@@ -18,6 +18,7 @@ contextBridge.exposeInMainWorld("missionsDesktop", {
   getState: () => ipcRenderer.invoke("backend:get-state"),
   getConfig: () => ipcRenderer.invoke("config:get"),
   updateConfig: (patch) => ipcRenderer.invoke("config:update", patch),
+  checkForUpdates: (payload) => ipcRenderer.invoke("updates:check", payload),
   refreshWalletSummary: () => ipcRenderer.invoke("wallet:refresh-summary"),
   bootstrapWalletSummary: () => ipcRenderer.invoke("wallet:bootstrap-summary"),
   revealSignerBackup: () => ipcRenderer.invoke("signer:reveal-backup"),

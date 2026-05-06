@@ -15,6 +15,11 @@ export default function SettingsPage({
   SlideNumberFormatted,
   openSecretModal,
   openCreateWalletModal,
+  autoUpdateCheckEnabled,
+  setAutoUpdateCheckEnabled,
+  onManualUpdateCheck,
+  updateCheckBusy,
+  updateCheckMessage,
 }) {
   return (
     <section>
@@ -234,6 +239,36 @@ export default function SettingsPage({
             </div>
           </div>
         ) : null}
+      </div>
+      <div className="card gap-4 mt-4">
+        <div className="space-y-4">
+          <div className="flex items-center">
+            <ToggleSwitch
+              switchID="autoUpdateCheckEnabled"
+              checked={autoUpdateCheckEnabled === true}
+              onChange={(e) =>
+                void setAutoUpdateCheckEnabled(e.target.checked === true)
+              }
+            />
+            <h1 className="text-2xl font-normal ">App Updates</h1>
+          </div>
+          <div className="text-sm text-slate-300">
+            Checks GitHub for newer versions when the desktop app launches.
+          </div>
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              className="btn btn-clear btn-sm"
+              onClick={() => void onManualUpdateCheck?.()}
+              disabled={updateCheckBusy === true}
+            >
+              {updateCheckBusy === true ? "Checking..." : "Check Now"}
+            </button>
+            {updateCheckMessage ? (
+              <div className="text-xs text-slate-300">{updateCheckMessage}</div>
+            ) : null}
+          </div>
+        </div>
       </div>
     </section>
   );

@@ -1,5 +1,5 @@
 {
-  "version": "3.2.4",
+  "version": "3.2.1",
   "downloadUrl": "https://github.com/smolpuff/mos-mission-manager/releases/latest",
-  "notes": "Test update dialog. Includes UI polish, mission flow fixes, and browser wallet improvements."
+  "notes": "Added version check; Added 500k/100k filtering for level 20 when possible; Added windows window controls"
 }
