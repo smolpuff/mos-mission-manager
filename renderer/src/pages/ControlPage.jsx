@@ -301,8 +301,7 @@ function ControlView() {
     }
   };
   const setSignerMode = async (mode) => {
-    const next =
-      mode === "browser_wallet" ? "dapp" : String(mode || "").trim();
+    const next = mode === "browser_wallet" ? "dapp" : String(mode || "").trim();
     if (!next) return;
     // Persist the choice even if the backend isn't running yet.
     await applyConfigPatch({ signerMode: next });
@@ -526,7 +525,9 @@ function ControlView() {
       }
       if (manual) {
         setUpdateCheckMessage(
-          result?.ok ? "You are up to date." : "Unable to check for updates right now.",
+          result?.ok
+            ? "You are up to date."
+            : "Unable to check for updates right now.",
         );
       }
       return result;
@@ -864,7 +865,8 @@ function ControlView() {
   const [missionPickerPendingName, setMissionPickerPendingName] = useState("");
   const [missionPickerBusy, setMissionPickerBusy] = useState(false);
   const [missionPickerApplying, setMissionPickerApplying] = useState(false);
-  const [missionPickerPreviewBusy, setMissionPickerPreviewBusy] = useState(false);
+  const [missionPickerPreviewBusy, setMissionPickerPreviewBusy] =
+    useState(false);
   const [missionPickerError, setMissionPickerError] = useState(null);
   const [collectionImageByKey, setCollectionImageByKey] = useState({});
   const [onboardingBodyHeight, setOnboardingBodyHeight] = useState(null);
@@ -1263,6 +1265,15 @@ function ControlView() {
   };
   const actionResultUrl = (value) =>
     String(value?.signingUrl || value?.bridgeUrl || "").trim();
+  const actionResultCost = (value, keys = []) => {
+    const structured =
+      value?.prepare?.structuredContent || value?.structuredContent || {};
+    for (const key of keys) {
+      const amount = Number(structured?.[key]);
+      if (Number.isFinite(amount) && amount >= 0) return amount;
+    }
+    return null;
+  };
   const confirmUnlockSlot4 = async () => {
     if (!bridge?.prepareSlot4Unlock) {
       setSlotUnlockError("Unlock flow is not available in this build.");
@@ -1641,7 +1652,7 @@ function ControlView() {
             ? "This slot is locked."
             : reason === "mission_not_found"
               ? "Mission was not found in the catalog."
-            : reason,
+              : reason,
         );
       }
       setMissionPickerPrepared(result);
@@ -1717,7 +1728,11 @@ function ControlView() {
     const mission =
       onboardingCatalogByName.get(missionKey(selectedName)) || null;
 
-    if (!Number.isFinite(slotNumber) || !selectedName || !missionPickerHasActualChange) {
+    if (
+      !Number.isFinite(slotNumber) ||
+      !selectedName ||
+      !missionPickerHasActualChange
+    ) {
       setMissionPickerPrepared(null);
       setMissionPickerPreviewBusy(false);
       return () => {
@@ -2874,7 +2889,7 @@ function ControlView() {
                   <div className="border border-warning/40 bg-warning/10 p-3 text-sm text-slate-100 rounded-md">
                     {createWalletOnboarding
                       ? "No app-wallet is configured yet. Generate one now to enable app-wallet mode."
-                      : "This replaces your current app-wallet in the app. Save the recovery phrase immediately."}
+                      : "Generating a new app-wallet will delete your current app-wallet. There is no undoing it.  Do not do this unless you are 100% sure. You will only be able to access it by recovering it with its recovery keys."}
                   </div>
                 )}
                 {createWalletError ? (
@@ -2897,8 +2912,8 @@ function ControlView() {
                       onChange={(e) => setCreateWalletConfirm(e.target.checked)}
                       disabled={createWalletBusy}
                     />
-                    I understand this will replace the current app-wallet and I
-                    must save the recovery phrase now.
+                    I understand this will replace the current app-wallet and
+                    have backed up my recovery keys.
                   </label>
                 ) : null}
                 {createWalletResult ? (
@@ -3722,7 +3737,12 @@ function ControlView() {
                 <div className="flex items-center justify-between gap-3">
                   <div>
                     <div className="text-lg font-semibold text-slate-100">
-                      Change mission for 250PBP
+                      Change Mission for{" "}
+                      {Number(
+                        actionResultCost(missionPickerPrepared, ["swapCost"]) ??
+                          500,
+                      ).toLocaleString()}{" "}
+                      PBP
                     </div>
                     <div className="text-xs text-slate-400">
                       Pick the mission this slot should run.
@@ -3750,40 +3770,6 @@ function ControlView() {
                 {missionPickerPreviewBusy ? (
                   <div className="rounded-md border border-white/10 bg-black/20 p-3 text-xs text-slate-300">
                     Preparing browser link...
-                  </div>
-                ) : null}
-                {actionResultUrl(missionPickerPrepared) ? (
-                  <div className="rounded-md border border-info/30 bg-info/10 p-3 text-xs text-slate-200 space-y-2">
-                    <div>
-                      {missionPickerPrepared?.signingMode === "manual_page"
-                        ? "Open the PbP missions page and complete the change manually."
-                        : "This mission change opens in your browser. Complete it on the PbP signing page."}
-                    </div>
-                    <div className="rounded-md border border-white/10 bg-black/20 p-2 break-all">
-                      {actionResultUrl(missionPickerPrepared)}
-                    </div>
-                    <div className="flex justify-end gap-2">
-                      <button
-                        type="button"
-                        className="btn btn-clear btn-xs"
-                        onClick={() =>
-                          void copyText(actionResultUrl(missionPickerPrepared))
-                        }
-                      >
-                        Copy Link
-                      </button>
-                      <button
-                        type="button"
-                        className="btn btn-clear btn-xs"
-                        onClick={() =>
-                          void openExternalUrl(
-                            actionResultUrl(missionPickerPrepared),
-                          )
-                        }
-                      >
-                        Open in Browser
-                      </button>
-                    </div>
                   </div>
                 ) : null}
                 {missionPickerBusy ? (
@@ -3903,6 +3889,40 @@ function ControlView() {
                     ) : null}
                   </div>
                 )}
+                {actionResultUrl(missionPickerPrepared) ? (
+                  <div className="rounded-md border border-info/30 bg-info/10 p-3 text-xs text-slate-200 space-y-2">
+                    <div>
+                      {missionPickerPrepared?.signingMode === "manual_page"
+                        ? "Open the PbP missions page and complete the change manually."
+                        : "This mission change opens in your browser. Complete it on the PbP signing page."}
+                    </div>
+                    <div className="rounded-md border border-white/10 bg-black/20 p-2 break-all">
+                      {actionResultUrl(missionPickerPrepared)}
+                    </div>
+                    <div className="flex justify-end gap-2">
+                      <button
+                        type="button"
+                        className="btn btn-clear btn-sm"
+                        onClick={() =>
+                          void copyText(actionResultUrl(missionPickerPrepared))
+                        }
+                      >
+                        Copy Link
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-clear btn-sm"
+                        onClick={() =>
+                          void openExternalUrl(
+                            actionResultUrl(missionPickerPrepared),
+                          )
+                        }
+                      >
+                        Open in Browser
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
                 <div className="flex items-center justify-between gap-3 border-t border-white/10 pt-3">
                   <div className="min-w-0 text-xs text-slate-400">
                     {missionPickerPendingName && missionPickerHasActualChange
@@ -3948,9 +3968,9 @@ function ControlView() {
                           : "Applying..."
                         : missionPickerPreviewBusy
                           ? "Preparing Link..."
-                        : browserWalletMode
-                          ? "Open in Browser"
-                          : "Confirm "}
+                          : browserWalletMode
+                            ? "Open in Browser"
+                            : "Confirm "}
                     </button>
                   </div>
                 </div>
@@ -3977,7 +3997,11 @@ function ControlView() {
               >
                 <div className="flex items-center justify-between gap-3">
                   <div className="text-lg font-semibold text-error">
-                    Reset Needs Attention
+                    {String(resetErrorModal?.actionName || "")
+                      .trim()
+                      .replace(/_/g, " ")
+                      .replace(/\b\w/g, (char) => char.toUpperCase()) ||
+                      "Reset Needs Attention"}
                   </div>
                   <button
                     type="button"
@@ -4006,10 +4030,8 @@ function ControlView() {
                   {resetErrorModal?.error || "Reset failed."}
                 </div>
                 {resetErrorModal?.bridgeUrl ? (
-                  <div className="space-y-2">
-                    <div className="text-xs uppercase text-slate-300">
-                      Action URL
-                    </div>
+                  <div className="rounded-md border border-info/30 bg-info/10 p-3 text-xs text-slate-200 space-y-2">
+                    <div>Open this URL and complete the action there.</div>
                     <div className="rounded-md border border-white/10 bg-black/20 p-2 text-xs break-all text-slate-200">
                       {resetErrorModal.bridgeUrl}
                     </div>
@@ -4069,10 +4091,19 @@ function ControlView() {
                 }
               }}
             >
-              <div className="card w-full max-w-140 space-y-4 !bg-[#0b1116] border border-white/15 z-10">
+              <div
+                className="p-4 w-full rounded-xl shadow-2xl shadow-black/95 space-y-4 z-10 border-2 border-[#1D1C27] transition-all duration-250 ease-out"
+                style={{
+                  maxWidth: "600px",
+                  backgroundImage: `url(${backImg})`,
+                  backgroundSize: "cover",
+                  backgroundPosition: "center",
+                }}
+              >
                 <div className="flex items-center justify-between gap-3">
                   <div className="text-lg font-semibold text-white">
-                    Unlock Slot 4
+                    Unlock Slot 4 for{" "}
+                    {normalizedSlotUnlockCost.toLocaleString()} PBP
                   </div>
                   <button
                     type="button"
@@ -4085,15 +4116,16 @@ function ControlView() {
                   </button>
                 </div>
                 <div className="text-sm text-slate-200">
-                  Are you sure you want to unlock your 4th slot for{" "}
-                  <span className="font-semibold">
-                    {normalizedSlotUnlockCost} PBP
-                  </span>
-                  ?
+                  Are you sure you want to unlock your 4th slot?
                 </div>
                 {slotUnlockError ? (
                   <div className="rounded-md border border-error/40 bg-error/10 p-3 text-sm text-slate-100">
                     {slotUnlockError}
+                  </div>
+                ) : null}
+                {slotUnlockResult?.reason === "no_more_to_unlock" ? (
+                  <div className="rounded-md border border-success/35 bg-success/10 p-3 text-sm text-slate-100">
+                    No more to unlock.
                   </div>
                 ) : null}
                 {actionResultUrl(slotUnlockResult) ? (
@@ -4109,7 +4141,7 @@ function ControlView() {
                     <div className="flex justify-end gap-2">
                       <button
                         type="button"
-                        className="btn btn-clear btn-xs"
+                        className="btn btn-clear btn-sm"
                         onClick={() =>
                           void copyText(actionResultUrl(slotUnlockResult))
                         }
@@ -4118,19 +4150,16 @@ function ControlView() {
                       </button>
                       <button
                         type="button"
-                        className="btn btn-clear btn-xs"
+                        className="btn btn-clear btn-sm"
                         onClick={() =>
-                          void openExternalUrl(actionResultUrl(slotUnlockResult))
+                          void openExternalUrl(
+                            actionResultUrl(slotUnlockResult),
+                          )
                         }
                       >
                         Open in Browser
                       </button>
                     </div>
-                  </div>
-                ) : null}
-                {slotUnlockResult?.reason === "no_more_to_unlock" ? (
-                  <div className="rounded-md border border-success/35 bg-success/10 p-3 text-sm text-slate-100">
-                    No more to unlock.
                   </div>
                 ) : null}
                 <div className="flex items-center justify-end gap-2">

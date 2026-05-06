@@ -640,7 +640,12 @@ export default function NftsPage({ bridge, signerMode = "" }) {
           >
             <div className="flex items-center justify-between gap-3">
               <div className="text-lg font-semibold text-white">
-                Reset NFT Cooldown
+                Reset NFT for{" "}
+                {resetModal.preparing
+                  ? "Checking Cost"
+                  : Number.isFinite(Number(resetModal.resetCost))
+                    ? formatTokenAmount(resetModal.resetCost)
+                    : "PbP"}
               </div>
               <button
                 type="button"

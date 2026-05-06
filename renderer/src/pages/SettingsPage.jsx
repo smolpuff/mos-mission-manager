@@ -44,9 +44,6 @@ export default function SettingsPage({
             />
             <h1 className="text-2xl font-normal ">Funding Wallet</h1>{" "}
           </div>
-          <div className="text-sm text-slate-300">
-            Wallets must have enough Solana to cover resets transactions.
-          </div>
 
           {fundingEnabled && (
             <div className="signer-type">
@@ -72,8 +69,8 @@ export default function SettingsPage({
                     </span>
                   </div>
                   <span className="signer-type_description text-xs text-slate-300 ">
-                    A dedicated self-custody wallet specifically for this app. No
-                    approval needed.
+                    A dedicated self-custody wallet specifically for this app.
+                    No approval needed.
                   </span>
                   <div className="flex font-semibold gap-2 mt-3  text-slate-300">
                     <img src={solIcon} className="w-4 h-4" alt="Solana logo" />
@@ -98,8 +95,8 @@ export default function SettingsPage({
                 <div className="space-y-2">
                   <h2 className="text-base text-white">Browser</h2>
                   <span className="signer-type_description text-xs  text-slate-300">
-                    Transactions open in your browser wallet and must be manually
-                    approved.
+                    Transactions open in your browser wallet and must be
+                    manually approved.
                   </span>
                 </div>
               </label>
@@ -109,15 +106,26 @@ export default function SettingsPage({
 
         {fundingEnabled && fundingSource === "app_wallet" ? (
           <div className="space-y-3">
-            <h3 className="sm border-b border-white/20 pb-1">App-Wallet Details</h3>
+            <h3 className="flex gap-4 sm border-b border-white/20 pb-1 justify-between">
+              App-Wallet Details ({lockLabel})
+              <button
+                className="text-xs uppercase inline-flex px-4 py-1 bg-error max-w-max rounded-sm not-disabled:hover:bg-error-content transition-all opacity-50 hover:opacity-100 "
+                onClick={() => openCreateWalletModal()}
+                type="button"
+              >
+                Generate New Wallet
+              </button>
+            </h3>
             <label
               htmlFor="user__wallet-addres"
               className="text-sm uppercase text-slate-300"
             >
-              Address
+              Wallet Address
             </label>
             <div className="user__wallet-addres text-lg flex flex-wrap gap-y-0 gap-x-5 items-center">
-              <div className="flex w-full flex-basis">{appWalletAddress || "—"}</div>
+              <div className="flex w-full flex-basis">
+                {appWalletAddress || "—"}
+              </div>
               <button
                 type="button"
                 className="fill-white flex  items-center gap-1 font-normal text-xs px-0  py-1 h-min btn btn-clear hover:fill-accent hover:text-accent hover:cursor-pointer"
@@ -159,18 +167,7 @@ export default function SettingsPage({
                 Explorer
               </button>
             </div>
-            <div className="grid grid-cols-2 gap-8">
-              <div>
-                <label
-                  htmlFor="user-wallet__lock-status"
-                  className="text-sm uppercase text-slate-300"
-                >
-                  Lock State
-                </label>
-                <div className="user-wallet__lock-status flex gap-2">
-                  {lockLabel} Locked (last unlock time here)
-                </div>
-              </div>
+            <div className="flex gap-8 items-center justify-between">
               <div>
                 <label
                   htmlFor="user-wallet__lock-status"
@@ -211,32 +208,15 @@ export default function SettingsPage({
                     Loading app-wallet summary...
                   </div>
                 ) : null}
-              </div>
-            </div>
-
+              </div>{" "}
+            </div>{" "}
             <button
               type="button"
               onClick={() => void openSecretModal()}
-              className="text-sm uppercase inline-flex px-6 py-1.5 bg-[#9661E2] max-w-max rounded-sm hover:bg-[#5F0DD5] transition-colors"
+              className="text-sm uppercase  px-6 py-1.5 bg-[#9661E2] max-w-max rounded-sm hover:bg-[#5F0DD5] transition-colors"
             >
               View Secret Keys
             </button>
-            <div className="bg-warning/20 border border-warning/70 rounded-md p-3  space-y-2.5 opacity-50 mt-4">
-              <span>Generate New App Wallet</span>
-              <div className="text-xs">
-                This will delete your app-wallet from the app entirely. There is no
-                re-adding it. Do not do this unless you are 100% sure. You will
-                only be able to access it by recovering it elsewhere.
-              </div>
-
-              <button
-                className="text-xs uppercase inline-flex px-6 py-1.5 bg-error max-w-max rounded-sm not-disabled:hover:bg-error-content transition-colors"
-                onClick={() => openCreateWalletModal()}
-                type="button"
-              >
-                Generate New Wallet
-              </button>
-            </div>
           </div>
         ) : null}
       </div>
@@ -253,12 +233,12 @@ export default function SettingsPage({
             <h1 className="text-2xl font-normal ">App Updates</h1>
           </div>
           <div className="text-sm text-slate-300">
-            Checks GitHub for newer versions when the desktop app launches.
+            Checks GitHub for a newer version when the app launches.
           </div>
           <div className="flex items-center gap-3">
             <button
               type="button"
-              className="btn btn-clear btn-sm"
+              className="text-sm uppercase  px-6 py-1.5 bg-[#9661E2] max-w-max rounded-sm hover:bg-[#5F0DD5] transition-colors"
               onClick={() => void onManualUpdateCheck?.()}
               disabled={updateCheckBusy === true}
             >
