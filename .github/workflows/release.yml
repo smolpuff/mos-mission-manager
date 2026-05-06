@@ -51,6 +51,7 @@ jobs:
           generate_release_notes: true
           files: |
             release/missions-v3-mcp*.zip
+            MAC_INSTRUCTIONS.md
 
   build-mac:
     name: Build macOS
@@ -81,3 +82,4 @@ jobs:
           generate_release_notes: true
           files: |
             release/missions-v3-mcp-*-mac.zip
+            MAC_INSTRUCTIONS.md
