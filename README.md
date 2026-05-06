@@ -30,7 +30,7 @@ This project was heavily vibe-coded and is still evolving.
 
 ## Requirements for Source
 
-- Node.js 25 recommended
+- Node.js 25
 - access to the Pixel by Pixel MCP endpoint
 - local `config.json` (create from `config.sample.json`)
 
@@ -39,10 +39,18 @@ This project was heavily vibe-coded and is still evolving.
 ### Install deps
 
 ```bash
-npm install
+npm ci
 ```
 
 ### Desktop App
+
+Development mode with Vite:
+
+```bash
+npm run desktop:dev
+```
+
+Electron app from local built files:
 
 ```bash
 npm run desktop
@@ -75,34 +83,35 @@ If you are debugging a packaged install, check those locations first.
 
 ## First Run Wizard
 
-- Select your funding type you would like for automation
+- Select your funding type you would like, app wallet is suggested for full automation
 - BE SURE TO WRITE DOWN YOUR RECOVERY KEYS SOMEWHERE SAFE IF YOU USE APP-WALLET. YOU NEED TO KEEP THESE IN A SAFE PLACE INCASE YOU EVER NEED TO IMPORT THE WALLET
 - next will pull your currently set up missions from the website as your targetMission. Confirm
-- Select your mission mode; normal with level 20 resets on by default, or mission mode with level 11 reset and use rentals by default
-- Press the start missionininining button to start automation
+- Select your mission mode; normal with level 20 resets on by default, or mission mode with level 11 reset and use rentals both locked on
+- Press the start button to start watching and claiming missions
 - If you chose app-wallet, fund it now to cover transations (0.1sol, whatever pbp)
 
-- find the rest of your own secret sauce because you're not getting mine
+- find the rest of your own secret sauce
 
 ## Features
 
 - first-run onboarding wizard
-- built-in app-wallet usign secureStorage methods
+- built-in app-wallet using secureStorage
 - wallet import/recovery via 12/24 keys
 - missions watch + claim
 - target-mission assignment
 - low balance warning
 - mission level reset
 - mission assignment/change mission
-- rentals support (lease side)
+- rentals support (lease)
 - NFT cooldown reset
 - NFT inventory view with cooldowns, filtering, and sorting
 - Mission competition live results from for those who are #notgrinding
 - session stats
+- automatic app version check
 
 ## Mission Targeting
 
-First start, the wizard will automatically pull your selected missions from your account adn assign them. You can click on a mission card at anytime when a mission is assigned to change missions. You can also manually edit your config.json to target the mission
+First start, the wizard will automatically pull your selected missions from your account adn assign them. You can click on a mission card at anytime when a mission is assigned to change missions. Changing a mission in all via clicking on it and submitting will change your targetMission to the newly selected. This only works fopr app-wallet mode. You can also manually edit your config.json to target the mission
 
 Example:
 
@@ -146,9 +155,6 @@ General CLI commands:
 - `r`
 - `reset20`
 - `20r [on|off]`
-- `mm [off|on|<level>]`
-- `pause`
-- `resume`
 - `q`
 - `signer`
 
@@ -195,7 +201,7 @@ Signer notes:
 ## Notes
 
 - Use a dedicated burner wallet if you run `app_wallet` mode.
-- `dapp` mode uses the browser signing bridge returned by the prepare tool.
+- `dapp` mode uses the browser signing bridge returned by the prepare tool. Currently funky and nto always working...
 
 ## License
 
