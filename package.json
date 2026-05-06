@@ -14,6 +14,8 @@
     "desktop:dist:mac": "npm run desktop:build && electron-builder --mac dir zip",
     "desktop:dist:win": "npm run desktop:build && electron-builder --win portable",
     "desktop:dist:linux": "npm run desktop:build && electron-builder --linux AppImage",
+    "desktop:release:mac": "npm run desktop:dist:mac",
+    "desktop:release:win": "npm run desktop:dist:win",
     "build": "npm run build:mac && npm run build:win && npm run zip:builds",
     "bundle": "mkdir -p binaries && npx esbuild app.js --bundle --platform=node --format=cjs --target=node22 --outfile=binaries/app.bundle.cjs",
     "build:mac": "npm run bundle && npm run build:mac:arm64 && npm run build:mac:x64",
