@@ -323,8 +323,8 @@
   }
 
   .window-button--windows {
-    @apply h-5 w-7 rounded-md;
-    background: rgba(148, 163, 184, 0.14);
+    @apply h-7 w-7 rounded-none;
+    background: rgba(148, 163, 184, 0);
   }
 
   .window-button--windows:hover {
@@ -336,7 +336,7 @@
   }
 
   .window-button--windows span {
-    @apply h-px w-2.5 rounded-none;
+    @apply h-px w-3 rounded-none;
     background: rgba(226, 232, 240, 0.9);
   }
 
