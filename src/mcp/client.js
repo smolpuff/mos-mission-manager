@@ -35,6 +35,19 @@ function createMcpClient(ctx, logger) {
     }
   }
 
+  function parseSseJsonOutput(raw, fallback = null) {
+    const text = String(raw ?? "");
+    if (!text.trim()) return fallback;
+    const lines = text.split(/\r?\n/);
+    const dataParts = [];
+    for (const line of lines) {
+      if (!line.startsWith("data:")) continue;
+      dataParts.push(line.slice(5).trimStart());
+    }
+    if (dataParts.length === 0) return fallback;
+    return parseJsonOutput(dataParts.join("\n"), fallback);
+  }
+
   function tokenRecord() {
     if (!fs.existsSync(ctx.tokenFilePath)) return null;
     return parseJsonOutput(fs.readFileSync(ctx.tokenFilePath, "utf8"));
@@ -171,7 +184,12 @@ function createMcpClient(ctx, logger) {
         signal: controller.signal,
       });
       const text = await response.text();
-      const json = parseJsonOutput(text, {});
+      const contentType = String(response.headers.get("content-type") || "")
+        .trim()
+        .toLowerCase();
+      const json = contentType.includes("text/event-stream")
+        ? parseSseJsonOutput(text, {})
+        : parseJsonOutput(text, {});
       const nextSessionId = response.headers.get("mcp-session-id") || sessionId;
       return {
         ok: response.ok,
@@ -212,6 +230,11 @@ function createMcpClient(ctx, logger) {
     });
 
     if (!init.ok) throw new Error(`initialize failed: HTTP ${init.status}`);
+
+    if (!init.sessionId) {
+      logDebug("mcp", "initialize_ok", { sessionId: null, streamableHttp: true });
+      return null;
+    }
 
     await mcpPost({
       token,

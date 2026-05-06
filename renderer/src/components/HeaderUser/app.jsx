@@ -57,21 +57,11 @@ export default function HeaderUser({
         <h1 className="text-2xl user_meta__username">{username}</h1>
         {signerMode === "manual" ? (
           <div className="user_meta__funding_wallet flex gap-3 items-center">
-            <div className="text-xs mt-1">
-              <span className="user_meta__funding_wallet_lockstate text-xs">
-                {lockLabel}
-              </span>{" "}
-              Manual Mode
-            </div>
+            <div className="text-xs mt-1">Manual Mode</div>
           </div>
         ) : signerMode === "dapp" ? (
           <div className="user_meta__funding_wallet flex gap-3 items-center mt-1">
-            <div className="text-xs ">
-              <span className="user_meta__funding_wallet_lockstate text-xs">
-                {lockLabel}
-              </span>{" "}
-              Browser Wallet Balance
-            </div>
+            <div className="text-xs ">Browser Wallet Balance</div>
             <div className="flex gap-3 items-center">
               <div className="flex gap-1 items-center">
                 <div>
@@ -100,10 +90,10 @@ export default function HeaderUser({
         ) : fundingSummary ? (
           <div className="user_meta__funding_wallet flex gap-3 items-center">
             <div className="text-xs mt-1">
-              {/* <span className="user_meta__funding_wallet_lockstate text-xs">
-                {lockLabel}
-              </span>{" "} */}
               Funding Wallet Balance
+              {/* <span className="user_meta__funding_wallet_lockstate text-[1-0px]">
+                ({lockLabel})
+              </span> */}
             </div>
             <div className="flex gap-3 items-center">
               <div className="flex gap-1 items-center">
