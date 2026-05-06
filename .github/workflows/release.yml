@@ -27,7 +27,9 @@ jobs:
         run: npm install
 
       - name: Build Windows desktop app
-        run: npm run desktop:release:win -- --publish never
+        run: |
+          npm run desktop:build
+          npx electron-builder --win portable --publish never
 
       - name: Create Windows zip asset
         shell: pwsh
@@ -69,7 +71,9 @@ jobs:
         run: npm install
 
       - name: Build macOS desktop app
-        run: npm run desktop:release:mac -- --publish never
+        run: |
+          npm run desktop:build
+          npx electron-builder --mac dir zip --publish never
 
       - name: Upload macOS release files
         uses: softprops/action-gh-release@v2
