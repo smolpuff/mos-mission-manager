@@ -34,9 +34,9 @@ jobs:
       - name: Create Windows zip asset
         shell: pwsh
         run: |
-          $portable = Get-ChildItem -Path release -Recurse -File -Filter *.exe | Select-Object -First 1
+          $portable = Get-ChildItem -Path release -File -Filter "missions-v3-mcp*.exe" | Select-Object -First 1
           if (-not $portable) {
-            throw "Windows portable executable not found in release/"
+            throw "Windows portable executable not found at top level of release/"
           }
           $zipPath = Join-Path $portable.DirectoryName ($portable.BaseName + ".zip")
           if (Test-Path $zipPath) {
@@ -47,8 +47,10 @@ jobs:
       - name: Upload Windows release files
         uses: softprops/action-gh-release@v2
         with:
+          name: ${{ github.ref_name }}
+          generate_release_notes: true
           files: |
-            release/missions-v3-mcp-*.zip
+            release/missions-v3-mcp*.zip
 
   build-mac:
     name: Build macOS
@@ -75,5 +77,7 @@ jobs:
       - name: Upload macOS release files
         uses: softprops/action-gh-release@v2
         with:
+          name: ${{ github.ref_name }}
+          generate_release_notes: true
           files: |
             release/missions-v3-mcp-*-mac.zip
