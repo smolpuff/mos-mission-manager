@@ -30,7 +30,7 @@ This project was heavily vibe-coded and is still evolving.
 
 ## Requirements for Source
 
-- Node.js 25
+- Node.js 24
 - access to the Pixel by Pixel MCP endpoint
 - local `config.json` (create from `config.sample.json`)
 
