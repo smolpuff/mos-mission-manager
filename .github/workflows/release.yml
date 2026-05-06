@@ -48,10 +48,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            release/**/*.exe
-            release/**/*.zip
-            release/**/*.yml
-            release/**/*.blockmap
+            release/missions-v3-mcp-*.zip
 
   build-mac:
     name: Build macOS
@@ -79,6 +76,4 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            release/**/*.zip
-            release/**/*.yml
-            release/**/*.blockmap
+            release/missions-v3-mcp-*-mac.zip
