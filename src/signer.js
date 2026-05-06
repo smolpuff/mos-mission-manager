@@ -51,7 +51,7 @@ const DEFAULT_ACTION_COOLDOWN_SECONDS = {
   mission_slot_unlock: 30,
 };
 const DEFAULT_MAX_ACTION_COST = {
-  nft_cooldown_reset: 500,
+  nft_cooldown_reset: 1000,
   mission_reroll: 5500,
   mission_swap: 500,
   mission_slot_unlock: 2500,
@@ -421,12 +421,43 @@ function createSignerService(ctx, logger) {
       structuredContent && typeof structuredContent === "object"
         ? structuredContent
         : {};
+    const seen = new Set();
     const candidates = [
       sc.signingBridgeUrl,
       sc.signingUrl,
       sc?.signingMethods?.browserBridge?.signingUrl,
       sc?.signingMethods?.browserBridge?.url,
     ];
+    const collectUrls = (value, path = "") => {
+      if (value === null || value === undefined) return;
+      if (typeof value === "string") {
+        const url = value.trim();
+        if (
+          /^https?:\/\//i.test(url) &&
+          /(sign|bridge|browser|wallet|transaction|tx)/i.test(path + url)
+        ) {
+          candidates.push(url);
+        }
+        const matches = value.match(/https?:\/\/[^\s"'<>]+/gi) || [];
+        for (const matched of matches) {
+          const clean = matched.replace(/[),.;]+$/, "");
+          if (/(sign|bridge|browser|wallet|transaction|tx)/i.test(path + clean)) {
+            candidates.push(clean);
+          }
+        }
+        return;
+      }
+      if (Array.isArray(value)) {
+        value.forEach((entry, index) => collectUrls(entry, `${path}.${index}`));
+        return;
+      }
+      if (typeof value !== "object" || seen.has(value)) return;
+      seen.add(value);
+      for (const [key, child] of Object.entries(value)) {
+        collectUrls(child, path ? `${path}.${key}` : key);
+      }
+    };
+    collectUrls(sc);
     for (const value of candidates) {
       const url = String(value || "").trim();
       if (/^https?:\/\//i.test(url)) return url;
@@ -434,6 +465,29 @@ function createSignerService(ctx, logger) {
     const bridgePath = String(sc.signingBridgePath || "").trim();
     if (bridgePath.startsWith("/")) {
       return `https://pixelbypixel.studio${bridgePath}`;
+    }
+    const bridgeIdFallbacks = [
+      {
+        id: sc.missionRerollId,
+        path: "/mcp/sign-mission-reroll",
+        param: "missionRerollId",
+      },
+      {
+        id: sc.missionSwapId,
+        path: "/mcp/sign-mission-swap",
+        param: "missionSwapId",
+      },
+      {
+        id: sc.missionSlotUnlockId || sc.slotUnlockId || sc.unlockId,
+        path: "/mcp/sign-mission-slot-unlock",
+        param: "missionSlotUnlockId",
+      },
+    ];
+    for (const entry of bridgeIdFallbacks) {
+      const id = String(entry.id || "").trim();
+      if (id) {
+        return `https://pixelbypixel.studio${entry.path}?${entry.param}=${encodeURIComponent(id)}`;
+      }
     }
     return null;
   }

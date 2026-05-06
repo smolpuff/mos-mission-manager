@@ -168,6 +168,17 @@ if (process.env.PBP_GUI_BRIDGE === "1" && typeof process.send === "function") {
     const action = String(message.action || "");
     if (!requestId) return;
     try {
+      const requestedSignerMode = String(
+        message?.payload?.__signerMode || "",
+      ).trim();
+      if (
+        requestedSignerMode === "manual" ||
+        requestedSignerMode === "dapp" ||
+        requestedSignerMode === "app_wallet"
+      ) {
+        signer.setSignerMode(requestedSignerMode, `gui_${action}`);
+        ctx.config.signerMode = ctx.signerMode;
+      }
       if (action === "signer_reveal_backup") {
         if (!signer || typeof signer.revealWalletBackup !== "function") {
           throw new Error("Signer service unavailable.");
@@ -203,6 +214,16 @@ if (process.env.PBP_GUI_BRIDGE === "1" && typeof process.send === "function") {
           throw new Error("Mission selection service unavailable.");
         }
         const result = await checks.applyMissionSelection(
+          message.payload || {},
+        );
+        sendGuiResponse(requestId, { ok: true, result });
+        return;
+      }
+      if (action === "preview_mission_selection") {
+        if (!checks || typeof checks.previewMissionSelection !== "function") {
+          throw new Error("Mission selection preview service unavailable.");
+        }
+        const result = await checks.previewMissionSelection(
           message.payload || {},
         );
         sendGuiResponse(requestId, { ok: true, result });

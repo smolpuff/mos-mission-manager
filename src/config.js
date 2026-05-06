@@ -328,7 +328,7 @@ function loadConfig(ctx, logWithTimestamp) {
       ctx.config.signerMode === "signing"
         ? "app_wallet"
         : ctx.config.signerMode === "browser_wallet"
-          ? "manual"
+          ? "dapp"
           : ctx.config.signerMode;
   }
   if (

@@ -51,6 +51,97 @@ function createWatchService(
     return MISSION_PAGE_OPEN_COOLDOWN_MS_DEFAULT;
   }
 
+  function usesBrowserBridgeSigning() {
+    return ctx.signerMode === "dapp";
+  }
+
+  function preparedActionSigningArgs() {
+    if (usesBrowserBridgeSigning()) return { signingMode: "browser_bridge" };
+    return {
+      signingMode: "agent_managed",
+      ...(String(ctx.signerConfig?.walletAddress || "").trim()
+        ? { payerWallet: String(ctx.signerConfig.walletAddress).trim() }
+        : {}),
+    };
+  }
+
+  function browserBridgeUrlFromPrepared(prepared) {
+    const sc =
+      prepared?.structuredContent && typeof prepared.structuredContent === "object"
+        ? prepared.structuredContent
+        : {};
+    const seen = new Set();
+    const candidates = [
+      sc.signingBridgeUrl,
+      sc.signingUrl,
+      sc?.signingMethods?.browserBridge?.signingUrl,
+      sc?.signingMethods?.browserBridge?.url,
+    ];
+    const collectUrls = (value, path = "") => {
+      if (value === null || value === undefined) return;
+      if (typeof value === "string") {
+        const url = value.trim();
+        if (
+          /^https?:\/\//i.test(url) &&
+          /(sign|bridge|browser|wallet|transaction|tx)/i.test(path + url)
+        ) {
+          candidates.push(url);
+        }
+        const matches = value.match(/https?:\/\/[^\s"'<>]+/gi) || [];
+        for (const matched of matches) {
+          const clean = matched.replace(/[),.;]+$/, "");
+          if (/(sign|bridge|browser|wallet|transaction|tx)/i.test(path + clean)) {
+            candidates.push(clean);
+          }
+        }
+        return;
+      }
+      if (Array.isArray(value)) {
+        value.forEach((entry, index) => collectUrls(entry, `${path}.${index}`));
+        return;
+      }
+      if (typeof value !== "object" || seen.has(value)) return;
+      seen.add(value);
+      for (const [key, child] of Object.entries(value)) {
+        collectUrls(child, path ? `${path}.${key}` : key);
+      }
+    };
+    collectUrls(sc);
+    collectUrls(prepared);
+    for (const value of candidates) {
+      const url = String(value || "").trim();
+      if (/^https?:\/\//i.test(url)) return url;
+    }
+    const bridgePath = String(sc.signingBridgePath || "").trim();
+    if (bridgePath.startsWith("/")) {
+      return `https://pixelbypixel.studio${bridgePath}`;
+    }
+    const bridgeIdFallbacks = [
+      {
+        id: sc.missionRerollId,
+        path: "/mcp/sign-mission-reroll",
+        param: "missionRerollId",
+      },
+      {
+        id: sc.missionSwapId,
+        path: "/mcp/sign-mission-swap",
+        param: "missionSwapId",
+      },
+      {
+        id: sc.missionSlotUnlockId || sc.slotUnlockId || sc.unlockId,
+        path: "/mcp/sign-mission-slot-unlock",
+        param: "missionSlotUnlockId",
+      },
+    ];
+    for (const entry of bridgeIdFallbacks) {
+      const id = String(entry.id || "").trim();
+      if (id) {
+        return `https://pixelbypixel.studio${entry.path}?${entry.param}=${encodeURIComponent(id)}`;
+      }
+    }
+    return null;
+  }
+
   function scheduleFundingWalletRefresh(reason = "token_change") {
     // If the funding wallet is not in use, skip. Avoid spamming summary calls
     // when multiple token-affecting actions happen close together.
@@ -1275,16 +1366,7 @@ function createWatchService(
     let manualBridgeUrl = null;
     const rerollArgs = {
       assignedMissionId,
-      ...(ctx.signerMode === "dapp"
-        ? { signingMode: "browser_bridge" }
-        : {
-            signingMode: "agent_managed",
-            ...(String(ctx.signerConfig?.walletAddress || "").trim()
-              ? {
-                  payerWallet: String(ctx.signerConfig.walletAddress).trim(),
-                }
-              : {}),
-          }),
+      ...preparedActionSigningArgs(),
     };
     logDebug("watch", "mission_reroll_prepare_args", {
       reason,
@@ -1297,21 +1379,7 @@ function createWatchService(
       "prepare_mission_reroll",
       rerollArgs,
     );
-    manualBridgeUrl = String(
-      prepared?.structuredContent?.signingBridgeUrl ||
-        prepared?.structuredContent?.signingUrl ||
-        prepared?.structuredContent?.signingMethods?.browserBridge
-          ?.signingUrl ||
-        "",
-    ).trim();
-    if (!manualBridgeUrl) {
-      const bridgePath = String(
-        prepared?.structuredContent?.signingBridgePath || "",
-      ).trim();
-      if (bridgePath.startsWith("/")) {
-        manualBridgeUrl = `https://pixelbypixel.studio${bridgePath}`;
-      }
-    }
+    manualBridgeUrl = browserBridgeUrlFromPrepared(prepared) || "";
     logDebug("watch", "mission_reroll_prepare_result", {
       reason,
       label,
@@ -1321,6 +1389,20 @@ function createWatchService(
       slot,
       structuredContent: prepared?.structuredContent || null,
     });
+    if (usesBrowserBridgeSigning()) {
+      if (!manualBridgeUrl) {
+        const error = new Error(
+          "Browser wallet prepare did not return a signing URL.",
+        );
+        error.manualBridgeUrl = "";
+        throw error;
+      }
+      const error = new Error(
+        "Browser wallet signing is required. Open the signing URL.",
+      );
+      error.manualBridgeUrl = manualBridgeUrl;
+      throw error;
+    }
     let actionResult;
     try {
       actionResult = await executePreparedMissionAction({
@@ -1350,7 +1432,7 @@ function createWatchService(
         { actionName: "mission_reroll" },
       );
     }
-    if (ctx.signerMode === "dapp" && !actionResult?.submitted) {
+    if (usesBrowserBridgeSigning() && !actionResult?.submitted) {
       logWithTimestamp("[DAPP] ⏳ Waiting briefly for reroll to settle...");
       const settle = await waitForDappRerollSettlement(assignedMissionId, {
         timeoutMs: 12_000,
@@ -1527,6 +1609,19 @@ function createWatchService(
       logWithTimestamp(
         "[RESET] ℹ️ Manual mode selected. Reset the mission yourself on the site.",
       );
+      if (ctx.guiBridge?.sendEvent) {
+        for (const mission of resetHits) {
+          ctx.guiBridge.sendEvent("reset_error", {
+            actionName: "mission_reroll",
+            assignedMissionId: mission.assignedMissionId || mission.id || null,
+            missionName: mission.name || null,
+            level: mission.level ?? null,
+            slot: mission.slot ?? null,
+            error: "Manual mode selected. Open the missions page and reset this mission there.",
+            bridgeUrl: MISSION_PLAY_URL,
+          });
+        }
+      }
       return true;
     }
     let rerolledCount = 0;

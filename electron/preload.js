@@ -24,6 +24,8 @@ contextBridge.exposeInMainWorld("missionsDesktop", {
   prepareSlot4Unlock: () => ipcRenderer.invoke("slot:prepare-unlock4"),
   createGeneratedWallet: () => ipcRenderer.invoke("signer:create-generated-wallet"),
   fetchOnboardingAccount: () => ipcRenderer.invoke("onboarding:fetch-account"),
+  previewMissionSelection: (payload) =>
+    ipcRenderer.invoke("missions:preview-selection", payload),
   applyMissionSelection: (payload) =>
     ipcRenderer.invoke("missions:apply-selection", payload),
   getRentalsPreview: () => ipcRenderer.invoke("rentals:preview"),

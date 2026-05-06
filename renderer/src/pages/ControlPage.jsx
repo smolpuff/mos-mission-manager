@@ -276,6 +276,7 @@ function ControlView() {
   const [slotUnlockBusy, setSlotUnlockBusy] = useState(false);
   const [slotUnlockError, setSlotUnlockError] = useState(null);
   const [slotUnlockResult, setSlotUnlockResult] = useState(null);
+  const [missionPickerPrepared, setMissionPickerPrepared] = useState(null);
   const [bridgeLinkModal, setBridgeLinkModal] = useState(null);
   const [lowBalanceModal, setLowBalanceModal] = useState(null);
   const [statsHistory, setStatsHistory] = useState([]);
@@ -295,7 +296,7 @@ function ControlView() {
   };
   const setSignerMode = async (mode) => {
     const next =
-      mode === "browser_wallet" ? "manual" : String(mode || "").trim();
+      mode === "browser_wallet" ? "dapp" : String(mode || "").trim();
     if (!next) return;
     // Persist the choice even if the backend isn't running yet.
     await applyConfigPatch({ signerMode: next });
@@ -806,6 +807,7 @@ function ControlView() {
   const [missionPickerPendingName, setMissionPickerPendingName] = useState("");
   const [missionPickerBusy, setMissionPickerBusy] = useState(false);
   const [missionPickerApplying, setMissionPickerApplying] = useState(false);
+  const [missionPickerPreviewBusy, setMissionPickerPreviewBusy] = useState(false);
   const [missionPickerError, setMissionPickerError] = useState(null);
   const [collectionImageByKey, setCollectionImageByKey] = useState({});
   const [onboardingBodyHeight, setOnboardingBodyHeight] = useState(null);
@@ -1031,6 +1033,11 @@ function ControlView() {
     setFundingEnabled(enabled);
     setFundingSource(mode === "app_wallet" ? "app_wallet" : "browser");
   }, [status.signerMode]);
+  const normalizedSignerMode =
+    status.signerMode === "browser_wallet"
+      ? "dapp"
+      : String(status.signerMode || "").trim();
+  const browserWalletMode = normalizedSignerMode === "dapp";
 
   useEffect(() => {
     // When switching into app_wallet mode, the backend may write signer wallet
@@ -1187,19 +1194,18 @@ function ControlView() {
       return false;
     }
   };
-  const openBridgeLinkModal = (url) => {
+  const openBridgeLinkModal = (url, options = {}) => {
     const target = String(url || "").trim();
     if (!target) return;
+    const mode = String(options.signingMode || "").trim();
+    const manualPage = mode === "manual_page";
     setBridgeLinkModal({
       url: target,
-      phantomUrl: `https://phantom.app/ul/browse/${encodeURIComponent(
-        target,
-      )}?ref=${encodeURIComponent("https://www.pixelbypixel.studio")}`,
-      solflareUrl: `https://solflare.com/ul/v1/browse/${encodeURIComponent(
-        target,
-      )}?cluster=mainnet-beta`,
+      manualPage,
     });
   };
+  const actionResultUrl = (value) =>
+    String(value?.signingUrl || value?.bridgeUrl || "").trim();
   const confirmUnlockSlot4 = async () => {
     if (!bridge?.prepareSlot4Unlock) {
       setSlotUnlockError("Unlock flow is not available in this build.");
@@ -1220,6 +1226,12 @@ function ControlView() {
         setSlotUnlockError("No more slots to unlock.");
       } else if (!prepared?.ok) {
         throw new Error(prepared?.reason || "Unlock failed.");
+      } else if (prepared?.signingUrl || prepared?.bridgeUrl) {
+        await openExternalUrl(prepared.signingUrl || prepared.bridgeUrl);
+      } else if (browserWalletMode && prepared?.pending) {
+        setSlotUnlockError(
+          "Browser wallet prepare did not return a signing URL. Check the backend log for the MCP prepare response.",
+        );
       } else if (prepared?.unlocked) {
         setSlotUnlockModalOpen(false);
       }
@@ -1535,6 +1547,20 @@ function ControlView() {
       );
       return;
     }
+    if (
+      (browserWalletMode || normalizedSignerMode === "manual") &&
+      actionResultUrl(missionPickerPrepared)
+    ) {
+      setMissionPickerApplying(true);
+      try {
+        await openExternalUrl(actionResultUrl(missionPickerPrepared));
+      } catch (error) {
+        setMissionPickerError(String(error?.message || error));
+      } finally {
+        setMissionPickerApplying(false);
+      }
+      return;
+    }
     const mission =
       onboardingCatalogByName.get(missionKey(selectedName)) || null;
     setMissionPickerBusy(true);
@@ -1558,8 +1584,19 @@ function ControlView() {
             ? "This slot is locked."
             : reason === "mission_not_found"
               ? "Mission was not found in the catalog."
-              : reason,
+            : reason,
         );
+      }
+      setMissionPickerPrepared(result);
+      if (result?.signingUrl || result?.bridgeUrl) {
+        await openExternalUrl(result.signingUrl || result.bridgeUrl);
+        return;
+      }
+      if (browserWalletMode && result?.pending) {
+        setMissionPickerError(
+          "Browser wallet prepare did not return a signing URL. Check the backend log for the MCP prepare response.",
+        );
+        return;
       }
       updateOnboardingSlotSelection(slotNumber, selectedName);
       setMissionPickerSlot(null);
@@ -1573,11 +1610,24 @@ function ControlView() {
     }
   };
   const currentMissionPickerName = missionPickerSlot
-    ? String(
-        onboardingSlotSelections[missionPickerSlot] ||
-          getOnboardingMissionCard(missionPickerSlot)?.name ||
-          "",
-      ).trim()
+    ? (() => {
+        const slotNumber = Number(missionPickerSlot);
+        const liveEntry =
+          slots.find((entry) => Number(entry?.slot) === slotNumber) || null;
+        const onboardingEntry =
+          onboardingMissions.find(
+            (entry) => Number(entry?.slot) === slotNumber,
+          ) || null;
+        return String(
+          liveEntry?.missionName ||
+            liveEntry?.name ||
+            onboardingEntry?.name ||
+            onboardingEntry?.missionName ||
+            onboardingSlotSelections[missionPickerSlot] ||
+            getOnboardingMissionCard(missionPickerSlot)?.name ||
+            "",
+        ).trim();
+      })()
     : "";
   const currentMissionPickerLevel = missionPickerSlot
     ? (() => {
@@ -1602,6 +1652,78 @@ function ControlView() {
   const missionPickerHasActualChange =
     missionKey(missionPickerPendingName) !==
     missionKey(currentMissionPickerName);
+
+  useEffect(() => {
+    let cancelled = false;
+    const slotNumber = Number(missionPickerSlot);
+    const selectedName = String(missionPickerPendingName || "").trim();
+    const mission =
+      onboardingCatalogByName.get(missionKey(selectedName)) || null;
+
+    if (!Number.isFinite(slotNumber) || !selectedName || !missionPickerHasActualChange) {
+      setMissionPickerPrepared(null);
+      setMissionPickerPreviewBusy(false);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    if (!browserWalletMode && normalizedSignerMode !== "manual") {
+      setMissionPickerPrepared(null);
+      setMissionPickerPreviewBusy(false);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    if (!bridge?.previewMissionSelection) {
+      setMissionPickerPrepared(null);
+      setMissionPickerPreviewBusy(false);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    setMissionPickerPreviewBusy(true);
+    setMissionPickerError(null);
+    const run = async () => {
+      try {
+        const response = await bridge.previewMissionSelection({
+          slot: slotNumber,
+          missionName: selectedName,
+          missionId:
+            mission?.id || mission?.missionId || mission?.mission_id || "",
+        });
+        if (cancelled) return;
+        if (!response?.ok) {
+          throw new Error(response?.error || "Mission change preview failed.");
+        }
+        const result = response.result || null;
+        if (!result?.ok) {
+          throw new Error(result?.reason || "Mission change preview failed.");
+        }
+        setMissionPickerPrepared(result);
+      } catch (error) {
+        if (cancelled) return;
+        setMissionPickerPrepared(null);
+        setMissionPickerError(String(error?.message || error));
+      } finally {
+        if (!cancelled) setMissionPickerPreviewBusy(false);
+      }
+    };
+    void run();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    bridge,
+    browserWalletMode,
+    missionPickerHasActualChange,
+    missionPickerPendingName,
+    missionPickerSlot,
+    normalizedSignerMode,
+    onboardingCatalogByName,
+  ]);
 
   const missionCollectionsLabel = (
     mission,
@@ -2857,7 +2979,9 @@ function ControlView() {
               sessionStartedAtMs={sessionStartedAtRef.current}
             />
           ) : null}
-          {currentPage === "nfts" ? <NftsPage bridge={bridge} /> : null}
+          {currentPage === "nfts" ? (
+            <NftsPage bridge={bridge} signerMode={status.signerMode} />
+          ) : null}
           {currentPage === "rentals" ? <RentalsPage bridge={bridge} /> : null}
           {currentPage !== "missions" ? null : (
             <>
@@ -3548,6 +3672,7 @@ function ControlView() {
                     onClick={() => {
                       setMissionPickerSlot(null);
                       setMissionPickerPendingName("");
+                      setMissionPickerPrepared(null);
                     }}
                     title="Close"
                     disabled={missionPickerBusy}
@@ -3558,6 +3683,45 @@ function ControlView() {
                 {missionPickerError ? (
                   <div className="rounded-md border border-error/40 bg-error/10 p-3 text-sm text-slate-100">
                     {missionPickerError}
+                  </div>
+                ) : null}
+                {missionPickerPreviewBusy ? (
+                  <div className="rounded-md border border-white/10 bg-black/20 p-3 text-xs text-slate-300">
+                    Preparing browser link...
+                  </div>
+                ) : null}
+                {actionResultUrl(missionPickerPrepared) ? (
+                  <div className="rounded-md border border-info/30 bg-info/10 p-3 text-xs text-slate-200 space-y-2">
+                    <div>
+                      {missionPickerPrepared?.signingMode === "manual_page"
+                        ? "Open the PbP missions page and complete the change manually."
+                        : "This mission change opens in your browser. Complete it on the PbP signing page."}
+                    </div>
+                    <div className="rounded-md border border-white/10 bg-black/20 p-2 break-all">
+                      {actionResultUrl(missionPickerPrepared)}
+                    </div>
+                    <div className="flex justify-end gap-2">
+                      <button
+                        type="button"
+                        className="btn btn-clear btn-xs"
+                        onClick={() =>
+                          void copyText(actionResultUrl(missionPickerPrepared))
+                        }
+                      >
+                        Copy Link
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-clear btn-xs"
+                        onClick={() =>
+                          void openExternalUrl(
+                            actionResultUrl(missionPickerPrepared),
+                          )
+                        }
+                      >
+                        Open in Browser
+                      </button>
+                    </div>
                   </div>
                 ) : null}
                 {missionPickerBusy ? (
@@ -3693,6 +3857,7 @@ function ControlView() {
                       onClick={() => {
                         setMissionPickerSlot(null);
                         setMissionPickerPendingName("");
+                        setMissionPickerPrepared(null);
                       }}
                     >
                       Cancel
@@ -3701,6 +3866,7 @@ function ControlView() {
                       type="button"
                       className={`${
                         missionPickerBusy ||
+                        missionPickerPreviewBusy ||
                         !missionPickerPendingName ||
                         !missionPickerHasActualChange
                           ? "disabled opacity-40 grayscale"
@@ -3708,12 +3874,21 @@ function ControlView() {
                       } btn btn-gradient btn-sm text-shadow-sm text-shadow-black/40`}
                       disabled={
                         missionPickerBusy ||
+                        missionPickerPreviewBusy ||
                         !missionPickerPendingName ||
                         !missionPickerHasActualChange
                       }
                       onClick={() => void applyMissionPickerSelection()}
                     >
-                      {missionPickerApplying ? "Applying..." : "Confirm "}
+                      {missionPickerApplying
+                        ? browserWalletMode
+                          ? "Opening..."
+                          : "Applying..."
+                        : missionPickerPreviewBusy
+                          ? "Preparing Link..."
+                        : browserWalletMode
+                          ? "Open in Browser"
+                          : "Confirm "}
                     </button>
                   </div>
                 </div>
@@ -3771,7 +3946,7 @@ function ControlView() {
                 {resetErrorModal?.bridgeUrl ? (
                   <div className="space-y-2">
                     <div className="text-xs uppercase text-slate-300">
-                      Manual Reset Bridge URL
+                      Action URL
                     </div>
                     <div className="rounded-md border border-white/10 bg-black/20 p-2 text-xs break-all text-slate-200">
                       {resetErrorModal.bridgeUrl}
@@ -3780,15 +3955,22 @@ function ControlView() {
                       <button
                         type="button"
                         className="btn btn-clear btn-sm"
-                        onClick={() => {
-                          const url = String(
-                            resetErrorModal.bridgeUrl || "",
-                          ).trim();
-                          if (!url) return;
-                          openBridgeLinkModal(url);
-                        }}
+                        onClick={() =>
+                          void copyText(String(resetErrorModal.bridgeUrl || ""))
+                        }
                       >
-                        Open Link
+                        Copy Link
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-clear btn-sm"
+                        onClick={() =>
+                          void openExternalUrl(
+                            String(resetErrorModal.bridgeUrl || ""),
+                          )
+                        }
+                      >
+                        Open in Browser
                       </button>
                     </div>
                   </div>
@@ -3797,9 +3979,18 @@ function ControlView() {
                   <button
                     type="button"
                     className="btn btn-gradient btn-sm text-shadow-sm text-shadow-black/40"
-                    onClick={() => setResetErrorModal(null)}
+                    onClick={() => {
+                      const url = String(
+                        resetErrorModal?.bridgeUrl || "",
+                      ).trim();
+                      if (url) {
+                        void openExternalUrl(url);
+                        return;
+                      }
+                      setResetErrorModal(null);
+                    }}
                   >
-                    OK
+                    {resetErrorModal?.bridgeUrl ? "Open in Browser" : "OK"}
                   </button>
                 </div>
               </div>
@@ -3843,6 +4034,38 @@ function ControlView() {
                     {slotUnlockError}
                   </div>
                 ) : null}
+                {actionResultUrl(slotUnlockResult) ? (
+                  <div className="rounded-md border border-info/30 bg-info/10 p-3 text-xs text-slate-200 space-y-2">
+                    <div>
+                      {slotUnlockResult?.signingMode === "manual_page"
+                        ? "Open the PbP missions page and unlock the slot manually."
+                        : "This slot unlock opens in your browser. Complete it on the PbP signing page."}
+                    </div>
+                    <div className="rounded-md border border-white/10 bg-black/20 p-2 break-all">
+                      {actionResultUrl(slotUnlockResult)}
+                    </div>
+                    <div className="flex justify-end gap-2">
+                      <button
+                        type="button"
+                        className="btn btn-clear btn-xs"
+                        onClick={() =>
+                          void copyText(actionResultUrl(slotUnlockResult))
+                        }
+                      >
+                        Copy Link
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-clear btn-xs"
+                        onClick={() =>
+                          void openExternalUrl(actionResultUrl(slotUnlockResult))
+                        }
+                      >
+                        Open in Browser
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
                 {slotUnlockResult?.reason === "no_more_to_unlock" ? (
                   <div className="rounded-md border border-success/35 bg-success/10 p-3 text-sm text-slate-100">
                     No more to unlock.
@@ -3863,7 +4086,13 @@ function ControlView() {
                     onClick={() => void confirmUnlockSlot4()}
                     disabled={slotUnlockBusy}
                   >
-                    {slotUnlockBusy ? "Unlocking..." : "Yes"}
+                    {slotUnlockBusy
+                      ? browserWalletMode
+                        ? "Opening..."
+                        : "Unlocking..."
+                      : browserWalletMode
+                        ? "Open in Browser"
+                        : "Yes"}
                   </button>
                 </div>
               </div>
@@ -3889,7 +4118,9 @@ function ControlView() {
               >
                 <div className="flex items-center justify-between gap-3">
                   <div className="text-lg font-semibold text-warning">
-                    Open Bridge URL
+                    {bridgeLinkModal.manualPage
+                      ? "Open PbP Page"
+                      : "Open Bridge URL"}
                   </div>
                   <button
                     type="button"
@@ -3901,31 +4132,14 @@ function ControlView() {
                   </button>
                 </div>
                 <div className="text-sm text-slate-200">
-                  Open this in a wallet-enabled browser/app (Phantom/Solflare)
-                  or copy it manually.
+                  {bridgeLinkModal.manualPage
+                    ? "Open the PbP missions page and complete the action manually."
+                    : "Open this in a wallet-enabled browser/app (Phantom/Solflare) or copy it manually."}
                 </div>
                 <div className="rounded-md border border-white/10 bg-black/20 p-2 text-xs break-all text-slate-200">
                   {bridgeLinkModal.url}
                 </div>
                 <div className="flex flex-wrap items-center justify-end gap-2">
-                  <button
-                    type="button"
-                    className="btn btn-clear btn-sm"
-                    onClick={() =>
-                      void openExternalUrl(bridgeLinkModal.phantomUrl)
-                    }
-                  >
-                    Open in Phantom
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn-clear btn-sm"
-                    onClick={() =>
-                      void openExternalUrl(bridgeLinkModal.solflareUrl)
-                    }
-                  >
-                    Open in Solflare
-                  </button>
                   <button
                     type="button"
                     className="btn btn-clear btn-sm"

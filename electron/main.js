@@ -868,6 +868,16 @@ function applyDesktopConfigPatch(patch = {}) {
   return next;
 }
 
+function normalizedDesktopSignerMode(value) {
+  const mode = String(value || "").trim();
+  if (mode === "browser_wallet") return "dapp";
+  if (mode === "signing") return "app_wallet";
+  if (mode === "manual" || mode === "dapp" || mode === "app_wallet") {
+    return mode;
+  }
+  return "";
+}
+
 function hydrateBackendStatusFromConfig() {
   const config = readDesktopConfig();
   backendStatus.analytics = loadAnalytics();
@@ -1975,7 +1985,17 @@ async function requestBackend(action, payload = {}, options = {}) {
         reject(err);
       },
     });
-    backend.send({ type: "pbp_request", requestId, action, payload });
+    const currentConfig = readDesktopConfig();
+    const signerMode = normalizedDesktopSignerMode(currentConfig?.signerMode);
+    backend.send({
+      type: "pbp_request",
+      requestId,
+      action,
+      payload: {
+        ...(payload && typeof payload === "object" ? payload : {}),
+        ...(signerMode ? { __signerMode: signerMode } : {}),
+      },
+    });
   });
 }
 
@@ -2198,6 +2218,10 @@ app.whenReady().then(async () => {
     }
     if (typeof next.missionResetLevel === "string") {
       backendStatus.currentMissionResetLevel = next.missionResetLevel;
+    }
+    if (typeof next.signerMode === "string") {
+      const signerMode = normalizedDesktopSignerMode(next.signerMode);
+      if (signerMode) backendStatus.signerMode = signerMode;
     }
     if (next.currentUserWalletSummary !== undefined) {
       backendStatus.currentUserWalletSummary = next.currentUserWalletSummary;
@@ -2607,6 +2631,26 @@ app.whenReady().then(async () => {
     }
     const response = await requestBackend(
       "apply_mission_selection",
+      { slot: Math.floor(slot), missionName, missionId },
+      {
+        ensureRunning: true,
+        timeoutMs: 90000,
+      },
+    );
+    return response;
+  });
+  ipcMain.handle("missions:preview-selection", async (_event, payload = {}) => {
+    const slot = Number(payload?.slot);
+    const missionName = String(payload?.missionName || payload?.name || "").trim();
+    const missionId = String(payload?.missionId || "").trim();
+    if (!Number.isFinite(slot) || slot < 1 || slot > 4) {
+      return { ok: false, error: "Invalid mission slot." };
+    }
+    if (!missionName && !missionId) {
+      return { ok: false, error: "Select a mission first." };
+    }
+    const response = await requestBackend(
+      "preview_mission_selection",
       { slot: Math.floor(slot), missionName, missionId },
       {
         ensureRunning: true,

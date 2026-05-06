@@ -133,7 +133,7 @@ function NftCardImage({ src, alt }) {
   );
 }
 
-export default function NftsPage({ bridge }) {
+export default function NftsPage({ bridge, signerMode = "" }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [resetModal, setResetModal] = useState(null);
@@ -146,6 +146,40 @@ export default function NftsPage({ bridge }) {
     total: 0,
     nfts: [],
   });
+  const normalizedSignerMode =
+    signerMode === "browser_wallet" ? "dapp" : String(signerMode || "").trim();
+  const browserWalletMode = normalizedSignerMode === "dapp";
+
+  const formatResetErrorMessage = (value) => {
+    if (value && typeof value === "object") {
+      const reason = String(value.reason || "").trim();
+      const resetCost = Number(value.resetCost);
+      const maxPbp = Number(value.maxPbp);
+      if (
+        reason === "cost_exceeds_max" &&
+        Number.isFinite(resetCost) &&
+        Number.isFinite(maxPbp)
+      ) {
+        return `Cooldown reset cost ${resetCost} PBP exceeds the configured max ${maxPbp} PBP.`;
+      }
+      const nestedMessage = String(value.message || value.error || reason).trim();
+      if (nestedMessage) {
+        return formatResetErrorMessage(nestedMessage);
+      }
+    }
+    const message = String(value || "").trim();
+    if (!message) return "Cooldown reset failed.";
+    if (message === "cost_exceeds_max") {
+      return "Cooldown reset cost exceeds the configured maximum.";
+    }
+    const signerCostMatch = message.match(
+      /Signer action cost\s+(\d+)\s+exceeds configured max\s+(\d+)/i,
+    );
+    if (signerCostMatch) {
+      return `Cooldown reset cost ${signerCostMatch[1]} PBP exceeds the configured max ${signerCostMatch[2]} PBP.`;
+    }
+    return message;
+  };
 
   const load = async () => {
     if (!bridge?.getUserNfts) return;
@@ -214,12 +248,23 @@ export default function NftsPage({ bridge }) {
         throw new Error(prepared?.reason || "Cooldown reset is not available.");
       }
       const resetCost = Number(prepared.resetCost);
-      if (!Number.isFinite(resetCost)) {
+      const resetUrl = String(prepared.signingUrl || prepared.bridgeUrl || "").trim();
+      if (!Number.isFinite(resetCost) && !resetUrl) {
         throw new Error("Cooldown reset cost was not returned.");
       }
       setResetModal((current) =>
         current?.item === item
-          ? { ...current, preparing: false, resetCost }
+          ? {
+              ...current,
+              preparing: false,
+              resetCost: Number.isFinite(resetCost) ? resetCost : null,
+              signingMode: prepared.signingMode || null,
+              signingUrl: resetUrl || null,
+              browserFallbackToPlayUrl:
+                prepared.browserFallbackToPlayUrl === true,
+              fallbackNotice: String(prepared.fallbackNotice || "").trim() || null,
+              browserWalletMode,
+            }
           : current,
       );
     } catch (err) {
@@ -233,7 +278,7 @@ export default function NftsPage({ bridge }) {
       setResetModal((current) =>
         current?.item === item ? { ...current, preparing: false } : current,
       );
-      setResetError(message);
+      setResetError(formatResetErrorMessage(message));
     }
   };
 
@@ -241,6 +286,41 @@ export default function NftsPage({ bridge }) {
     if (resetBusy) return;
     setResetModal(null);
     setResetError(null);
+  };
+
+  const resetSigningUrl = () =>
+    String(resetModal?.signingUrl || resetModal?.bridgeUrl || "").trim();
+
+  const openResetSigningUrl = async () => {
+    const signingUrl = resetSigningUrl();
+    if (!signingUrl) return;
+    if (!bridge?.openExternal) {
+      setResetError("Browser signing link is not available in this build.");
+      return;
+    }
+    try {
+      await bridge.openExternal(signingUrl);
+    } catch (error) {
+      setResetError(String(error?.message || error));
+    }
+  };
+
+  const copyResetSigningUrl = async () => {
+    const signingUrl = resetSigningUrl();
+    if (!signingUrl) return;
+    if (bridge?.copyToClipboard) {
+      try {
+        await bridge.copyToClipboard(signingUrl);
+      } catch (error) {
+        setResetError(String(error?.message || error));
+      }
+      return;
+    }
+    try {
+      await navigator.clipboard?.writeText?.(signingUrl);
+    } catch (error) {
+      setResetError(String(error?.message || error));
+    }
   };
 
   const confirmResetCooldown = async () => {
@@ -257,6 +337,17 @@ export default function NftsPage({ bridge }) {
     setResetBusy(true);
     setResetError(null);
     try {
+      const signingUrl = resetSigningUrl();
+      if (signingUrl) {
+        await openResetSigningUrl();
+        setResetBusy(false);
+        return;
+      }
+      if (browserWalletMode) {
+        throw new Error(
+          "Browser wallet prepare did not return a signing URL.",
+        );
+      }
       const response = await bridge.resetNftCooldown({
         nftId,
         nftName: item.name || "NFT",
@@ -271,13 +362,38 @@ export default function NftsPage({ bridge }) {
         throw new Error(response?.error || "Cooldown reset failed.");
       }
       const reset = response.reset || null;
+      const resetUrl = String(reset?.signingUrl || reset?.bridgeUrl || "").trim();
+      if (resetUrl) {
+        setResetModal((current) =>
+          current
+            ? {
+                ...current,
+                signingUrl: resetUrl,
+                signingMode: reset.signingMode || current.signingMode || null,
+              }
+            : current,
+        );
+        if (bridge?.openExternal) await bridge.openExternal(resetUrl);
+        return;
+      }
+      if (browserWalletMode && reset?.pending) {
+        return;
+      }
       if (!reset?.ok || reset?.reset !== true) {
-        throw new Error(reset?.reason || "Cooldown reset did not complete.");
+        throw new Error(
+          formatResetErrorMessage({
+            reason: reset?.reason,
+            resetCost: reset?.resetCost,
+            maxPbp: reset?.maxPbp,
+            message: reset?.message,
+            error: reset?.error,
+          }) || "Cooldown reset did not complete.",
+        );
       }
       setResetModal(null);
       await load();
     } catch (err) {
-      setResetError(String(err?.message || err));
+      setResetError(formatResetErrorMessage(err?.message || err));
     } finally {
       setResetBusy(false);
     }
@@ -568,10 +684,44 @@ export default function NftsPage({ bridge }) {
               <span className="font-semibold text-white">
                 {resetModal.preparing
                   ? "checking cost..."
-                  : formatTokenAmount(resetModal.resetCost)}
+                  : Number.isFinite(Number(resetModal.resetCost))
+                    ? formatTokenAmount(resetModal.resetCost)
+                    : "on PbP"}
               </span>
               ?
             </div>
+            {resetSigningUrl() ? (
+              <div className="rounded-md border border-info/30 bg-info/10 p-3 text-xs text-slate-200 space-y-2">
+                <div>
+                  {resetModal.browserFallbackToPlayUrl
+                    ? resetModal.fallbackNotice ||
+                      "Open the PbP missions page and reset the cooldown there."
+                    : resetModal.signingMode === "manual_page"
+                      ? "Open the PbP missions page and complete the reset manually."
+                    : "This reset opens in your browser. Complete it on the PbP signing page."}
+                </div>
+                <div className="rounded-md border border-white/10 bg-black/20 p-2 break-all">
+                  {resetSigningUrl()}
+                </div>
+                <div className="flex justify-end gap-2">
+                  <button
+                    type="button"
+                    className="btn btn-clear btn-xs"
+                    onClick={() => void copyResetSigningUrl()}
+                  >
+                    Copy Link
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-clear btn-xs"
+                    onClick={() => void openResetSigningUrl()}
+                    disabled={resetBusy || resetModal.preparing}
+                  >
+                    Open in Browser
+                  </button>
+                </div>
+              </div>
+            ) : null}
             {resetError ? (
               <div className="rounded-md border border-error/40 bg-error/10 p-3 text-sm text-slate-100">
                 {resetError}
@@ -593,10 +743,18 @@ export default function NftsPage({ bridge }) {
                 disabled={
                   resetBusy ||
                   resetModal.preparing ||
-                  !Number.isFinite(Number(resetModal.resetCost))
+                  (browserWalletMode && !resetSigningUrl()) ||
+                  (!browserWalletMode &&
+                    !Number.isFinite(Number(resetModal.resetCost)))
                 }
               >
-                {resetBusy ? "Resetting..." : "Yes"}
+                {resetBusy
+                  ? resetSigningUrl()
+                    ? "Opening..."
+                    : "Resetting..."
+                  : resetSigningUrl()
+                    ? "Open in Browser"
+                    : "Yes"}
               </button>
             </div>
           </div>

@@ -52,6 +52,20 @@ function createChecksService(ctx, logger, mcp, services = {}) {
     return MISSION_PAGE_OPEN_COOLDOWN_MS_DEFAULT;
   }
 
+  function usesBrowserBridgeSigning() {
+    return ctx.signerMode === "dapp";
+  }
+
+  function preparedActionSigningArgs() {
+    if (usesBrowserBridgeSigning()) return { signingMode: "browser_bridge" };
+    return {
+      signingMode: "agent_managed",
+      ...(String(ctx.signerConfig?.walletAddress || "").trim()
+        ? { payerWallet: String(ctx.signerConfig.walletAddress).trim() }
+        : {}),
+    };
+  }
+
   const TARGET_UNLOCK_SLOT = 4;
   const SOLANA_RPC_URL = "https://api.mainnet-beta.solana.com";
   const PBP_MINT = "3f7wfg9yHLtGKvy75MmqsVT1ueTFoqyySQbusrX1YAQ4";
@@ -654,6 +668,83 @@ function createChecksService(ctx, logger, mcp, services = {}) {
     return assignResult?.structuredContent?.details || null;
   }
 
+  function browserBridgeUrlFromPrepared(prepared) {
+    const sc =
+      prepared?.structuredContent && typeof prepared.structuredContent === "object"
+        ? prepared.structuredContent
+        : {};
+    const seen = new Set();
+    const candidates = [
+      sc.signingBridgeUrl,
+      sc.signingUrl,
+      sc?.signingMethods?.browserBridge?.signingUrl,
+      sc?.signingMethods?.browserBridge?.url,
+    ];
+    const collectUrls = (value, path = "") => {
+      if (value === null || value === undefined) return;
+      if (typeof value === "string") {
+        const url = value.trim();
+        if (
+          /^https?:\/\//i.test(url) &&
+          /(sign|bridge|browser|wallet|transaction|tx)/i.test(path + url)
+        ) {
+          candidates.push(url);
+        }
+        const matches = value.match(/https?:\/\/[^\s"'<>]+/gi) || [];
+        for (const matched of matches) {
+          const clean = matched.replace(/[),.;]+$/, "");
+          if (/(sign|bridge|browser|wallet|transaction|tx)/i.test(path + clean)) {
+            candidates.push(clean);
+          }
+        }
+        return;
+      }
+      if (Array.isArray(value)) {
+        value.forEach((entry, index) => collectUrls(entry, `${path}.${index}`));
+        return;
+      }
+      if (typeof value !== "object" || seen.has(value)) return;
+      seen.add(value);
+      for (const [key, child] of Object.entries(value)) {
+        collectUrls(child, path ? `${path}.${key}` : key);
+      }
+    };
+    collectUrls(sc);
+    collectUrls(prepared);
+    for (const value of candidates) {
+      const url = String(value || "").trim();
+      if (/^https?:\/\//i.test(url)) return url;
+    }
+    const bridgePath = String(sc.signingBridgePath || "").trim();
+    if (bridgePath.startsWith("/")) {
+      return `https://pixelbypixel.studio${bridgePath}`;
+    }
+    const bridgeIdFallbacks = [
+      {
+        id: sc.missionRerollId,
+        path: "/mcp/sign-mission-reroll",
+        param: "missionRerollId",
+      },
+      {
+        id: sc.missionSwapId,
+        path: "/mcp/sign-mission-swap",
+        param: "missionSwapId",
+      },
+      {
+        id: sc.missionSlotUnlockId || sc.slotUnlockId || sc.unlockId,
+        path: "/mcp/sign-mission-slot-unlock",
+        param: "missionSlotUnlockId",
+      },
+    ];
+    for (const entry of bridgeIdFallbacks) {
+      const id = String(entry.id || "").trim();
+      if (id) {
+        return `https://pixelbypixel.studio${entry.path}?${entry.param}=${encodeURIComponent(id)}`;
+      }
+    }
+    return null;
+  }
+
   function extractSlotUnlockSummary(result) {
     const sc = result?.structuredContent || {};
     return sc.slotUnlockSummary || sc?.missions?.slotUnlockSummary || null;
@@ -819,6 +910,11 @@ function createChecksService(ctx, logger, mcp, services = {}) {
   function autoNftCooldownResetMaxPbp() {
     const raw = Number(ctx.config?.nftCooldownResetMaxPbp);
     return Number.isFinite(raw) && raw >= 0 ? raw : 20;
+  }
+
+  function uiNftCooldownResetMaxPbp() {
+    const raw = Number(ctx.signerConfig?.maxActionCost?.nft_cooldown_reset);
+    return Number.isFinite(raw) && raw >= 0 ? raw : 1000;
   }
 
   function autoNftCooldownResetProbeLimit() {
@@ -1351,16 +1447,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
       });
       const resetArgs = {
         nftId,
-        ...(ctx.signerMode === "dapp"
-          ? { signingMode: "browser_bridge" }
-          : {
-              signingMode: "agent_managed",
-              ...(String(ctx.signerConfig?.walletAddress || "").trim()
-                ? {
-                    payerWallet: String(ctx.signerConfig.walletAddress).trim(),
-                  }
-                : {}),
-            }),
+        ...preparedActionSigningArgs(),
       };
       logDebug("assign", "cooldown_reset_prepare_args", {
         reason,
@@ -1455,6 +1542,20 @@ function createChecksService(ctx, logger, mcp, services = {}) {
         });
         scheduleFundingWalletRefresh("cooldown_reset");
       }
+      if (usesBrowserBridgeSigning() && !actionResult?.submitted) {
+        const signingUrl =
+          actionResult?.signed?.signingUrl || browserBridgeUrlFromPrepared(prepared);
+        return {
+          ok: true,
+          attempted: true,
+          reset: false,
+          pending: true,
+          reason: "browser_signing_required",
+          nftId,
+          signingUrl,
+          bridgeUrl: signingUrl,
+        };
+      }
       logWithTimestamp(
         `[TIMING] reset submit ${source} ${missionName}: ${timingMs(submitStartedAt)}ms`,
       );
@@ -1522,7 +1623,19 @@ function createChecksService(ctx, logger, mcp, services = {}) {
       return { ok: false, ready: false, reason: "missing_nft_id" };
     }
     if (ctx.signerMode === "manual") {
-      return { ok: false, ready: false, reason: "manual_mode" };
+      return {
+        ok: true,
+        ready: true,
+        reason: "manual_mode",
+        nftId: resolvedNftId,
+        nftName: nftDisplayName(targetNft),
+        cooldownSeconds: nftCooldownSeconds(targetNft),
+        resetCost: null,
+        signingMode: "manual_page",
+        signingUrl: MISSION_PLAY_URL,
+        bridgeUrl: MISSION_PLAY_URL,
+        manualUrl: MISSION_PLAY_URL,
+      };
     }
     if (!signer) {
       return { ok: false, ready: false, reason: "missing_signer" };
@@ -1530,16 +1643,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
     signer.ensureMissionActionSupported("nft_cooldown_reset");
     const resetArgs = {
       nftId: resolvedNftId,
-      ...(ctx.signerMode === "dapp"
-        ? { signingMode: "browser_bridge" }
-        : {
-            signingMode: "agent_managed",
-            ...(String(ctx.signerConfig?.walletAddress || "").trim()
-              ? {
-                  payerWallet: String(ctx.signerConfig.walletAddress).trim(),
-                }
-              : {}),
-          }),
+      ...preparedActionSigningArgs(),
     };
     const prepared = await mcp.mcpToolCall(
       "prepare_nft_cooldown_reset",
@@ -1557,6 +1661,34 @@ function createChecksService(ctx, logger, mcp, services = {}) {
       };
     }
     const resetCost = Number(prepared?.structuredContent?.resetCost);
+    const signingUrl = usesBrowserBridgeSigning()
+      ? browserBridgeUrlFromPrepared(prepared)
+      : null;
+    if (usesBrowserBridgeSigning() && !signingUrl) {
+      logDebug("assign", "cooldown_reset_browser_url_missing", {
+        nftId: resolvedNftId,
+        signerMode: ctx.signerMode,
+        structuredContent: prepared?.structuredContent || null,
+        content: prepared?.content || null,
+      });
+      return {
+        ok: true,
+        ready: true,
+        reason: "missing_browser_signing_url",
+        nftId: resolvedNftId,
+        nftName: nftDisplayName(targetNft),
+        cooldownSeconds: nftCooldownSeconds(targetNft),
+        resetCost: Number.isFinite(resetCost) ? resetCost : null,
+        signingMode: "manual_page",
+        signingUrl: MISSION_PLAY_URL,
+        bridgeUrl: MISSION_PLAY_URL,
+        manualUrl: MISSION_PLAY_URL,
+        browserFallbackToPlayUrl: true,
+        fallbackNotice:
+          "Browser signing URL was not returned. Open the PbP missions page and reset the cooldown there.",
+        prepare: prepared,
+      };
+    }
     return {
       ok: true,
       ready: true,
@@ -1565,6 +1697,11 @@ function createChecksService(ctx, logger, mcp, services = {}) {
       nftName: nftDisplayName(targetNft),
       cooldownSeconds: nftCooldownSeconds(targetNft),
       resetCost: Number.isFinite(resetCost) ? resetCost : null,
+      signingMode: usesBrowserBridgeSigning()
+        ? "browser_bridge"
+        : "agent_managed",
+      signingUrl,
+      bridgeUrl: signingUrl,
       prepare: prepared,
     };
   }
@@ -1589,6 +1726,8 @@ function createChecksService(ctx, logger, mcp, services = {}) {
       missionName: "NFT page",
       missionId: null,
       nft: targetNft,
+      maxPbp: uiNftCooldownResetMaxPbp(),
+      source: "ui",
     });
     if (result?.reset) {
       await refreshMissionHeaderStats({ refreshNftCount: true });
@@ -1705,16 +1844,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
       });
       const unlockArgs = {
         slotNumber: targetSlotNumber,
-        ...(ctx.signerMode === "dapp"
-          ? { signingMode: "browser_bridge" }
-          : {
-              signingMode: "agent_managed",
-              ...(String(ctx.signerConfig?.walletAddress || "").trim()
-                ? {
-                    payerWallet: String(ctx.signerConfig.walletAddress).trim(),
-                  }
-                : {}),
-            }),
+        ...preparedActionSigningArgs(),
       };
       logDebug("assign", "slot_unlock_prepare_args", {
         reason,
@@ -1723,6 +1853,39 @@ function createChecksService(ctx, logger, mcp, services = {}) {
         args: unlockArgs,
       });
       const prepared = await mcp.mcpToolCall("unlock_mission_slot", unlockArgs);
+      if (usesBrowserBridgeSigning()) {
+        const signingUrl = browserBridgeUrlFromPrepared(prepared);
+        if (!signingUrl) {
+          logDebug("assign", "slot_unlock_browser_url_missing", {
+            reason,
+            targetSlotNumber,
+            signerMode: ctx.signerMode,
+            structuredContent: prepared?.structuredContent || null,
+            content: prepared?.content || null,
+          });
+          return {
+            ok: false,
+            attempted: true,
+            unlocked: false,
+            reason: "missing_browser_signing_url",
+            slotNumber: targetSlotNumber,
+            signingMode: "browser_bridge",
+            prepare: prepared,
+          };
+        }
+        return {
+          ok: true,
+          attempted: true,
+          unlocked: false,
+          pending: true,
+          reason: "browser_signing_required",
+          slotNumber: targetSlotNumber,
+          signingMode: "browser_bridge",
+          signingUrl,
+          bridgeUrl: signingUrl,
+          prepare: prepared,
+        };
+      }
       const actionResult = await executePreparedMissionAction({
         actionName: "mission_slot_unlock",
         prepareResult: prepared,
@@ -1741,6 +1904,20 @@ function createChecksService(ctx, logger, mcp, services = {}) {
           { actionName: "mission_slot_unlock" },
         );
         scheduleFundingWalletRefresh("mission_slot_unlock");
+      }
+      if (usesBrowserBridgeSigning() && !actionResult?.submitted) {
+        const signingUrl =
+          actionResult?.signed?.signingUrl || browserBridgeUrlFromPrepared(prepared);
+        return {
+          ok: true,
+          attempted: true,
+          unlocked: false,
+          pending: true,
+          reason: "browser_signing_required",
+          slotNumber: targetSlotNumber,
+          signingUrl,
+          bridgeUrl: signingUrl,
+        };
       }
       logWithTimestamp(
         `[UNLOCK] ✅ Mission slot ${targetSlotNumber} unlocked.`,
@@ -1777,6 +1954,30 @@ function createChecksService(ctx, logger, mcp, services = {}) {
 
   async function prepareUnlockSlot4({ reason = "ui_manual_unlock" } = {}) {
     const missionsResult = await mcp.mcpToolCall("get_user_missions", {});
+    if (ctx.signerMode === "manual") {
+      const summary = extractSlotUnlockSummary(missionsResult);
+      const canUnlockMore = summary?.canUnlockMore === true;
+      if (!canUnlockMore) {
+        return {
+          ok: false,
+          attempted: false,
+          unlocked: false,
+          reason: "not_unlockable",
+        };
+      }
+      return {
+        ok: true,
+        attempted: true,
+        unlocked: false,
+        pending: true,
+        reason: "manual_mode",
+        slotNumber: TARGET_UNLOCK_SLOT,
+        signingMode: "manual_page",
+        signingUrl: MISSION_PLAY_URL,
+        bridgeUrl: MISSION_PLAY_URL,
+        manualUrl: MISSION_PLAY_URL,
+      };
+    }
     const result = await tryUnlockNextMissionSlot({ reason, missionsResult });
     if (result?.unlocked) {
       await refreshMissionHeaderStats({ refreshNftCount: true });
@@ -1799,7 +2000,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
     );
   }
 
-  function applyTargetMissionForSlot(slot, selectedName, missions = []) {
+  function buildTargetMissionList(slot, selectedName, missions = []) {
     const slotNumber = Number(slot);
     const currentTargets = Array.isArray(ctx.config.targetMissions)
       ? ctx.config.targetMissions.slice()
@@ -1816,9 +2017,13 @@ function createChecksService(ctx, logger, mcp, services = {}) {
           : configured || (assignedName ? assignedName : "");
       if (value) next[i - 1] = value;
     }
-    const cleaned = next
+    return next
       .map((name) => String(name || "").trim())
       .filter(Boolean);
+  }
+
+  function applyTargetMissionForSlot(slot, selectedName, missions = []) {
+    const cleaned = buildTargetMissionList(slot, selectedName, missions);
     ctx.config.targetMissions = Array.from(new Set(cleaned));
     flushConfig(ctx, logDebug);
     logWithTimestamp(
@@ -1832,6 +2037,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
     slot,
     missionName: selectedMissionName = "",
     missionId: selectedMissionId = "",
+    prepareOnly = false,
   } = {}) {
     const slotNumber = Number(slot);
     if (!Number.isFinite(slotNumber) || slotNumber < 1 || slotNumber > 4) {
@@ -1866,7 +2072,9 @@ function createChecksService(ctx, logger, mcp, services = {}) {
       missions.find((mission) => Number(mission?.slot) === slotNumber) || null;
     const currentAssignedMissionId = assignedMissionId(currentMission);
     const currentCatalogMissionId = catalogMissionId(currentMission);
-    const targets = applyTargetMissionForSlot(slotNumber, selectedName, missions);
+    const previewTargets = Array.from(
+      new Set(buildTargetMissionList(slotNumber, selectedName, missions)),
+    );
 
     if (currentCatalogMissionId && currentCatalogMissionId === chosenMissionId) {
       return {
@@ -1874,11 +2082,27 @@ function createChecksService(ctx, logger, mcp, services = {}) {
         changed: false,
         reason: "already_selected",
         slot: slotNumber,
-        targetMissions: targets,
+        targetMissions: previewTargets,
       };
     }
 
     if (currentAssignedMissionId) {
+      if (ctx.signerMode === "manual") {
+        return {
+          ok: true,
+          changed: false,
+          swapped: false,
+          pending: true,
+          reason: "manual_mode",
+          slot: slotNumber,
+          missionName: selectedName,
+          targetMissions: previewTargets,
+          signingMode: "manual_page",
+          signingUrl: MISSION_PLAY_URL,
+          bridgeUrl: MISSION_PLAY_URL,
+          manualUrl: MISSION_PLAY_URL,
+        };
+      }
       if (!signer) {
         return { ok: false, reason: "missing_signer", slot: slotNumber };
       }
@@ -1886,21 +2110,61 @@ function createChecksService(ctx, logger, mcp, services = {}) {
       const swapArgs = {
         assignedMissionId: currentAssignedMissionId,
         chosenMissionId,
-        ...(ctx.signerMode === "dapp"
-          ? { signingMode: "browser_bridge" }
-          : {
-              signingMode: "agent_managed",
-              ...(String(ctx.signerConfig?.walletAddress || "").trim()
-                ? {
-                    payerWallet: String(ctx.signerConfig.walletAddress).trim(),
-                  }
-                : {}),
-            }),
+        ...preparedActionSigningArgs(),
       };
       logWithTimestamp(
         `[MISSION] 🔁 Changing slot ${slotNumber}: ${missionName(currentMission) || "current mission"} → ${selectedName}`,
       );
       const prepared = await mcp.mcpToolCall("prepare_mission_swap", swapArgs);
+      if (usesBrowserBridgeSigning()) {
+        const signingUrl = browserBridgeUrlFromPrepared(prepared);
+        if (!signingUrl) {
+          logDebug("assign", "mission_swap_browser_url_missing", {
+            slot: slotNumber,
+            fromMissionId: currentCatalogMissionId || null,
+            toMissionId: chosenMissionId,
+            signerMode: ctx.signerMode,
+            structuredContent: prepared?.structuredContent || null,
+            content: prepared?.content || null,
+          });
+          return {
+            ok: false,
+            changed: false,
+            swapped: false,
+            reason: "missing_browser_signing_url",
+            slot: slotNumber,
+            missionName: selectedName,
+            targetMissions: previewTargets,
+            signingMode: "browser_bridge",
+            prepare: prepared,
+          };
+        }
+        return {
+          ok: true,
+          changed: false,
+          swapped: false,
+          pending: true,
+          reason: "browser_signing_required",
+          slot: slotNumber,
+          missionName: selectedName,
+          targetMissions: previewTargets,
+          signingMode: "browser_bridge",
+          signingUrl,
+          bridgeUrl: signingUrl,
+          prepare: prepared,
+        };
+      }
+      if (prepareOnly) {
+        return {
+          ok: true,
+          changed: false,
+          swapped: false,
+          previewOnly: true,
+          slot: slotNumber,
+          missionName: selectedName,
+          targetMissions: previewTargets,
+        };
+      }
       const actionResult = await executePreparedMissionAction({
         actionName: "mission_swap",
         prepareResult: prepared,
@@ -1920,6 +2184,23 @@ function createChecksService(ctx, logger, mcp, services = {}) {
         );
         scheduleFundingWalletRefresh("mission_swap");
       }
+      if (usesBrowserBridgeSigning() && !actionResult?.submitted) {
+        const signingUrl =
+          actionResult?.signed?.signingUrl || browserBridgeUrlFromPrepared(prepared);
+        return {
+          ok: true,
+        changed: false,
+        swapped: false,
+        pending: true,
+        reason: "browser_signing_required",
+        slot: slotNumber,
+        missionName: selectedName,
+        targetMissions: previewTargets,
+        signingUrl,
+        bridgeUrl: signingUrl,
+      };
+    }
+      const targets = applyTargetMissionForSlot(slotNumber, selectedName, missions);
       await refreshMissionHeaderStats({ refreshNftCount: true });
       return {
         ok: true,
@@ -1935,6 +2216,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
       reason: "ui_mission_selection",
       missionsResult,
     });
+    const targets = applyTargetMissionForSlot(slotNumber, selectedName, missions);
     await refreshMissionHeaderStats({ refreshNftCount: true });
     return {
       ok: true,
@@ -1945,6 +2227,13 @@ function createChecksService(ctx, logger, mcp, services = {}) {
       missionName: selectedName,
       targetMissions: targets,
     };
+  }
+
+  async function previewMissionSelection(payload = {}) {
+    return await applyMissionSelection({
+      ...payload,
+      prepareOnly: true,
+    });
   }
 
   function configuredTargetEntries() {
@@ -2852,17 +3141,16 @@ function createChecksService(ctx, logger, mcp, services = {}) {
                 missionName: name,
                 missionId: id,
                 listingId: option.listingId,
-                signingMode:
-                  ctx.signerMode === "dapp"
-                    ? "browser_bridge"
-                    : "agent_managed",
+                signingMode: usesBrowserBridgeSigning()
+                  ? "browser_bridge"
+                  : "agent_managed",
                 attempt: index + 1,
                 maxAttempts: assignmentOptions.length,
               });
               const leaseStartedAt = Date.now();
               let leaseResult = await mcp.mcpToolCall("start_rental_lease", {
                 listingId: option.listingId,
-                ...(ctx.signerMode === "dapp"
+                ...(usesBrowserBridgeSigning()
                   ? { signingMode: "browser_bridge" }
                   : { signingMode: "agent_managed" }),
               });
@@ -2901,7 +3189,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
                     const retryLeaseStartedAt = Date.now();
                     leaseResult = await mcp.mcpToolCall("start_rental_lease", {
                       listingId: option.listingId,
-                      ...(ctx.signerMode === "dapp"
+                      ...(usesBrowserBridgeSigning()
                         ? { signingMode: "browser_bridge" }
                         : { signingMode: "agent_managed" }),
                     });
@@ -3031,7 +3319,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
                       nftSource: "rental",
                     }
                   : {}),
-                ...(ctx.signerMode === "dapp"
+                ...(usesBrowserBridgeSigning()
                   ? { signingMode: "browser_bridge" }
                   : { signingMode: "agent_managed" }),
               },
@@ -3623,6 +3911,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
     stopRentalFastRefresh,
     prepareUnlockSlot4,
     applyMissionSelection,
+    previewMissionSelection,
     prepareCooldownResetNftFromUi,
     resetCooldownNftFromUi,
     runInitialChecks,
