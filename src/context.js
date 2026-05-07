@@ -8,7 +8,7 @@ const {
   applyRuntimeDefaults,
 } = require("./runtime-defaults");
 
-const APP_VERSION = "3.2.2";
+const { version: APP_VERSION } = require("../package.json");
 const APP_NAME = "missions-v3-mcp";
 const DEV_MODE = detectNodeDevMode();
 const DEFAULT_SIGNER_MODE = "app_wallet";

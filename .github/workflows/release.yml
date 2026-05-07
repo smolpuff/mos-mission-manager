@@ -26,6 +26,15 @@ jobs:
       - name: Install dependencies
         run: npm install
 
+      - name: Validate tag matches package version
+        shell: pwsh
+        run: |
+          $pkgVersion = node -p "require('./package.json').version"
+          $expectedTag = "v$pkgVersion"
+          if ("${{ github.ref_name }}" -ne $expectedTag) {
+            throw "Tag/version mismatch. tag=${{ github.ref_name }} package.json=$pkgVersion expected=$expectedTag"
+          }
+
       - name: Build Windows desktop app
         run: |
           npm run desktop:build
@@ -68,6 +77,15 @@ jobs:
 
       - name: Install dependencies
         run: npm install
+
+      - name: Validate tag matches package version
+        run: |
+          PKG_VERSION="$(node -p "require('./package.json').version")"
+          EXPECTED_TAG="v${PKG_VERSION}"
+          if [ "${{ github.ref_name }}" != "$EXPECTED_TAG" ]; then
+            echo "Tag/version mismatch. tag=${{ github.ref_name }} package.json=${PKG_VERSION} expected=${EXPECTED_TAG}"
+            exit 1
+          fi
 
       - name: Build macOS desktop app
         run: |
