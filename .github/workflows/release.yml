@@ -61,7 +61,7 @@ jobs:
         run: |
           $pkgVersion = node -p "require('./package.json').version"
           $expected = "missions-v3-mcp-$pkgVersion-win64.zip"
-          $zip = Get-ChildItem -Path release -File -Filter "missions-v3-mcp-*-win*.zip" |
+          $zip = Get-ChildItem -Path release -File -Filter "missions-v3-mcp-*-win.zip" |
             Sort-Object LastWriteTime -Descending |
             Select-Object -First 1
           if (-not $zip) {
