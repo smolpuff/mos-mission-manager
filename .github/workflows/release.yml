@@ -50,7 +50,7 @@ jobs:
           name: ${{ github.ref_name }}
           generate_release_notes: true
           files: |
-            release/missions-v3-mcp*.zip
+            release/missions-v3-mcp-*-win.zip
 
   build-mac:
     name: Build macOS
