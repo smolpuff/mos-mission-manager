@@ -119,7 +119,7 @@ export default function HeaderUser({
             </div>
           </div>
         ) : null}
-        {debug && (
+        {/* {debug && (
           <div className="debug-info text-xs opacity-80 flex gap-3">
             <span>
               {lockLabel}{" "}
@@ -129,7 +129,7 @@ export default function HeaderUser({
               {status.signerWallet ? `wallet: ${status.signerWallet}` : ""}
             </span>
           </div>
-        )}
+        )} */}
       </div>
       <div className="flex  flex-col h-full right text-xs w-full text-right place-content-center-safe">
         <div className="flex items-center justify-end gap-2">
@@ -156,7 +156,7 @@ export default function HeaderUser({
             </button>
           ) : null}
         </div>
-        {debug && <span className="pid-label">PID {status.pid ?? "none"}</span>}
+        {/* {debug && <span className="pid-label">PID {status.pid ?? "none"}</span>} */}
       </div>
     </section>
   );

@@ -31,7 +31,6 @@ function createWatchService(
   );
   const WATCH_MAX_CLAIMS = 4;
   const WATCH_FALLBACK_CLAIMS = true;
-  const WATCH_MIN_CYCLE_SECONDS = ctx.runtimeDefaults?.watchMinCycleSeconds || 30;
   const RESET_PROMPT_REOPEN_COOLDOWN_MS = 60_000;
   const DEFAULT_SESSION_REWARD_TOTALS = { pbp: 0, tc: 0, cc: 0 };
   const DEFAULT_SESSION_SPEND_TOTALS = { pbp: 0, tc: 0, cc: 0 };
@@ -42,6 +41,10 @@ function createWatchService(
   let walletRefreshPendingReason = null;
   let currentWalletSummaryRefreshTimer = null;
   let currentWalletSummaryRefreshPendingReason = null;
+
+  function watchMinCycleSeconds() {
+    return ctx.runtimeDefaults?.watchMinCycleSeconds || 30;
+  }
 
   function missionPageCooldownMs() {
     const sec = Number(ctx.config?.missionPageOpenCooldownSeconds);
@@ -640,6 +643,7 @@ function createWatchService(
   }
 
   function watchConfig() {
+    const minCycleSeconds = watchMinCycleSeconds();
     const maxLimitSeconds = ctx.runtimeDefaults?.watchMaxLimitSeconds || 600;
     const configuredPoll = Number(ctx.config.watchPollIntervalSeconds);
     const rawPollIntervalSeconds =
@@ -648,20 +652,20 @@ function createWatchService(
         : ctx.runtimeDefaults?.watchDefaultPollSeconds || 45;
     // Server-facing poll interval: keep this conservative by default.
     const pollIntervalSeconds = Math.max(
-      WATCH_MIN_CYCLE_SECONDS,
+      minCycleSeconds,
       Math.floor(rawPollIntervalSeconds),
     );
     const maxClaims = WATCH_MAX_CLAIMS;
     const fallbackClaims = WATCH_FALLBACK_CLAIMS;
     const configuredCycleSeconds = Number(ctx.config.watchCycleSeconds);
     const derivedCycleSeconds = Math.max(
-      WATCH_MIN_CYCLE_SECONDS,
+      minCycleSeconds,
       Math.ceil(pollIntervalSeconds),
     );
     const watchSeconds =
       Number.isFinite(configuredCycleSeconds) && configuredCycleSeconds > 0
         ? Math.max(
-            WATCH_MIN_CYCLE_SECONDS,
+            minCycleSeconds,
             Math.min(maxLimitSeconds, configuredCycleSeconds),
           )
         : Math.min(maxLimitSeconds, derivedCycleSeconds);
@@ -1890,7 +1894,7 @@ function createWatchService(
       Number.isFinite(clientConfiguredPollSeconds) &&
       clientConfiguredPollSeconds > 0
         ? Math.max(
-            WATCH_MIN_CYCLE_SECONDS,
+            watchMinCycleSeconds(),
             Math.floor(clientConfiguredPollSeconds),
           )
         : 0;

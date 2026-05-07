@@ -6,9 +6,9 @@ v2-missions.js
 data/
 binaries/
 scripts/
-newtodo.md
+releases/
 config.json.bak
-
+DEV_DEBUG_AUDIT.md
 
 # macOS junk
 .DS_Store

@@ -3,6 +3,11 @@
 const fs = require("fs");
 const readline = require("readline");
 const { createManualApprovalService } = require("./manual-approval");
+const {
+  NORMAL_DEFAULTS,
+  DEV_DEFAULTS,
+  applyRuntimeDefaults,
+} = require("./runtime-defaults");
 
 function createCommandHandler(ctx, logger, actions, configApi, services = {}) {
   const { logWithTimestamp, clearLogBuffer } = logger;
@@ -57,7 +62,7 @@ function createCommandHandler(ctx, logger, actions, configApi, services = {}) {
 
   function showHelp() {
     logWithTimestamp(
-      "[HELP] h/help, clear, status, login, logout, check, c, r, reset20, 20r [on|off], mm [off|on|<level>], pause, resume, q",
+      "[HELP] h/help, clear, status, login, logout, check, c, r, reset20, 20r [on|off], mm [off|on|<level>], debug [on|off], pause, resume, q",
     );
     logWithTimestamp(
       "[HELP] signer [status|doctor|setup|create|reveal|app_wallet|manual|dapp|import [path-or-key]|remove|unlock|lock]",
@@ -83,6 +88,30 @@ function createCommandHandler(ctx, logger, actions, configApi, services = {}) {
     try {
       await refreshFundingWalletSummary();
     } catch {}
+  }
+
+  function logDebugToggleSummary(enabled) {
+    const defaults = ctx.runtimeDefaults || applyRuntimeDefaults(ctx);
+    const baseline = NORMAL_DEFAULTS;
+    const tuned = DEV_DEFAULTS;
+    logWithTimestamp(
+      `[DEBUG] Debug mode ${enabled ? "enabled" : "disabled"}.`,
+    );
+    logWithTimestamp(
+      `[DEBUG] runtimeDefaults: missionResetLevel ${baseline.missionResetLevel} -> ${defaults.missionResetLevel}, rentalFastRefreshTickMs ${baseline.rentalFastRefreshTickMs} -> ${defaults.rentalFastRefreshTickMs}, rentalBatchLimit ${baseline.rentalBatchLimit} -> ${defaults.rentalBatchLimit}, watchMinCycleSeconds ${baseline.watchMinCycleSeconds} -> ${defaults.watchMinCycleSeconds}, watchDefaultPollSeconds ${baseline.watchDefaultPollSeconds} -> ${defaults.watchDefaultPollSeconds}`,
+    );
+    logWithTimestamp(
+      `[DEBUG] watcher behavior: live mission polling=${enabled ? "enabled" : "disabled unless separately configured"}, verbose debug logs=${enabled ? "enabled" : "disabled"}, startup FX=${enabled ? "disabled" : "enabled"}`,
+    );
+    logWithTimestamp(
+      `[DEBUG] auth behavior: startup interactive login=${enabled ? "enabled when token is missing" : "normal token-first flow"}, browser login prompts=${enabled ? "enabled" : "disabled unless interactiveAuth is enabled"}`,
+    );
+    logWithTimestamp(
+      `[DEBUG] auto NFT cooldown reset gate: debug=${enabled}, missionMode=${ctx.missionModeEnabled === true || ctx.config?.missionModeEnabled === true}, nftCooldownResetEnabled=${ctx.nftCooldownResetEnabled === true || ctx.config?.nftCooldownResetEnabled === true}`,
+    );
+    logWithTimestamp(
+      `[DEBUG] dev-equivalent defaults are now ${enabled ? "active" : "inactive"}; target dev values are missionResetLevel=${tuned.missionResetLevel}, rentalFastRefreshTickMs=${tuned.rentalFastRefreshTickMs}, rentalBatchLimit=${tuned.rentalBatchLimit}, watchMinCycleSeconds=${tuned.watchMinCycleSeconds}, watchDefaultPollSeconds=${tuned.watchDefaultPollSeconds}`,
+    );
   }
 
   function setupCommandHandler() {
@@ -395,6 +424,37 @@ function createCommandHandler(ctx, logger, actions, configApi, services = {}) {
         void startWatchLoop();
       },
       status: async () => showStatus(),
+      debug: async (raw) => {
+        const parts = String(raw || "")
+          .trim()
+          .split(/\s+/)
+          .filter(Boolean);
+        const arg = String(parts[1] || "").trim().toLowerCase();
+        if (!arg) {
+          logWithTimestamp(
+            `[DEBUG] Debug mode is ${ctx.debugMode ? "enabled" : "disabled"}.`,
+          );
+          return;
+        }
+        if (arg !== "on" && arg !== "off") {
+          logWithTimestamp("Usage: debug [on|off]");
+          return;
+        }
+        const nextDebugMode = arg === "on";
+        ctx.debugMode = nextDebugMode;
+        ctx.config.debugMode = nextDebugMode;
+        applyRuntimeDefaults(ctx);
+        if (
+          typeof ctx.config.missionResetLevel !== "string" ||
+          !ctx.config.missionResetLevel.trim()
+        ) {
+          ctx.currentMissionResetLevel =
+            ctx.runtimeDefaults?.missionResetLevel ||
+            ctx.currentMissionResetLevel;
+        }
+        flushConfig(ctx, logger.logDebug);
+        logDebugToggleSummary(nextDebugMode);
+      },
       signer: async (raw) => {
         if (!signer) {
           logWithTimestamp("[SIGNER] ❌ Signer service unavailable.");
@@ -601,6 +661,10 @@ function createCommandHandler(ctx, logger, actions, configApi, services = {}) {
       }
       if (cmd === "reset20") {
         await handlers.reset20();
+        return;
+      }
+      if (cmd === "debug" || cmd.startsWith("debug ")) {
+        await handlers.debug(raw);
         return;
       }
       if (cmd === "exit") {

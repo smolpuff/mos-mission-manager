@@ -15,7 +15,6 @@ import solIcon from "../img/icon-sm__sol.svg";
 import ccIcon from "../img/icon_cc.webp";
 import tcIcon from "../img/icon_tc.webp";
 import backImg from "../img/back.png";
-const debug = false;
 
 const quickCommands = [
   "login",
@@ -240,7 +239,10 @@ function SlideNumberFormatted({ value, format }) {
 
 function ControlView() {
   const { bridge, status, logs, lastEvent } = useBackendState();
-  const desktopDevMode = bridge?.desktopDevMode === true;
+  const [debugEnabled, setDebugEnabled] = useState(
+    status?.debugMode === true,
+  );
+  const debug = debugEnabled;
   const [currentPage, setCurrentPage] = useState("missions");
   const [isCliActive, setIsCliActive] = useState(false);
   const [fundingSource, setFundingSource] = useState("browser");
@@ -361,6 +363,12 @@ function ControlView() {
   }, [status.missionModeEnabled]);
 
   useEffect(() => {
+    if (typeof status.debugMode === "boolean") {
+      setDebugEnabled(status.debugMode);
+    }
+  }, [status.debugMode]);
+
+  useEffect(() => {
     if (typeof status.nftCooldownResetEnabled === "boolean") {
       setNftResetEnabled(status.nftCooldownResetEnabled);
     }
@@ -381,6 +389,9 @@ function ControlView() {
       const config = response?.config || {};
       if (typeof config.level20ResetEnabled === "boolean") {
         setResetEnabled(config.level20ResetEnabled);
+      }
+      if (typeof config.debugMode === "boolean") {
+        setDebugEnabled(config.debugMode);
       }
       if (typeof config.enableRentals === "boolean") {
         setRentalsEnabled(config.enableRentals);
@@ -3450,14 +3461,14 @@ function ControlView() {
                         </svg>
                       </div>
                     </button>
-                    {desktopDevMode ? (
+                    {debug ? (
                       <>
                         <button
                           className="h-full  items-center justify-center opacity-30  "
                           type="button"
                           disabled
                         ></button>
-                        {debug && "hiasdasds"}
+
                         <div
                           className={`{h-full w-full  !p-0 items-center  ${!isMissionMode ? "grayscale opacity-60" : ""}`}
                         >

@@ -2,6 +2,7 @@
 
 const fs = require("fs");
 const path = require("path");
+const { applyRuntimeDefaults } = require("./runtime-defaults");
 
 const SAVE_DEBOUNCE_MS = 350;
 const pendingSaves = new WeakMap();
@@ -308,13 +309,6 @@ function loadConfig(ctx, logWithTimestamp) {
   if (typeof ctx.config.rentalFastRefreshEnabled !== "boolean") {
     ctx.config.rentalFastRefreshEnabled = false;
   }
-  const rentalFastRefreshMinMs =
-    ctx.runtimeDefaults?.rentalFastRefreshTickMs || 15000;
-  const rentalFastRefreshTickMs = Number(ctx.config.rentalFastRefreshTickMs);
-  ctx.config.rentalFastRefreshTickMs =
-    Number.isFinite(rentalFastRefreshTickMs) && rentalFastRefreshTickMs > 0
-      ? Math.max(rentalFastRefreshMinMs, Math.floor(rentalFastRefreshTickMs))
-      : rentalFastRefreshMinMs;
   if (typeof ctx.config.missionResetLevel === "string") {
     ctx.currentMissionResetLevel = ctx.config.missionResetLevel;
   }
@@ -358,6 +352,21 @@ function loadConfig(ctx, logWithTimestamp) {
     !process.argv.includes("--debug")
   ) {
     ctx.debugMode = ctx.config.debugMode;
+  }
+  applyRuntimeDefaults(ctx);
+  const rentalFastRefreshMinMs =
+    ctx.runtimeDefaults?.rentalFastRefreshTickMs || 15000;
+  const rentalFastRefreshTickMs = Number(ctx.config.rentalFastRefreshTickMs);
+  ctx.config.rentalFastRefreshTickMs =
+    Number.isFinite(rentalFastRefreshTickMs) && rentalFastRefreshTickMs > 0
+      ? Math.max(rentalFastRefreshMinMs, Math.floor(rentalFastRefreshTickMs))
+      : rentalFastRefreshMinMs;
+  if (
+    typeof ctx.config.missionResetLevel !== "string" ||
+    !ctx.config.missionResetLevel.trim()
+  ) {
+    ctx.currentMissionResetLevel =
+      ctx.runtimeDefaults?.missionResetLevel || ctx.currentMissionResetLevel;
   }
   ctx.config.signerMode = ctx.signerMode;
 }

@@ -28,7 +28,11 @@ const {
 const {
   computeGuiMissionSlots: computeGuiMissionSlotsShared,
 } = require("../src/missions/gui-slots");
-const { runtimeDefaults } = require("../src/runtime-defaults");
+const {
+  NORMAL_DEFAULTS,
+  DEV_DEFAULTS,
+  runtimeDefaultsForFlags,
+} = require("../src/runtime-defaults");
 
 const ROOT_DIR = path.resolve(__dirname, "..");
 const RENDERER_DEV_URL =
@@ -56,8 +60,11 @@ if (process.platform === "win32") {
   } catch {}
 }
 
-function defaultMissionResetLevel() {
-  return runtimeDefaults(isDesktopDevMode()).missionResetLevel;
+function defaultMissionResetLevelForConfig(config = {}) {
+  return runtimeDefaultsForFlags({
+    debugMode: config?.debugMode === true,
+    devMode: isDesktopDevMode(),
+  }).missionResetLevel;
 }
 
 function desktopWindowFrameOptions() {
@@ -128,6 +135,7 @@ const backendStatus = {
   defaultMissionResetLevel: null,
   level20ResetEnabled: null,
   missionModeEnabled: null,
+  debugMode: null,
   nftCooldownResetEnabled: null,
   nftCooldownResetMaxPbp: null,
   currentMissionResetLevel: null,
@@ -489,6 +497,10 @@ async function bootstrapStartupMissionSlots() {
         whoInfo.display_name || whoInfo.displayName || whoInfo.username || null;
       backendStatus.currentUserWalletId =
         whoInfo.wallet_id || whoInfo.walletId || null;
+      syncDesktopTargetMissionsFromAssignedMissions(
+        missionList,
+        "Startup mission sync",
+      );
       backendStatus.guiMissionSlots = computeGuiMissionSlotsShared(missionList, {
         missionNftByAccount: nftByAccount,
         assignedNftMetadataByAccount: nftByAccount,
@@ -876,6 +888,34 @@ function applyDesktopConfigPatch(patch = {}) {
   return next;
 }
 
+function syncDesktopTargetMissionsFromAssignedMissions(
+  missions = [],
+  source = "startup",
+) {
+  const missionList = Array.isArray(missions) ? missions : [];
+  const nextTargets = [];
+  for (let i = 1; i <= 4; i += 1) {
+    const mission =
+      missionList.find((entry) => Number(entry?.slot) === i) || null;
+    const name = String(mission?.name || mission?.missionName || "").trim();
+    if (name) nextTargets.push(name);
+  }
+  const uniqueTargets = Array.from(new Set(nextTargets));
+  if (uniqueTargets.length === 0) return [];
+  const currentConfig = readDesktopConfig();
+  const currentTargets = Array.isArray(currentConfig?.targetMissions)
+    ? currentConfig.targetMissions
+        .map((name) => String(name || "").trim())
+        .filter(Boolean)
+    : [];
+  if (JSON.stringify(currentTargets) === JSON.stringify(uniqueTargets)) {
+    return uniqueTargets;
+  }
+  applyDesktopConfigPatch({ targetMissions: uniqueTargets });
+  pushSystemLog(`${source}: synced target missions -> ${uniqueTargets.join(", ")}`);
+  return uniqueTargets;
+}
+
 function normalizedDesktopSignerMode(value) {
   const mode = String(value || "").trim();
   if (mode === "browser_wallet") return "dapp";
@@ -890,7 +930,8 @@ function hydrateBackendStatusFromConfig() {
   const config = readDesktopConfig();
   backendStatus.analytics = loadAnalytics();
   beginAnalyticsSession({ force: true });
-  backendStatus.defaultMissionResetLevel = defaultMissionResetLevel();
+  backendStatus.defaultMissionResetLevel = defaultMissionResetLevelForConfig(config);
+  backendStatus.debugMode = config.debugMode === true;
   if (typeof config.level20ResetEnabled === "boolean") {
     backendStatus.level20ResetEnabled = config.level20ResetEnabled;
   }
@@ -913,10 +954,10 @@ function hydrateBackendStatusFromConfig() {
     backendStatus.currentMissionResetLevel = config.missionResetLevel;
   }
   if (!backendStatus.currentMissionResetLevel) {
-    backendStatus.currentMissionResetLevel = defaultMissionResetLevel();
+    backendStatus.currentMissionResetLevel = defaultMissionResetLevelForConfig(config);
   }
   backendStatus.currentMode = backendStatus.missionModeEnabled
-    ? `mission-${backendStatus.currentMissionResetLevel || defaultMissionResetLevel()}`
+    ? `mission-${backendStatus.currentMissionResetLevel || defaultMissionResetLevelForConfig(config)}`
     : "normal";
 }
 
@@ -1676,6 +1717,7 @@ function startBackend() {
   }
 
   logHistory = [];
+  const currentConfig = readDesktopConfig();
   backend = fork(path.join(ROOT_DIR, "app.js"), ["--plain-output"], {
     cwd: getBackendWorkingDirectory(),
     env: {
@@ -1684,7 +1726,7 @@ function startBackend() {
       PBP_GUI_BRIDGE: "1",
       PBP_DEV_MODE: isDesktopDevMode() ? "1" : "0",
       PBP_CONFIG_DIR: getBackendWorkingDirectory(),
-      PBP_DEFAULT_MISSION_RESET_LEVEL: defaultMissionResetLevel(),
+      PBP_DEFAULT_MISSION_RESET_LEVEL: defaultMissionResetLevelForConfig(currentConfig),
       FORCE_COLOR: "0",
     },
     silent: true,
@@ -1891,6 +1933,12 @@ function parseStoppedModeCommand(command) {
     return { type: "invalidMm" };
   }
 
+  if (cmd === "debug") {
+    if (parts.length === 1) return { type: "debug_status" };
+    if (arg === "on" || arg === "off") return { type: "debug", mode: arg };
+    return { type: "invalidDebug" };
+  }
+
   return { type: "other" };
 }
 
@@ -1924,9 +1972,13 @@ function applyStoppedModeConfig(parsed) {
       : current.level20ResetEnabled === true;
     if (nextMissionEnabled && typeof patch.missionResetLevel !== "string") {
       patch.missionResetLevel = String(
-        current.missionResetLevel || defaultMissionResetLevel(),
+        current.missionResetLevel || defaultMissionResetLevelForConfig(current),
       );
     }
+  }
+
+  if (parsed.type === "debug") {
+    patch.debugMode = parsed.mode === "on";
   }
 
   const next = applyDesktopConfigPatch(patch);
@@ -1936,13 +1988,40 @@ function applyStoppedModeConfig(parsed) {
   if (typeof next.missionModeEnabled === "boolean") {
     backendStatus.missionModeEnabled = next.missionModeEnabled;
   }
+  if (typeof next.debugMode === "boolean") {
+    backendStatus.debugMode = next.debugMode;
+  }
+  backendStatus.defaultMissionResetLevel = defaultMissionResetLevelForConfig(next);
+  if (
+    patch.debugMode !== undefined &&
+    (typeof next.missionResetLevel !== "string" || !next.missionResetLevel.trim())
+  ) {
+    backendStatus.currentMissionResetLevel = backendStatus.defaultMissionResetLevel;
+  }
   if (typeof next.missionResetLevel === "string") {
     backendStatus.currentMissionResetLevel = next.missionResetLevel;
   }
   backendStatus.currentMode = backendStatus.missionModeEnabled
-    ? `mission-${backendStatus.currentMissionResetLevel || defaultMissionResetLevel()}`
+    ? `mission-${backendStatus.currentMissionResetLevel || backendStatus.defaultMissionResetLevel}`
     : "normal";
   publishStatus();
+  return next;
+}
+
+function debugToggleSummaryLines(config = {}) {
+  const enabled = config?.debugMode === true;
+  const defaults = runtimeDefaultsForFlags({
+    debugMode: enabled,
+    devMode: isDesktopDevMode(),
+  });
+  return [
+    `[DEBUG] Debug mode ${enabled ? "enabled" : "disabled"}.`,
+    `[DEBUG] runtimeDefaults: missionResetLevel ${NORMAL_DEFAULTS.missionResetLevel} -> ${defaults.missionResetLevel}, rentalFastRefreshTickMs ${NORMAL_DEFAULTS.rentalFastRefreshTickMs} -> ${defaults.rentalFastRefreshTickMs}, rentalBatchLimit ${NORMAL_DEFAULTS.rentalBatchLimit} -> ${defaults.rentalBatchLimit}, watchMinCycleSeconds ${NORMAL_DEFAULTS.watchMinCycleSeconds} -> ${defaults.watchMinCycleSeconds}, watchDefaultPollSeconds ${NORMAL_DEFAULTS.watchDefaultPollSeconds} -> ${defaults.watchDefaultPollSeconds}`,
+    `[DEBUG] watcher behavior: live mission polling=${enabled ? "enabled" : "disabled unless separately configured"}, verbose debug logs=${enabled ? "enabled" : "disabled"}, startup FX=${enabled ? "disabled" : "enabled"}`,
+    `[DEBUG] auth behavior: startup interactive login=${enabled ? "enabled when token is missing" : "normal token-first flow"}, browser login prompts=${enabled ? "enabled" : "disabled unless interactiveAuth is enabled"}`,
+    `[DEBUG] auto NFT cooldown reset gate: debug=${enabled}, missionMode=${config?.missionModeEnabled === true}, nftCooldownResetEnabled=${config?.nftCooldownResetEnabled === true}`,
+    `[DEBUG] dev-equivalent defaults are now ${enabled ? "active" : "inactive"}; target dev values are missionResetLevel=${DEV_DEFAULTS.missionResetLevel}, rentalFastRefreshTickMs=${DEV_DEFAULTS.rentalFastRefreshTickMs}, rentalBatchLimit=${DEV_DEFAULTS.rentalBatchLimit}, watchMinCycleSeconds=${DEV_DEFAULTS.watchMinCycleSeconds}, watchDefaultPollSeconds=${DEV_DEFAULTS.watchDefaultPollSeconds}`,
+  ];
 }
 
 async function sendBackendCommand(command) {
@@ -1954,18 +2033,33 @@ async function sendBackendCommand(command) {
     const parsed = parseStoppedModeCommand(trimmed);
     if (parsed.type === "start") {
       startBackend();
-    } else if (parsed.type === "20r" || parsed.type === "mm") {
-      applyStoppedModeConfig(parsed);
+    } else if (
+      parsed.type === "20r" ||
+      parsed.type === "mm" ||
+      parsed.type === "debug"
+    ) {
+      const next = applyStoppedModeConfig(parsed);
       pushOutput("stdin", `> ${trimmed}\n`);
-      pushOutput(
-        "system",
-        `[GUI] Saved mode setting while runner is stopped.\n`,
-      );
+      pushOutput("system", `[GUI] Saved mode setting while runner is stopped.\n`);
+      if (parsed.type === "debug") {
+        for (const line of debugToggleSummaryLines(next)) {
+          pushOutput("system", `${line}\n`);
+        }
+      }
+      return true;
+    } else if (parsed.type === "debug_status") {
+      const current = readDesktopConfig();
+      pushOutput("stdin", `> ${trimmed}\n`);
+      for (const line of debugToggleSummaryLines(current)) {
+        pushOutput("system", `${line}\n`);
+      }
       return true;
     } else if (parsed.type === "invalid20r") {
       throw new Error("Usage: 20r [on|off]");
     } else if (parsed.type === "invalidMm") {
       throw new Error("Usage: mm [off|on|<level>]");
+    } else if (parsed.type === "invalidDebug") {
+      throw new Error("Usage: debug [on|off]");
     } else {
       throw new Error("Backend is not running. Use 'start' to launch it.");
     }
@@ -2247,6 +2341,10 @@ app.whenReady().then(async () => {
     if (typeof next.nftCooldownResetEnabled === "boolean") {
       backendStatus.nftCooldownResetEnabled = next.nftCooldownResetEnabled;
     }
+    if (typeof next.debugMode === "boolean") {
+      backendStatus.debugMode = next.debugMode;
+    }
+    backendStatus.defaultMissionResetLevel = defaultMissionResetLevelForConfig(next);
     if (next.nftCooldownResetMaxPbp !== undefined) {
       const maxPbp = Number(next.nftCooldownResetMaxPbp);
       backendStatus.nftCooldownResetMaxPbp =
@@ -2266,14 +2364,15 @@ app.whenReady().then(async () => {
       backendStatus.sessionRewardTotals = next.sessionRewardTotals;
     }
     backendStatus.currentMode = backendStatus.missionModeEnabled
-      ? `mission-${backendStatus.currentMissionResetLevel || defaultMissionResetLevel()}`
+      ? `mission-${backendStatus.currentMissionResetLevel || backendStatus.defaultMissionResetLevel}`
       : "normal";
     logConfigPatch("Desktop", requestedPatch);
     publishStatus();
     if (
       backend &&
       backendStatus.running &&
-      (Object.prototype.hasOwnProperty.call(
+      (Object.prototype.hasOwnProperty.call(requestedPatch, "debugMode") ||
+        Object.prototype.hasOwnProperty.call(
         requestedPatch,
         "nftCooldownResetEnabled",
       ) ||
@@ -2283,6 +2382,7 @@ app.whenReady().then(async () => {
         ))
     ) {
       requestBackend("update_runtime_config", {
+        debugMode: next.debugMode,
         nftCooldownResetEnabled: next.nftCooldownResetEnabled,
         nftCooldownResetMaxPbp: next.nftCooldownResetMaxPbp,
       }).catch((error) => {

@@ -18,6 +18,7 @@ const { createChecksService } = require("./src/services/checks");
 const { createWatchService } = require("./src/services/watch");
 const { createCommandHandler } = require("./src/commands");
 const { startStartupFx } = require("./src/ui/startup-fx");
+const { applyRuntimeDefaults } = require("./src/runtime-defaults");
 
 const ctx = createContext();
 const logger = createLogger(ctx);
@@ -79,6 +80,7 @@ function createGuiStateEmitter(ctx) {
       currentMode: ctx.currentMode,
       level20ResetEnabled: ctx.level20ResetEnabled,
       missionModeEnabled: ctx.missionModeEnabled,
+      debugMode: ctx.debugMode,
       nftCooldownResetEnabled: ctx.nftCooldownResetEnabled,
       nftCooldownResetMaxPbp: ctx.config?.nftCooldownResetMaxPbp ?? 20,
       currentMissionResetLevel: ctx.currentMissionResetLevel,
@@ -257,6 +259,19 @@ if (process.env.PBP_GUI_BRIDGE === "1" && typeof process.send === "function") {
           message.payload && typeof message.payload === "object"
             ? message.payload
             : {};
+        if (typeof payload.debugMode === "boolean") {
+          ctx.debugMode = payload.debugMode;
+          ctx.config.debugMode = payload.debugMode;
+          applyRuntimeDefaults(ctx);
+          if (
+            typeof ctx.config.missionResetLevel !== "string" ||
+            !ctx.config.missionResetLevel.trim()
+          ) {
+            ctx.currentMissionResetLevel =
+              ctx.runtimeDefaults?.missionResetLevel ||
+              ctx.currentMissionResetLevel;
+          }
+        }
         if (typeof payload.nftCooldownResetEnabled === "boolean") {
           ctx.nftCooldownResetEnabled = payload.nftCooldownResetEnabled;
           ctx.config.nftCooldownResetEnabled = payload.nftCooldownResetEnabled;
@@ -274,6 +289,7 @@ if (process.env.PBP_GUI_BRIDGE === "1" && typeof process.send === "function") {
         sendGuiResponse(requestId, {
           ok: true,
           config: {
+            debugMode: ctx.debugMode,
             nftCooldownResetEnabled: ctx.nftCooldownResetEnabled,
             nftCooldownResetMaxPbp: ctx.config.nftCooldownResetMaxPbp,
           },

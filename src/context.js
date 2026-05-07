@@ -2,7 +2,11 @@
 
 const path = require("path");
 const os = require("os");
-const { detectNodeDevMode, runtimeDefaults } = require("./runtime-defaults");
+const {
+  detectNodeDevMode,
+  runtimeDefaults,
+  applyRuntimeDefaults,
+} = require("./runtime-defaults");
 
 const APP_VERSION = "3.2.2";
 const APP_NAME = "missions-v3-mcp";
@@ -16,7 +20,7 @@ const LOG_BUFFER_SIZE_DEBUG = 400;
 function createContext() {
   const configDir = process.env.PBP_CONFIG_DIR || process.cwd();
   const defaults = runtimeDefaults(DEV_MODE);
-  return {
+  const ctx = {
     APP_VERSION,
     APP_NAME,
     MCP_URL,
@@ -107,6 +111,8 @@ function createContext() {
     guiMissionSlots: [],
     slotUnlockSummary: null,
   };
+  applyRuntimeDefaults(ctx);
+  return ctx;
 }
 
 module.exports = {

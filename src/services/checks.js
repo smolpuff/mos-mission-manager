@@ -868,6 +868,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
 
   function autoNftCooldownResetEnabled() {
     return (
+      ctx.debugMode === true &&
       (ctx.missionModeEnabled === true ||
         ctx.config?.missionModeEnabled === true) &&
       (ctx.nftCooldownResetEnabled === true ||
@@ -2020,6 +2021,42 @@ function createChecksService(ctx, logger, mcp, services = {}) {
     return next
       .map((name) => String(name || "").trim())
       .filter(Boolean);
+  }
+
+  function syncConfiguredTargetMissionsFromAssigned(missions = [], reason = "") {
+    const normalizedMissions = Array.isArray(missions) ? missions : [];
+    const nextTargets = [];
+    for (let i = 1; i <= 4; i += 1) {
+      const assigned =
+        normalizedMissions.find((mission) => Number(mission?.slot) === i) || null;
+      const assignedName = missionName(assigned);
+      if (assignedName) nextTargets.push(assignedName);
+    }
+    const uniqueTargets = Array.from(
+      new Set(
+        nextTargets
+          .map((name) => String(name || "").trim())
+          .filter(Boolean),
+      ),
+    );
+    const currentTargets = Array.isArray(ctx.config.targetMissions)
+      ? ctx.config.targetMissions
+          .map((name) => String(name || "").trim())
+          .filter(Boolean)
+      : [];
+    if (
+      uniqueTargets.length === 0 ||
+      JSON.stringify(currentTargets) === JSON.stringify(uniqueTargets)
+    ) {
+      return currentTargets;
+    }
+    ctx.config.targetMissions = uniqueTargets;
+    flushConfig(ctx, logDebug);
+    logWithTimestamp(
+      `[CONFIG] Synced target missions from assigned slots${reason ? ` (${reason})` : ""}: ${uniqueTargets.join(", ")}`,
+    );
+    if (ctx.guiBridge?.emitNow) ctx.guiBridge.emitNow();
+    return uniqueTargets;
   }
 
   function applyTargetMissionForSlot(slot, selectedName, missions = []) {
@@ -3724,11 +3761,16 @@ function createChecksService(ctx, logger, mcp, services = {}) {
   async function refreshMissionHeaderStats({
     refreshNftCount = false,
     missionsResult = null,
+    syncTargetsFromAssigned = false,
+    syncReason = "",
   } = {}) {
     try {
       const result =
         missionsResult || (await mcp.mcpToolCall("get_user_missions", {}));
       const missions = normalizeMissionList(result);
+      if (syncTargetsFromAssigned) {
+        syncConfiguredTargetMissionsFromAssigned(missions, syncReason);
+      }
       const progressByAssignedMissionId =
         missionProgressLookupFromResult(result);
       const computed = computeMissionStats(missions, ctx.sessionClaimedCount);
@@ -3875,7 +3917,11 @@ function createChecksService(ctx, logger, mcp, services = {}) {
     markStep("mcp_health", stepStartedAt);
 
     stepStartedAt = Date.now();
-    const missions = await refreshMissionHeaderStats({ refreshNftCount: true });
+    const missions = await refreshMissionHeaderStats({
+      refreshNftCount: true,
+      syncTargetsFromAssigned: true,
+      syncReason: "startup",
+    });
     markStep("mission_header_stats", stepStartedAt);
 
     if (!health.ok || !missions.ok) {
@@ -3903,6 +3949,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
     runMcpHealthCheck,
     refreshFundingWalletSummary,
     refreshMissionHeaderStats,
+    syncConfiguredTargetMissionsFromAssigned,
     claimClaimableMissions,
     isConfiguredTargetMission,
     filterSelectedMissions,
