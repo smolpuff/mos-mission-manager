@@ -43,15 +43,34 @@ jobs:
       - name: Create Windows zip asset
         shell: pwsh
         run: |
-          $portable = Get-ChildItem -Path release -File -Filter "missions-v3-mcp*.exe" | Select-Object -First 1
+          $portable = Get-ChildItem -Path release -File -Filter "missions-v3-mcp*.exe" |
+            Sort-Object LastWriteTime -Descending |
+            Select-Object -First 1
           if (-not $portable) {
             throw "Windows portable executable not found at top level of release/"
           }
+          Write-Host "Zipping Windows executable: $($portable.Name)"
           $zipPath = Join-Path $portable.DirectoryName ($portable.BaseName + ".zip")
           if (Test-Path $zipPath) {
             Remove-Item $zipPath -Force
           }
           Compress-Archive -Path $portable.FullName -DestinationPath $zipPath
+
+      - name: Verify Windows zip version matches package version
+        shell: pwsh
+        run: |
+          $pkgVersion = node -p "require('./package.json').version"
+          $expected = "missions-v3-mcp-$pkgVersion-win64.zip"
+          $zip = Get-ChildItem -Path release -File -Filter "missions-v3-mcp-*-win*.zip" |
+            Sort-Object LastWriteTime -Descending |
+            Select-Object -First 1
+          if (-not $zip) {
+            throw "No Windows zip file found in release/"
+          }
+          Write-Host "Latest Windows zip: $($zip.Name)"
+          if ($zip.Name -ne $expected) {
+            throw "Windows zip/version mismatch. got=$($zip.Name) expected=$expected"
+          }
 
       - name: Upload Windows release files
         uses: softprops/action-gh-release@v2
