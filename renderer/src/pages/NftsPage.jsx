@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import backImg from "../img/back.png";
+import { localCollectionImage } from "../collection-images";
 
 const NFT_COOLDOWN_RING_MAX_SECONDS = 24 * 60 * 60;
 function formatAccount(value) {
@@ -408,7 +409,7 @@ export default function NftsPage({ bridge, signerMode = "" }) {
     collectionOptions.push({
       key,
       label: key,
-      image: item?.image || null,
+      image: localCollectionImage(key) || null,
       count: data.nfts.filter(
         (entry) =>
           (String(entry?.collection || "unknown").trim() || "unknown") === key,

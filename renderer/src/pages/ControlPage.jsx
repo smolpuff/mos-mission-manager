@@ -15,6 +15,10 @@ import solIcon from "../img/icon-sm__sol.svg";
 import ccIcon from "../img/icon_cc.webp";
 import tcIcon from "../img/icon_tc.webp";
 import backImg from "../img/back.png";
+import {
+  localCollectionImage,
+  normalizeCollectionKey,
+} from "../collection-images";
 
 const quickCommands = [
   "login",
@@ -1564,11 +1568,10 @@ function ControlView() {
       if (nftsResponse?.ok && Array.isArray(nftsResponse.nfts)) {
         const nextImages = {};
         for (const item of nftsResponse.nfts) {
-          const key = normalizeCollectionKey(
-            String(item?.collection || "unknown").trim() || "unknown",
-          );
+          const rawName = String(item?.collection || "unknown").trim() || "unknown";
+          const key = normalizeCollectionKey(rawName);
           if (!key || nextImages[key]) continue;
-          const image = String(item?.image || "").trim();
+          const image = String(localCollectionImage(rawName) || "").trim();
           if (image) nextImages[key] = image;
         }
         setCollectionImageByKey(nextImages);
@@ -1841,12 +1844,6 @@ function ControlView() {
     }
     return "Collection requirements unavailable";
   };
-  const normalizeCollectionKey = (value) =>
-    String(value || "")
-      .trim()
-      .toLowerCase()
-      .replace(/\s+/g, " ")
-      .replace(/[^a-z0-9 ]/g, "");
   const collectionNameFromEntry = (entry) => {
     if (!entry) return "";
     if (typeof entry === "string") return entry.trim();
@@ -1860,7 +1857,12 @@ function ControlView() {
       if (typeof entry === "string") {
         const name = entry.trim();
         const key = normalizeCollectionKey(name);
-        return name ? { name, image: collectionImageByKey[key] || null } : null;
+        return name
+          ? {
+              name,
+              image: localCollectionImage(name) || collectionImageByKey[key] || null,
+            }
+          : null;
       }
       const name = String(
         entry?.name || entry?.title || entry?.collection || entry?.symbol || "",
@@ -1868,12 +1870,7 @@ function ControlView() {
       if (!name) return null;
       const key = normalizeCollectionKey(name);
       const image = String(
-        entry?.image ||
-          entry?.imageUrl ||
-          entry?.image_url ||
-          entry?.logo ||
-          collectionImageByKey[key] ||
-          "",
+        localCollectionImage(name) || collectionImageByKey[key] || "",
       ).trim();
       return { name, image: image || null };
     };
@@ -3871,13 +3868,11 @@ function ControlView() {
                                         <img
                                           src={entry.image}
                                           alt={entry.name}
-                                          className=" object-cover "
+                                          className="w-full h-full object-cover"
                                           loading="lazy"
                                           decoding="async"
                                         />
-                                      ) : (
-                                        ""
-                                      )}
+                                      ) : null}
                                     </span>
                                   ))
                               ) : (
