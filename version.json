@@ -1,5 +1,9 @@
 {
-  "version": "3.2.2",
+  "version": "3.2.3",
   "downloadUrl": "https://github.com/smolpuff/mos-mission-manager/releases/latest",
-  "notes": "Update for MCP protocol changes, flow optimizations, 100k/500k level 20 reservation"
+  "notes": [
+    "Added startup mission sync",
+    "Updated stuff",
+    "Pooped on Pete's pillow"
+  ]
 }
