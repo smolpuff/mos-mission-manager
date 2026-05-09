@@ -1,3 +1,7 @@
+import packageJson from "../../../../package.json";
+import korea from "../../img/korea-sm.webp";
+const APP_VERSION = packageJson.version;
+
 export default function NavMain({
   onOpenCli,
   onNavigate,
@@ -109,6 +113,18 @@ export default function NavMain({
           </svg>
           Settings
         </a>
+        <div className="flex flex-1 w-full items-end justify-center pb-4 text-xs text-gray-400">
+          <div className="flex flex-col items-center justify-center gap-1 opacity-35 hover:opacity-100 transition-all select-none">
+            <img
+              src={korea}
+              alt="it's a meeeee, koreaaa!"
+              draggable={false}
+              className="w-7/10 h-auto aspect-square "
+              onDragStart={(e) => e.preventDefault()}
+            />
+            v{APP_VERSION}
+          </div>
+        </div>
       </nav>
     </>
   );
