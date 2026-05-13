@@ -101,6 +101,7 @@ let nftListPromise = null;
 const FUNDING_WALLET_REFRESH_MIN_INTERVAL_MS = 30000;
 const BOOTSTRAP_WALLET_REFRESH_MIN_INTERVAL_MS = 30000;
 const PAGE_PREVIEW_CACHE_TTL_MS = 2000;
+const NFT_LIST_CACHE_TTL_MS = 60000;
 const execFileAsync = (file, args, options = {}) =>
   new Promise((resolve, reject) => {
     execFile(file, args, options, (error, stdout, stderr) => {
@@ -662,6 +663,44 @@ function shouldServeCachedPagePreview(cachedAt) {
     Number.isFinite(Number(cachedAt)) &&
     Date.now() - Number(cachedAt) <= PAGE_PREVIEW_CACHE_TTL_MS
   );
+}
+
+function shouldServeCachedNftList(cachedAt) {
+  return (
+    Number.isFinite(Number(cachedAt)) &&
+    Date.now() - Number(cachedAt) <= NFT_LIST_CACHE_TTL_MS
+  );
+}
+
+function hydrateCachedNftList(result, cachedAt) {
+  if (!result || !Array.isArray(result?.nfts)) return result;
+  const nowMs = Date.now();
+  const fetchedAtMs = Number(cachedAt);
+  const elapsedSeconds = Number.isFinite(fetchedAtMs)
+    ? Math.max(0, Math.floor((nowMs - fetchedAtMs) / 1000))
+    : 0;
+  const nfts = result.nfts.map((entry) => {
+    const next = entry && typeof entry === "object" ? { ...entry } : entry;
+    if (!next || typeof next !== "object") return next;
+    const endsAtMs = next.cooldownEndsAt
+      ? new Date(next.cooldownEndsAt).getTime()
+      : NaN;
+    let cooldownSeconds = Math.max(0, Number(next.cooldownSeconds || 0));
+    if (Number.isFinite(endsAtMs)) {
+      cooldownSeconds = Math.max(0, Math.ceil((endsAtMs - nowMs) / 1000));
+    } else if (elapsedSeconds > 0) {
+      cooldownSeconds = Math.max(0, cooldownSeconds - elapsedSeconds);
+    }
+    const onCooldown = cooldownSeconds > 0;
+    next.cooldownSeconds = cooldownSeconds;
+    next.onCooldown = onCooldown;
+    next.available = !onCooldown;
+    return next;
+  });
+  return {
+    ...result,
+    nfts,
+  };
 }
 
 function addUniqueValue(list, value) {
@@ -3071,9 +3110,9 @@ app.whenReady().then(async () => {
       pushSystemLog("NFT page refresh wait: refresh already running.");
       return nftListPromise;
     }
-    if (nftListCache && shouldServeCachedPagePreview(nftListCacheAt)) {
+    if (nftListCache && shouldServeCachedNftList(nftListCacheAt)) {
       pushSystemLog("NFT page refresh cache hit.");
-      return nftListCache;
+      return hydrateCachedNftList(nftListCache, nftListCacheAt);
     }
 
     nftListPromise = (async () => {
@@ -3135,6 +3174,10 @@ app.whenReady().then(async () => {
         timeoutMs: 180000,
       },
     );
+    if (response?.ok) {
+      nftListCache = null;
+      nftListCacheAt = 0;
+    }
     return response;
   });
   ipcMain.handle("nfts:prepare-cooldown-reset", async (_event, payload = {}) => {
