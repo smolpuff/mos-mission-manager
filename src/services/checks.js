@@ -2996,36 +2996,32 @@ function createChecksService(ctx, logger, mcp, services = {}) {
             );
           }
 
-          if (!rentalFallbackEnabled || !rentalLookupSucceeded) {
-            logWithTimestamp(
-              `[RESET] ⏭️ ${name}: skipping cooldown resets because rentals were not successfully checked first.`,
+          const orderedOptions = [];
+          if (rentalFallbackEnabled && readyRentalCandidates.length > 0) {
+            orderedOptions.push(
+              ...readyRentalCandidates.map((entry) => ({
+                ...entry,
+                source: "rental",
+                stage: "ready_rental",
+              })),
             );
-          } else {
-            const orderedOptions = [];
-            if (readyRentalCandidates.length > 0) {
+            assignmentSourceStage = "ready_rental";
+          }
+          if (autoNftCooldownResetEnabled()) {
+            const maxPbp = autoNftCooldownResetMaxPbp();
+            if (ownedCooldownCandidates.length > 0) {
               orderedOptions.push(
-                ...readyRentalCandidates.map((entry) => ({
+                ...ownedCooldownCandidates.map((entry) => ({
                   ...entry,
-                  source: "rental",
-                  stage: "ready_rental",
+                  source: "owned_cooldown",
+                  stage: "owned_cooldown_reset",
                 })),
               );
-              assignmentSourceStage = "ready_rental";
+              logWithTimestamp(
+                `[RESET] 🔎 ${name}: stage 3/4 queued ${ownedCooldownCandidates.length} owned cooldown NFT candidate(s), max=${maxPbp} PBP.`,
+              );
             }
-            if (autoNftCooldownResetEnabled()) {
-              const maxPbp = autoNftCooldownResetMaxPbp();
-              if (ownedCooldownCandidates.length > 0) {
-                orderedOptions.push(
-                  ...ownedCooldownCandidates.map((entry) => ({
-                    ...entry,
-                    source: "owned_cooldown",
-                    stage: "owned_cooldown_reset",
-                  })),
-                );
-                logWithTimestamp(
-                  `[RESET] 🔎 ${name}: stage 3/4 queued ${ownedCooldownCandidates.length} owned cooldown NFT candidate(s), max=${maxPbp} PBP.`,
-                );
-              }
+            if (rentalFallbackEnabled && rentalLookupSucceeded) {
               if (cooledRentalCandidates.length > 0) {
                 orderedOptions.push(
                   ...cooledRentalCandidates.map((entry) => ({
@@ -3038,19 +3034,23 @@ function createChecksService(ctx, logger, mcp, services = {}) {
                   `[RESET] 🔎 ${name}: stage 4/4 queued ${cooledRentalCandidates.length} rental cooldown NFT candidate(s), max=${maxPbp} PBP.`,
                 );
               }
-            } else if (
-              readyRentalCandidates.length === 0 &&
-              (ownedCooldownCandidates.length > 0 ||
-                cooledRentalCandidates.length > 0)
-            ) {
+            } else if (rentalFallbackEnabled) {
               logWithTimestamp(
-                `[RESET] ⏭️ ${name}: auto NFT cooldown reset is disabled.`,
+                `[RESET] ⏭️ ${name}: skipping rental cooldown fallback because rentals were not successfully checked first.`,
               );
             }
-            assignmentOptions = orderedOptions;
-            if (!assignmentSourceStage && orderedOptions.length > 0) {
-              assignmentSourceStage = orderedOptions[0].stage || null;
-            }
+          } else if (
+            readyRentalCandidates.length === 0 &&
+            (ownedCooldownCandidates.length > 0 ||
+              cooledRentalCandidates.length > 0)
+          ) {
+            logWithTimestamp(
+              `[RESET] ⏭️ ${name}: auto NFT cooldown reset is disabled.`,
+            );
+          }
+          assignmentOptions = orderedOptions;
+          if (!assignmentSourceStage && orderedOptions.length > 0) {
+            assignmentSourceStage = orderedOptions[0].stage || null;
           }
         }
 

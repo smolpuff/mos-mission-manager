@@ -248,6 +248,7 @@ function ControlView() {
   );
   const debug = debugEnabled;
   const [currentPage, setCurrentPage] = useState("missions");
+  const [mountedPages, setMountedPages] = useState({ missions: true });
   const [isCliActive, setIsCliActive] = useState(false);
   const [fundingSource, setFundingSource] = useState("browser");
   const [fundingEnabled, setFundingEnabled] = useState(true);
@@ -920,6 +921,12 @@ function ControlView() {
   }, [onboardingMissionCatalog]);
   const slots = liveSlots;
 
+  useEffect(() => {
+    setMountedPages((current) =>
+      current[currentPage] ? current : { ...current, [currentPage]: true },
+    );
+  }, [currentPage]);
+
   const mainStatusLabel = activityLabel
     ? activityLabel
     : status.running
@@ -1556,27 +1563,16 @@ function ControlView() {
     setMissionPickerApplying(false);
     setMissionPickerError(null);
     try {
-      const [accountResponse, configResponse, nftsResponse] = await Promise.all(
-        [
-          bridge?.fetchOnboardingAccount
-            ? bridge.fetchOnboardingAccount()
-            : Promise.resolve(null),
-          bridge?.getConfig ? bridge.getConfig() : Promise.resolve(null),
-          bridge?.getUserNfts ? bridge.getUserNfts() : Promise.resolve(null),
-        ],
-      );
-      if (nftsResponse?.ok && Array.isArray(nftsResponse.nfts)) {
-        const nextImages = {};
-        for (const item of nftsResponse.nfts) {
-          const rawName = String(item?.collection || "unknown").trim() || "unknown";
-          const key = normalizeCollectionKey(rawName);
-          if (!key || nextImages[key]) continue;
-          const image = String(localCollectionImage(rawName) || "").trim();
-          if (image) nextImages[key] = image;
+      if (!onboardingMissionCatalog.length) {
+        if (!bridge?.fetchOnboardingAccount) {
+          throw new Error("Mission catalog is not available in this build.");
         }
-        setCollectionImageByKey(nextImages);
-      }
-      if (accountResponse?.ok) {
+        const accountResponse = await bridge.fetchOnboardingAccount();
+        if (!accountResponse?.ok) {
+          throw new Error(
+            accountResponse?.error || "Failed to load mission catalog.",
+          );
+        }
         const missions = Array.isArray(accountResponse.missions)
           ? accountResponse.missions
           : [];
@@ -1597,20 +1593,17 @@ function ControlView() {
               .filter(Boolean),
           ),
         );
-        seedMissionSelectionState(
-          missions,
-          configResponse?.config?.targetMissions || [],
-        );
+        seedMissionSelectionState(missions, []);
       } else {
-        seedMissionSelectionState(
-          [],
-          configResponse?.config?.targetMissions || [],
-        );
-        if (!onboardingMissionCatalog.length) {
-          throw new Error(
-            accountResponse?.error || "Failed to load mission catalog.",
-          );
-        }
+        const sourceMissions = onboardingMissions.length
+          ? onboardingMissions
+          : slots.map((entry) => ({
+              slot: entry?.slot,
+              name: entry?.missionName || entry?.name || "",
+              currentLevel:
+                entry?.missionLevel ?? entry?.currentLevel ?? entry?.level ?? null,
+            }));
+        seedMissionSelectionState(sourceMissions, []);
       }
     } catch (error) {
       setMissionPickerError(String(error?.message || error));
@@ -3047,27 +3040,41 @@ function ControlView() {
               </div>
             </div>
           ) : null}
-          {currentPage === "mish_tish" ? (
-            <CompetitionPage
-              latestCompetition={latestCompetition}
-              latestCompetitionBusy={latestCompetitionBusy}
-              latestCompetitionError={latestCompetitionError}
-              refreshLatestCompetition={refreshLatestCompetition}
-              isCurrentCompetitionRow={isCurrentCompetitionRow}
-            />
+          {mountedPages.mish_tish ? (
+            <div
+              style={{ display: currentPage === "mish_tish" ? "block" : "none" }}
+            >
+              <CompetitionPage
+                latestCompetition={latestCompetition}
+                latestCompetitionBusy={latestCompetitionBusy}
+                latestCompetitionError={latestCompetitionError}
+                refreshLatestCompetition={refreshLatestCompetition}
+                isCurrentCompetitionRow={isCurrentCompetitionRow}
+              />
+            </div>
           ) : null}
-          {currentPage === "stats" ? (
-            <StatsPage
-              status={status}
-              logs={logs}
-              missionStats={missionStats}
-              sessionStartedAtMs={sessionStartedAtRef.current}
-            />
+          {mountedPages.stats ? (
+            <div style={{ display: currentPage === "stats" ? "block" : "none" }}>
+              <StatsPage
+                status={status}
+                logs={logs}
+                missionStats={missionStats}
+                sessionStartedAtMs={sessionStartedAtRef.current}
+              />
+            </div>
           ) : null}
-          {currentPage === "nfts" ? (
-            <NftsPage bridge={bridge} signerMode={status.signerMode} />
+          {mountedPages.nfts ? (
+            <div style={{ display: currentPage === "nfts" ? "block" : "none" }}>
+              <NftsPage bridge={bridge} signerMode={status.signerMode} />
+            </div>
           ) : null}
-          {currentPage === "rentals" ? <RentalsPage bridge={bridge} /> : null}
+          {mountedPages.rentals ? (
+            <div
+              style={{ display: currentPage === "rentals" ? "block" : "none" }}
+            >
+              <RentalsPage bridge={bridge} />
+            </div>
+          ) : null}
           {currentPage !== "missions" ? null : (
             <>
               <div className="space-y-1.5">

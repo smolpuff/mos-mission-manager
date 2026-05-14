@@ -2,8 +2,7 @@
   "version": "3.2.3",
   "downloadUrl": "https://github.com/smolpuff/mos-mission-manager/releases/latest",
   "notes": [
-    "Added startup mission sync",
-    "Updated stuff",
-    "Pooped on Pete's pillow"
+    "Potential fix for rentals block in normal mode",
+    "MCP flow optimizations"
   ]
 }

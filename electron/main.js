@@ -95,12 +95,16 @@ let missionCatalogResultPromise = null;
 let rentalsPreviewCache = null;
 let rentalsPreviewCacheAt = 0;
 let rentalsPreviewPromise = null;
+let accountSnapshotCache = null;
+let accountSnapshotCacheAt = 0;
+let accountSnapshotPromise = null;
 let nftListCache = null;
 let nftListCacheAt = 0;
 let nftListPromise = null;
 const FUNDING_WALLET_REFRESH_MIN_INTERVAL_MS = 30000;
 const BOOTSTRAP_WALLET_REFRESH_MIN_INTERVAL_MS = 30000;
 const PAGE_PREVIEW_CACHE_TTL_MS = 2000;
+const RENTALS_PREVIEW_CACHE_TTL_MS = 120000;
 const NFT_LIST_CACHE_TTL_MS = 60000;
 const execFileAsync = (file, args, options = {}) =>
   new Promise((resolve, reject) => {
@@ -438,28 +442,7 @@ async function bootstrapStartupMissionSlots() {
     backendStatus.startupMissionSlotsLoading = true;
     publishStatus();
     const loadStartupState = async () => {
-      const who = await mcpCallTool(
-        "who_am_i",
-        {},
-        {
-          url: "https://pixelbypixel.studio/mcp",
-        },
-      );
-      const missionsResult = await mcpCallTool(
-        "get_user_missions",
-        {},
-        {
-          url: "https://pixelbypixel.studio/mcp",
-        },
-      );
-      const nftResult = await mcpCallTool(
-        "get_mission_nfts",
-        {},
-        {
-          url: "https://pixelbypixel.studio/mcp",
-        },
-      );
-      return { who, missionsResult, nftResult };
+      return getAccountSnapshotCached();
     };
 
     try {
@@ -665,11 +648,75 @@ function shouldServeCachedPagePreview(cachedAt) {
   );
 }
 
+function shouldServeCachedRentalsPreview(cachedAt) {
+  return (
+    Number.isFinite(Number(cachedAt)) &&
+    Date.now() - Number(cachedAt) <= RENTALS_PREVIEW_CACHE_TTL_MS
+  );
+}
+
 function shouldServeCachedNftList(cachedAt) {
   return (
     Number.isFinite(Number(cachedAt)) &&
     Date.now() - Number(cachedAt) <= NFT_LIST_CACHE_TTL_MS
   );
+}
+
+function invalidateAccountSnapshotCache() {
+  accountSnapshotCache = null;
+  accountSnapshotCacheAt = 0;
+}
+
+function invalidateNftListCache() {
+  nftListCache = null;
+  nftListCacheAt = 0;
+}
+
+function invalidateRentalsPreviewCache() {
+  rentalsPreviewCache = null;
+  rentalsPreviewCacheAt = 0;
+}
+
+function invalidateMissionRelatedCaches() {
+  invalidateAccountSnapshotCache();
+  invalidateNftListCache();
+  invalidateRentalsPreviewCache();
+}
+
+async function getAccountSnapshotCached() {
+  if (accountSnapshotCache) {
+    pushSystemLog("Account snapshot cache hit.");
+    return accountSnapshotCache;
+  }
+  if (accountSnapshotPromise) {
+    pushSystemLog("Account snapshot cache wait: refresh already running.");
+    return accountSnapshotPromise;
+  }
+  accountSnapshotPromise = (async () => {
+    const snapshot = {
+      who: await mcpCallTool(
+        "who_am_i",
+        {},
+        { url: "https://pixelbypixel.studio/mcp" },
+      ),
+      missionsResult: await mcpCallTool(
+        "get_user_missions",
+        {},
+        { url: "https://pixelbypixel.studio/mcp" },
+      ),
+      nftResult: await mcpCallTool(
+        "get_mission_nfts",
+        {},
+        { url: "https://pixelbypixel.studio/mcp" },
+      ),
+    };
+    accountSnapshotCache = snapshot;
+    accountSnapshotCacheAt = Date.now();
+    return snapshot;
+  })().finally(() => {
+    accountSnapshotPromise = null;
+  });
+  return accountSnapshotPromise;
 }
 
 function hydrateCachedNftList(result, cachedAt) {
@@ -2637,34 +2684,17 @@ app.whenReady().then(async () => {
     const loadAccount = async () => {
       pushSystemLog("Onboarding sync: fetching who_am_i.");
       emitProgress(35, "whoami", "Fetching profile");
-      const who = await mcpCallTool(
-        "who_am_i",
-        {},
-        {
-          url: "https://pixelbypixel.studio/mcp",
-        },
-      );
+      const snapshot = await getAccountSnapshotCached();
+      const who = snapshot?.who || null;
       pushSystemLog("Onboarding sync: fetching get_user_missions.");
       emitProgress(65, "missions", "Fetching missions");
-      const missionsResult = await mcpCallTool(
-        "get_user_missions",
-        {},
-        {
-          url: "https://pixelbypixel.studio/mcp",
-        },
-      );
+      const missionsResult = snapshot?.missionsResult || null;
       pushSystemLog("Onboarding sync: fetching get_mission_catalog.");
       emitProgress(85, "catalog", "Fetching mission catalog");
       const catalogResult = await getMissionCatalogCached();
       pushSystemLog("Onboarding sync: fetching get_mission_nfts.");
       emitProgress(92, "nfts", "Fetching wallet collections");
-      const nftResult = await mcpCallTool(
-        "get_mission_nfts",
-        {},
-        {
-          url: "https://pixelbypixel.studio/mcp",
-        },
-      );
+      const nftResult = snapshot?.nftResult || null;
       return { who, missionsResult, catalogResult, nftResult };
     };
 
@@ -2826,6 +2856,7 @@ app.whenReady().then(async () => {
         timeoutMs: 90000,
       },
     );
+    if (response?.ok) invalidateMissionRelatedCaches();
     return response;
   });
   ipcMain.handle("missions:preview-selection", async (_event, payload = {}) => {
@@ -2969,7 +3000,7 @@ app.whenReady().then(async () => {
     }
     if (
       rentalsPreviewCache &&
-      shouldServeCachedPagePreview(rentalsPreviewCacheAt)
+      shouldServeCachedRentalsPreview(rentalsPreviewCacheAt)
     ) {
       pushSystemLog("Rentals preview cache hit.");
       return rentalsPreviewCache;
@@ -3175,8 +3206,7 @@ app.whenReady().then(async () => {
       },
     );
     if (response?.ok) {
-      nftListCache = null;
-      nftListCacheAt = 0;
+      invalidateMissionRelatedCaches();
     }
     return response;
   });
