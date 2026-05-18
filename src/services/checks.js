@@ -930,7 +930,11 @@ function createChecksService(ctx, logger, mcp, services = {}) {
   }
 
   function rentalFastRefreshEnabled() {
-    return ctx.config?.rentalFastRefreshEnabled === true;
+    return (
+      ctx.debugMode === true ||
+      ctx.config?.debugMode === true ||
+      ctx.config?.rentalFastRefreshEnabled === true
+    );
   }
   // tick
   function rentalFastRefreshTickMs() {
