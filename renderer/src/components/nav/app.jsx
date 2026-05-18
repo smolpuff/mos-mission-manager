@@ -1,6 +1,7 @@
 import packageJson from "../../../../package.json";
 import korea from "../../img/korea-sm.webp";
 const APP_VERSION = packageJson.version;
+const DESKTOP_DEV_MODE = window?.missionsDesktop?.desktopDevMode === true;
 
 export default function NavMain({
   onOpenCli,
@@ -123,6 +124,9 @@ export default function NavMain({
               onDragStart={(e) => e.preventDefault()}
             />
             v{APP_VERSION}
+            {DESKTOP_DEV_MODE ? (
+              <span className="text-[10px] uppercase text-amber-300">DEV</span>
+            ) : null}
           </div>
         </div>
       </nav>

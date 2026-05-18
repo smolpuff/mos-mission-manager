@@ -90,6 +90,9 @@ let fundingWalletSummaryLastAttemptAt = 0;
 let bootstrapWalletSummaryPromise = null;
 let bootstrapWalletSummaryLastAttemptAt = 0;
 let startupMissionBootstrapPromise = null;
+let competitionRangeLockTimer = null;
+let competitionRangeLockRunning = false;
+let competitionRangeLockLastSummary = "";
 let missionCatalogResultCache = null;
 let missionCatalogResultPromise = null;
 let rentalsPreviewCache = null;
@@ -106,6 +109,8 @@ const BOOTSTRAP_WALLET_REFRESH_MIN_INTERVAL_MS = 30000;
 const PAGE_PREVIEW_CACHE_TTL_MS = 2000;
 const RENTALS_PREVIEW_CACHE_TTL_MS = 120000;
 const NFT_LIST_CACHE_TTL_MS = 60000;
+const COMPETITION_RANGE_LOCK_MIN_POLL_SECONDS = 60;
+const COMPETITION_RANGE_LOCK_DEFAULT_POLL_SECONDS = 150;
 const execFileAsync = (file, args, options = {}) =>
   new Promise((resolve, reject) => {
     execFile(file, args, options, (error, stdout, stderr) => {
@@ -195,6 +200,10 @@ function createEmptyAnalytics() {
       missionClaims: {},
       claimHistory: [],
       resetTypes: { mission: 0, nft: 0 },
+      nftResetUsage: {
+        owned: { resets: 0, assigned: 0 },
+        rental: { resets: 0, assigned: 0 },
+      },
       spendByAction: {},
       nftsUsed: [],
     },
@@ -208,8 +217,28 @@ function createEmptyAnalytics() {
       missionClaims: {},
       claimHistory: [],
       resetTypes: { mission: 0, nft: 0 },
+      nftResetUsage: {
+        owned: { resets: 0, assigned: 0 },
+        rental: { resets: 0, assigned: 0 },
+      },
       spendByAction: {},
       nftsUsed: [],
+    },
+  };
+}
+
+function normalizeNftResetUsage(raw) {
+  const owned = raw?.owned && typeof raw.owned === "object" ? raw.owned : {};
+  const rental =
+    raw?.rental && typeof raw.rental === "object" ? raw.rental : {};
+  return {
+    owned: {
+      resets: Number(owned.resets || 0) || 0,
+      assigned: Number(owned.assigned || 0) || 0,
+    },
+    rental: {
+      resets: Number(rental.resets || 0) || 0,
+      assigned: Number(rental.assigned || 0) || 0,
     },
   };
 }
@@ -271,6 +300,7 @@ function normalizeAnalytics(raw) {
         mission: Number(src?.lifetime?.resetTypes?.mission || 0) || 0,
         nft: Number(src?.lifetime?.resetTypes?.nft || 0) || 0,
       },
+      nftResetUsage: normalizeNftResetUsage(src?.lifetime?.nftResetUsage),
       spendByAction: normalizeCounterObject(src?.lifetime?.spendByAction),
       nftsUsed: Array.isArray(src?.lifetime?.nftsUsed)
         ? src.lifetime.nftsUsed.map((v) => String(v || "").trim()).filter(Boolean)
@@ -300,6 +330,7 @@ function normalizeAnalytics(raw) {
         mission: Number(src?.session?.resetTypes?.mission || 0) || 0,
         nft: Number(src?.session?.resetTypes?.nft || 0) || 0,
       },
+      nftResetUsage: normalizeNftResetUsage(src?.session?.nftResetUsage),
       spendByAction: normalizeCounterObject(src?.session?.spendByAction),
       nftsUsed: Array.isArray(src?.session?.nftsUsed)
         ? src.session.nftsUsed.map((v) => String(v || "").trim()).filter(Boolean)
@@ -582,6 +613,43 @@ function readDesktopConfigWithMeta() {
   }
 }
 
+function normalizeCompetitionRowKey(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/^@+/, "")
+    .replace(/\s+/g, "")
+    .replace(/[^a-z0-9._-]/g, "");
+}
+
+function competitionRangeLockConfigFrom(config = {}) {
+  const minRank = Number(config?.competitionRangeLockMinRank);
+  const maxRank = Number(config?.competitionRangeLockMaxRank);
+  const pollSeconds = Number(config?.competitionRangeLockPollSeconds);
+  return {
+    enabled: config?.competitionRangeLockEnabled === true,
+    minRank:
+      Number.isFinite(minRank) && minRank > 0 ? Math.floor(minRank) : 11,
+    maxRank:
+      Number.isFinite(maxRank) && maxRank > 0 ? Math.floor(maxRank) : 13,
+    pollSeconds:
+      Number.isFinite(pollSeconds) &&
+      pollSeconds >= COMPETITION_RANGE_LOCK_MIN_POLL_SECONDS
+        ? Math.floor(pollSeconds)
+        : COMPETITION_RANGE_LOCK_DEFAULT_POLL_SECONDS,
+  };
+}
+
+function shouldRunCompetitionRangeLock(config = readDesktopConfig()) {
+  const lockConfig = competitionRangeLockConfigFrom(config);
+  return (
+    isDesktopDevMode() &&
+    lockConfig.enabled &&
+    config?.debugMode === true &&
+    config?.missionModeEnabled === true
+  );
+}
+
 function loadAnalytics() {
   try {
     const raw = fs.readFileSync(getAnalyticsPath(), "utf8");
@@ -634,6 +702,10 @@ function beginAnalyticsSession({ force = false } = {}) {
     missionClaims: {},
     claimHistory: [],
     resetTypes: { mission: 0, nft: 0 },
+    nftResetUsage: {
+      owned: { resets: 0, assigned: 0 },
+      rental: { resets: 0, assigned: 0 },
+    },
     spendByAction: {},
     nftsUsed: [],
   };
@@ -883,6 +955,14 @@ function applyAnalyticsResetEvent(payload = {}) {
   current.session.totalResets += 1;
   current.lifetime.resetTypes[bucket] += 1;
   current.session.resetTypes[bucket] += 1;
+  if (bucket === "nft") {
+    const source = String(payload?.resetSource || payload?.source || "")
+      .trim()
+      .toLowerCase();
+    const usageBucket = source === "rental" ? "rental" : "owned";
+    current.lifetime.nftResetUsage[usageBucket].resets += 1;
+    current.session.nftResetUsage[usageBucket].resets += 1;
+  }
   saveAnalytics(current);
   publishStatus();
   return true;
@@ -892,6 +972,18 @@ function applyAnalyticsRentalEvent() {
   const current = normalizeAnalytics(backendStatus.analytics || loadAnalytics());
   current.lifetime.totalLeased += 1;
   current.session.totalLeased += 1;
+  saveAnalytics(current);
+  publishStatus();
+  return true;
+}
+
+function applyAnalyticsAssignmentEvent(payload = {}) {
+  if (payload?.usedReset !== true) return false;
+  const source = String(payload?.source || "").trim().toLowerCase();
+  const usageBucket = source === "rental" ? "rental" : "owned";
+  const current = normalizeAnalytics(backendStatus.analytics || loadAnalytics());
+  current.lifetime.nftResetUsage[usageBucket].assigned += 1;
+  current.session.nftResetUsage[usageBucket].assigned += 1;
   saveAnalytics(current);
   publishStatus();
   return true;
@@ -1045,6 +1137,7 @@ function hydrateBackendStatusFromConfig() {
   backendStatus.currentMode = backendStatus.missionModeEnabled
     ? `mission-${backendStatus.currentMissionResetLevel || defaultMissionResetLevelForConfig(config)}`
     : "normal";
+  syncCompetitionRangeLockScheduler();
 }
 
 async function runDesktopUpdateCheck({ manual = false } = {}) {
@@ -1845,6 +1938,7 @@ function startBackend() {
   backendStatus.fundingWalletSummary = null;
   backendStatus.guiMissionSlots = null;
   backendStatus.slotUnlockSummary = null;
+  syncCompetitionRangeLockScheduler();
   publishStatus();
   pushOutput("system", "[GUI] Backend started.\n");
 
@@ -1865,6 +1959,8 @@ function startBackend() {
         applyAnalyticsSpendEvent(message.payload || {});
       } else if (message.event === "stats_reset") {
         applyAnalyticsResetEvent(message.payload || {});
+      } else if (message.event === "stats_assignment") {
+        applyAnalyticsAssignmentEvent(message.payload || {});
       } else if (message.event === "stats_rental") {
         applyAnalyticsRentalEvent(message.payload || {});
       }
@@ -1909,6 +2005,7 @@ function startBackend() {
       "system",
       `[GUI] Backend exited (code=${code ?? "null"}, signal=${signal ?? "null"}).\n`,
     );
+    syncCompetitionRangeLockScheduler();
     publishStatus();
   });
 
@@ -1929,6 +2026,7 @@ function stopBackend() {
   backendStatus.currentMissionStats = null;
   backendStatus.guiMissionSlots = null;
   backendStatus.slotUnlockSummary = null;
+  syncCompetitionRangeLockScheduler();
   publishStatus();
   backend.kill("SIGTERM");
   clearStopTimer();
@@ -2090,6 +2188,7 @@ function applyStoppedModeConfig(parsed) {
   backendStatus.currentMode = backendStatus.missionModeEnabled
     ? `mission-${backendStatus.currentMissionResetLevel || backendStatus.defaultMissionResetLevel}`
     : "normal";
+  syncCompetitionRangeLockScheduler();
   publishStatus();
   return next;
 }
@@ -2206,6 +2305,134 @@ async function requestBackend(action, payload = {}, options = {}) {
       },
     });
   });
+}
+
+function clearCompetitionRangeLockTimer() {
+  if (competitionRangeLockTimer) {
+    clearTimeout(competitionRangeLockTimer);
+    competitionRangeLockTimer = null;
+  }
+}
+
+function scheduleCompetitionRangeLockTick(delayMs = 0) {
+  clearCompetitionRangeLockTimer();
+  competitionRangeLockTimer = setTimeout(() => {
+    competitionRangeLockTimer = null;
+    void runCompetitionRangeLockCycle();
+  }, Math.max(0, Number(delayMs) || 0));
+}
+
+async function applyCompetitionRangeLockAction(action, detail) {
+  const desired = String(action || "").trim();
+  if (desired !== "pause" && desired !== "resume") return;
+  if (!backendStatus.running) {
+    pushSystemLog(
+      `[COMP LOCK] ${detail}; backend is stopped, skipping ${desired}.`,
+    );
+    return;
+  }
+  const currentlyPaused = backendStatus.watchLoopEnabled === false;
+  const currentlyRunning = backendStatus.watchLoopEnabled !== false;
+  if (
+    (desired === "pause" && currentlyPaused) ||
+    (desired === "resume" && currentlyRunning)
+  ) {
+    const summary = `${desired}:${detail}`;
+    if (competitionRangeLockLastSummary !== summary) {
+      competitionRangeLockLastSummary = summary;
+      pushSystemLog(`[COMP LOCK] ${detail}; already ${desired}d.`);
+    }
+    return;
+  }
+  const command = desired === "pause" ? "pause" : "resume";
+  pushSystemLog(`[COMP LOCK] ${detail}; sending ${command}.`);
+  await sendBackendCommand(command);
+  competitionRangeLockLastSummary = `${desired}:${detail}`;
+}
+
+async function runCompetitionRangeLockCycle() {
+  const config = readDesktopConfig();
+  const lockConfig = competitionRangeLockConfigFrom(config);
+  if (!shouldRunCompetitionRangeLock(config)) {
+    competitionRangeLockLastSummary = "";
+    return;
+  }
+  if (competitionRangeLockRunning) {
+    scheduleCompetitionRangeLockTick(lockConfig.pollSeconds * 1000);
+    return;
+  }
+  competitionRangeLockRunning = true;
+  try {
+    const normalizedMinRank = Math.min(lockConfig.minRank, lockConfig.maxRank);
+    const normalizedMaxRank = Math.max(lockConfig.minRank, lockConfig.maxRank);
+    const userKeys = [
+      normalizeCompetitionRowKey(backendStatus.currentUserDisplayName),
+      normalizeCompetitionRowKey(backendStatus.currentUserWalletId),
+    ].filter(Boolean);
+    if (!userKeys.length) {
+      pushSystemLog("[COMP LOCK] Missing current user identity; waiting for whoami.");
+      return;
+    }
+
+    const competition = await scrapeLatestCompetition({});
+    if (competition?.debug?.challenge) {
+      pushSystemLog(
+        `[COMP LOCK] Competition scrape blocked (${competition.debug.challenge}).`,
+      );
+      return;
+    }
+    const rows = Array.isArray(competition?.userRows) ? competition.userRows : [];
+    if (!rows.length) {
+      pushSystemLog("[COMP LOCK] Competition rows unavailable; no action.");
+      return;
+    }
+    const currentRow =
+      rows.find((row) => {
+        const rowKey = normalizeCompetitionRowKey(row?.player);
+        if (!rowKey) return false;
+        return userKeys.some(
+          (key) => rowKey === key || rowKey.includes(key) || key.includes(rowKey),
+        );
+      }) || null;
+    if (!currentRow || !Number.isFinite(Number(currentRow.rank))) {
+      pushSystemLog("[COMP LOCK] Current user row not found; no action.");
+      return;
+    }
+
+    const rank = Number(currentRow.rank);
+    const detail = `rank=${rank} target=${normalizedMinRank}-${normalizedMaxRank} player=${String(currentRow.player || "unknown").trim() || "unknown"}`;
+    if (rank < normalizedMinRank) {
+      await applyCompetitionRangeLockAction("pause", `${detail} above range`);
+      return;
+    }
+    if (rank > normalizedMaxRank) {
+      await applyCompetitionRangeLockAction("resume", `${detail} below range`);
+      return;
+    }
+    await applyCompetitionRangeLockAction("pause", `${detail} in range`);
+  } catch (error) {
+    pushSystemLog(
+      `[COMP LOCK] Poll failed: ${String(error?.message || error)}`,
+    );
+  } finally {
+    competitionRangeLockRunning = false;
+    const nextRawConfig = readDesktopConfig();
+    const nextConfig = competitionRangeLockConfigFrom(nextRawConfig);
+    if (shouldRunCompetitionRangeLock(nextRawConfig)) {
+      scheduleCompetitionRangeLockTick(nextConfig.pollSeconds * 1000);
+    }
+  }
+}
+
+function syncCompetitionRangeLockScheduler() {
+  const config = readDesktopConfig();
+  const lockConfig = competitionRangeLockConfigFrom(config);
+  if (!shouldRunCompetitionRangeLock(config)) {
+    clearCompetitionRangeLockTimer();
+    competitionRangeLockLastSummary = "";
+    return;
+  }
+  scheduleCompetitionRangeLockTick(250);
 }
 
 async function createControlWindow() {
@@ -2453,6 +2680,7 @@ app.whenReady().then(async () => {
       ? `mission-${backendStatus.currentMissionResetLevel || backendStatus.defaultMissionResetLevel}`
       : "normal";
     logConfigPatch("Desktop", requestedPatch);
+    syncCompetitionRangeLockScheduler();
     publishStatus();
     if (
       backend &&

@@ -1572,6 +1572,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
           source: "cooldown_reset",
           at: Date.now(),
           resetType: "nft",
+          resetSource: source,
           missionName,
           nftName,
           nftId,
@@ -3224,6 +3225,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
                     source: "rental",
                   });
                   if (resetResult?.reset === true) {
+                    option.rentalResetUsed = true;
                     logWithTimestamp(
                       `[RENTAL] 🔁 ${name}: retrying lease after rental cooldown reset...`,
                     );
@@ -3434,6 +3436,20 @@ function createChecksService(ctx, logger, mcp, services = {}) {
               ctx.guiBridge &&
               typeof ctx.guiBridge.sendEvent === "function"
             ) {
+              const usedReset =
+                option.source === "owned_cooldown" ||
+                (option.source === "rental" && option.rentalResetUsed === true);
+              if (usedReset) {
+                ctx.guiBridge.sendEvent("stats_assignment", {
+                  at: Date.now(),
+                  missionId: id,
+                  missionName: name,
+                  slot,
+                  nftAccount: account,
+                  source: option.source === "rental" ? "rental" : "owned",
+                  usedReset: true,
+                });
+              }
               ctx.guiBridge.sendEvent("assigned", {
                 missionId: id,
                 missionName: name,

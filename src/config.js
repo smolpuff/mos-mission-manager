@@ -31,6 +31,10 @@ const SALVAGE_TOP_LEVEL_KEYS = [
   "lowBalanceSolThreshold",
   "signerSetupCompleted",
   "autoUpdateCheckEnabled",
+  "competitionRangeLockEnabled",
+  "competitionRangeLockMinRank",
+  "competitionRangeLockMaxRank",
+  "competitionRangeLockPollSeconds",
 ];
 
 function configBackupPath(configPath) {
@@ -338,6 +342,33 @@ function loadConfig(ctx, logWithTimestamp) {
   if (typeof ctx.config.watchLoopEnabled === "boolean") {
     ctx.watchLoopEnabled = ctx.config.watchLoopEnabled;
   }
+  if (typeof ctx.config.competitionRangeLockEnabled !== "boolean") {
+    ctx.config.competitionRangeLockEnabled = false;
+  }
+  const competitionRangeLockMinRank = Number(
+    ctx.config.competitionRangeLockMinRank,
+  );
+  ctx.config.competitionRangeLockMinRank =
+    Number.isFinite(competitionRangeLockMinRank) &&
+    competitionRangeLockMinRank > 0
+      ? Math.floor(competitionRangeLockMinRank)
+      : 11;
+  const competitionRangeLockMaxRank = Number(
+    ctx.config.competitionRangeLockMaxRank,
+  );
+  ctx.config.competitionRangeLockMaxRank =
+    Number.isFinite(competitionRangeLockMaxRank) &&
+    competitionRangeLockMaxRank > 0
+      ? Math.floor(competitionRangeLockMaxRank)
+      : 13;
+  const competitionRangeLockPollSeconds = Number(
+    ctx.config.competitionRangeLockPollSeconds,
+  );
+  ctx.config.competitionRangeLockPollSeconds =
+    Number.isFinite(competitionRangeLockPollSeconds) &&
+    competitionRangeLockPollSeconds >= 60
+      ? Math.floor(competitionRangeLockPollSeconds)
+      : 150;
   if (ctx.config.watchLoopEnabled === true) {
     delete ctx.config.watchLoopEnabled;
   }

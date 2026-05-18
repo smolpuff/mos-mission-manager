@@ -339,12 +339,37 @@ export default function StatsPage({
   );
   const slotUnlockPbp = asNumber(spendByAction.mission_slot_unlock, 0);
   const sessionRentals = asNumber(sessionAnalytics.totalLeased, 0);
+  const nftResetUsage =
+    sessionAnalytics.nftResetUsage &&
+    typeof sessionAnalytics.nftResetUsage === "object"
+      ? sessionAnalytics.nftResetUsage
+      : {};
+  const ownedResetStats =
+    nftResetUsage.owned && typeof nftResetUsage.owned === "object"
+      ? nftResetUsage.owned
+      : {};
+  const rentalResetStats =
+    nftResetUsage.rental && typeof nftResetUsage.rental === "object"
+      ? nftResetUsage.rental
+      : {};
+  const ownedNftResets = asNumber(ownedResetStats.resets, 0);
+  const ownedNftResetAssigned = asNumber(ownedResetStats.assigned, 0);
+  const ownedNftResetMissed = Math.max(
+    0,
+    ownedNftResets - ownedNftResetAssigned,
+  );
+  const rentalNftResets = asNumber(rentalResetStats.resets, 0);
+  const rentalNftResetAssigned = asNumber(rentalResetStats.assigned, 0);
+  const rentalNftResetMissed = Math.max(
+    0,
+    rentalNftResets - rentalNftResetAssigned,
+  );
   const netPerHour = netPbp / elapsedHours;
   const tokenIconClass = "h-3.5 w-3.5 object-contain";
 
   return (
     <section className="h-full min-h-0 overflow-hidden">
-      <div className="grid h-full min-h-0 grid-rows-[118px_210px_minmax(0,1fr)] gap-3 overflow-hidden">
+      <div className="grid h-full min-h-0 grid-rows-[118px_210px_minmax(0,1fr)_auto] gap-3 overflow-hidden">
         <section className="card grid grid-cols-[minmax(195px,0.28fr)_minmax(0,1fr)] items-center gap-4 overflow-hidden">
           <div className="min-w-0">
             <div className="text-xs  text-slate-400">Net PBP</div>
@@ -567,6 +592,26 @@ export default function StatsPage({
               value={formatNumber(rankedClaims, 0)}
             />
             <DetailRow label="Reset actions" value={formatNumber(resets, 0)} />
+          </DetailCard>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3 overflow-hidden">
+          <DetailCard title="Rental NFT Reset Usage">
+            <DetailRow
+              label="Rental NFT resets"
+              value={formatNumber(rentalNftResets, 0)}
+            />
+            <DetailRow
+              label="Reset then assigned"
+              value={formatNumber(rentalNftResetAssigned, 0)}
+            />
+            <DetailRow
+              label="Missed after reset"
+              value={formatNumber(rentalNftResetMissed, 0)}
+              tone={
+                rentalNftResetMissed > 0 ? "text-amber-300" : "text-slate-100"
+              }
+            />
           </DetailCard>
         </div>
       </div>

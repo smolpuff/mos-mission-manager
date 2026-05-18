@@ -243,9 +243,7 @@ function SlideNumberFormatted({ value, format }) {
 
 function ControlView() {
   const { bridge, status, logs, lastEvent } = useBackendState();
-  const [debugEnabled, setDebugEnabled] = useState(
-    status?.debugMode === true,
-  );
+  const [debugEnabled, setDebugEnabled] = useState(status?.debugMode === true);
   const debug = debugEnabled;
   const [currentPage, setCurrentPage] = useState("missions");
   const [mountedPages, setMountedPages] = useState({ missions: true });
@@ -262,6 +260,14 @@ function ControlView() {
   const [nftResetMaxPbp, setNftResetMaxPbp] = useState(
     String(status.nftCooldownResetMaxPbp ?? 20),
   );
+  const [competitionRangeLockEnabled, setCompetitionRangeLockEnabled] =
+    useState(false);
+  const [competitionRangeLockMinRank, setCompetitionRangeLockMinRank] =
+    useState("11");
+  const [competitionRangeLockMaxRank, setCompetitionRangeLockMaxRank] =
+    useState("13");
+  const [competitionRangeLockPollSeconds, setCompetitionRangeLockPollSeconds] =
+    useState("150");
   const [autoUpdateCheckEnabled, setAutoUpdateCheckEnabledState] =
     useState(true);
   const [updateCheckBusy, setUpdateCheckBusy] = useState(false);
@@ -302,6 +308,43 @@ function ControlView() {
   const startupUpdateCheckRequestedRef = useRef(false);
   const isMissionMode = modeSelection === "mission";
   const isNormalMode = !isMissionMode;
+  const debugControlsVisible = bridge?.desktopDevMode === true;
+  const competitionRangeLockDisabled = !debug || !isMissionMode;
+  const competitionRangeLockInputsDisabled =
+    competitionRangeLockDisabled || !competitionRangeLockEnabled;
+  const nftResetInputsDisabled = !isMissionMode || !nftResetEnabled;
+  const normalizePositiveIntegerString = (value, fallback) => {
+    const next = Number(value);
+    return Number.isFinite(next) && next > 0
+      ? String(Math.floor(next))
+      : String(fallback);
+  };
+  const normalizeRangeLockPollString = (value, fallback = 150) => {
+    const next = Number(value);
+    return Number.isFinite(next) && next >= 60
+      ? String(Math.floor(next))
+      : String(fallback);
+  };
+  const getCompetitionRangeLockPatch = (
+    enabled = competitionRangeLockEnabled,
+  ) => ({
+    competitionRangeLockEnabled: enabled === true,
+    competitionRangeLockMinRank: Math.floor(
+      Number(competitionRangeLockMinRank) > 0
+        ? Number(competitionRangeLockMinRank)
+        : 11,
+    ),
+    competitionRangeLockMaxRank: Math.floor(
+      Number(competitionRangeLockMaxRank) > 0
+        ? Number(competitionRangeLockMaxRank)
+        : 13,
+    ),
+    competitionRangeLockPollSeconds: Math.floor(
+      Number(competitionRangeLockPollSeconds) >= 60
+        ? Number(competitionRangeLockPollSeconds)
+        : 150,
+    ),
+  });
   const applyConfigPatch = async (patch) => {
     if (bridge?.updateConfig) {
       await bridge.updateConfig(patch);
@@ -407,6 +450,9 @@ function ControlView() {
       if (typeof config.nftCooldownResetEnabled === "boolean") {
         setNftResetEnabled(config.nftCooldownResetEnabled);
       }
+      if (typeof config.competitionRangeLockEnabled === "boolean") {
+        setCompetitionRangeLockEnabled(config.competitionRangeLockEnabled);
+      }
       if (typeof config.autoUpdateCheckEnabled === "boolean") {
         setAutoUpdateCheckEnabledState(config.autoUpdateCheckEnabled);
       } else {
@@ -417,6 +463,18 @@ function ControlView() {
         Number.isFinite(cooldownMaxPbp) && cooldownMaxPbp >= 0
           ? String(cooldownMaxPbp)
           : "10",
+      );
+      const rangeMin = Number(config.competitionRangeLockMinRank);
+      setCompetitionRangeLockMinRank(
+        normalizePositiveIntegerString(rangeMin, 11),
+      );
+      const rangeMax = Number(config.competitionRangeLockMaxRank);
+      setCompetitionRangeLockMaxRank(
+        normalizePositiveIntegerString(rangeMax, 13),
+      );
+      const rangePollSeconds = Number(config.competitionRangeLockPollSeconds);
+      setCompetitionRangeLockPollSeconds(
+        normalizeRangeLockPollString(rangePollSeconds, 150),
       );
       const configuredPbp = Number(
         config?.lowBalanceThresholds?.pbp ?? config?.lowBalancePbpThreshold,
@@ -522,6 +580,38 @@ function ControlView() {
     const next = enabled === true;
     setAutoUpdateCheckEnabledState(next);
     await applyConfigPatch({ autoUpdateCheckEnabled: next });
+  };
+  const setCompetitionRangeLock = async (enabled) => {
+    const next = enabled === true;
+    setCompetitionRangeLockEnabled(next);
+    await applyConfigPatch(getCompetitionRangeLockPatch(next));
+  };
+  const setCompetitionRangeLockMin = async (value) => {
+    const raw = String(value ?? "").trim();
+    setCompetitionRangeLockMinRank(raw);
+    const next = Number(raw);
+    if (!Number.isFinite(next) || next <= 0) return;
+    await applyConfigPatch({
+      competitionRangeLockMinRank: Math.floor(next),
+    });
+  };
+  const setCompetitionRangeLockMax = async (value) => {
+    const raw = String(value ?? "").trim();
+    setCompetitionRangeLockMaxRank(raw);
+    const next = Number(raw);
+    if (!Number.isFinite(next) || next <= 0) return;
+    await applyConfigPatch({
+      competitionRangeLockMaxRank: Math.floor(next),
+    });
+  };
+  const setCompetitionRangeLockPoll = async (value) => {
+    const raw = String(value ?? "").trim();
+    setCompetitionRangeLockPollSeconds(raw);
+    const next = Number(raw);
+    if (!Number.isFinite(next) || next < 60) return;
+    await applyConfigPatch({
+      competitionRangeLockPollSeconds: Math.floor(next),
+    });
   };
   const runUpdateCheck = async ({ manual = false } = {}) => {
     if (!bridge?.checkForUpdates) return null;
@@ -1601,7 +1691,10 @@ function ControlView() {
               slot: entry?.slot,
               name: entry?.missionName || entry?.name || "",
               currentLevel:
-                entry?.missionLevel ?? entry?.currentLevel ?? entry?.level ?? null,
+                entry?.missionLevel ??
+                entry?.currentLevel ??
+                entry?.level ??
+                null,
             }));
         seedMissionSelectionState(sourceMissions, []);
       }
@@ -1853,7 +1946,8 @@ function ControlView() {
         return name
           ? {
               name,
-              image: localCollectionImage(name) || collectionImageByKey[key] || null,
+              image:
+                localCollectionImage(name) || collectionImageByKey[key] || null,
             }
           : null;
       }
@@ -3042,7 +3136,9 @@ function ControlView() {
           ) : null}
           {mountedPages.mish_tish ? (
             <div
-              style={{ display: currentPage === "mish_tish" ? "block" : "none" }}
+              style={{
+                display: currentPage === "mish_tish" ? "block" : "none",
+              }}
             >
               <CompetitionPage
                 latestCompetition={latestCompetition}
@@ -3054,7 +3150,9 @@ function ControlView() {
             </div>
           ) : null}
           {mountedPages.stats ? (
-            <div style={{ display: currentPage === "stats" ? "block" : "none" }}>
+            <div
+              style={{ display: currentPage === "stats" ? "block" : "none" }}
+            >
               <StatsPage
                 status={status}
                 logs={logs}
@@ -3465,13 +3563,54 @@ function ControlView() {
                         </svg>
                       </div>
                     </button>
-                    {debug ? (
+                    {debugControlsVisible ? (
                       <>
-                        <button
-                          className="h-full  items-center justify-center opacity-30  "
-                          type="button"
-                          disabled
-                        ></button>
+                        <div
+                          className={`h-full w-full !p-0 items-center ${competitionRangeLockDisabled ? "grayscale opacity-60" : ""}`}
+                        >
+                          <div class="w-full">
+                            <ToggleSwitch
+                              switchID="enableCompetitionRangeLock"
+                              checked={competitionRangeLockEnabled}
+                              title="Finish Target"
+                              styling="text-xs flex !flex-row"
+                              disabled={competitionRangeLockDisabled}
+                              onChange={(event) =>
+                                void setCompetitionRangeLock(
+                                  event.target.checked,
+                                )
+                              }
+                            />
+                          </div>
+                          <div class="w-full mt-0 flex gap-3  items-center text-xs">
+                            <div class="flex items-center rounded-full border border-white/15 px-0 py-1">
+                              <input
+                                type="text"
+                                value={competitionRangeLockMinRank}
+                                onChange={(event) =>
+                                  void setCompetitionRangeLockMin(
+                                    event.target.value,
+                                  )
+                                }
+                                disabled={competitionRangeLockInputsDisabled}
+                                class="w-7.5 border-0 bg-transparent p-0 text-center text-xs !text-white outline-none disabled:opacity-50"
+                              />
+                              <span class=" text-xs text-white/70">-</span>
+                              <input
+                                type="text"
+                                value={competitionRangeLockMaxRank}
+                                onChange={(event) =>
+                                  void setCompetitionRangeLockMax(
+                                    event.target.value,
+                                  )
+                                }
+                                disabled={competitionRangeLockInputsDisabled}
+                                class="w-7.5 border-0 bg-transparent p-0 text-center text-xs !text-white outline-none disabled:opacity-50"
+                              />
+                            </div>
+                            Range
+                          </div>
+                        </div>
 
                         <div
                           className={`{h-full w-full  !p-0 items-center  ${!isMissionMode ? "grayscale opacity-60" : ""}`}
@@ -3503,6 +3642,7 @@ function ControlView() {
                                       event.target.value,
                                     )
                                   }
+                                  disabled={nftResetInputsDisabled}
                                   class="relative input bg-transparent text-xs w-17 p-1 pr-3 h-auto !text-white text-center !rounded-full outline-none"
                                 />
                                 <img
