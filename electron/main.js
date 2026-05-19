@@ -111,6 +111,7 @@ let analyticsTelemetryFailureLogged = false;
 let analyticsTelemetryEndTimer = null;
 let telemetryQuitInProgress = false;
 let analyticsTelemetrySessionReusableUntil = 0;
+let appQuitInFlight = false;
 const FUNDING_WALLET_REFRESH_MIN_INTERVAL_MS = 30000;
 const BOOTSTRAP_WALLET_REFRESH_MIN_INTERVAL_MS = 30000;
 const PAGE_PREVIEW_CACHE_TTL_MS = 2000;
@@ -997,6 +998,21 @@ function trackTelemetryCrash(error, context = {}) {
     stack_trace: stack || undefined,
     context,
   });
+}
+
+function requestAppQuit(reason = "user") {
+  if (appQuitInFlight) return;
+  appQuitInFlight = true;
+  try {
+    stopBackend();
+  } catch {}
+  Promise.resolve(stopTelemetrySession(reason, { immediate: true }))
+    .catch(() => {})
+    .finally(() => {
+      try {
+        app.exit(0);
+      } catch {}
+    });
 }
 
 function walletSummaryResultFromBackendStatus() {
@@ -2560,15 +2576,7 @@ function startBackend() {
         applyAnalyticsRentalEvent(message.payload || {});
       }
       if (message.event === "app_quit") {
-        try {
-          stopBackend();
-        } catch {}
-        // Quit the entire desktop app (not just the backend runner).
-        setTimeout(() => {
-          try {
-            app.quit();
-          } catch {}
-        }, 50);
+        requestAppQuit("app_quit");
         return;
       }
       publishEvent(message);
@@ -4145,7 +4153,7 @@ app.whenReady().then(async () => {
         !controlWindow.isDestroyed() &&
         win === controlWindow
       ) {
-        app.quit();
+        requestAppQuit("window_close");
       } else {
         win.close();
       }
@@ -4226,12 +4234,7 @@ app.on("before-quit", (event) => {
   }
   telemetryQuitInProgress = true;
   event.preventDefault();
-  stopBackend();
-  stopTelemetrySession("before_quit", { immediate: true })
-    .catch(() => {})
-    .finally(() => {
-      app.quit();
-    });
+  requestAppQuit("before_quit");
 });
 
 process.on("uncaughtException", (error) => {

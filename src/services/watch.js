@@ -2419,6 +2419,7 @@ function createWatchService(
     logWithTimestamp("[WATCH] ▶ Watch loop armed.");
     try {
       let initialMissionResult = startupMissionResult();
+      let startupDidClaimOrAssign = false;
       if (initialMissionResult) {
         const initialStatsResult = await checks.refreshMissionHeaderStats({
           missionsResult: initialMissionResult,
@@ -2433,21 +2434,48 @@ function createWatchService(
           claimable: Number(ctx.currentMissionStats?.claimable || 0),
         });
         const startupStats = initialStatsResult?.stats || ctx.currentMissionStats || {};
-        const startupClaimable = Number(startupStats.claimable || 0);
-        const startupAvailable = Number(startupStats.available || 0);
+        let startupClaimable = Number(startupStats.claimable || 0);
+        let startupAvailable = Number(startupStats.available || 0);
+        let startupActionMissionResult = initialMissionResult;
+        if (!hasActiveMcpCooldown()) {
+          try {
+            startupActionMissionResult = await mcp.mcpToolCall(
+              "get_user_missions",
+              {},
+            );
+            initialMissionResult =
+              startupActionMissionResult || initialMissionResult;
+            const freshStartupStatsResult =
+              await checks.refreshMissionHeaderStats({
+                missionsResult: startupActionMissionResult,
+                refreshNftCount: false,
+              });
+            const freshStartupStats =
+              freshStartupStatsResult?.stats || ctx.currentMissionStats || {};
+            startupClaimable = Number(freshStartupStats.claimable || 0);
+            startupAvailable = Number(freshStartupStats.available || 0);
+          } catch (error) {
+            logDebug("watch", "startup_action_state_refresh_failed", {
+              error: error.message,
+            });
+          }
+        }
         if (!hasActiveMcpCooldown() && startupClaimable > 0) {
           const traceId = nextTraceId("startup");
           let beforeSnapshot = new Map();
           try {
-            beforeSnapshot = await loadSelectedMissionSnapshot(initialMissionResult);
+            beforeSnapshot = await loadSelectedMissionSnapshot(
+              startupActionMissionResult,
+            );
           } catch {}
           logWithTimestamp("[WATCH] ▶ Startup claim check...");
           const claimResult = await checks.claimClaimableMissions({
             maxClaims: WATCH_MAX_CLAIMS,
             reason: "startup",
-            missionsResult: initialMissionResult,
+            missionsResult: startupActionMissionResult,
           });
           if (Number(claimResult?.claimed || 0) > 0) {
+            startupDidClaimOrAssign = true;
             const followup = await runClaimLifecycle({
               traceId,
               beforeSnapshot,
@@ -2467,9 +2495,52 @@ function createWatchService(
           logWithTimestamp("[ASSIGN] ▶ Startup assign check...");
           const assignResult = await checks.autoAssignConfiguredMissions({
             reason: "startup_unassigned_check",
-            missionsResult: initialMissionResult,
+            missionsResult: startupActionMissionResult,
           });
           logAssignCheckResult(assignResult);
+          if (Number(assignResult?.assigned || 0) > 0) {
+            startupDidClaimOrAssign = true;
+          }
+        }
+
+        if (startupDidClaimOrAssign && !hasActiveMcpCooldown()) {
+          try {
+            const settledMissionResult = await mcp.mcpToolCall(
+              "get_user_missions",
+              {},
+            );
+            initialMissionResult = settledMissionResult || initialMissionResult;
+            const settledStatsResult = await checks.refreshMissionHeaderStats({
+              missionsResult: initialMissionResult,
+              refreshNftCount: false,
+            });
+            const settledStats =
+              settledStatsResult?.stats || ctx.currentMissionStats || {};
+            const settledAvailable = Number(settledStats.available || 0);
+            if (settledAvailable > 0) {
+              logWithTimestamp("[ASSIGN] ▶ Startup settle assign check...");
+              const secondAssignResult =
+                await checks.autoAssignConfiguredMissions({
+                  reason: "startup_settle_assign_check",
+                  missionsResult: initialMissionResult,
+                });
+              logAssignCheckResult(secondAssignResult);
+              if (Number(secondAssignResult?.assigned || 0) > 0) {
+                initialMissionResult = await mcp.mcpToolCall(
+                  "get_user_missions",
+                  {},
+                );
+                await checks.refreshMissionHeaderStats({
+                  missionsResult: initialMissionResult,
+                  refreshNftCount: false,
+                });
+              }
+            }
+          } catch (error) {
+            logDebug("watch", "startup_settle_refresh_failed", {
+              error: error.message,
+            });
+          }
         }
       } else {
         logDebug("watch", "startup_ui_refresh_skipped", {

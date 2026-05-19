@@ -94,7 +94,10 @@ function competitionStatusFrom(summary, isNewCompetition) {
   const startMs = competitionDateMs(summary?.start);
   const endMs = competitionDateMs(summary?.end);
   if (endMs && now > endMs) {
-    return null;
+    return {
+      label: "Ended",
+      className: "badge bg-slate-300 text-slate-900 border-transparent",
+    };
   }
   if (startMs && now < startMs) {
     if (startMs - now <= 24 * 60 * 60 * 1000) {
@@ -657,26 +660,15 @@ function ControlView() {
       const lastSeenCompetitionId =
         String(config.lastSeenMissionCompetitionId || "").trim() ||
         COMPETITION_NOTIFICATION_SEED;
-      const suppressedCompetitionId = String(
-        config.suppressedMissionCompetitionNotificationId || "",
-      ).trim();
       const isNewCompetition =
         summary.competitionNumber !== lastSeenCompetitionId;
-      const isSuppressedForCurrentCompetition =
-        summary.competitionNumber === suppressedCompetitionId;
       const statusBadge = competitionStatusFrom(summary, isNewCompetition);
-      if (!statusBadge) {
-        await applyConfigPatch({
-          lastSeenMissionCompetitionId: summary.competitionNumber,
-        });
-        return;
-      }
       if (isNewCompetition) {
         await applyConfigPatch({
           suppressedMissionCompetitionNotificationId: "",
         });
       }
-      if (!isSuppressedForCurrentCompetition) {
+      if (isNewCompetition) {
         setCompetitionNotificationSuppressChecked(false);
         setCompetitionNotificationModal({
           ...summary,

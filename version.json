@@ -1,10 +1,11 @@
 {
-  "version": "3.2.4",
+  "version": "3.2.6",
   "downloadUrl": "https://github.com/smolpuff/mos-mission-manager/releases/latest",
   "notes": [
-    "new startup flows",
+    "entirely new app and runner startup flows",
     "added dev-gated mish competish result targeting. UMADBRO",
-    "added mish competish startup dialog",
-    "added rental reset stats"
+    "added mish competish startup dialg on new detection",
+    "added rental reset stats",
+    "call optimizations"
   ]
 }
