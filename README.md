@@ -39,7 +39,7 @@ This project was heavily vibe-coded and is still evolving.
 ### Install deps
 
 ```bash
-npm ci
+npm install
 ```
 
 ### Desktop App
@@ -90,11 +90,9 @@ If you are debugging a packaged install, check those locations first.
 - Press the start button to start watching and claiming missions
 - If you chose app-wallet, fund it now to cover transations (0.1sol, whatever pbp)
 
-- find the rest of your own secret sauce
-
 ## Features
 
-- first-run onboarding wizard
+- onboarding wizard
 - built-in app-wallet using secureStorage
 - wallet import/recovery via 12/24 keys
 - missions watch + claim
@@ -199,7 +197,7 @@ Signer notes:
 ## Notes
 
 - Use a dedicated burner wallet if you run `app_wallet` mode.
-- `dapp` mode uses the browser signing bridge returned by the prepare tool. Currently funky and nto always working...
+- `dapp` mode uses the browser signing bridge returned by the prepare tool. Currently funky and nto always working. lol...
 
 ## License
 
