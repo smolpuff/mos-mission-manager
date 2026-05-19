@@ -208,6 +208,74 @@ function createChecksService(ctx, logger, mcp, services = {}) {
     return { ...DEFAULT_REWARD_TOTALS };
   }
 
+  function rewardFromClaimToolResult(result = {}) {
+    const sc = result?.structuredContent || {};
+    const directSources = [
+      sc,
+      sc.reward,
+      sc.claim,
+      sc.data,
+      sc.result,
+      Array.isArray(sc.rewardsClaimed) ? sc.rewardsClaimed[0] : null,
+      Array.isArray(sc.claimedMissions) ? sc.claimedMissions[0] : null,
+      Array.isArray(sc.claims) ? sc.claims[0] : null,
+    ].filter((entry) => entry && typeof entry === "object");
+
+    for (const source of directSources) {
+      const token = normalizeRewardBucket(
+        source?.rewardToken ??
+          source?.reward_token ??
+          source?.prize ??
+          source?.prizeToken ??
+          source?.currency ??
+          source?.symbol ??
+          source?.token ??
+          null,
+      );
+      const rawAmount =
+        source?.rewardAmount ??
+        source?.reward_amount ??
+        source?.prizeAmount ??
+        source?.prize_amount ??
+        source?.amount ??
+        source?.reward ??
+        source?.value ??
+        null;
+      let amount = Number(rawAmount);
+      if (!Number.isFinite(amount) && typeof rawAmount === "string") {
+        const match = rawAmount.match(/([0-9]+(?:\.[0-9]+)?)/);
+        amount = match ? Number(match[1]) : NaN;
+      }
+      if (token && Number.isFinite(amount) && amount > 0) {
+        return { token, amount };
+      }
+    }
+
+    const textParts = [
+      ...(Array.isArray(result?.content)
+        ? result.content
+            .map((entry) =>
+              entry && typeof entry === "object" ? String(entry.text || "") : "",
+            )
+            .filter(Boolean)
+        : []),
+      String(sc?.details?.message || ""),
+      String(sc?.message || ""),
+      String(sc?.note || ""),
+    ].filter(Boolean);
+    for (const text of textParts) {
+      const match = text.match(/([0-9]+(?:\.[0-9]+)?)\s*([A-Za-z_]{2,20})/);
+      if (!match) continue;
+      const amount = Number(match[1]);
+      const token = normalizeRewardBucket(match[2]);
+      if (token && Number.isFinite(amount) && amount > 0) {
+        return { token, amount };
+      }
+    }
+
+    return { token: null, amount: 0 };
+  }
+
   function parseTokenBalancesArray(balances = []) {
     const summary = [];
     for (const entry of Array.isArray(balances) ? balances : []) {
@@ -3776,6 +3844,13 @@ function createChecksService(ctx, logger, mcp, services = {}) {
             ctx.guiBridge &&
             typeof ctx.guiBridge.sendEvent === "function"
           ) {
+            const rewardFromResult = rewardFromClaimToolResult(claimResult);
+            const rewardToken =
+              rewardFromResult.token || normalizeRewardBucket(mission.prize);
+            const rewardAmount =
+              rewardFromResult.amount > 0
+                ? rewardFromResult.amount
+                : Number(mission.prizeAmount ?? 0);
             ctx.guiBridge.sendEvent("stats_claim", {
               source: "fallback_claim",
               at: Date.now(),
@@ -3783,12 +3858,20 @@ function createChecksService(ctx, logger, mcp, services = {}) {
               missionName: mission.name || "unknown mission",
               slot: mission.slot ?? null,
               level: mission.level ?? null,
-              rewardAmount: mission.prizeAmount ?? null,
-              rewardToken: mission.prize ?? null,
+              rewardAmount:
+                Number.isFinite(rewardAmount) && rewardAmount > 0
+                  ? rewardAmount
+                  : null,
+              rewardToken: rewardToken || mission.prize || null,
             });
           }
-          const rewardBucket = normalizeRewardBucket(mission.prize);
-          const rewardAmount = Number(mission.prizeAmount ?? 0);
+          const rewardFromResult = rewardFromClaimToolResult(claimResult);
+          const rewardBucket =
+            rewardFromResult.token || normalizeRewardBucket(mission.prize);
+          const rewardAmount =
+            rewardFromResult.amount > 0
+              ? rewardFromResult.amount
+              : Number(mission.prizeAmount ?? 0);
           if (
             rewardBucket &&
             Number.isFinite(rewardAmount) &&
