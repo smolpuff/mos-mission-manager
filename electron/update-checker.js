@@ -74,7 +74,12 @@ async function checkForUpdates({
     const payload = await response.json();
     const latestVersion = String(payload?.version || "").trim();
     const downloadUrl = String(payload?.downloadUrl || "").trim();
-    const notes = String(payload?.notes || "").trim();
+    const notes = Array.isArray(payload?.notes)
+      ? payload.notes.map((note) => String(note).trim()).filter(Boolean)
+      : String(payload?.notes || "")
+          .split(/\r?\n/)
+          .map((note) => note.trim())
+          .filter(Boolean);
     if (!latestVersion || !downloadUrl) {
       return {
         ok: false,

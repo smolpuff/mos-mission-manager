@@ -780,7 +780,12 @@ function ControlView() {
           currentVersion: String(result.currentVersion || "").trim(),
           latestVersion: String(result.latestVersion || "").trim(),
           downloadUrl: String(result.downloadUrl || "").trim(),
-          notes: String(result.notes || "").trim(),
+          notes: Array.isArray(result.notes)
+            ? result.notes
+            : String(result.notes || "")
+                .split(/\r?\n/)
+                .map((note) => note.trim())
+                .filter(Boolean),
         });
         if (manual) setUpdateCheckMessage("Update available.");
         return result;
@@ -1136,8 +1141,10 @@ function ControlView() {
   const [onboardingSlotSelections, setOnboardingSlotSelections] = useState({});
   const [onboardingMissionPickerSlot, setOnboardingMissionPickerSlot] =
     useState(null);
-  const [onboardingMissionPickerPendingName, setOnboardingMissionPickerPendingName] =
-    useState("");
+  const [
+    onboardingMissionPickerPendingName,
+    setOnboardingMissionPickerPendingName,
+  ] = useState("");
   const [onboardingPreviewOnly, setOnboardingPreviewOnly] = useState(false);
   const [onboardingDataLoading, setOnboardingDataLoading] = useState(false);
   const [missionPickerSlot, setMissionPickerSlot] = useState(null);
@@ -2870,10 +2877,10 @@ function ControlView() {
                             <button
                               type="button"
                               className="btn btn-clear btn-sm"
-                              onClick={() =>
-                                (setOnboardingMissionPickerSlot(null),
-                                setOnboardingMissionPickerPendingName(""))
-                              }
+                              onClick={() => (
+                                setOnboardingMissionPickerSlot(null),
+                                setOnboardingMissionPickerPendingName("")
+                              )}
                               title="Close"
                             >
                               ✕
@@ -3012,10 +3019,10 @@ function ControlView() {
                               <button
                                 type="button"
                                 className="btn btn-clear btn-sm"
-                                onClick={() =>
-                                  (setOnboardingMissionPickerSlot(null),
-                                  setOnboardingMissionPickerPendingName(""))
-                                }
+                                onClick={() => (
+                                  setOnboardingMissionPickerSlot(null),
+                                  setOnboardingMissionPickerPendingName("")
+                                )}
                               >
                                 Cancel
                               </button>
@@ -4901,7 +4908,6 @@ function ControlView() {
                     <span className="font-semibold">
                       {updateModal.latestVersion || "unknown"}
                     </span>{" "}
-                    is available
                   </div>
                   {updateModal.currentVersion ? (
                     <div className="text-xs text-slate-400">
@@ -4909,8 +4915,17 @@ function ControlView() {
                     </div>
                   ) : null}
                 </div>
-                <div className="rounded-md border border-white/10 bg-black/20 p-3 text-sm text-slate-100 whitespace-pre-wrap">
-                  {updateModal.notes || "No update notes were provided."}
+                <div className="rounded-md border border-white/10 bg-black/20 p-3 text-xs text-slate-100 whitespace-pre-wrap">
+                  {Array.isArray(updateModal.notes) &&
+                  updateModal.notes.length > 0 ? (
+                    <ul className="list-disc pl-0 list-inside">
+                      {updateModal.notes.map((note, index) => (
+                        <li key={index}>{note}</li>
+                      ))}
+                    </ul>
+                  ) : (
+                    "No update notes were provided."
+                  )}
                 </div>
                 <div className="rounded-md border border-white/10 bg-black/20 p-2 text-xs break-all text-slate-200">
                   {updateModal.downloadUrl}

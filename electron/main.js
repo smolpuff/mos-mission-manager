@@ -307,7 +307,8 @@ function normalizeAnalytics(raw) {
         cc: Number(src?.lifetime?.currencyEarned?.cc || 0) || 0,
       },
       missionClaims:
-        src?.lifetime?.missionClaims && typeof src.lifetime.missionClaims === "object"
+        src?.lifetime?.missionClaims &&
+        typeof src.lifetime.missionClaims === "object"
           ? src.lifetime.missionClaims
           : {},
       claimHistory: normalizeClaimHistory(src?.lifetime?.claimHistory),
@@ -318,7 +319,9 @@ function normalizeAnalytics(raw) {
       nftResetUsage: normalizeNftResetUsage(src?.lifetime?.nftResetUsage),
       spendByAction: normalizeCounterObject(src?.lifetime?.spendByAction),
       nftsUsed: Array.isArray(src?.lifetime?.nftsUsed)
-        ? src.lifetime.nftsUsed.map((v) => String(v || "").trim()).filter(Boolean)
+        ? src.lifetime.nftsUsed
+            .map((v) => String(v || "").trim())
+            .filter(Boolean)
         : [],
     },
     session: {
@@ -337,7 +340,8 @@ function normalizeAnalytics(raw) {
         cc: Number(src?.session?.currencyEarned?.cc || 0) || 0,
       },
       missionClaims:
-        src?.session?.missionClaims && typeof src.session.missionClaims === "object"
+        src?.session?.missionClaims &&
+        typeof src.session.missionClaims === "object"
           ? src.session.missionClaims
           : {},
       claimHistory: normalizeClaimHistory(src?.session?.claimHistory),
@@ -348,7 +352,9 @@ function normalizeAnalytics(raw) {
       nftResetUsage: normalizeNftResetUsage(src?.session?.nftResetUsage),
       spendByAction: normalizeCounterObject(src?.session?.spendByAction),
       nftsUsed: Array.isArray(src?.session?.nftsUsed)
-        ? src.session.nftsUsed.map((v) => String(v || "").trim()).filter(Boolean)
+        ? src.session.nftsUsed
+            .map((v) => String(v || "").trim())
+            .filter(Boolean)
         : [],
     },
   };
@@ -365,9 +371,7 @@ function canConnectToUrl(targetUrl, timeoutMs = 250) {
       const parsed = new URL(targetUrl);
       const socket = net.createConnection({
         host: parsed.hostname,
-        port:
-          Number(parsed.port) ||
-          (parsed.protocol === "https:" ? 443 : 80),
+        port: Number(parsed.port) || (parsed.protocol === "https:" ? 443 : 80),
       });
       let settled = false;
       const finish = (ok) => {
@@ -449,7 +453,9 @@ function formatConfigValueForLog(value) {
     return String(value);
   }
   if (Array.isArray(value)) {
-    const preview = value.slice(0, 6).map((entry) => formatConfigValueForLog(entry));
+    const preview = value
+      .slice(0, 6)
+      .map((entry) => formatConfigValueForLog(entry));
     const suffix = value.length > 6 ? `, ... +${value.length - 6} more` : "";
     return `[${preview.join(", ")}${suffix}]`;
   }
@@ -490,11 +496,19 @@ function missionNameKey(value) {
 function hydrateMissionListWithCachedCatalog(missions = []) {
   const missionList = Array.isArray(missions) ? missions : [];
   if (!missionCatalogResultCache) {
-    return { missions: missionList, hydrated: false, source: "no_catalog_cache" };
+    return {
+      missions: missionList,
+      hydrated: false,
+      source: "no_catalog_cache",
+    };
   }
   const catalogList = normalizeMissionCatalogList(missionCatalogResultCache);
   if (!catalogList.length) {
-    return { missions: missionList, hydrated: false, source: "empty_catalog_cache" };
+    return {
+      missions: missionList,
+      hydrated: false,
+      source: "empty_catalog_cache",
+    };
   }
   const catalogByName = new Map();
   for (const entry of catalogList) {
@@ -514,15 +528,17 @@ function hydrateMissionListWithCachedCatalog(missions = []) {
     const merged = { ...catalogMission, ...mission };
     const hadImage = Boolean(
       mission?.image ||
-        mission?.imageUrl ||
-        mission?.image_url ||
-        mission?.thumbnail ||
-        mission?.thumbnailUrl ||
-        mission?.thumbnail_url,
+      mission?.imageUrl ||
+      mission?.image_url ||
+      mission?.thumbnail ||
+      mission?.thumbnailUrl ||
+      mission?.thumbnail_url,
     );
     if (!hadImage) {
-      if (catalogMission?.image && !merged.image) merged.image = catalogMission.image;
-      if (catalogMission?.imageUrl && !merged.imageUrl) merged.imageUrl = catalogMission.imageUrl;
+      if (catalogMission?.image && !merged.image)
+        merged.image = catalogMission.image;
+      if (catalogMission?.imageUrl && !merged.imageUrl)
+        merged.imageUrl = catalogMission.imageUrl;
       if (catalogMission?.image_url && !merged.image_url) {
         merged.image_url = catalogMission.image_url;
       }
@@ -559,9 +575,7 @@ async function bootstrapStartupMissionSlots() {
         );
       } catch (error) {
         if (!isAuthFailureMessage(error?.message)) throw error;
-        pushSystemLog(
-          "Startup mission sync skipped until login is available.",
-        );
+        pushSystemLog("Startup mission sync skipped until login is available.");
         backendStatus.isAuthenticated = false;
         return { ok: false, skipped: "auth_required" };
       }
@@ -608,7 +622,8 @@ async function bootstrapStartupMissionSlots() {
           missionList,
           "Startup mission sync",
         );
-        backendStatus.guiMissionSlots = computeGuiMissionSlotsShared(missionList);
+        backendStatus.guiMissionSlots =
+          computeGuiMissionSlotsShared(missionList);
         if (hydratedMissions.hydrated) {
           pushSystemLog(
             `Startup mission metadata hydration complete (${Number(hydratedMissions.hydratedCount || 0)}).`,
@@ -658,7 +673,9 @@ function updateBackendStateFromIpc(payload) {
   const hasUsableFundingSummary = (summary) =>
     summary &&
     typeof summary === "object" &&
-    String(summary.status || "").trim().toLowerCase() === "ok" &&
+    String(summary.status || "")
+      .trim()
+      .toLowerCase() === "ok" &&
     (Number.isFinite(Number(summary.sol)) ||
       Number.isFinite(Number(summary.pbp)) ||
       String(summary.address || "").trim().length > 0);
@@ -678,7 +695,10 @@ function updateBackendStateFromIpc(payload) {
       if (key === "currentUserWalletSummary") {
         const currentSummary = backendStatus.currentUserWalletSummary;
         const nextSummary = next[key];
-        if (hasUsableBalances(currentSummary) && !hasUsableBalances(nextSummary)) {
+        if (
+          hasUsableBalances(currentSummary) &&
+          !hasUsableBalances(nextSummary)
+        ) {
           continue;
         }
       }
@@ -725,15 +745,27 @@ function getConfigPath() {
 }
 
 function getAnalyticsPath() {
-  return path.join(getBackendWorkingDirectory(), "data", "stats-analytics.json");
+  return path.join(
+    getBackendWorkingDirectory(),
+    "data",
+    "stats-analytics.json",
+  );
 }
 
 function getAnalyticsTelemetryStatePath() {
-  return path.join(getBackendWorkingDirectory(), "data", "missions-analytics.json");
+  return path.join(
+    getBackendWorkingDirectory(),
+    "data",
+    "missions-analytics.json",
+  );
 }
 
 function getStartupSnapshotPath() {
-  return path.join(getBackendWorkingDirectory(), "data", "startup-account-snapshot.json");
+  return path.join(
+    getBackendWorkingDirectory(),
+    "data",
+    "startup-account-snapshot.json",
+  );
 }
 
 function readAnalyticsTelemetryState() {
@@ -758,18 +790,16 @@ function telemetryConfigFromDesktopConfig(config = readDesktopConfig()) {
   const configuredEnabled = config?.missionsAnalyticsEnabled;
   const enabled =
     typeof configuredEnabled === "boolean" ? configuredEnabled : true;
-  const url =
-    String(
-      config?.missionsAnalyticsUrl ||
-        process.env.MISSIONS_ANALYTICS_URL ||
-        MISSIONS_ANALYTICS_TRACK_URL,
-    ).trim();
-  const token =
-    String(
-      config?.missionsAnalyticsToken ||
-        process.env.MISSIONS_ANALYTICS_TOKEN ||
-        MISSIONS_ANALYTICS_TRACK_TOKEN,
-    ).trim();
+  const url = String(
+    config?.missionsAnalyticsUrl ||
+      process.env.MISSIONS_ANALYTICS_URL ||
+      MISSIONS_ANALYTICS_TRACK_URL,
+  ).trim();
+  const token = String(
+    config?.missionsAnalyticsToken ||
+      process.env.MISSIONS_ANALYTICS_TOKEN ||
+      MISSIONS_ANALYTICS_TRACK_TOKEN,
+  ).trim();
   return {
     enabled: enabled && Boolean(url) && Boolean(token),
     url,
@@ -947,7 +977,10 @@ function startTelemetrySession() {
   }, MISSIONS_ANALYTICS_HEARTBEAT_MS);
 }
 
-function stopTelemetrySession(reason = "runner_stop", { immediate = false } = {}) {
+function stopTelemetrySession(
+  reason = "runner_stop",
+  { immediate = false } = {},
+) {
   if (!analyticsTelemetrySessionId) return Promise.resolve(false);
   resetTelemetryHeartbeat();
   resetTelemetryEndTimer();
@@ -1025,8 +1058,7 @@ function walletSummaryResultFromBackendStatus() {
   return {
     structuredContent: {
       success: true,
-      walletId:
-        summary.walletId || backendStatus.currentUserWalletId || null,
+      walletId: summary.walletId || backendStatus.currentUserWalletId || null,
       displayName:
         summary.displayName || backendStatus.currentUserDisplayName || null,
       balances: Array.isArray(summary.balances) ? summary.balances : [],
@@ -1110,10 +1142,8 @@ function competitionRangeLockConfigFrom(config = {}) {
   const pollSeconds = Number(config?.competitionRangeLockPollSeconds);
   return {
     enabled: config?.competitionRangeLockEnabled === true,
-    minRank:
-      Number.isFinite(minRank) && minRank > 0 ? Math.floor(minRank) : 11,
-    maxRank:
-      Number.isFinite(maxRank) && maxRank > 0 ? Math.floor(maxRank) : 13,
+    minRank: Number.isFinite(minRank) && minRank > 0 ? Math.floor(minRank) : 11,
+    maxRank: Number.isFinite(maxRank) && maxRank > 0 ? Math.floor(maxRank) : 13,
     pollSeconds:
       Number.isFinite(pollSeconds) &&
       pollSeconds >= COMPETITION_RANGE_LOCK_MIN_POLL_SECONDS
@@ -1162,7 +1192,9 @@ function saveAnalytics(analytics) {
 }
 
 function beginAnalyticsSession({ force = false } = {}) {
-  const current = normalizeAnalytics(backendStatus.analytics || loadAnalytics());
+  const current = normalizeAnalytics(
+    backendStatus.analytics || loadAnalytics(),
+  );
   if (
     !force &&
     Number.isFinite(Number(current?.session?.startedAt)) &&
@@ -1238,7 +1270,10 @@ function invalidateMissionRelatedCaches() {
 }
 
 async function getAccountSnapshotCached({ includeNfts = false } = {}) {
-  if (accountSnapshotCache && (!includeNfts || accountSnapshotCache?.nftResult)) {
+  if (
+    accountSnapshotCache &&
+    (!includeNfts || accountSnapshotCache?.nftResult)
+  ) {
     pushSystemLog("Account snapshot cache hit.");
     return accountSnapshotCache;
   }
@@ -1344,9 +1379,8 @@ function normalizeRewardToken(value) {
 }
 
 function rewardFromStatsPayload(payload = {}) {
-  const reward = payload?.reward && typeof payload.reward === "object"
-    ? payload.reward
-    : {};
+  const reward =
+    payload?.reward && typeof payload.reward === "object" ? payload.reward : {};
   const directAmount =
     payload?.rewardAmount ??
     payload?.amount ??
@@ -1408,7 +1442,9 @@ function totalValueOfTotals(raw = {}) {
 }
 
 function applyAnalyticsClaimEvent(payload = {}) {
-  const current = normalizeAnalytics(backendStatus.analytics || loadAnalytics());
+  const current = normalizeAnalytics(
+    backendStatus.analytics || loadAnalytics(),
+  );
   const mission =
     String(
       payload?.missionName ||
@@ -1459,8 +1495,11 @@ function applyAnalyticsClaimEvent(payload = {}) {
 function applyAnalyticsSpendEvent(payload = {}) {
   const amount = Number(payload?.amount ?? payload?.cost ?? payload?.pbp ?? 0);
   if (!Number.isFinite(amount) || amount <= 0) return false;
-  const action = String(payload?.actionName || payload?.action || "other").trim() || "other";
-  const current = normalizeAnalytics(backendStatus.analytics || loadAnalytics());
+  const action =
+    String(payload?.actionName || payload?.action || "other").trim() || "other";
+  const current = normalizeAnalytics(
+    backendStatus.analytics || loadAnalytics(),
+  );
   current.lifetime.totalResetCostPbp += amount;
   current.session.totalResetCostPbp += amount;
   current.lifetime.spendByAction[action] =
@@ -1478,11 +1517,16 @@ function applyAnalyticsSpendEvent(payload = {}) {
 }
 
 function applyAnalyticsResetEvent(payload = {}) {
-  const kind = String(payload?.resetType || payload?.kind || payload?.type || "mission")
+  const kind = String(
+    payload?.resetType || payload?.kind || payload?.type || "mission",
+  )
     .trim()
     .toLowerCase();
-  const bucket = kind.includes("nft") || kind.includes("cooldown") ? "nft" : "mission";
-  const current = normalizeAnalytics(backendStatus.analytics || loadAnalytics());
+  const bucket =
+    kind.includes("nft") || kind.includes("cooldown") ? "nft" : "mission";
+  const current = normalizeAnalytics(
+    backendStatus.analytics || loadAnalytics(),
+  );
   current.lifetime.totalResets += 1;
   current.session.totalResets += 1;
   current.lifetime.resetTypes[bucket] += 1;
@@ -1506,7 +1550,9 @@ function applyAnalyticsResetEvent(payload = {}) {
 }
 
 function applyAnalyticsRentalEvent() {
-  const current = normalizeAnalytics(backendStatus.analytics || loadAnalytics());
+  const current = normalizeAnalytics(
+    backendStatus.analytics || loadAnalytics(),
+  );
   current.lifetime.totalLeased += 1;
   current.session.totalLeased += 1;
   saveAnalytics(current);
@@ -1517,9 +1563,13 @@ function applyAnalyticsRentalEvent() {
 
 function applyAnalyticsAssignmentEvent(payload = {}) {
   if (payload?.usedReset !== true) return false;
-  const source = String(payload?.source || "").trim().toLowerCase();
+  const source = String(payload?.source || "")
+    .trim()
+    .toLowerCase();
   const usageBucket = source === "rental" ? "rental" : "owned";
-  const current = normalizeAnalytics(backendStatus.analytics || loadAnalytics());
+  const current = normalizeAnalytics(
+    backendStatus.analytics || loadAnalytics(),
+  );
   current.lifetime.nftResetUsage[usageBucket].assigned += 1;
   current.session.nftResetUsage[usageBucket].assigned += 1;
   saveAnalytics(current);
@@ -1533,16 +1583,20 @@ function applyAnalyticsAssignmentEvent(payload = {}) {
 function applyAnalyticsLine(line) {
   const text = String(line || "").trim();
   if (!text) return false;
-  const current = normalizeAnalytics(backendStatus.analytics || loadAnalytics());
+  const current = normalizeAnalytics(
+    backendStatus.analytics || loadAnalytics(),
+  );
   let changed = false;
 
   const nftMatches = [];
   const nftEq = text.match(/nft=([^\s,]+)/i);
   if (nftEq && nftEq[1]) nftMatches.push(String(nftEq[1]).trim());
   const nftAccountEq = text.match(/nftAccount=([^\s,]+)/i);
-  if (nftAccountEq && nftAccountEq[1]) nftMatches.push(String(nftAccountEq[1]).trim());
+  if (nftAccountEq && nftAccountEq[1])
+    nftMatches.push(String(nftAccountEq[1]).trim());
   const assignedText = text.match(/Assigned NFT\s+([A-Za-z0-9]+)/i);
-  if (assignedText && assignedText[1]) nftMatches.push(String(assignedText[1]).trim());
+  if (assignedText && assignedText[1])
+    nftMatches.push(String(assignedText[1]).trim());
 
   for (const nft of nftMatches) {
     if (!nft) continue;
@@ -1631,7 +1685,9 @@ function syncDesktopTargetMissionsFromAssignedMissions(
     return uniqueTargets;
   }
   applyDesktopConfigPatch({ targetMissions: uniqueTargets });
-  pushSystemLog(`${source}: synced target missions -> ${uniqueTargets.join(", ")}`);
+  pushSystemLog(
+    `${source}: synced target missions -> ${uniqueTargets.join(", ")}`,
+  );
   return uniqueTargets;
 }
 
@@ -1649,7 +1705,8 @@ function hydrateBackendStatusFromConfig() {
   const config = readDesktopConfig();
   backendStatus.analytics = loadAnalytics();
   beginAnalyticsSession({ force: true });
-  backendStatus.defaultMissionResetLevel = defaultMissionResetLevelForConfig(config);
+  backendStatus.defaultMissionResetLevel =
+    defaultMissionResetLevelForConfig(config);
   backendStatus.debugMode = config.debugMode === true;
   if (typeof config.level20ResetEnabled === "boolean") {
     backendStatus.level20ResetEnabled = config.level20ResetEnabled;
@@ -1673,7 +1730,8 @@ function hydrateBackendStatusFromConfig() {
     backendStatus.currentMissionResetLevel = config.missionResetLevel;
   }
   if (!backendStatus.currentMissionResetLevel) {
-    backendStatus.currentMissionResetLevel = defaultMissionResetLevelForConfig(config);
+    backendStatus.currentMissionResetLevel =
+      defaultMissionResetLevelForConfig(config);
   }
   backendStatus.currentMode = backendStatus.missionModeEnabled
     ? `mission-${backendStatus.currentMissionResetLevel || defaultMissionResetLevelForConfig(config)}`
@@ -1693,10 +1751,17 @@ async function runDesktopUpdateCheck({ manual = false } = {}) {
   return {
     ok: result.ok === true,
     manual: manual === true,
-    currentVersion: String(result.currentVersion || currentVersion || "").trim(),
+    currentVersion: String(
+      result.currentVersion || currentVersion || "",
+    ).trim(),
     latestVersion: String(result.latestVersion || "").trim() || null,
     downloadUrl: String(result.downloadUrl || "").trim() || null,
-    notes: String(result.notes || "").trim() || "",
+    notes: Array.isArray(result.notes)
+      ? result.notes.map((note) => String(note).trim()).filter(Boolean)
+      : String(result.notes || "")
+          .split(/\r?\n|,/)
+          .map((note) => note.trim())
+          .filter(Boolean),
     updateAvailable: result.updateAvailable === true,
     reason: result.reason || null,
   };
@@ -1807,22 +1872,25 @@ function normalizeWalletBalanceEntries(raw = []) {
         const amount = Number(
           entry.balance ?? entry.displayBalance ?? entry.amount ?? NaN,
         );
-        const symbolSource = entry.symbol || entry.code || entry.key || entry.name || "";
-        const nameSource = entry.name || entry.symbol || entry.code || entry.key || "";
+        const symbolSource =
+          entry.symbol || entry.code || entry.key || entry.name || "";
+        const nameSource =
+          entry.name || entry.symbol || entry.code || entry.key || "";
         return {
           ...entry,
-          key: String(entry.key || entry.code || entry.symbol || entry.name || "")
+          key: String(
+            entry.key || entry.code || entry.symbol || entry.name || "",
+          )
             .trim()
             .toLowerCase(),
           symbol: String(symbolSource || "")
             .trim()
             .toUpperCase(),
-          name: String(nameSource || "")
-            .trim(),
+          name: String(nameSource || "").trim(),
           balance: Number.isFinite(amount) ? amount : null,
           displayBalance: Number.isFinite(amount)
             ? amount.toLocaleString(undefined, { maximumFractionDigits: 2 })
-            : entry.displayBalance ?? null,
+            : (entry.displayBalance ?? null),
         };
       });
   }
@@ -1863,9 +1931,7 @@ function summarizeWalletPayload(payload) {
     if (!normalizedKey || !Number.isFinite(amount)) return list;
     const next = Array.isArray(list) ? list.slice() : [];
     const index = next.findIndex((entry) => {
-      const entryKey = String(
-        entry?.key || entry?.symbol || entry?.name || "",
-      )
+      const entryKey = String(entry?.key || entry?.symbol || entry?.name || "")
         .trim()
         .toLowerCase();
       return entryKey === normalizedKey;
@@ -1895,7 +1961,8 @@ function summarizeWalletPayload(payload) {
     sc.balances || sc.walletBalances || sc.wallet_balances || [],
   );
   const virtualCurrencies = sc.virtualCurrencies || sc.virtual_currencies || {};
-  const virtualCurrencyBalances = normalizeWalletBalanceEntries(virtualCurrencies);
+  const virtualCurrencyBalances =
+    normalizeWalletBalanceEntries(virtualCurrencies);
   let mergedBalances = [...baseBalances, ...virtualCurrencyBalances];
   const solFromPayload =
     parseMaybeNumber(sc.solBalance) ??
@@ -1980,7 +2047,8 @@ function missionAssignedNftAccount(mission = {}) {
   if (directId && directId !== "[object Object]") return directId;
 
   const directObject =
-    mission?.currentAssignedNft && typeof mission.currentAssignedNft === "object"
+    mission?.currentAssignedNft &&
+    typeof mission.currentAssignedNft === "object"
       ? mission.currentAssignedNft
       : mission?.current_assigned_nft &&
           typeof mission.current_assigned_nft === "object"
@@ -2064,7 +2132,8 @@ function assignedNftImageFromMission(mission = {}) {
   }
 
   const nft =
-    mission?.currentAssignedNft && typeof mission.currentAssignedNft === "object"
+    mission?.currentAssignedNft &&
+    typeof mission.currentAssignedNft === "object"
       ? mission.currentAssignedNft
       : mission?.current_assigned_nft &&
           typeof mission.current_assigned_nft === "object"
@@ -2124,22 +2193,32 @@ function assignedNftImageFromMission(mission = {}) {
   );
 }
 
-function slotSummaryFromMissionList(missionList = [], nftByAccount = new Map()) {
+function slotSummaryFromMissionList(
+  missionList = [],
+  nftByAccount = new Map(),
+) {
   return missionList
     .map((mission, index) => {
-      const assignedAccount = String(missionAssignedNftAccount(mission) || "").trim();
-      const matchedNft = assignedAccount ? nftByAccount.get(assignedAccount) : null;
+      const assignedAccount = String(
+        missionAssignedNftAccount(mission) || "",
+      ).trim();
+      const matchedNft = assignedAccount
+        ? nftByAccount.get(assignedAccount)
+        : null;
       return {
         id:
           mission?.assignedMissionId ||
           mission?.assigned_mission_id ||
           `slot-${index}`,
-        slot: Number.isFinite(Number(mission?.slot)) ? Number(mission.slot) : null,
+        slot: Number.isFinite(Number(mission?.slot))
+          ? Number(mission.slot)
+          : null,
         missionName: missionDisplayName(mission),
         assignedNft: mission?.assigned_nft || mission?.assignedNft || null,
         assignedNftAccount: assignedAccount || null,
         nftSource: mission?.nft_source || mission?.nftSource || null,
-        rentalLeaseId: mission?.rental_lease_id || mission?.rentalLeaseId || null,
+        rentalLeaseId:
+          mission?.rental_lease_id || mission?.rentalLeaseId || null,
         missionLevel: Number.isFinite(Number(mission?.current_level))
           ? Number(mission.current_level)
           : Number.isFinite(Number(mission?.level))
@@ -2516,7 +2595,8 @@ function startBackend() {
       PBP_GUI_BRIDGE: "1",
       PBP_DEV_MODE: isDesktopDevMode() ? "1" : "0",
       PBP_CONFIG_DIR: getBackendWorkingDirectory(),
-      PBP_DEFAULT_MISSION_RESET_LEVEL: defaultMissionResetLevelForConfig(currentConfig),
+      PBP_DEFAULT_MISSION_RESET_LEVEL:
+        defaultMissionResetLevelForConfig(currentConfig),
       ...(startupSnapshotPath
         ? { PBP_STARTUP_SNAPSHOT_PATH: startupSnapshotPath }
         : {}),
@@ -2779,12 +2859,15 @@ function applyStoppedModeConfig(parsed) {
   if (typeof next.debugMode === "boolean") {
     backendStatus.debugMode = next.debugMode;
   }
-  backendStatus.defaultMissionResetLevel = defaultMissionResetLevelForConfig(next);
+  backendStatus.defaultMissionResetLevel =
+    defaultMissionResetLevelForConfig(next);
   if (
     patch.debugMode !== undefined &&
-    (typeof next.missionResetLevel !== "string" || !next.missionResetLevel.trim())
+    (typeof next.missionResetLevel !== "string" ||
+      !next.missionResetLevel.trim())
   ) {
-    backendStatus.currentMissionResetLevel = backendStatus.defaultMissionResetLevel;
+    backendStatus.currentMissionResetLevel =
+      backendStatus.defaultMissionResetLevel;
   }
   if (typeof next.missionResetLevel === "string") {
     backendStatus.currentMissionResetLevel = next.missionResetLevel;
@@ -2829,7 +2912,10 @@ async function sendBackendCommand(command) {
     ) {
       const next = applyStoppedModeConfig(parsed);
       pushOutput("stdin", `> ${trimmed}\n`);
-      pushOutput("system", `[GUI] Saved mode setting while runner is stopped.\n`);
+      pushOutput(
+        "system",
+        `[GUI] Saved mode setting while runner is stopped.\n`,
+      );
       if (parsed.type === "debug") {
         for (const line of debugToggleSummaryLines(next)) {
           pushOutput("system", `${line}\n`);
@@ -2871,7 +2957,9 @@ async function requestBackend(action, payload = {}, options = {}) {
     startBackend();
   }
   if (!backend || !backendStatus.running) {
-    pushSystemLog(`Backend request failed: ${action} -> backend is not running.`);
+    pushSystemLog(
+      `Backend request failed: ${action} -> backend is not running.`,
+    );
     throw new Error("Backend is not running.");
   }
   const requestId = `${Date.now()}_${Math.random().toString(16).slice(2)}`;
@@ -2920,10 +3008,13 @@ function clearCompetitionRangeLockTimer() {
 
 function scheduleCompetitionRangeLockTick(delayMs = 0) {
   clearCompetitionRangeLockTimer();
-  competitionRangeLockTimer = setTimeout(() => {
-    competitionRangeLockTimer = null;
-    void runCompetitionRangeLockCycle();
-  }, Math.max(0, Number(delayMs) || 0));
+  competitionRangeLockTimer = setTimeout(
+    () => {
+      competitionRangeLockTimer = null;
+      void runCompetitionRangeLockCycle();
+    },
+    Math.max(0, Number(delayMs) || 0),
+  );
 }
 
 async function applyCompetitionRangeLockAction(action, detail) {
@@ -2974,7 +3065,9 @@ async function runCompetitionRangeLockCycle() {
       normalizeCompetitionRowKey(backendStatus.currentUserWalletId),
     ].filter(Boolean);
     if (!userKeys.length) {
-      pushSystemLog("[COMP LOCK] Missing current user identity; waiting for whoami.");
+      pushSystemLog(
+        "[COMP LOCK] Missing current user identity; waiting for whoami.",
+      );
       return;
     }
 
@@ -2985,7 +3078,9 @@ async function runCompetitionRangeLockCycle() {
       );
       return;
     }
-    const rows = Array.isArray(competition?.userRows) ? competition.userRows : [];
+    const rows = Array.isArray(competition?.userRows)
+      ? competition.userRows
+      : [];
     if (!rows.length) {
       pushSystemLog("[COMP LOCK] Competition rows unavailable; no action.");
       return;
@@ -2995,7 +3090,8 @@ async function runCompetitionRangeLockCycle() {
         const rowKey = normalizeCompetitionRowKey(row?.player);
         if (!rowKey) return false;
         return userKeys.some(
-          (key) => rowKey === key || rowKey.includes(key) || key.includes(rowKey),
+          (key) =>
+            rowKey === key || rowKey.includes(key) || key.includes(rowKey),
         );
       }) || null;
     if (!currentRow || !Number.isFinite(Number(currentRow.rank))) {
@@ -3261,7 +3357,8 @@ app.whenReady().then(async () => {
     if (typeof next.debugMode === "boolean") {
       backendStatus.debugMode = next.debugMode;
     }
-    backendStatus.defaultMissionResetLevel = defaultMissionResetLevelForConfig(next);
+    backendStatus.defaultMissionResetLevel =
+      defaultMissionResetLevelForConfig(next);
     if (next.nftCooldownResetMaxPbp !== undefined) {
       const maxPbp = Number(next.nftCooldownResetMaxPbp);
       backendStatus.nftCooldownResetMaxPbp =
@@ -3314,9 +3411,9 @@ app.whenReady().then(async () => {
       backendStatus.running &&
       (Object.prototype.hasOwnProperty.call(requestedPatch, "debugMode") ||
         Object.prototype.hasOwnProperty.call(
-        requestedPatch,
-        "nftCooldownResetEnabled",
-      ) ||
+          requestedPatch,
+          "nftCooldownResetEnabled",
+        ) ||
         Object.prototype.hasOwnProperty.call(
           requestedPatch,
           "nftCooldownResetMaxPbp",
@@ -3382,13 +3479,15 @@ app.whenReady().then(async () => {
     }
     fundingWalletSummaryRefreshPromise = (async () => {
       try {
-        const rpcSummary = await fetchOnchainFundingWalletSummary(walletAddress);
+        const rpcSummary =
+          await fetchOnchainFundingWalletSummary(walletAddress);
         const summary = {
           walletId: null,
           displayName: null,
           fundingWalletSummary: rpcSummary,
         };
-        backendStatus.signerMode = config.signerMode || backendStatus.signerMode;
+        backendStatus.signerMode =
+          config.signerMode || backendStatus.signerMode;
         backendStatus.fundingWalletSummary = summary.fundingWalletSummary;
         pushSystemLog("Funding wallet summary refresh complete.");
         publishStatus();
@@ -3576,9 +3675,7 @@ app.whenReady().then(async () => {
       backendStatus.currentUserDisplayName ||
       "unknown";
     const walletId =
-      walletSummary?.walletId ||
-      backendStatus.currentUserWalletId ||
-      "unknown";
+      walletSummary?.walletId || backendStatus.currentUserWalletId || "unknown";
 
     const missions = normalizeMissionList(loaded?.missionsResult || {}).map(
       (mission, index) => ({
@@ -3696,7 +3793,9 @@ app.whenReady().then(async () => {
   });
   ipcMain.handle("missions:apply-selection", async (_event, payload = {}) => {
     const slot = Number(payload?.slot);
-    const missionName = String(payload?.missionName || payload?.name || "").trim();
+    const missionName = String(
+      payload?.missionName || payload?.name || "",
+    ).trim();
     const missionId = String(payload?.missionId || "").trim();
     if (!Number.isFinite(slot) || slot < 1 || slot > 4) {
       return { ok: false, error: "Invalid mission slot." };
@@ -3717,7 +3816,9 @@ app.whenReady().then(async () => {
   });
   ipcMain.handle("missions:preview-selection", async (_event, payload = {}) => {
     const slot = Number(payload?.slot);
-    const missionName = String(payload?.missionName || payload?.name || "").trim();
+    const missionName = String(
+      payload?.missionName || payload?.name || "",
+    ).trim();
     const missionId = String(payload?.missionId || "").trim();
     if (!Number.isFinite(slot) || slot < 1 || slot > 4) {
       return { ok: false, error: "Invalid mission slot." };
@@ -3788,11 +3889,14 @@ app.whenReady().then(async () => {
             mission?.assignedMissionId ||
             mission?.assigned_mission_id ||
             `slot-${index}`,
-          slot: Number.isFinite(Number(mission?.slot)) ? Number(mission.slot) : null,
+          slot: Number.isFinite(Number(mission?.slot))
+            ? Number(mission.slot)
+            : null,
           missionName: missionDisplayName(mission),
           assignedNft: mission?.assigned_nft || mission?.assignedNft || null,
           nftSource: mission?.nft_source || mission?.nftSource || null,
-          rentalLeaseId: mission?.rental_lease_id || mission?.rentalLeaseId || null,
+          rentalLeaseId:
+            mission?.rental_lease_id || mission?.rentalLeaseId || null,
           currentLevel: Number.isFinite(Number(mission?.current_level))
             ? Number(mission.current_level)
             : Number.isFinite(Number(mission?.level))
@@ -3801,18 +3905,22 @@ app.whenReady().then(async () => {
         }))
         .sort((a, b) => Number(a.slot || 99) - Number(b.slot || 99));
       const activeRentals = missionList
-        .filter((mission) => String(mission?.nft_source || mission?.nftSource || "").toLowerCase() === "rental")
+        .filter(
+          (mission) =>
+            String(
+              mission?.nft_source || mission?.nftSource || "",
+            ).toLowerCase() === "rental",
+        )
         .map((mission, index) => ({
           id:
             mission?.assignedMissionId ||
             mission?.assigned_mission_id ||
             `mission-rental-${index}`,
-          slot: Number.isFinite(Number(mission?.slot)) ? Number(mission.slot) : null,
+          slot: Number.isFinite(Number(mission?.slot))
+            ? Number(mission.slot)
+            : null,
           missionName: missionDisplayName(mission),
-          assignedNft:
-            mission?.assigned_nft ||
-            mission?.assignedNft ||
-            null,
+          assignedNft: mission?.assigned_nft || mission?.assignedNft || null,
           image:
             mission?.assignedNftImage ||
             mission?.assigned_nft_image ||
@@ -3820,14 +3928,12 @@ app.whenReady().then(async () => {
             mission?.image ||
             null,
           rentalLeaseId:
-            mission?.rental_lease_id ||
-            mission?.rentalLeaseId ||
-            null,
+            mission?.rental_lease_id || mission?.rentalLeaseId || null,
           currentLevel: Number.isFinite(Number(mission?.current_level))
             ? Number(mission.current_level)
             : Number.isFinite(Number(mission?.level))
               ? Number(mission.level)
-            : null,
+              : null,
         }));
 
       const rentableByCollection = new Map();
@@ -3842,7 +3948,9 @@ app.whenReady().then(async () => {
 
       return {
         ok: true,
-        rentableCount: Number(rentableResult?.structuredContent?.count || rentableRaw.length || 0),
+        rentableCount: Number(
+          rentableResult?.structuredContent?.count || rentableRaw.length || 0,
+        ),
         rentable,
         activeRentals,
         slotSummary,
@@ -3915,76 +4023,70 @@ app.whenReady().then(async () => {
         const available = !onCooldown && cooldownSeconds <= 0;
 
         return {
-        id:
-          entry?.account ||
-          entry?.nftAccount ||
-          entry?.mint ||
-          entry?.mintAddress ||
-          entry?.id ||
-          `nft-${index}`,
-        account:
-          entry?.account ||
-          entry?.nftAccount ||
-          entry?.tokenAddress ||
-          null,
-        mint:
-          entry?.mint ||
-          entry?.mintAddress ||
-          entry?.mint_address ||
-          null,
-        name:
-          entry?.offChainMetadata?.metadata?.name ||
-          entry?.DASMetadata?.name ||
-          entry?.metadata?.name ||
-          entry?.name ||
-          "Unknown NFT",
-        image: (() => {
-          const candidates = [
-            entry?.offChainMetadata?.metadata?.image,
-            entry?.offChainMetadata?.metadata?.imageUrl,
-            entry?.offChainMetadata?.metadata?.image_url,
-            entry?.DASMetadata?.image,
-            entry?.DASMetadata?.content?.files,
-            entry?.metadata?.image,
-            entry?.metadata?.imageUrl,
-            entry?.metadata?.image_url,
-            entry?.image,
-            entry?.imageUrl,
-            entry?.image_url,
-            entry?.thumbnail,
-            entry?.thumbnailUrl,
-            entry?.thumbnail_url,
-            entry,
-          ];
-          for (const candidate of candidates) {
-            const resolved = deepFindRemoteImageUrl(candidate);
-            if (resolved) return resolved;
-          }
-          return null;
-        })(),
-        collection:
-          entry?.collection ||
-          entry?.collectionName ||
-          entry?.collection_name ||
-          entry?.offChainMetadata?.metadata?.symbol ||
-          entry?.DASMetadata?.symbol ||
-          entry?.symbol ||
-          null,
-        level: Number.isFinite(Number(entry?.stats?.level))
-          ? Number(entry.stats.level)
-          : Number.isFinite(Number(entry?.level))
-            ? Number(entry.level)
-            : null,
-        cooldownSeconds,
-        cooldownEndsAt:
-          entry?.cooldownEndsAt ??
-          entry?.cooldown_ends_at ??
-          entry?.cooldownEndAt ??
-          entry?.cooldown_end_at ??
-          null,
-        onCooldown,
-        available,
-      };
+          id:
+            entry?.account ||
+            entry?.nftAccount ||
+            entry?.mint ||
+            entry?.mintAddress ||
+            entry?.id ||
+            `nft-${index}`,
+          account:
+            entry?.account || entry?.nftAccount || entry?.tokenAddress || null,
+          mint:
+            entry?.mint || entry?.mintAddress || entry?.mint_address || null,
+          name:
+            entry?.offChainMetadata?.metadata?.name ||
+            entry?.DASMetadata?.name ||
+            entry?.metadata?.name ||
+            entry?.name ||
+            "Unknown NFT",
+          image: (() => {
+            const candidates = [
+              entry?.offChainMetadata?.metadata?.image,
+              entry?.offChainMetadata?.metadata?.imageUrl,
+              entry?.offChainMetadata?.metadata?.image_url,
+              entry?.DASMetadata?.image,
+              entry?.DASMetadata?.content?.files,
+              entry?.metadata?.image,
+              entry?.metadata?.imageUrl,
+              entry?.metadata?.image_url,
+              entry?.image,
+              entry?.imageUrl,
+              entry?.image_url,
+              entry?.thumbnail,
+              entry?.thumbnailUrl,
+              entry?.thumbnail_url,
+              entry,
+            ];
+            for (const candidate of candidates) {
+              const resolved = deepFindRemoteImageUrl(candidate);
+              if (resolved) return resolved;
+            }
+            return null;
+          })(),
+          collection:
+            entry?.collection ||
+            entry?.collectionName ||
+            entry?.collection_name ||
+            entry?.offChainMetadata?.metadata?.symbol ||
+            entry?.DASMetadata?.symbol ||
+            entry?.symbol ||
+            null,
+          level: Number.isFinite(Number(entry?.stats?.level))
+            ? Number(entry.stats.level)
+            : Number.isFinite(Number(entry?.level))
+              ? Number(entry.level)
+              : null,
+          cooldownSeconds,
+          cooldownEndsAt:
+            entry?.cooldownEndsAt ??
+            entry?.cooldown_ends_at ??
+            entry?.cooldownEndAt ??
+            entry?.cooldown_end_at ??
+            null,
+          onCooldown,
+          available,
+        };
       });
       return {
         ok: true,
@@ -4018,7 +4120,9 @@ app.whenReady().then(async () => {
           );
           return { ok: false, error: String(error?.message || error) };
         }
-        pushSystemLog("NFT page refresh requires login. Opening browser login.");
+        pushSystemLog(
+          "NFT page refresh requires login. Opening browser login.",
+        );
         await runOnboardingPopupLogin({
           url: "https://pixelbypixel.studio/mcp",
           timeoutMs: 30000,
@@ -4066,32 +4170,35 @@ app.whenReady().then(async () => {
     }
     return response;
   });
-  ipcMain.handle("nfts:prepare-cooldown-reset", async (_event, payload = {}) => {
-    const nftId = String(
-      payload?.nftId || payload?.nftAccount || payload?.account || "",
-    ).trim();
-    if (!nftId) {
-      return { ok: false, error: "Missing NFT id." };
-    }
-    pushSystemLog(`NFT cooldown reset prepare requested: ${nftId}.`);
-    const response = await requestBackend(
-      "prepare_nft_cooldown_reset",
-      {
-        nftId,
-        nftName: String(payload?.nftName || payload?.name || "NFT").trim(),
-        cooldownSeconds: Number(payload?.cooldownSeconds || 0),
-        nft:
-          payload?.nft && typeof payload.nft === "object"
-            ? payload.nft
-            : undefined,
-      },
-      {
-        ensureRunning: true,
-        timeoutMs: 45000,
-      },
-    );
-    return response;
-  });
+  ipcMain.handle(
+    "nfts:prepare-cooldown-reset",
+    async (_event, payload = {}) => {
+      const nftId = String(
+        payload?.nftId || payload?.nftAccount || payload?.account || "",
+      ).trim();
+      if (!nftId) {
+        return { ok: false, error: "Missing NFT id." };
+      }
+      pushSystemLog(`NFT cooldown reset prepare requested: ${nftId}.`);
+      const response = await requestBackend(
+        "prepare_nft_cooldown_reset",
+        {
+          nftId,
+          nftName: String(payload?.nftName || payload?.name || "NFT").trim(),
+          cooldownSeconds: Number(payload?.cooldownSeconds || 0),
+          nft:
+            payload?.nft && typeof payload.nft === "object"
+              ? payload.nft
+              : undefined,
+        },
+        {
+          ensureRunning: true,
+          timeoutMs: 45000,
+        },
+      );
+      return response;
+    },
+  );
   ipcMain.handle("slot:prepare-unlock4", async () => {
     pushSystemLog("Slot 4 unlock requested.");
     const payload = await requestBackend(

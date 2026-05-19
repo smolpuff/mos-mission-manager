@@ -4,7 +4,7 @@
   "notes": [
     "entirely new app and runner startup flows",
     "added dev-gated mish competish result targeting. UMADBRO",
-    "added mish competish startup dialg on new detection",
+    "added mish competish startup dialog on new detection",
     "added rental reset stats",
     "call optimizations"
   ]
