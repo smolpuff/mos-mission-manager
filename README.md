@@ -78,8 +78,32 @@ Important packaged files:
 
 - `config.json`
 - `data/stats-analytics.json`
+- `data/missions-analytics.json`
 
 If you are debugging a packaged install, check those locations first.
+
+## Dashboard Analytics
+
+The desktop app now reports session telemetry directly to the mission analytics
+dashboard backend at `https://missions.lol/missions-analytics/public/track.php`.
+
+Config keys:
+
+- `missionsAnalyticsEnabled`
+- `missionsAnalyticsUrl`
+- `missionsAnalyticsToken`
+
+The app sends:
+
+- `app_open`
+- `session_start`
+- `heartbeat`
+- `session_end`
+- `feature_used` events for claims, resets, spend, rentals, and reset-backed assignments
+- `crash` events for uncaught Electron main-process failures
+
+The nickname is taken from the current user's MCP wallet summary / whoami display
+name, and the wallet id is sent alongside it when available.
 
 ## First Run Wizard
 

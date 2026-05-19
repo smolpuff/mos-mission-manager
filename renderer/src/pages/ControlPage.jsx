@@ -1214,6 +1214,7 @@ function ControlView() {
 
   useEffect(() => {
     if (!lastEvent || typeof lastEvent !== "object") return;
+    if (!status.running || status.watchLoopEnabled === false) return;
     const type = String(lastEvent.type || "").trim();
     if (type === "assigning") {
       const state = String(lastEvent.state || "").trim();
@@ -1281,6 +1282,7 @@ function ControlView() {
     const timer = setTimeout(() => {
       setActivityLabel((current) => {
         if (!status.running) return null;
+        if (status.watchLoopEnabled === false) return "Stopped";
         if (status.watcherRunning === true) return "Watching missions...";
         return current === next ? null : current;
       });
@@ -1291,6 +1293,7 @@ function ControlView() {
     isWatching,
     activityLabel,
     status.running,
+    status.watchLoopEnabled,
     status.watcherRunning,
   ]);
 
@@ -1456,13 +1459,20 @@ function ControlView() {
   }, [fundingWalletSummary, status.signerWallet, lowBalanceThresholds]);
 
   useEffect(() => {
-    if (!status.running) return;
+    if (!status.running) {
+      setActivityLabel(null);
+      return;
+    }
+    if (status.watchLoopEnabled === false) {
+      setActivityLabel("Stopped");
+      return;
+    }
     if (isWatching) {
       setActivityLabel((current) => current || "Watching missions...");
       return;
     }
     setActivityLabel((current) => current || "Starting up...");
-  }, [status.running, isWatching]);
+  }, [status.running, isWatching, status.watchLoopEnabled]);
 
   useEffect(() => {
     if (!onboardingOpen) return undefined;

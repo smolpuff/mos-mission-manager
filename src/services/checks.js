@@ -3878,6 +3878,12 @@ function createChecksService(ctx, logger, mcp, services = {}) {
           ? parsedWalletSummary.walletBalanceSummary
           : fallbackWalletBalanceSummary,
       };
+      ctx.isAuthenticated = true;
+      ctx.currentUserDisplayName = displayName || "unknown";
+      ctx.currentUserWalletId = walletId || "unknown";
+      if (includeWalletSummary) {
+        ctx.currentUserWalletSummary = walletSummary;
+      }
       logDebug("check", "whoami_ok", { displayName, walletId });
       return { ok: true, displayName, walletId, walletSummary };
     } catch (error) {

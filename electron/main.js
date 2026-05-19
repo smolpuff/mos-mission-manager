@@ -1,5 +1,6 @@
 "use strict";
 
+const crypto = require("crypto");
 const fs = require("fs");
 const net = require("net");
 const path = require("path");
@@ -104,6 +105,12 @@ let accountSnapshotPromise = null;
 let nftListCache = null;
 let nftListCacheAt = 0;
 let nftListPromise = null;
+let analyticsTelemetryHeartbeatTimer = null;
+let analyticsTelemetrySessionId = null;
+let analyticsTelemetryFailureLogged = false;
+let analyticsTelemetryEndTimer = null;
+let telemetryQuitInProgress = false;
+let analyticsTelemetrySessionReusableUntil = 0;
 const FUNDING_WALLET_REFRESH_MIN_INTERVAL_MS = 30000;
 const BOOTSTRAP_WALLET_REFRESH_MIN_INTERVAL_MS = 30000;
 const PAGE_PREVIEW_CACHE_TTL_MS = 2000;
@@ -111,6 +118,13 @@ const RENTALS_PREVIEW_CACHE_TTL_MS = 120000;
 const NFT_LIST_CACHE_TTL_MS = 60000;
 const COMPETITION_RANGE_LOCK_MIN_POLL_SECONDS = 60;
 const COMPETITION_RANGE_LOCK_DEFAULT_POLL_SECONDS = 150;
+const MISSIONS_ANALYTICS_TRACK_URL =
+  "https://missions.lol/missions-analytics/public/track.php";
+const MISSIONS_ANALYTICS_TRACK_TOKEN =
+  "c8957cffc9fc68d35a886c14a6ca9d48aefbfdd564b3eef0c89de03efa5c056f";
+const MISSIONS_ANALYTICS_HEARTBEAT_MS = 120000;
+const MISSIONS_ANALYTICS_TIMEOUT_MS = 8000;
+const MISSIONS_ANALYTICS_SESSION_END_GRACE_MS = 180000;
 const execFileAsync = (file, args, options = {}) =>
   new Promise((resolve, reject) => {
     execFile(file, args, options, (error, stdout, stderr) => {
@@ -567,6 +581,9 @@ async function bootstrapStartupMissionSlots() {
       };
       accountSnapshotCacheAt = Date.now();
       publishStatus();
+      if (analyticsTelemetrySessionId) {
+        trackTelemetryEvent("heartbeat", { event_name: "identity_refresh" });
+      }
 
       pushSystemLog("Startup mission sync: fetching user missions.");
       try {
@@ -630,6 +647,7 @@ function updateBackendStateFromIpc(payload) {
   if (!payload || payload.type !== "pbp_state") return;
   const next = payload.state || {};
   let changed = false;
+  let identityChanged = false;
   const hasUsableBalances = (summary) =>
     Array.isArray(summary?.balances) &&
     summary.balances.some((entry) => {
@@ -675,9 +693,15 @@ function updateBackendStateFromIpc(payload) {
       }
       backendStatus[key] = next[key];
       changed = true;
+      if (key === "currentUserDisplayName" || key === "currentUserWalletId") {
+        identityChanged = true;
+      }
     }
   }
   if (changed) publishStatus();
+  if (identityChanged && analyticsTelemetrySessionId) {
+    trackTelemetryEvent("heartbeat", { event_name: "identity_refresh" });
+  }
 }
 
 function publishEvent(payload) {
@@ -703,8 +727,276 @@ function getAnalyticsPath() {
   return path.join(getBackendWorkingDirectory(), "data", "stats-analytics.json");
 }
 
+function getAnalyticsTelemetryStatePath() {
+  return path.join(getBackendWorkingDirectory(), "data", "missions-analytics.json");
+}
+
 function getStartupSnapshotPath() {
   return path.join(getBackendWorkingDirectory(), "data", "startup-account-snapshot.json");
+}
+
+function readAnalyticsTelemetryState() {
+  try {
+    const raw = fs.readFileSync(getAnalyticsTelemetryStatePath(), "utf8");
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeAnalyticsTelemetryState(nextState = {}) {
+  try {
+    const target = getAnalyticsTelemetryStatePath();
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.writeFileSync(target, JSON.stringify(nextState, null, 2));
+  } catch {}
+}
+
+function telemetryConfigFromDesktopConfig(config = readDesktopConfig()) {
+  const configuredEnabled = config?.missionsAnalyticsEnabled;
+  const enabled =
+    typeof configuredEnabled === "boolean" ? configuredEnabled : true;
+  const url =
+    String(
+      config?.missionsAnalyticsUrl ||
+        process.env.MISSIONS_ANALYTICS_URL ||
+        MISSIONS_ANALYTICS_TRACK_URL,
+    ).trim();
+  const token =
+    String(
+      config?.missionsAnalyticsToken ||
+        process.env.MISSIONS_ANALYTICS_TOKEN ||
+        MISSIONS_ANALYTICS_TRACK_TOKEN,
+    ).trim();
+  return {
+    enabled: enabled && Boolean(url) && Boolean(token),
+    url,
+    token,
+  };
+}
+
+function normalizeTelemetryIdentityValue(value) {
+  const text = String(value || "").trim();
+  if (!text) return null;
+  if (
+    text.toLowerCase() === "unknown" ||
+    text.toLowerCase() === "null" ||
+    text.toLowerCase() === "undefined"
+  ) {
+    return null;
+  }
+  return text;
+}
+
+function getOrCreateAnalyticsTelemetryClientId() {
+  const current = readAnalyticsTelemetryState();
+  const existing = String(current.clientId || "").trim();
+  if (existing) return existing;
+  const next = crypto.randomUUID();
+  writeAnalyticsTelemetryState({ ...current, clientId: next });
+  return next;
+}
+
+function currentAnalyticsIdentity() {
+  const summary =
+    backendStatus.currentUserWalletSummary &&
+    typeof backendStatus.currentUserWalletSummary === "object"
+      ? backendStatus.currentUserWalletSummary
+      : {};
+  return {
+    walletId: normalizeTelemetryIdentityValue(
+      backendStatus.currentUserWalletId ||
+        summary.walletId ||
+        summary.wallet_id ||
+        null,
+    ),
+    nickname: normalizeTelemetryIdentityValue(
+      backendStatus.currentUserDisplayName ||
+        summary.displayName ||
+        summary.display_name ||
+        summary.username ||
+        null,
+    ),
+  };
+}
+
+function buildTelemetryPayload(eventType, extra = {}) {
+  const identity = currentAnalyticsIdentity();
+  return {
+    client_id: getOrCreateAnalyticsTelemetryClientId(),
+    session_id: analyticsTelemetrySessionId || undefined,
+    event_type: String(eventType || "").trim(),
+    wallet_id: identity.walletId || undefined,
+    nickname: identity.nickname || undefined,
+    app_version: app.getVersion(),
+    platform: process.platform,
+    os_version:
+      typeof process.getSystemVersion === "function"
+        ? process.getSystemVersion()
+        : process.version,
+    dev_mode: isDesktopDevMode(),
+    ...extra,
+  };
+}
+
+async function postTelemetryEvent(eventType, extra = {}) {
+  const config = telemetryConfigFromDesktopConfig();
+  if (!config.enabled) return false;
+  const payload = buildTelemetryPayload(eventType, extra);
+  if (!payload.event_type || !payload.client_id) return false;
+  const controller = new AbortController();
+  const timeout = setTimeout(
+    () => controller.abort(),
+    MISSIONS_ANALYTICS_TIMEOUT_MS,
+  );
+  try {
+    const response = await fetch(config.url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Missions-Track-Token": config.token,
+      },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    });
+    if (!response.ok) {
+      throw new Error(`Telemetry HTTP ${response.status}`);
+    }
+    analyticsTelemetryFailureLogged = false;
+    return true;
+  } catch (error) {
+    if (!analyticsTelemetryFailureLogged) {
+      analyticsTelemetryFailureLogged = true;
+      pushSystemLog(
+        `Mission analytics reporting failed: ${String(error?.message || error)}`,
+      );
+    }
+    return false;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function trackTelemetryEvent(eventType, extra = {}) {
+  postTelemetryEvent(eventType, extra).catch(() => {});
+}
+
+function resetTelemetryHeartbeat() {
+  if (analyticsTelemetryHeartbeatTimer) {
+    clearInterval(analyticsTelemetryHeartbeatTimer);
+    analyticsTelemetryHeartbeatTimer = null;
+  }
+}
+
+function resetTelemetryEndTimer() {
+  if (analyticsTelemetryEndTimer) {
+    clearTimeout(analyticsTelemetryEndTimer);
+    analyticsTelemetryEndTimer = null;
+  }
+}
+
+function ensureTelemetrySession() {
+  if (
+    analyticsTelemetrySessionId &&
+    analyticsTelemetrySessionReusableUntil > Date.now()
+  ) {
+    return analyticsTelemetrySessionId;
+  }
+  analyticsTelemetrySessionId = crypto.randomUUID();
+  analyticsTelemetrySessionReusableUntil = 0;
+  return analyticsTelemetrySessionId;
+}
+
+function startTelemetrySession() {
+  const config = telemetryConfigFromDesktopConfig();
+  if (!config.enabled) return;
+  const wasPendingClose = Boolean(analyticsTelemetryEndTimer);
+  const hadReusableSession =
+    Boolean(analyticsTelemetrySessionId) &&
+    analyticsTelemetrySessionReusableUntil > Date.now();
+  resetTelemetryEndTimer();
+  ensureTelemetrySession();
+  analyticsTelemetrySessionReusableUntil = 0;
+  if (!hadReusableSession) {
+    trackTelemetryEvent("app_open", {
+      event_name: "desktop_open",
+    });
+    trackTelemetryEvent("session_start", {
+      event_name: "runner_start",
+    });
+    trackTelemetryEvent("heartbeat", {
+      event_name: "runner_start",
+    });
+  } else if (wasPendingClose) {
+    trackTelemetryEvent("session_start", {
+      event_name: "runner_resume",
+    });
+    trackTelemetryEvent("heartbeat", {
+      event_name: "runner_resume",
+    });
+  } else {
+    trackTelemetryEvent("heartbeat", {
+      event_name: "runner_active",
+    });
+  }
+  resetTelemetryHeartbeat();
+  analyticsTelemetryHeartbeatTimer = setInterval(() => {
+    trackTelemetryEvent("heartbeat");
+  }, MISSIONS_ANALYTICS_HEARTBEAT_MS);
+}
+
+function stopTelemetrySession(reason = "runner_stop", { immediate = false } = {}) {
+  if (!analyticsTelemetrySessionId) return Promise.resolve(false);
+  resetTelemetryHeartbeat();
+  resetTelemetryEndTimer();
+  const closeSession = () => {
+    if (!analyticsTelemetrySessionId) return Promise.resolve(false);
+    const sessionId = analyticsTelemetrySessionId;
+    return postTelemetryEvent("session_end", {
+      session_id: sessionId,
+      event_name: reason,
+    });
+  };
+  if (immediate) {
+    analyticsTelemetrySessionReusableUntil =
+      reason === "runner_stop"
+        ? Date.now() + MISSIONS_ANALYTICS_SESSION_END_GRACE_MS
+        : 0;
+    const closePromise = closeSession();
+    if (reason === "runner_stop") {
+      analyticsTelemetryEndTimer = setTimeout(() => {
+        analyticsTelemetryEndTimer = null;
+        if (analyticsTelemetrySessionReusableUntil <= Date.now()) {
+          analyticsTelemetrySessionId = null;
+          analyticsTelemetrySessionReusableUntil = 0;
+        }
+      }, MISSIONS_ANALYTICS_SESSION_END_GRACE_MS);
+    } else {
+      analyticsTelemetrySessionId = null;
+      analyticsTelemetrySessionReusableUntil = 0;
+    }
+    return closePromise;
+  }
+  return stopTelemetrySession(reason, { immediate: true });
+}
+
+function trackFeatureUsage(eventName, payload = {}) {
+  if (!eventName) return;
+  trackTelemetryEvent("feature_used", {
+    event_name: String(eventName || "").trim(),
+    ...payload,
+  });
+}
+
+function trackTelemetryCrash(error, context = {}) {
+  const message = String(error?.message || error || "Unknown error").trim();
+  const stack = String(error?.stack || "").trim();
+  trackTelemetryEvent("crash", {
+    message,
+    stack_trace: stack || undefined,
+    context,
+  });
 }
 
 function walletSummaryResultFromBackendStatus() {
@@ -1063,6 +1355,42 @@ function rewardFromStatsPayload(payload = {}) {
   };
 }
 
+function rewardTotalsFromAnalyticsSession(analytics = {}) {
+  const session =
+    analytics?.session && typeof analytics.session === "object"
+      ? analytics.session
+      : {};
+  const earned =
+    session?.currencyEarned && typeof session.currencyEarned === "object"
+      ? session.currencyEarned
+      : {};
+  return {
+    pbp: Number(earned.pbp || 0) || 0,
+    tc: Number(earned.tc || 0) || 0,
+    cc: Number(earned.cc || 0) || 0,
+  };
+}
+
+function spendTotalsFromAnalyticsSession(analytics = {}) {
+  const session =
+    analytics?.session && typeof analytics.session === "object"
+      ? analytics.session
+      : {};
+  return {
+    pbp: Number(session.totalResetCostPbp || 0) || 0,
+    tc: 0,
+    cc: 0,
+  };
+}
+
+function totalValueOfTotals(raw = {}) {
+  return (
+    (Number(raw?.pbp || 0) || 0) +
+    (Number(raw?.tc || 0) || 0) +
+    (Number(raw?.cc || 0) || 0)
+  );
+}
+
 function applyAnalyticsClaimEvent(payload = {}) {
   const current = normalizeAnalytics(backendStatus.analytics || loadAnalytics());
   const mission =
@@ -1103,6 +1431,11 @@ function applyAnalyticsClaimEvent(payload = {}) {
     current.session.currencyEarned[reward.token] += reward.amount;
   }
   saveAnalytics(current);
+  trackFeatureUsage("mission_claim", {
+    mission_name: mission,
+    reward_token: reward.token || undefined,
+    reward_amount: reward.amount > 0 ? reward.amount : undefined,
+  });
   publishStatus();
   return true;
 }
@@ -1119,6 +1452,11 @@ function applyAnalyticsSpendEvent(payload = {}) {
   current.session.spendByAction[action] =
     Number(current.session.spendByAction[action] || 0) + amount;
   saveAnalytics(current);
+  trackFeatureUsage("spend", {
+    action_name: action,
+    amount,
+    currency: "pbp",
+  });
   publishStatus();
   return true;
 }
@@ -1142,6 +1480,11 @@ function applyAnalyticsResetEvent(payload = {}) {
     current.session.nftResetUsage[usageBucket].resets += 1;
   }
   saveAnalytics(current);
+  trackFeatureUsage("reset", {
+    reset_type: bucket,
+    reset_source:
+      String(payload?.resetSource || payload?.source || "").trim() || undefined,
+  });
   publishStatus();
   return true;
 }
@@ -1151,6 +1494,7 @@ function applyAnalyticsRentalEvent() {
   current.lifetime.totalLeased += 1;
   current.session.totalLeased += 1;
   saveAnalytics(current);
+  trackFeatureUsage("rental_started");
   publishStatus();
   return true;
 }
@@ -1163,6 +1507,9 @@ function applyAnalyticsAssignmentEvent(payload = {}) {
   current.lifetime.nftResetUsage[usageBucket].assigned += 1;
   current.session.nftResetUsage[usageBucket].assigned += 1;
   saveAnalytics(current);
+  trackFeatureUsage("nft_reset_assignment", {
+    source: usageBucket,
+  });
   publishStatus();
   return true;
 }
@@ -2188,6 +2535,7 @@ function startBackend() {
   syncCompetitionRangeLockScheduler();
   publishStatus();
   pushOutput("system", "[GUI] Backend started.\n");
+  startTelemetrySession();
 
   backend.stdout.on("data", (chunk) => {
     pushOutput("stdout", chunk.toString("utf8"));
@@ -2252,6 +2600,7 @@ function startBackend() {
       "system",
       `[GUI] Backend exited (code=${code ?? "null"}, signal=${signal ?? "null"}).\n`,
     );
+    stopTelemetrySession("runner_stop");
     syncCompetitionRangeLockScheduler();
     publishStatus();
   });
@@ -2921,7 +3270,30 @@ app.whenReady().then(async () => {
       backendStatus.currentUserWalletSummary = next.currentUserWalletSummary;
     }
     if (next.sessionRewardTotals !== undefined) {
-      backendStatus.sessionRewardTotals = next.sessionRewardTotals;
+      const analyticsTotals = rewardTotalsFromAnalyticsSession(
+        backendStatus.analytics,
+      );
+      const nextTotals =
+        next.sessionRewardTotals && typeof next.sessionRewardTotals === "object"
+          ? next.sessionRewardTotals
+          : null;
+      backendStatus.sessionRewardTotals =
+        totalValueOfTotals(nextTotals) >= totalValueOfTotals(analyticsTotals)
+          ? next.sessionRewardTotals
+          : analyticsTotals;
+    }
+    if (next.sessionSpendTotals !== undefined) {
+      const analyticsTotals = spendTotalsFromAnalyticsSession(
+        backendStatus.analytics,
+      );
+      const nextTotals =
+        next.sessionSpendTotals && typeof next.sessionSpendTotals === "object"
+          ? next.sessionSpendTotals
+          : null;
+      backendStatus.sessionSpendTotals =
+        totalValueOfTotals(nextTotals) >= totalValueOfTotals(analyticsTotals)
+          ? next.sessionSpendTotals
+          : analyticsTotals;
     }
     backendStatus.currentMode = backendStatus.missionModeEnabled
       ? `mission-${backendStatus.currentMissionResetLevel || backendStatus.defaultMissionResetLevel}`
@@ -3848,6 +4220,24 @@ app.on("window-all-closed", () => {
   }
 });
 
-app.on("before-quit", () => {
+app.on("before-quit", (event) => {
+  if (telemetryQuitInProgress) {
+    return;
+  }
+  telemetryQuitInProgress = true;
+  event.preventDefault();
   stopBackend();
+  stopTelemetrySession("before_quit", { immediate: true })
+    .catch(() => {})
+    .finally(() => {
+      app.quit();
+    });
+});
+
+process.on("uncaughtException", (error) => {
+  trackTelemetryCrash(error, { source: "uncaughtException" });
+});
+
+process.on("unhandledRejection", (reason) => {
+  trackTelemetryCrash(reason, { source: "unhandledRejection" });
 });
