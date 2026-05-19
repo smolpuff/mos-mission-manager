@@ -101,13 +101,11 @@ If you are debugging a packaged install, check those locations first.
 - target-mission assignment
 - low balance warning
 - mission level reset
-- mission assignment/change mission
 - rentals support (lease)
 - NFT cooldown reset
-- NFT inventory view with cooldowns, filtering, and sorting
+- NFT inventory view with cooldowns
 - Mission competition live results from for those who are #notgrinding
 - session stats
-- automatic app version check
 
 ## Mission Targeting
 

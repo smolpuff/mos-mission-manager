@@ -1242,12 +1242,14 @@ function createWatchService(
           assigned,
           skipped: assignResult?.skipped === true,
         });
-        missionResult = await mcp.mcpToolCall("get_user_missions", {});
-        trace("watch", "claim_followup_refetched_after_assign", {
-          traceId,
-          assignReason,
-          assigned,
-        });
+        if (assigned > 0) {
+          missionResult = await mcp.mcpToolCall("get_user_missions", {});
+          trace("watch", "claim_followup_refetched_after_assign", {
+            traceId,
+            assignReason,
+            assigned,
+          });
+        }
       } catch (error) {
         logWithTimestamp(
           `[ASSIGN] ❌ Post-claim assign error: ${error.message}`,
@@ -1694,7 +1696,9 @@ function createWatchService(
           });
           logAssignCheckResult(assignResult);
         }
-        latestMissionResult = await mcp.mcpToolCall("get_user_missions", {});
+        if (Number(assignResult?.assigned || 0) > 0) {
+          latestMissionResult = await mcp.mcpToolCall("get_user_missions", {});
+        }
         await checks.refreshMissionHeaderStats({
           missionsResult: latestMissionResult,
         });
@@ -1780,6 +1784,29 @@ function createWatchService(
     }
   }
 
+  function getMcpCooldownRemainingMs() {
+    const until = Number(ctx.mcpRateLimitedUntil || 0);
+    return until > Date.now() ? until - Date.now() : 0;
+  }
+
+  function hasActiveMcpCooldown() {
+    return getMcpCooldownRemainingMs() > 0;
+  }
+
+  function startupMissionResult() {
+    const wrapper =
+      ctx.startupAccountSnapshot && typeof ctx.startupAccountSnapshot === "object"
+        ? ctx.startupAccountSnapshot
+        : null;
+    const snapshot =
+      wrapper?.snapshot && typeof wrapper.snapshot === "object"
+        ? wrapper.snapshot
+        : null;
+    return snapshot?.missionsResult && typeof snapshot.missionsResult === "object"
+      ? snapshot.missionsResult
+      : null;
+  }
+
   async function runWatchCycle() {
     const traceId = nextTraceId("cycle");
     const opts = watchConfig();
@@ -1787,28 +1814,8 @@ function createWatchService(
     trace("watch", "cycle_start", { traceId, opts });
     logWithTimestamp("[WATCH] Watching missions...");
 
-    let preCycleMissionResult = null;
-    try {
-      preCycleMissionResult = await mcp.mcpToolCall("get_user_missions", {});
-    } catch (error) {
-      logDebug("watch", "pre_cycle_missions_failed", { error: error.message });
-    }
-    await runResetCheckSafely(
-      "cycle_start",
-      preCycleMissionResult,
-      "pre_cycle_reset_check_failed",
-    );
-
     let beforeSnapshot = new Map();
-    try {
-      beforeSnapshot = await loadSelectedMissionSnapshot(preCycleMissionResult);
-      trace("watch", "cycle_before_snapshot", {
-        traceId,
-        beforeSnapshot: snapshotTraceSummary(beforeSnapshot),
-      });
-    } catch (error) {
-      logDebug("watch", "snapshot_before_failed", { error: error.message });
-    }
+    let preCycleMissionResult = null;
 
     const watchTimeoutMs = Math.max(
       45000,
@@ -1988,7 +1995,7 @@ function createWatchService(
       // server fetch if client-side polling is enabled.
       if (clientPollingEnabled) runLiveMissionCheck("token_refresh");
     };
-    if (ctx.debugMode) {
+    if (ctx.debugMode && preCycleMissionResult) {
       try {
         missionStateById = await pollMissionStateChanges(
           missionStateById,
@@ -2127,7 +2134,7 @@ function createWatchService(
         afterAdjustment: claimed,
       });
     }
-    if (claimed === 0 && opts.fallbackClaims) {
+    if (claimed === 0 && opts.fallbackClaims && !hasActiveMcpCooldown()) {
       logDebug("watch", "fallback_claim_start", {
         reason: "watch_reported_zero",
         maxClaims: opts.maxClaims,
@@ -2141,6 +2148,11 @@ function createWatchService(
         ok: fallback?.ok,
       });
       claimed += Number(fallback?.claimed || 0);
+    }
+    if (claimed === 0 && opts.fallbackClaims && hasActiveMcpCooldown()) {
+      logDebug("watch", "fallback_claim_skipped_rate_limited", {
+        retryAfterMs: getMcpCooldownRemainingMs(),
+      });
     }
     if (ctx.guiBridge?.sendEvent) {
       ctx.guiBridge.sendEvent("claiming", {
@@ -2161,86 +2173,125 @@ function createWatchService(
       raw: result?.structuredContent || result,
     });
     let postCycleMissionResult = null;
-    try {
-      postCycleMissionResult = await mcp.mcpToolCall("get_user_missions", {});
-    } catch (error) {
-      logDebug("watch", "post_cycle_missions_failed", { error: error.message });
+    if ((claimed > 0 || summary.claims.length > 0) && !hasActiveMcpCooldown()) {
+      try {
+        postCycleMissionResult = await mcp.mcpToolCall("get_user_missions", {});
+      } catch (error) {
+        logDebug("watch", "post_cycle_missions_failed", {
+          error: error.message,
+        });
+      }
+    }
+    if ((claimed > 0 || summary.claims.length > 0) && hasActiveMcpCooldown()) {
+      logDebug("watch", "post_cycle_missions_skipped_rate_limited", {
+        retryAfterMs: getMcpCooldownRemainingMs(),
+      });
     }
 
     let claimLookupByAssignedMissionId = null;
     if (summary.claims.length > 0) {
       const needsLookup = summary.claims.some((c) => {
         const d = compactClaimDetails(c);
-        return d.name === null || d.slot === null;
+        return (
+          d.name === null ||
+          d.slot === null ||
+          d.reward === null ||
+          d.prize === null
+        );
       });
       if (needsLookup) {
         try {
-          const [preLookup, postLookup] = await Promise.all([
-            loadAssignedMissionLookup(preCycleMissionResult),
-            loadAssignedMissionLookup(postCycleMissionResult),
-          ]);
-          claimLookupByAssignedMissionId = mergeAssignedMissionLookups(
-            preLookup,
-            postLookup,
-          );
+          const lookups = [];
+          if (preCycleMissionResult && typeof preCycleMissionResult === "object") {
+            lookups.push(loadAssignedMissionLookup(preCycleMissionResult));
+          }
+          if (
+            postCycleMissionResult &&
+            typeof postCycleMissionResult === "object"
+          ) {
+            lookups.push(loadAssignedMissionLookup(postCycleMissionResult));
+          }
+          if (lookups.length > 0) {
+            const resolved = await Promise.all(lookups);
+            claimLookupByAssignedMissionId = mergeAssignedMissionLookups(
+              ...resolved,
+            );
+          }
         } catch (error) {
           logDebug("watch", "claim_lookup_failed", { error: error.message });
         }
       }
     }
 
-    const claimFollowup = await runClaimLifecycle({
-      traceId,
-      beforeSnapshot,
-      claimed,
-      claims: summary.claims,
-      claimLookupByAssignedMissionId,
-      aggregateClaimLogLine: `[WATCH] ✅ Claimed ${claimed} mission reward(s).`,
-      assignReason: "post_claim",
-      claimLogLabel: "Claimed count updated",
-      assignIntro: "[ASSIGN] ▶ Post-claim assign check (immediate)...",
-      initialMissionResult: postCycleMissionResult,
-      allowStateFallback: true,
-      finalTraceAction: "cycle_final_snapshot",
-    });
-    claimed = claimFollowup.claimed;
-    postClaimAssigned = claimFollowup.assigned;
-    postClaimAssignRan = claimed > 0;
-    postCycleMissionResult = claimFollowup.missionResult;
-    trace("watch", "cycle_post_followup", { traceId, postClaimAssigned });
-    await runResetCheckSafely(
-      "cycle_end",
-      postCycleMissionResult,
-      "cycle_end_reset_check_failed",
-    );
-    if (postClaimAssignRan && postClaimAssigned > 0) {
-      logDebug("watch", "cycle_end_assign_skipped", {
-        reason: "post_claim_assign_succeeded",
-        postClaimAssigned,
+    if (hasActiveMcpCooldown()) {
+      logDebug("watch", "cycle_followup_skipped_rate_limited", {
+        retryAfterMs: getMcpCooldownRemainingMs(),
+      });
+      trace("watch", "cycle_post_followup", {
+        traceId,
+        postClaimAssigned: 0,
+        skipped: "rate_limited",
       });
     } else {
-      if (ctx.debugMode)
-        logWithTimestamp("[ASSIGN] ▶ Cycle-end assign check...");
-      try {
-        const assignResult = await checks.autoAssignConfiguredMissions({
-          reason: "cycle_end_unassigned_check",
-          missionsResult: postCycleMissionResult,
+      const claimFollowup = await runClaimLifecycle({
+        traceId,
+        beforeSnapshot,
+        claimed,
+        claims: summary.claims,
+        claimLookupByAssignedMissionId,
+        aggregateClaimLogLine: `[WATCH] ✅ Claimed ${claimed} mission reward(s).`,
+        assignReason: "post_claim",
+        claimLogLabel: "Claimed count updated",
+        assignIntro: "[ASSIGN] ▶ Post-claim assign check (immediate)...",
+        initialMissionResult: postCycleMissionResult,
+        allowStateFallback: true,
+        finalTraceAction: "cycle_final_snapshot",
+      });
+      claimed = claimFollowup.claimed;
+      postClaimAssigned = claimFollowup.assigned;
+      postClaimAssignRan = claimed > 0;
+      postCycleMissionResult = claimFollowup.missionResult;
+      trace("watch", "cycle_post_followup", { traceId, postClaimAssigned });
+      if (hasActiveMcpCooldown()) {
+        logDebug("watch", "cycle_end_checks_skipped_rate_limited", {
+          retryAfterMs: getMcpCooldownRemainingMs(),
         });
-        if (ctx.debugMode) {
-          logWithTimestamp(
-            Number(assignResult?.assigned || 0) > 0
-              ? `[ASSIGN] ✅ cycle-end result: attempted=${Number(assignResult?.attempted || 0)} assigned=${Number(assignResult?.assigned || 0)}`
-              : `[ASSIGN] ℹ️ cycle-end result: attempted=${Number(assignResult?.attempted || 0)} assigned=0`,
-          );
-        }
-      } catch (error) {
-        logWithTimestamp(
-          `[ASSIGN] ❌ cycle-end assign error: ${error.message}`,
+      } else {
+        await runResetCheckSafely(
+          "cycle_end",
+          postCycleMissionResult,
+          "cycle_end_reset_check_failed",
         );
-        logDebug("watch", "cycle_end_assign_error", {
-          error: error.message,
-          stack: error.stack,
-        });
+        if (postClaimAssignRan && postClaimAssigned > 0) {
+          logDebug("watch", "cycle_end_assign_skipped", {
+            reason: "post_claim_assign_succeeded",
+            postClaimAssigned,
+          });
+        } else {
+          if (ctx.debugMode)
+            logWithTimestamp("[ASSIGN] ▶ Cycle-end assign check...");
+          try {
+            const assignResult = await checks.autoAssignConfiguredMissions({
+              reason: "cycle_end_unassigned_check",
+              missionsResult: postCycleMissionResult,
+            });
+            if (ctx.debugMode) {
+              logWithTimestamp(
+                Number(assignResult?.assigned || 0) > 0
+                  ? `[ASSIGN] ✅ cycle-end result: attempted=${Number(assignResult?.attempted || 0)} assigned=${Number(assignResult?.assigned || 0)}`
+                  : `[ASSIGN] ℹ️ cycle-end result: attempted=${Number(assignResult?.attempted || 0)} assigned=0`,
+              );
+            }
+          } catch (error) {
+            logWithTimestamp(
+              `[ASSIGN] ❌ cycle-end assign error: ${error.message}`,
+            );
+            logDebug("watch", "cycle_end_assign_error", {
+              error: error.message,
+              stack: error.stack,
+            });
+          }
+        }
       }
     }
     logDebug("watch", "stats", {
@@ -2354,6 +2405,7 @@ function createWatchService(
     if (!ctx.watchLoopEnabled || !ctx.isAuthenticated || ctx.watcherRunning)
       return;
 
+    ctx.watchStartPending = false;
     resetSessionRewardTotals();
     resetSessionSpendTotals();
     ctx.watcherRunning = true;
@@ -2364,91 +2416,71 @@ function createWatchService(
     logWithTimestamp(
       `[WATCH] 👀 Started: poll=${opts.pollIntervalSeconds}s refresh=${opts.watchSeconds}s`,
     );
-    logWithTimestamp("[WATCH] ▶ Initial mission check...");
-    let startupBeforeSnapshot = new Map();
-    let startupMissionResult = null;
+    logWithTimestamp("[WATCH] ▶ Watch loop armed.");
     try {
-      const preStartupMissionResult = await mcp.mcpToolCall(
-        "get_user_missions",
-        {},
-      );
-      startupBeforeSnapshot = await loadSelectedMissionSnapshot(
-        preStartupMissionResult,
-      );
+      let initialMissionResult = startupMissionResult();
+      if (initialMissionResult) {
+        const initialStatsResult = await checks.refreshMissionHeaderStats({
+          missionsResult: initialMissionResult,
+          refreshNftCount: false,
+          hydrateAssignedMetadata: false,
+        });
+        logDebug("watch", "startup_ui_refresh_ok", {
+          source: "startup_snapshot",
+          total: Number(ctx.currentMissionStats?.total || 0),
+          active: Number(ctx.currentMissionStats?.active || 0),
+          available: Number(ctx.currentMissionStats?.available || 0),
+          claimable: Number(ctx.currentMissionStats?.claimable || 0),
+        });
+        const startupStats = initialStatsResult?.stats || ctx.currentMissionStats || {};
+        const startupClaimable = Number(startupStats.claimable || 0);
+        const startupAvailable = Number(startupStats.available || 0);
+        if (!hasActiveMcpCooldown() && startupClaimable > 0) {
+          const traceId = nextTraceId("startup");
+          let beforeSnapshot = new Map();
+          try {
+            beforeSnapshot = await loadSelectedMissionSnapshot(initialMissionResult);
+          } catch {}
+          logWithTimestamp("[WATCH] ▶ Startup claim check...");
+          const claimResult = await checks.claimClaimableMissions({
+            maxClaims: WATCH_MAX_CLAIMS,
+            reason: "startup",
+            missionsResult: initialMissionResult,
+          });
+          if (Number(claimResult?.claimed || 0) > 0) {
+            const followup = await runClaimLifecycle({
+              traceId,
+              beforeSnapshot,
+              claimed: Number(claimResult?.claimed || 0),
+              claims: [],
+              aggregateClaimLogLine: `[WATCH] ✅ Claimed ${Number(claimResult?.claimed || 0)} mission reward(s).`,
+              assignReason: "startup_post_claim",
+              claimLogLabel: "Startup claimed",
+              assignIntro: "[ASSIGN] ▶ Startup post-claim assign check...",
+              initialMissionResult: null,
+              allowStateFallback: true,
+              finalTraceAction: "startup_final_snapshot",
+            });
+            initialMissionResult = followup.missionResult || initialMissionResult;
+          }
+        } else if (!hasActiveMcpCooldown() && startupAvailable > 0) {
+          logWithTimestamp("[ASSIGN] ▶ Startup assign check...");
+          const assignResult = await checks.autoAssignConfiguredMissions({
+            reason: "startup_unassigned_check",
+            missionsResult: initialMissionResult,
+          });
+          logAssignCheckResult(assignResult);
+        }
+      } else {
+        logDebug("watch", "startup_ui_refresh_skipped", {
+          reason: "no_startup_snapshot",
+        });
+      }
     } catch (error) {
-      logDebug("watch", "startup_before_snapshot_failed", {
+      logDebug("watch", "startup_ui_refresh_failed", {
         error: error.message,
       });
     }
-    try {
-      const startupClaims = await checks.claimClaimableMissions({
-        maxClaims: opts.maxClaims,
-        reason: "watch_loop_startup",
-        onlySelected: false,
-      });
-      const startupClaimed = Number(startupClaims?.claimed || 0);
-      if (startupClaimed === 0) {
-        logWithTimestamp(
-          "[WATCH] ℹ️ Startup claim check: no claimable missions.",
-        );
-      }
-      const startupFollowup = await runClaimLifecycle({
-        traceId: nextTraceId("startup"),
-        beforeSnapshot: startupBeforeSnapshot,
-        claimed: startupClaimed,
-        claims: [],
-        assignReason: "watch_loop_startup",
-        claimLogLabel: "Startup claimed",
-        assignIntro: "[ASSIGN] ▶ Startup assign check...",
-        initialMissionResult: null,
-        allowStateFallback: true,
-        finalTraceAction: "startup_final_snapshot",
-      });
-      startupMissionResult = startupFollowup?.missionResult || null;
-    } catch (error) {
-      logWithTimestamp(
-        `[WATCH] ❌ Startup claim check failed: ${error.message}`,
-      );
-      logDebug("watch", "startup_claim_check_failed", {
-        error: error.message,
-        stack: error.stack,
-      });
-    }
-
-    try {
-      const startupAssign = await checks.autoAssignConfiguredMissions({
-        reason: "watch_loop_startup_fill",
-        missionsResult: startupMissionResult,
-      });
-      logAssignCheckResult(startupAssign);
-      if (Number(startupAssign?.assigned || 0) > 0) {
-        startupMissionResult = await mcp.mcpToolCall("get_user_missions", {});
-      }
-      if (
-        Number(startupAssign?.assigned || 0) === 0 &&
-        Number(ctx.currentMissionStats?.available || 0) > 0
-      ) {
-        logWithTimestamp(
-          "[ASSIGN] ℹ️ Startup: open slots exist, but no target mission was assignable yet.",
-        );
-      }
-    } catch (error) {
-      logWithTimestamp(
-        `[ASSIGN] ❌ Startup assign check failed: ${error.message}`,
-      );
-      logDebug("watch", "startup_assign_check_failed", {
-        error: error.message,
-        stack: error.stack,
-      });
-    }
-
-    const startupResetMissionResult =
-      startupMissionResult || (await mcp.mcpToolCall("get_user_missions", {}));
-    await runResetCheckSafely(
-      "startup",
-      startupResetMissionResult,
-      "startup_reset_check_failed",
-    );
 
     while (ctx.watchLoopEnabled) {
       try {
@@ -2461,6 +2493,13 @@ function createWatchService(
           logWithTimestamp(
             `[WATCH] ℹ️ Cycle complete: no claims (polls=${summary.polls}, eligible=${summary.eligible}). Next check continues automatically.`,
           );
+        }
+        const cooldownMs = getMcpCooldownRemainingMs();
+        if (cooldownMs > 0) {
+          logWithTimestamp(
+            `[WATCH] ⏳ MCP cooldown active. Waiting ${Math.ceil(cooldownMs / 1000)}s before next cycle.`,
+          );
+          await new Promise((resolve) => setTimeout(resolve, cooldownMs));
         }
       } catch (error) {
         const msg = String(error?.message || "");
@@ -2510,17 +2549,45 @@ function createWatchService(
           typeof error?.message === "string" && error.message.trim()
             ? error.message.trim()
             : "unknown error";
+        const baseRetryAfterSeconds = Math.max(
+          1,
+          Math.ceil(
+            Number(
+              error?.retryAfterSeconds ||
+                (Number(ctx.mcpRateLimitedUntil || 0) > Date.now()
+                  ? (Number(ctx.mcpRateLimitedUntil || 0) - Date.now()) / 1000
+                  : 0),
+            ) || 3,
+          ),
+        );
+        const repeatedRateLimit =
+          error?.rateLimited === true &&
+          String(error?.toolName || "") === "watch_and_claim";
+        const retryDelayMs =
+          error?.rateLimited === true
+            ? Math.max(
+                baseRetryAfterSeconds * 1000,
+                repeatedRateLimit ? opts.pollIntervalSeconds * 2000 : 0,
+              )
+            : 3000;
         logWithTimestamp(
-          `[WATCH] ❌ Cycle failed: ${displayMessage}. Retrying in 3s.`,
+          `[WATCH] ❌ Cycle failed: ${displayMessage}. Retrying in ${Math.ceil(retryDelayMs / 1000)}s.`,
         );
         logDebug("watch", "cycle_error", {
           error: error.message,
           stack: error.stack,
+          retryAfterSeconds:
+            error?.rateLimited === true ? baseRetryAfterSeconds : null,
+          retryDelaySeconds:
+            error?.rateLimited === true
+              ? Math.ceil(retryDelayMs / 1000)
+              : null,
         });
-        await new Promise((resolve) => setTimeout(resolve, 3000));
+        await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
       }
     }
     ctx.watcherRunning = false;
+    ctx.watchStartPending = false;
     ctx.isIdle = true;
     redrawHeaderAndLog(ctx.currentMissionStats);
     logWithTimestamp("[WATCH] ⏹️ Stopped.");

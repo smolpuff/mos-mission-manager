@@ -1,5 +1,6 @@
 "use strict";
 
+const fs = require("fs");
 const path = require("path");
 const os = require("os");
 const {
@@ -40,6 +41,10 @@ function createContext() {
       lastError: null,
       updatedAt: 0,
     },
+    mcpRateLimitedUntil: 0,
+    mcpRateLimitReason: null,
+    lastUserMissionsResult: null,
+    lastUserMissionsFetchedAt: 0,
     currentUserDisplayName: "unknown",
     currentUserWalletId: "unknown",
     currentUserWalletSummary: null,
@@ -74,6 +79,7 @@ function createContext() {
       process.argv.includes("--plain-output"),
     watchLoopEnabled: true,
     watcherRunning: false,
+    watchStartPending: false,
     authRefreshSignal: 0,
     onAuthRefresh: null,
     autoAssignRunning: false,
@@ -110,7 +116,19 @@ function createContext() {
 
     guiMissionSlots: [],
     slotUnlockSummary: null,
+    startupAccountSnapshot: null,
   };
+
+  const startupSnapshotPath = String(
+    process.env.PBP_STARTUP_SNAPSHOT_PATH || "",
+  ).trim();
+  if (startupSnapshotPath) {
+    try {
+      ctx.startupAccountSnapshot = JSON.parse(
+        fs.readFileSync(startupSnapshotPath, "utf8"),
+      );
+    } catch {}
+  }
   applyRuntimeDefaults(ctx);
   return ctx;
 }

@@ -75,6 +75,58 @@ function createMcpClient(ctx, logger) {
     );
   }
 
+  function sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, Math.max(0, ms || 0)));
+  }
+
+  function parseRetryAfterSeconds(value) {
+    const text = String(value || "").trim();
+    if (!text) return null;
+    const numeric = Number(text);
+    if (Number.isFinite(numeric) && numeric >= 0) {
+      return Math.max(0, Math.ceil(numeric));
+    }
+    const when = Date.parse(text);
+    if (!Number.isFinite(when)) return null;
+    return Math.max(0, Math.ceil((when - Date.now()) / 1000));
+  }
+
+  function rateLimitWaitMs() {
+    const until = Number(ctx.mcpRateLimitedUntil || 0);
+    return Number.isFinite(until) ? Math.max(0, until - Date.now()) : 0;
+  }
+
+  function buildActiveRateLimitError(reason = "pre_call") {
+    const waitMs = rateLimitWaitMs();
+    const waitSeconds = Math.max(1, Math.ceil(waitMs / 1000));
+    const error = new Error(
+      `rate limited; retry in ${waitSeconds}s`,
+    );
+    error.rateLimited = true;
+    error.retryAfterSeconds = waitSeconds;
+    error.retryAt = Number(ctx.mcpRateLimitedUntil || 0);
+    error.toolName = ctx.mcpRateLimitReason || null;
+    error.cooldownActive = true;
+    error.reason = reason;
+    return error;
+  }
+
+  function buildRateLimitError({ status = 429, retryAfterSeconds = 30, toolName = null, bodyError = null } = {}) {
+    const waitSeconds = Math.max(1, Math.ceil(Number(retryAfterSeconds) || 30));
+    const retryAt = Date.now() + waitSeconds * 1000;
+    ctx.mcpRateLimitedUntil = retryAt;
+    ctx.mcpRateLimitReason = toolName || "unknown_tool";
+    const error = new Error(
+      `tool call failed: HTTP ${status} (rate limited, retry in ${waitSeconds}s)`,
+    );
+    error.rateLimited = true;
+    error.retryAfterSeconds = waitSeconds;
+    error.retryAt = retryAt;
+    error.toolName = toolName || null;
+    error.bodyError = bodyError || null;
+    return error;
+  }
+
   async function tryRefresh(reason = "proactive") {
     const record = tokenRecord();
     if (!record?.refresh_token) return false;
@@ -196,6 +248,7 @@ function createMcpClient(ctx, logger) {
         status: response.status,
         json,
         sessionId: nextSessionId,
+        retryAfter: response.headers.get("retry-after") || null,
       };
     } catch (error) {
       if (error?.name === "AbortError") {
@@ -229,7 +282,21 @@ function createMcpClient(ctx, logger) {
       },
     });
 
-    if (!init.ok) throw new Error(`initialize failed: HTTP ${init.status}`);
+    if (!init.ok) {
+      if (Number(init.status) === 429) {
+        const retryAfterSeconds =
+          parseRetryAfterSeconds(init.retryAfter) ||
+          Number(init.json?.error?.data?.retryAfterSeconds || 0) ||
+          30;
+        throw buildRateLimitError({
+          status: init.status,
+          retryAfterSeconds,
+          toolName: "initialize",
+          bodyError: init.json?.error || null,
+        });
+      }
+      throw new Error(`initialize failed: HTTP ${init.status}`);
+    }
 
     if (!init.sessionId) {
       logDebug("mcp", "initialize_ok", { sessionId: null, streamableHttp: true });
@@ -266,6 +333,9 @@ function createMcpClient(ctx, logger) {
     }
 
     const runOnce = async () => {
+      if (rateLimitWaitMs() > 0) {
+        throw buildActiveRateLimitError(toolName);
+      }
       const token = bearerToken();
       if (!token) {
         setMcpConnection("expired", { error: "missing_token" });
@@ -284,7 +354,21 @@ function createMcpClient(ctx, logger) {
           params: { name: toolName, arguments: args },
         },
       });
-      if (!call.ok) throw new Error(`tool call failed: HTTP ${call.status}`);
+      if (!call.ok) {
+        if (Number(call.status) === 429) {
+          const retryAfterSeconds =
+            parseRetryAfterSeconds(call.retryAfter) ||
+            Number(call.json?.error?.data?.retryAfterSeconds || 0) ||
+            30;
+          throw buildRateLimitError({
+            status: call.status,
+            retryAfterSeconds,
+            toolName,
+            bodyError: call.json?.error || null,
+          });
+        }
+        throw new Error(`tool call failed: HTTP ${call.status}`);
+      }
       if (call.json?.error)
         throw new Error(`RPC error: ${JSON.stringify(call.json.error)}`);
       return call.json?.result || {};
@@ -293,9 +377,30 @@ function createMcpClient(ctx, logger) {
     try {
       const result = await runOnce();
       logDebug("tool", "call_ok", { toolName });
+      ctx.mcpRateLimitReason = null;
       setMcpConnection("connected");
       return result;
     } catch (error) {
+      if (error?.rateLimited) {
+        setMcpConnection("disconnected", { error: error.message });
+        if (error.cooldownActive === true) {
+          logDebug("tool", "call_rate_limited_active", {
+            toolName,
+            retryAfterSeconds: error.retryAfterSeconds,
+            retryAt: error.retryAt,
+          });
+        } else {
+          logWithTimestamp(
+            `[MCP] ⏳ ${toolName} rate limited. Retry after ${error.retryAfterSeconds}s.`,
+          );
+          logDebug("tool", "call_rate_limited", {
+            toolName,
+            retryAfterSeconds: error.retryAfterSeconds,
+            retryAt: error.retryAt,
+          });
+        }
+        throw error;
+      }
       if (!isAuthHttpError(error?.message || "")) {
         setMcpConnection("disconnected", { error: error.message });
         throw error;

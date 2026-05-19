@@ -81,6 +81,14 @@ function createCommandHandler(ctx, logger, actions, configApi, services = {}) {
     }
   }
 
+  async function startWatchLoopWithDelay({ reason = "start" } = {}) {
+    if (ctx.watcherRunning || ctx.watchStartPending) return;
+    ctx.watchStartPending = true;
+    logWithTimestamp(`[WATCH] ▶ Starting now (${reason}).`);
+    ctx.watchStartPending = false;
+    void startWatchLoop();
+  }
+
   let firstTimeSetupRunner = async () => {};
 
   async function refreshFundingWalletHeader() {
@@ -256,7 +264,23 @@ function createCommandHandler(ctx, logger, actions, configApi, services = {}) {
       }
     }
     async function runFirstTimeSignerSetup({ force = false } = {}) {
-      if (!force && ctx.config.signerSetupCompleted === true) return;
+      const hasExistingSignerMode = ["app_wallet", "manual", "dapp"].includes(
+        String(ctx.config.signerMode || ctx.signerMode || "").trim(),
+      );
+      const hasExistingAppWallet = Boolean(
+        String(ctx.signerConfig?.walletRef || "").trim(),
+      );
+      const looksAlreadyConfigured =
+        ctx.config.signerSetupCompleted === true ||
+        hasExistingSignerMode ||
+        hasExistingAppWallet;
+      if (!force && looksAlreadyConfigured) {
+        if (ctx.config.signerSetupCompleted !== true) {
+          ctx.config.signerSetupCompleted = true;
+          flushConfig(ctx, logger.logDebug);
+        }
+        return;
+      }
       logWithTimestamp(
         "[SIGNER] First run setup: choose app_wallet, manual, or dapp.",
       );
@@ -310,7 +334,7 @@ function createCommandHandler(ctx, logger, actions, configApi, services = {}) {
           await runLoginFlow({ forceInteractive: true })
         ) {
           await runInitialChecks();
-          void startWatchLoop();
+          await startWatchLoopWithDelay({ reason: "login" });
         }
       },
       logout: async () => {
@@ -412,6 +436,7 @@ function createCommandHandler(ctx, logger, actions, configApi, services = {}) {
       },
       pause: async () => {
         ctx.watchLoopEnabled = false;
+        ctx.watchStartPending = false;
         ctx.config.watchLoopEnabled = false;
         flushConfig(ctx, logger.logDebug);
         logWithTimestamp("[WATCH] ⏸️ Paused.");
@@ -421,7 +446,7 @@ function createCommandHandler(ctx, logger, actions, configApi, services = {}) {
         delete ctx.config.watchLoopEnabled;
         flushConfig(ctx, logger.logDebug);
         logWithTimestamp("[WATCH] ▶️ Resumed.");
-        void startWatchLoop();
+        await startWatchLoopWithDelay({ reason: "resume" });
       },
       status: async () => showStatus(),
       debug: async (raw) => {

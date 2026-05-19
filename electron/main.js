@@ -465,21 +465,83 @@ function publishStatus() {
   publish("backend:status", { ...backendStatus });
 }
 
+function missionNameKey(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ");
+}
+
+function hydrateMissionListWithCachedCatalog(missions = []) {
+  const missionList = Array.isArray(missions) ? missions : [];
+  if (!missionCatalogResultCache) {
+    return { missions: missionList, hydrated: false, source: "no_catalog_cache" };
+  }
+  const catalogList = normalizeMissionCatalogList(missionCatalogResultCache);
+  if (!catalogList.length) {
+    return { missions: missionList, hydrated: false, source: "empty_catalog_cache" };
+  }
+  const catalogByName = new Map();
+  for (const entry of catalogList) {
+    const key = missionNameKey(
+      entry?.missionName || entry?.name || entry?.title || entry?.mission,
+    );
+    if (key && !catalogByName.has(key)) {
+      catalogByName.set(key, entry);
+    }
+  }
+  let hydratedCount = 0;
+  const next = missionList.map((mission) => {
+    if (!mission || typeof mission !== "object") return mission;
+    const key = missionNameKey(missionDisplayName(mission));
+    const catalogMission = key ? catalogByName.get(key) || null : null;
+    if (!catalogMission) return mission;
+    const merged = { ...catalogMission, ...mission };
+    const hadImage = Boolean(
+      mission?.image ||
+        mission?.imageUrl ||
+        mission?.image_url ||
+        mission?.thumbnail ||
+        mission?.thumbnailUrl ||
+        mission?.thumbnail_url,
+    );
+    if (!hadImage) {
+      if (catalogMission?.image && !merged.image) merged.image = catalogMission.image;
+      if (catalogMission?.imageUrl && !merged.imageUrl) merged.imageUrl = catalogMission.imageUrl;
+      if (catalogMission?.image_url && !merged.image_url) {
+        merged.image_url = catalogMission.image_url;
+      }
+      if (catalogMission?.thumbnail && !merged.thumbnail) {
+        merged.thumbnail = catalogMission.thumbnail;
+      }
+    }
+    hydratedCount += 1;
+    return merged;
+  });
+  return {
+    missions: next,
+    hydrated: hydratedCount > 0,
+    hydratedCount,
+    source: "catalog_cache",
+  };
+}
+
 async function bootstrapStartupMissionSlots() {
   if (backendStatus.running) return { ok: true, skipped: "backend_running" };
   if (startupMissionBootstrapPromise) return startupMissionBootstrapPromise;
   startupMissionBootstrapPromise = (async () => {
-    pushSystemLog("Startup mission sync: fetching user missions.");
+    pushSystemLog("Startup wallet bootstrap: fetching wallet summary.");
     backendStatus.startupMissionSlotsLoading = true;
     publishStatus();
-    const loadStartupState = async () => {
-      return getAccountSnapshotCached();
-    };
 
     try {
-      let loaded = null;
+      let walletSummaryResult = null;
       try {
-        loaded = await loadStartupState();
+        walletSummaryResult = await mcpCallTool(
+          "get_wallet_summary",
+          {},
+          { url: "https://pixelbypixel.studio/mcp" },
+        );
       } catch (error) {
         if (!isAuthFailureMessage(error?.message)) throw error;
         pushSystemLog(
@@ -489,41 +551,65 @@ async function bootstrapStartupMissionSlots() {
         return { ok: false, skipped: "auth_required" };
       }
 
-      const whoInfo = loaded?.who?.structuredContent || {};
-      const missionList = normalizeMissionList(loaded?.missionsResult || {});
-      const nftList = normalizeNftList(loaded?.nftResult || {});
-      const nftByAccount = new Map(
-        nftList
-          .map((entry) => {
-            const account = String(
-              entry?.account ||
-                entry?.nftAccount ||
-                entry?.nft_account ||
-                entry?.tokenAddress ||
-                entry?.token_address ||
-                "",
-            ).trim();
-            return account ? [account, entry] : null;
-          })
-          .filter(Boolean),
-      );
+      const walletSummary = summarizeWalletPayload(walletSummaryResult || {});
       backendStatus.isAuthenticated = true;
-      backendStatus.currentUserDisplayName =
-        whoInfo.display_name || whoInfo.displayName || whoInfo.username || null;
-      backendStatus.currentUserWalletId =
-        whoInfo.wallet_id || whoInfo.walletId || null;
-      syncDesktopTargetMissionsFromAssignedMissions(
-        missionList,
-        "Startup mission sync",
-      );
-      backendStatus.guiMissionSlots = computeGuiMissionSlotsShared(missionList, {
-        missionNftByAccount: nftByAccount,
-        assignedNftMetadataByAccount: nftByAccount,
-      });
-      backendStatus.startupMissionSlotsLoading = false;
+      backendStatus.currentUserDisplayName = walletSummary.displayName || null;
+      backendStatus.currentUserWalletId = walletSummary.walletId || null;
+      if (walletSummary.currentUserWalletSummary) {
+        backendStatus.currentUserWalletSummary =
+          walletSummary.currentUserWalletSummary;
+      }
+      accountSnapshotCache = {
+        ...(accountSnapshotCache && typeof accountSnapshotCache === "object"
+          ? accountSnapshotCache
+          : {}),
+        walletSummaryResult,
+      };
+      accountSnapshotCacheAt = Date.now();
       publishStatus();
-      pushSystemLog("Startup mission sync complete.");
-      return { ok: true };
+
+      pushSystemLog("Startup mission sync: fetching user missions.");
+      try {
+        const missionsResult = await mcpCallTool(
+          "get_user_missions",
+          {},
+          { url: "https://pixelbypixel.studio/mcp" },
+        );
+        const hydratedMissions = hydrateMissionListWithCachedCatalog(
+          normalizeMissionList(missionsResult || {}),
+        );
+        const missionList = hydratedMissions.missions;
+        accountSnapshotCache = {
+          ...(accountSnapshotCache && typeof accountSnapshotCache === "object"
+            ? accountSnapshotCache
+            : {}),
+          missionsResult,
+        };
+        accountSnapshotCacheAt = Date.now();
+        syncDesktopTargetMissionsFromAssignedMissions(
+          missionList,
+          "Startup mission sync",
+        );
+        backendStatus.guiMissionSlots = computeGuiMissionSlotsShared(missionList);
+        if (hydratedMissions.hydrated) {
+          pushSystemLog(
+            `Startup mission metadata hydration complete (${Number(hydratedMissions.hydratedCount || 0)}).`,
+          );
+        } else {
+          pushSystemLog("Startup mission metadata hydration skipped.");
+        }
+        backendStatus.startupMissionSlotsLoading = false;
+        publishStatus();
+        pushSystemLog("Startup mission sync complete.");
+        return { ok: true };
+      } catch (error) {
+        backendStatus.startupMissionSlotsLoading = false;
+        publishStatus();
+        pushSystemLog(
+          `Startup mission sync failed: ${String(error?.message || error)}`,
+        );
+        return { ok: false, error: String(error?.message || error) };
+      }
     } catch (error) {
       backendStatus.startupMissionSlotsLoading = false;
       publishStatus();
@@ -544,6 +630,19 @@ function updateBackendStateFromIpc(payload) {
   if (!payload || payload.type !== "pbp_state") return;
   const next = payload.state || {};
   let changed = false;
+  const hasUsableBalances = (summary) =>
+    Array.isArray(summary?.balances) &&
+    summary.balances.some((entry) => {
+      const amount = Number(entry?.balance ?? entry?.displayBalance ?? NaN);
+      return Number.isFinite(amount);
+    });
+  const hasUsableFundingSummary = (summary) =>
+    summary &&
+    typeof summary === "object" &&
+    String(summary.status || "").trim().toLowerCase() === "ok" &&
+    (Number.isFinite(Number(summary.sol)) ||
+      Number.isFinite(Number(summary.pbp)) ||
+      String(summary.address || "").trim().length > 0);
   for (const key of Object.keys(backendStatus)) {
     if (
       key === "running" ||
@@ -557,6 +656,23 @@ function updateBackendStateFromIpc(payload) {
       Object.prototype.hasOwnProperty.call(next, key) &&
       backendStatus[key] !== next[key]
     ) {
+      if (key === "currentUserWalletSummary") {
+        const currentSummary = backendStatus.currentUserWalletSummary;
+        const nextSummary = next[key];
+        if (hasUsableBalances(currentSummary) && !hasUsableBalances(nextSummary)) {
+          continue;
+        }
+      }
+      if (key === "fundingWalletSummary") {
+        const currentSummary = backendStatus.fundingWalletSummary;
+        const nextSummary = next[key];
+        if (
+          hasUsableFundingSummary(currentSummary) &&
+          !hasUsableFundingSummary(nextSummary)
+        ) {
+          continue;
+        }
+      }
       backendStatus[key] = next[key];
       changed = true;
     }
@@ -585,6 +701,64 @@ function getConfigPath() {
 
 function getAnalyticsPath() {
   return path.join(getBackendWorkingDirectory(), "data", "stats-analytics.json");
+}
+
+function getStartupSnapshotPath() {
+  return path.join(getBackendWorkingDirectory(), "data", "startup-account-snapshot.json");
+}
+
+function walletSummaryResultFromBackendStatus() {
+  const summary =
+    backendStatus.currentUserWalletSummary &&
+    typeof backendStatus.currentUserWalletSummary === "object"
+      ? backendStatus.currentUserWalletSummary
+      : null;
+  if (!summary) return null;
+  return {
+    structuredContent: {
+      success: true,
+      walletId:
+        summary.walletId || backendStatus.currentUserWalletId || null,
+      displayName:
+        summary.displayName || backendStatus.currentUserDisplayName || null,
+      balances: Array.isArray(summary.balances) ? summary.balances : [],
+      walletBalanceSummary: Array.isArray(summary.walletBalanceSummary)
+        ? summary.walletBalanceSummary
+        : [],
+    },
+  };
+}
+
+function writeStartupSnapshotFile() {
+  const snapshotBase =
+    accountSnapshotCache && typeof accountSnapshotCache === "object"
+      ? { ...accountSnapshotCache }
+      : {};
+  const synthesizedWalletSummary = walletSummaryResultFromBackendStatus();
+  if (!snapshotBase.walletSummaryResult && synthesizedWalletSummary) {
+    snapshotBase.walletSummaryResult = synthesizedWalletSummary;
+  }
+  if (!Object.keys(snapshotBase).length) {
+    return null;
+  }
+  try {
+    const target = getStartupSnapshotPath();
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.writeFileSync(
+      target,
+      JSON.stringify(
+        {
+          cachedAt: accountSnapshotCacheAt || Date.now(),
+          snapshot: snapshotBase,
+        },
+        null,
+        2,
+      ),
+    );
+    return target;
+  } catch {
+    return null;
+  }
 }
 
 function readDesktopConfig() {
@@ -755,8 +929,8 @@ function invalidateMissionRelatedCaches() {
   invalidateRentalsPreviewCache();
 }
 
-async function getAccountSnapshotCached() {
-  if (accountSnapshotCache) {
+async function getAccountSnapshotCached({ includeNfts = false } = {}) {
+  if (accountSnapshotCache && (!includeNfts || accountSnapshotCache?.nftResult)) {
     pushSystemLog("Account snapshot cache hit.");
     return accountSnapshotCache;
   }
@@ -766,8 +940,8 @@ async function getAccountSnapshotCached() {
   }
   accountSnapshotPromise = (async () => {
     const snapshot = {
-      who: await mcpCallTool(
-        "who_am_i",
+      walletSummaryResult: await mcpCallTool(
+        "get_wallet_summary",
         {},
         { url: "https://pixelbypixel.studio/mcp" },
       ),
@@ -776,11 +950,15 @@ async function getAccountSnapshotCached() {
         {},
         { url: "https://pixelbypixel.studio/mcp" },
       ),
-      nftResult: await mcpCallTool(
-        "get_mission_nfts",
-        {},
-        { url: "https://pixelbypixel.studio/mcp" },
-      ),
+      ...(includeNfts
+        ? {
+            nftResult: await mcpCallTool(
+              "get_mission_nfts",
+              {},
+              { url: "https://pixelbypixel.studio/mcp" },
+            ),
+          }
+        : {}),
     };
     accountSnapshotCache = snapshot;
     accountSnapshotCacheAt = Date.now();
@@ -1260,7 +1438,30 @@ function deriveCooldownSeconds(entry) {
 
 function normalizeWalletBalanceEntries(raw = []) {
   if (Array.isArray(raw)) {
-    return raw.filter((entry) => entry && typeof entry === "object");
+    return raw
+      .filter((entry) => entry && typeof entry === "object")
+      .map((entry) => {
+        const amount = Number(
+          entry.balance ?? entry.displayBalance ?? entry.amount ?? NaN,
+        );
+        const symbolSource = entry.symbol || entry.code || entry.key || entry.name || "";
+        const nameSource = entry.name || entry.symbol || entry.code || entry.key || "";
+        return {
+          ...entry,
+          key: String(entry.key || entry.code || entry.symbol || entry.name || "")
+            .trim()
+            .toLowerCase(),
+          symbol: String(symbolSource || "")
+            .trim()
+            .toUpperCase(),
+          name: String(nameSource || "")
+            .trim(),
+          balance: Number.isFinite(amount) ? amount : null,
+          displayBalance: Number.isFinite(amount)
+            ? amount.toLocaleString(undefined, { maximumFractionDigits: 2 })
+            : entry.displayBalance ?? null,
+        };
+      });
   }
   if (!raw || typeof raw !== "object") return [];
   return Object.entries(raw).map(([symbol, balance]) => {
@@ -1285,6 +1486,45 @@ function normalizeWalletBalanceEntries(raw = []) {
 }
 
 function summarizeWalletPayload(payload) {
+  const parseMaybeNumber = (value) => {
+    if (typeof value === "number") return Number.isFinite(value) ? value : null;
+    if (typeof value !== "string") return null;
+    const n = Number(value.replace(/[, _]/g, "").trim());
+    return Number.isFinite(n) ? n : null;
+  };
+  const upsertBalanceEntry = (list, { key, symbol, name, balance }) => {
+    const normalizedKey = String(key || symbol || name || "")
+      .trim()
+      .toLowerCase();
+    const amount = Number(balance);
+    if (!normalizedKey || !Number.isFinite(amount)) return list;
+    const next = Array.isArray(list) ? list.slice() : [];
+    const index = next.findIndex((entry) => {
+      const entryKey = String(
+        entry?.key || entry?.symbol || entry?.name || "",
+      )
+        .trim()
+        .toLowerCase();
+      return entryKey === normalizedKey;
+    });
+    const patch = {
+      key: normalizedKey,
+      symbol: String(symbol || key || "")
+        .trim()
+        .toUpperCase(),
+      name: String(name || symbol || key || "")
+        .trim()
+        .toUpperCase(),
+      mint: null,
+      balance: amount,
+      displayBalance: amount.toLocaleString(undefined, {
+        maximumFractionDigits: 2,
+      }),
+    };
+    if (index >= 0) next[index] = { ...next[index], ...patch };
+    else next.push(patch);
+    return next;
+  };
   const sc = payload?.structuredContent || {};
   const walletId = sc.walletId || sc.wallet_id || null;
   const displayName = sc.displayName || sc.display_name || null;
@@ -1292,25 +1532,32 @@ function summarizeWalletPayload(payload) {
     sc.balances || sc.walletBalances || sc.wallet_balances || [],
   );
   const virtualCurrencies = sc.virtualCurrencies || sc.virtual_currencies || {};
-  const virtualCurrencyBalances = Object.entries(virtualCurrencies)
-    .map(([symbol, balance]) => ({
-      key: String(symbol || "")
-        .trim()
-        .toLowerCase(),
-      symbol: String(symbol || "")
-        .trim()
-        .toUpperCase(),
-      name: String(symbol || "")
-        .trim()
-        .toUpperCase(),
-      mint: null,
-      balance: Number(balance),
-      displayBalance: Number(balance).toLocaleString(undefined, {
-        maximumFractionDigits: 2,
-      }),
-    }))
-    .filter((entry) => entry.key && Number.isFinite(entry.balance));
-  const mergedBalances = [...baseBalances, ...virtualCurrencyBalances];
+  const virtualCurrencyBalances = normalizeWalletBalanceEntries(virtualCurrencies);
+  let mergedBalances = [...baseBalances, ...virtualCurrencyBalances];
+  const solFromPayload =
+    parseMaybeNumber(sc.solBalance) ??
+    parseMaybeNumber(sc.sol_balance) ??
+    parseMaybeNumber(sc.sol);
+  const pbpFromPayload =
+    parseMaybeNumber(sc.pbpBalance) ??
+    parseMaybeNumber(sc.pbp_balance) ??
+    parseMaybeNumber(sc.pbp);
+  if (solFromPayload !== null) {
+    mergedBalances = upsertBalanceEntry(mergedBalances, {
+      key: "sol",
+      symbol: "SOL",
+      name: "SOL",
+      balance: solFromPayload,
+    });
+  }
+  if (pbpFromPayload !== null) {
+    mergedBalances = upsertBalanceEntry(mergedBalances, {
+      key: "pbp",
+      symbol: "PBP",
+      name: "PBP",
+      balance: pbpFromPayload,
+    });
+  }
   const sol = extractBalanceNumber(
     mergedBalances,
     ({ symbol, name }) => symbol === "SOL" || name === "SOL",
@@ -1897,6 +2144,7 @@ function startBackend() {
 
   logHistory = [];
   const currentConfig = readDesktopConfig();
+  const startupSnapshotPath = writeStartupSnapshotFile();
   backend = fork(path.join(ROOT_DIR, "app.js"), ["--plain-output"], {
     cwd: getBackendWorkingDirectory(),
     env: {
@@ -1906,6 +2154,9 @@ function startBackend() {
       PBP_DEV_MODE: isDesktopDevMode() ? "1" : "0",
       PBP_CONFIG_DIR: getBackendWorkingDirectory(),
       PBP_DEFAULT_MISSION_RESET_LEVEL: defaultMissionResetLevelForConfig(currentConfig),
+      ...(startupSnapshotPath
+        ? { PBP_STARTUP_SNAPSHOT_PATH: startupSnapshotPath }
+        : {}),
       FORCE_COLOR: "0",
     },
     silent: true,
@@ -1923,9 +2174,6 @@ function startBackend() {
   backendStatus.isAuthenticated = null;
   backendStatus.watcherRunning = null;
   backendStatus.watchLoopEnabled = null;
-  backendStatus.currentUserDisplayName = null;
-  backendStatus.currentUserWalletId = null;
-  backendStatus.currentUserWalletSummary = null;
   backendStatus.currentMissionStats = null;
   backendStatus.currentMode = null;
   backendStatus.level20ResetEnabled = null;
@@ -1935,7 +2183,6 @@ function startBackend() {
   backendStatus.currentMissionResetLevel = null;
   backendStatus.sessionRewardTotals = null;
   backendStatus.sessionSpendTotals = null;
-  backendStatus.fundingWalletSummary = null;
   backendStatus.guiMissionSlots = null;
   backendStatus.slotUnlockSummary = null;
   syncCompetitionRangeLockScheduler();
@@ -2910,20 +3157,18 @@ app.whenReady().then(async () => {
 
     emitProgress(5, "start", "Starting account sync");
     const loadAccount = async () => {
-      pushSystemLog("Onboarding sync: fetching who_am_i.");
-      emitProgress(35, "whoami", "Fetching profile");
-      const snapshot = await getAccountSnapshotCached();
-      const who = snapshot?.who || null;
+      const snapshot = await getAccountSnapshotCached({ includeNfts: true });
       pushSystemLog("Onboarding sync: fetching get_user_missions.");
-      emitProgress(65, "missions", "Fetching missions");
+      emitProgress(45, "missions", "Fetching missions");
       const missionsResult = snapshot?.missionsResult || null;
       pushSystemLog("Onboarding sync: fetching get_mission_catalog.");
-      emitProgress(85, "catalog", "Fetching mission catalog");
+      emitProgress(75, "catalog", "Fetching mission catalog");
       const catalogResult = await getMissionCatalogCached();
       pushSystemLog("Onboarding sync: fetching get_mission_nfts.");
       emitProgress(92, "nfts", "Fetching wallet collections");
       const nftResult = snapshot?.nftResult || null;
-      return { who, missionsResult, catalogResult, nftResult };
+      const walletSummaryResult = snapshot?.walletSummaryResult || null;
+      return { walletSummaryResult, missionsResult, catalogResult, nftResult };
     };
 
     let loaded = null;
@@ -2943,14 +3188,17 @@ app.whenReady().then(async () => {
       loaded = await loadAccount();
     }
 
-    const who = loaded?.who || {};
-    const whoInfo = who?.structuredContent || {};
+    const walletSummary = summarizeWalletPayload(
+      loaded?.walletSummaryResult || {},
+    );
     const displayName =
-      whoInfo.display_name ||
-      whoInfo.displayName ||
-      whoInfo.username ||
+      walletSummary?.displayName ||
+      backendStatus.currentUserDisplayName ||
       "unknown";
-    const walletId = whoInfo.wallet_id || whoInfo.walletId || "unknown";
+    const walletId =
+      walletSummary?.walletId ||
+      backendStatus.currentUserWalletId ||
+      "unknown";
 
     const missions = normalizeMissionList(loaded?.missionsResult || {}).map(
       (mission, index) => ({
@@ -3546,7 +3794,7 @@ app.whenReady().then(async () => {
   hydrateBackendStatusFromConfig();
   publishStatus();
   await createControlWindow();
-  void bootstrapStartupMissionSlots();
+  await bootstrapStartupMissionSlots();
   try {
     const launchConfig = readDesktopConfig();
     const walletAddress =

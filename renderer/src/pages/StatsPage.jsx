@@ -420,31 +420,25 @@ export default function StatsPage({
           </div>
         </section>
 
-        <div className="grid min-h-0 grid-cols-[minmax(0,1fr)_minmax(300px,0.9fr)] gap-3 overflow-hidden">
+        <div className="grid min-h-0 grid-cols-2 gap-3 overflow-hidden">
           <section className="card stats-live-card min-h-0 overflow-hidden">
             <div className="flex items-center justify-between gap-2">
-              <div>
-                <div className="text-sm font-semibold text-slate-200">
-                  Claims per {timelineData.mode === "daily" ? "Day" : "Hour"}
-                </div>
-                <div className="text-[11px] text-slate-500">
-                  {timelineData.mode === "daily"
-                    ? "Recent active days"
-                    : "Recent active hours"}
-                </div>
+              <div className="text-sm font-semibold text-slate-200">
+                Claims per {timelineData.mode === "daily" ? "Day" : "Hour"}
               </div>
+
               <div className="text-right  text-slate-400">
                 <div className="text-[11px]">
                   {formatNumber(chartTotalClaims, 0)} claims shown
                 </div>
               </div>
             </div>
-            <div className="mt-2 h-[calc(100%-38px)] rounded-md bg-black/20 p-2.5 overflow-hidden">
+            <div className="mt-2 h-full rounded-md bg-black/20 px-2 pt-2 pb-1 overflow-hidden">
               {chartBuckets.length ? (
                 <div className="relative h-full min-w-0">
-                  <div className="absolute inset-x-0 top-0 border-t border-slate-400/10" />
-                  <div className="absolute inset-x-0 top-1/2 border-t border-slate-400/10" />
-                  <div className="absolute inset-x-0 bottom-0 border-t border-slate-400/20" />
+                  {/* <div className="absolute inset-x-0 top-0 border-t border-slate-400/10" /> */}
+                  {/* <div className="absolute inset-x-0 top-1/2 border-t border-slate-400/10" /> */}
+                  <div className="absolute inset-x-0 bottom-5.5 border-t border-slate-400/20" />
                   <div className="relative z-10 flex h-full items-end justify-end gap-0.5 overflow-hidden">
                     {chartBuckets.map((bucket, index) => {
                       const count = asNumber(bucket.count, 0);
@@ -462,17 +456,19 @@ export default function StatsPage({
                           title={`${bucketLabel(bucket, timelineData.mode, index, chartBuckets.length)}: ${formatNumber(count, 0)} claims`}
                         >
                           <div className="flex h-[calc(100%-14px)] w-full flex-col justify-end">
-                            {count > 0 ? (
-                              <div className="mb-1 text-center text-[10px] font-semibold leading-none text-slate-100">
-                                {formatNumber(count, 0)}
-                              </div>
-                            ) : null}
                             <div
-                              className="claim-bar mx-auto w-4 rounded-t-sm"
+                              className="claim-bar mx-auto w-5 rounded-t-sm"
                               style={{ height: `${height}%` }}
                             />
                           </div>
-                          <div className="h-3 max-w-full truncate text-[9px] leading-3 text-slate-500">
+                          <div className="h-auto max-w-full truncate text-[9px] leading-3 text-slate-400 flex-row">
+                            <div>
+                              {count > 0 ? (
+                                <div className="mb-0.5 text-center text-[10px] font-semibold leading-none text-slate-100">
+                                  {formatNumber(count, 0)}
+                                </div>
+                              ) : null}
+                            </div>{" "}
                             {bucketLabel(
                               bucket,
                               timelineData.mode,
@@ -497,7 +493,7 @@ export default function StatsPage({
             <section className="card min-h-0 overflow-hidden">
               <div className="flex items-center justify-between gap-2">
                 <div className="text-sm font-semibold text-slate-200">
-                  Session Mission Ranking
+                  Session Missions
                 </div>
               </div>
               <div className="mt-2 space-y-1 overflow-hidden">
@@ -545,7 +541,7 @@ export default function StatsPage({
           </div>
         </div>
 
-        <div className="grid grid-cols-3 gap-3 overflow-hidden">
+        <div className="grid grid-cols-2 gap-3 overflow-hidden">
           <DetailCard title="Session Activity">
             <DetailRow label="Claims" value={formatNumber(claims, 0)} />
             <DetailRow
@@ -577,30 +573,20 @@ export default function StatsPage({
               value={formatNumber(resetCost)}
             />
           </DetailCard>
+        </div>
 
+        <div className="grid grid-cols-2 gap-3 overflow-hidden">
           <DetailCard title="Rentals">
             <DetailRow
               label="Session leases"
               value={formatNumber(sessionRentals, 0)}
-            />
-            <DetailRow
-              label="Tracked claims"
-              value={formatNumber(sessionHistory.length, 0)}
-            />
-            <DetailRow
-              label="Ranked claims"
-              value={formatNumber(rankedClaims, 0)}
-            />
-            <DetailRow label="Reset actions" value={formatNumber(resets, 0)} />
-          </DetailCard>
-        </div>
-
-        <div className="grid grid-cols-2 gap-3 overflow-hidden">
-          <DetailCard title="Rental NFT Reset Usage">
+            />{" "}
             <DetailRow
               label="Rental NFT resets"
               value={formatNumber(rentalNftResets, 0)}
             />
+          </DetailCard>{" "}
+          <DetailCard title="Rental Resets">
             <DetailRow
               label="Reset then assigned"
               value={formatNumber(rentalNftResetAssigned, 0)}

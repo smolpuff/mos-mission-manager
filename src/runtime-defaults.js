@@ -2,8 +2,8 @@
 
 const NORMAL_DEFAULTS = {
   missionResetLevel: "11",
-  rentalFastRefreshTickMs: 15000,
-  rentalBatchLimit: 2,
+  rentalFastRefreshTickMs: 10000,
+  rentalBatchLimit: 1,
   watchMaxLimitSeconds: 60,
   watchMinCycleSeconds: 30,
   watchDefaultPollSeconds: 30,
@@ -11,8 +11,8 @@ const NORMAL_DEFAULTS = {
 
 const DEV_DEFAULTS = {
   missionResetLevel: "6",
-  rentalFastRefreshTickMs: 1500,
-  rentalBatchLimit: 4,
+  rentalFastRefreshTickMs: 2500,
+  rentalBatchLimit: 3,
   watchMaxLimitSeconds: 60,
   watchMinCycleSeconds: 15,
   watchDefaultPollSeconds: 15,
@@ -22,10 +22,7 @@ function runtimeDefaults(devMode = false) {
   return devMode ? DEV_DEFAULTS : NORMAL_DEFAULTS;
 }
 
-function runtimeDefaultsForFlags({
-  debugMode = false,
-  devMode = false,
-} = {}) {
+function runtimeDefaultsForFlags({ debugMode = false, devMode = false } = {}) {
   return runtimeDefaults(Boolean(debugMode || devMode));
 }
 

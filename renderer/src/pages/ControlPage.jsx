@@ -605,13 +605,6 @@ function ControlView() {
         setOnboardingOpen(true);
       }
     });
-    if (
-      bridge?.bootstrapWalletSummary &&
-      !bootstrapWalletSummaryRequestedRef.current
-    ) {
-      bootstrapWalletSummaryRequestedRef.current = true;
-      void bridge.bootstrapWalletSummary().catch(() => {});
-    }
     return () => {
       cancelled = true;
     };
@@ -1151,6 +1144,8 @@ function ControlView() {
   const [onboardingSlotSelections, setOnboardingSlotSelections] = useState({});
   const [onboardingMissionPickerSlot, setOnboardingMissionPickerSlot] =
     useState(null);
+  const [onboardingMissionPickerPendingName, setOnboardingMissionPickerPendingName] =
+    useState("");
   const [onboardingPreviewOnly, setOnboardingPreviewOnly] = useState(false);
   const [onboardingDataLoading, setOnboardingDataLoading] = useState(false);
   const [missionPickerSlot, setMissionPickerSlot] = useState(null);
@@ -1833,6 +1828,7 @@ function ControlView() {
           ?.missionName ||
         "",
     ).trim();
+    setOnboardingMissionPickerPendingName(currentName);
     setMissionPickerPendingName(currentName);
     setMissionPickerSlot(slotNumber);
     setMissionPickerBusy(true);
@@ -2863,19 +2859,18 @@ function ControlView() {
                           <div className="flex items-center justify-between gap-3">
                             <div>
                               <div className="text-lg font-semibold text-slate-100">
-                                Select mission for slot{" "}
-                                {onboardingMissionPickerSlot}
+                                Change Mission for 500 PBP
                               </div>
                               <div className="text-xs text-slate-400">
-                                Only missions not already used in other slots
-                                are shown.
+                                Pick the mission this slot should run.
                               </div>
                             </div>
                             <button
                               type="button"
                               className="btn btn-clear btn-sm"
                               onClick={() =>
-                                setOnboardingMissionPickerSlot(null)
+                                (setOnboardingMissionPickerSlot(null),
+                                setOnboardingMissionPickerPendingName(""))
                               }
                               title="Close"
                             >
@@ -2885,9 +2880,7 @@ function ControlView() {
                           <div className="grid grid-cols-2 gap-2 max-h-[60vh] overflow-y-auto pr-1">
                             {getOnboardingSlotOptions(
                               onboardingMissionPickerSlot,
-                              onboardingSlotSelections[
-                                onboardingMissionPickerSlot
-                              ] ||
+                              onboardingMissionPickerPendingName ||
                                 getOnboardingMissionCard(
                                   onboardingMissionPickerSlot,
                                 )?.name ||
@@ -2898,50 +2891,152 @@ function ControlView() {
                                 null;
                               const collections =
                                 resolveMissionCollections(mission);
+                              const description = String(
+                                mission?.description ||
+                                  mission?.summary ||
+                                  mission?.taskDescription ||
+                                  mission?.task_description ||
+                                  "",
+                              ).trim();
+                              const currentName = String(
+                                onboardingSlotSelections[
+                                  onboardingMissionPickerSlot
+                                ] ||
+                                  getOnboardingMissionCard(
+                                    onboardingMissionPickerSlot,
+                                  )?.name ||
+                                  "",
+                              ).trim();
+                              const isCurrent =
+                                missionKey(currentName) === missionKey(name);
                               const isSelected =
                                 missionKey(
-                                  onboardingSlotSelections[
-                                    onboardingMissionPickerSlot
-                                  ] || "",
+                                  onboardingMissionPickerPendingName || "",
                                 ) === missionKey(name);
                               return (
                                 <button
                                   type="button"
                                   key={`picker-${onboardingMissionPickerSlot}-${name}`}
-                                  className={`rounded-md border-2 ${isSelected ? "border-accent bg-accent/10" : "border-white/10 bg-black/20"} p-3 h-full flex flex-col gap-2 text-left`}
+                                  className={`mission-choice-card ${
+                                    isSelected
+                                      ? "mission-choice-card--selected"
+                                      : ""
+                                  } rounded-md p-3 h-full flex gap-2 text-left`}
                                   onClick={() => {
-                                    updateOnboardingSlotSelection(
-                                      onboardingMissionPickerSlot,
-                                      name,
-                                    );
-                                    setOnboardingMissionPickerSlot(null);
+                                    setOnboardingMissionPickerPendingName(name);
                                   }}
                                 >
-                                  <div className="flex flex-row justify-between items-center">
-                                    <div className="text-[11px] text-slate-400">
-                                      Level —
+                                  <input
+                                    type="radio"
+                                    name="onboarding_mission_picker_selection"
+                                    className="fake-checkbox-radio"
+                                    checked={isSelected}
+                                    onChange={() =>
+                                      setOnboardingMissionPickerPendingName(
+                                        name,
+                                      )
+                                    }
+                                    tabIndex={-1}
+                                  />
+                                  <div className="flex min-w-0 flex-1 flex-col gap-1">
+                                    {isCurrent ? (
+                                      <div className="absolute right-0 top-0 badge px-2 h-auto text-[11px] text-slate-900">
+                                        CURRENT
+                                      </div>
+                                    ) : null}
+                                    {isSelected && !isCurrent ? (
+                                      <div className="absolute right-0 top-0 badge px-2 h-auto text-[11px] text-slate-900">
+                                        SELECTED
+                                      </div>
+                                    ) : null}
+                                    <div className="text-sm text-slate-100 flex justify-between">
+                                      <span>{name}</span>
+                                      <div className="flex shrink-0 items-center gap-2 text-[11px] text-slate-300">
+                                        <RewardBadge reward={mission?.reward} />
+                                      </div>
                                     </div>
-                                    <div className="badge px-2 h-auto text-[11px] text-slate-900">
-                                      {isSelected ? "Selected" : "Available"}
+                                    {description ? (
+                                      <div className="text-xs leading-4 text-slate-400">
+                                        {description}
+                                      </div>
+                                    ) : null}
+                                    <div className="text-slate-400 flex flex-wrap gap-0.5">
+                                      {collections.length > 0 ? (
+                                        collections
+                                          .filter((entry) => entry?.name)
+                                          .map((entry) => (
+                                            <span
+                                              key={entry.id ?? entry.name}
+                                              className={`flex flex-col items-center justify-center overflow-hidden border-2 gap-0.5 border-white/10 rounded-full w-5 h-5 ${
+                                                onboardingOwnedCollections.has(
+                                                  normalizeCollectionKey(
+                                                    entry.name,
+                                                  ),
+                                                )
+                                                  ? "!border-success"
+                                                  : ""
+                                              }`}
+                                              title={entry.name}
+                                            >
+                                              {entry.image ? (
+                                                <img
+                                                  src={entry.image}
+                                                  alt={entry.name}
+                                                  className="w-full h-full object-cover"
+                                                  loading="lazy"
+                                                  decoding="async"
+                                                />
+                                              ) : null}
+                                            </span>
+                                          ))
+                                      ) : (
+                                        <span className="collection-unavailable">
+                                          Collection requirements unavailable
+                                        </span>
+                                      )}
                                     </div>
-                                  </div>
-                                  <div className="text-sm text-slate-100">
-                                    {name}
-                                  </div>
-                                  <div className="text-[11px] text-slate-300">
-                                    <RewardBadge reward={mission?.reward} />
-                                  </div>
-                                  <div className="text-[11px] text-slate-400 mt-auto">
-                                    {collections.length > 0
-                                      ? collections
-                                          .map((entry) => entry?.name)
-                                          .filter(Boolean)
-                                          .join(", ")
-                                      : "Collection requirements unavailable"}
                                   </div>
                                 </button>
                               );
                             })}
+                          </div>
+                          <div className="flex items-center justify-between gap-3 border-t border-white/10 pt-3">
+                            <div className="min-w-0 text-xs text-slate-400">
+                              {onboardingMissionPickerPendingName
+                                ? `Selected: ${onboardingMissionPickerPendingName}`
+                                : "Select a mission before confirming."}
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <button
+                                type="button"
+                                className="btn btn-clear btn-sm"
+                                onClick={() =>
+                                  (setOnboardingMissionPickerSlot(null),
+                                  setOnboardingMissionPickerPendingName(""))
+                                }
+                              >
+                                Cancel
+                              </button>
+                              <button
+                                type="button"
+                                className="btn btn-gradient btn-sm text-shadow-sm text-shadow-black/40"
+                                disabled={
+                                  !String(
+                                    onboardingMissionPickerPendingName || "",
+                                  ).trim()
+                                }
+                                onClick={() => {
+                                  updateOnboardingSlotSelection(
+                                    onboardingMissionPickerSlot,
+                                    onboardingMissionPickerPendingName,
+                                  );
+                                  setOnboardingMissionPickerSlot(null);
+                                  setOnboardingMissionPickerPendingName("");
+                                }}
+                              >
+                                OK
+                              </button>
+                            </div>
                           </div>
                         </div>
                       </div>

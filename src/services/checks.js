@@ -44,6 +44,80 @@ function createChecksService(ctx, logger, mcp, services = {}) {
   let ownedMissionNftsPromise = null;
   const OWNED_MISSION_NFTS_CACHE_TTL_MS = 2000;
 
+  function startupAccountSnapshot() {
+    const wrapper =
+      ctx.startupAccountSnapshot && typeof ctx.startupAccountSnapshot === "object"
+        ? ctx.startupAccountSnapshot
+        : null;
+    const snapshot =
+      wrapper?.snapshot && typeof wrapper.snapshot === "object"
+        ? wrapper.snapshot
+        : null;
+    return snapshot;
+  }
+
+  function seedStartupSnapshotCaches(snapshot) {
+    if (!snapshot || typeof snapshot !== "object") return;
+    const nftResult = snapshot?.nftResult || null;
+    if (nftResult) {
+      const nfts = normalizeNftList(nftResult);
+      ownedMissionNftsCache = nfts;
+      ownedMissionNftsCacheAt = Date.now();
+      missionNftByAccount.clear();
+      for (const nft of nfts) {
+        const key = nftAccountId(nft);
+        if (key) missionNftByAccount.set(key, nft);
+      }
+    }
+  }
+
+  function whoAmIFromSnapshot(snapshot) {
+    const walletSummarySnapshot =
+      snapshot?.walletSummaryResult && typeof snapshot.walletSummaryResult === "object"
+        ? snapshot.walletSummaryResult
+        : null;
+    const parsedWalletSummary = walletSummarySnapshot
+      ? parseWalletSummary(walletSummarySnapshot)
+      : null;
+    const walletSummaryContent = walletSummarySnapshot?.structuredContent || {};
+    const info = snapshot?.who?.structuredContent || {};
+    const displayName =
+      walletSummaryContent.displayName ||
+      walletSummaryContent.display_name ||
+      info.display_name ||
+      info.displayName ||
+      info.username ||
+      "unknown";
+    const walletId =
+      walletSummaryContent.walletId ||
+      walletSummaryContent.wallet_id ||
+      parsedWalletSummary?.address ||
+      info.wallet_id ||
+      info.walletId ||
+      "unknown";
+    if (displayName === "unknown" && walletId === "unknown") return null;
+    const fallbackBalances = parseTokenBalancesArray(
+      info.walletBalances || info.wallet_balances || [],
+    );
+    const fallbackWalletBalanceSummary = Array.isArray(info.walletBalanceSummary)
+      ? info.walletBalanceSummary.slice()
+      : Array.isArray(info.wallet_balance_summary)
+        ? info.wallet_balance_summary.slice()
+        : [];
+    const walletSummary = {
+      walletId,
+      displayName,
+      balances: mergeTokenBalanceEntries(
+        parsedWalletSummary?.balances || [],
+        fallbackBalances,
+      ),
+      walletBalanceSummary: parsedWalletSummary?.walletBalanceSummary?.length
+        ? parsedWalletSummary.walletBalanceSummary
+        : fallbackWalletBalanceSummary,
+    };
+    return { ok: true, displayName, walletId, walletSummary, fromSnapshot: true };
+  }
+
   function missionPageCooldownMs() {
     const sec = Number(ctx.config?.missionPageOpenCooldownSeconds);
     if (Number.isFinite(sec) && sec > 0) return Math.floor(sec * 1000);
@@ -1173,6 +1247,44 @@ function createChecksService(ctx, logger, mcp, services = {}) {
       }
     }
     return ctx.sessionSpendTotals;
+  }
+
+  function ensureSessionRewardTotals() {
+    if (
+      !ctx.sessionRewardTotals ||
+      typeof ctx.sessionRewardTotals !== "object"
+    ) {
+      ctx.sessionRewardTotals = createEmptyRewardTotals();
+    }
+    for (const key of Object.keys(DEFAULT_REWARD_TOTALS)) {
+      if (typeof ctx.sessionRewardTotals[key] !== "number") {
+        ctx.sessionRewardTotals[key] = 0;
+      }
+    }
+    return ctx.sessionRewardTotals;
+  }
+
+  function addSessionRewardTotals(deltas = {}, { logLabel = "Claimed" } = {}) {
+    const totals = ensureSessionRewardTotals();
+    let changed = false;
+    for (const [key, delta] of Object.entries(deltas || {})) {
+      const amount = Number(delta || 0);
+      if (!Number.isFinite(amount) || amount === 0) continue;
+      if (typeof totals[key] !== "number") totals[key] = 0;
+      totals[key] += amount;
+      changed = true;
+    }
+    if (changed) {
+      logDebug("check", "session_reward_totals_updated", {
+        logLabel,
+        totals: { ...totals },
+      });
+      if (ctx.guiBridge?.emitNow) ctx.guiBridge.emitNow();
+      scheduleFundingWalletRefresh(
+        `reward_${String(logLabel || "claim").toLowerCase()}`,
+      );
+    }
+    return totals;
   }
 
   function addSessionSpendTotals(
@@ -3675,6 +3787,18 @@ function createChecksService(ctx, logger, mcp, services = {}) {
               rewardToken: mission.prize ?? null,
             });
           }
+          const rewardBucket = normalizeRewardBucket(mission.prize);
+          const rewardAmount = Number(mission.prizeAmount ?? 0);
+          if (
+            rewardBucket &&
+            Number.isFinite(rewardAmount) &&
+            rewardAmount > 0
+          ) {
+            addSessionRewardTotals(
+              { [rewardBucket]: rewardAmount },
+              { logLabel: "Fallback claimed" },
+            );
+          }
           logWithTimestamp(
             `[WATCH] ✅ Claimed (fallback): ${mission.name}${slotText}${levelText}`,
           );
@@ -3719,7 +3843,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
     }
   }
 
-  async function runWhoAmICheck() {
+  async function runWhoAmICheck({ includeWalletSummary = true } = {}) {
     try {
       const json = await mcp.mcpToolCall("who_am_i", {});
       const info = json?.structuredContent || {};
@@ -3727,7 +3851,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
         info.display_name || info.displayName || info.username || "unknown";
       const walletId = info.wallet_id || info.walletId || "unknown";
       const walletSummaryResult =
-        walletId && walletId !== "unknown"
+        includeWalletSummary && walletId && walletId !== "unknown"
           ? await fetchCurrentWalletSummary(walletId)
           : null;
       const parsedWalletSummary = walletSummaryResult
@@ -3754,7 +3878,6 @@ function createChecksService(ctx, logger, mcp, services = {}) {
           ? parsedWalletSummary.walletBalanceSummary
           : fallbackWalletBalanceSummary,
       };
-      ctx.currentUserWalletSummary = walletSummary;
       logDebug("check", "whoami_ok", { displayName, walletId });
       return { ok: true, displayName, walletId, walletSummary };
     } catch (error) {
@@ -3765,24 +3888,12 @@ function createChecksService(ctx, logger, mcp, services = {}) {
     }
   }
 
-  async function runMcpHealthCheck() {
-    try {
-      const json = await mcp.mcpToolCall("mcp_health", {});
-      const healthOk =
-        json?.structuredContent?.success ?? json?.structuredContent?.ok ?? true;
-      logDebug("check", "mcp_health_ok", { healthOk });
-      return { ok: true, healthOk };
-    } catch (error) {
-      logDebug("check", "mcp_health_failed", { error: error.message });
-      return { ok: false, healthOk: false };
-    }
-  }
-
   async function refreshMissionHeaderStats({
     refreshNftCount = false,
     missionsResult = null,
     syncTargetsFromAssigned = false,
     syncReason = "",
+    hydrateAssignedMetadata = true,
   } = {}) {
     try {
       const result =
@@ -3814,41 +3925,43 @@ function createChecksService(ctx, logger, mcp, services = {}) {
         }
       }
 
-      try {
-        const missingAccounts = missions
-          .map((mission) => missionAssignedNftAccount(mission))
-          .filter((account) => isUsableIdValue(account))
-          .map((account) => String(account).trim())
-          .filter((account) => !missionNftByAccount.has(account))
-          .filter((account) => !assignedNftMetadataByAccount.has(account));
+      if (hydrateAssignedMetadata) {
+        try {
+          const missingAccounts = missions
+            .map((mission) => missionAssignedNftAccount(mission))
+            .filter((account) => isUsableIdValue(account))
+            .map((account) => String(account).trim())
+            .filter((account) => !missionNftByAccount.has(account))
+            .filter((account) => !assignedNftMetadataByAccount.has(account));
 
-        const uniqueMissing = Array.from(new Set(missingAccounts)).slice(0, 6);
-        for (const account of uniqueMissing) {
-          try {
-            const nftResult = await mcp.mcpToolCall("get_nft", {
-              mintAddress: account,
-            });
-            const nfts = Array.isArray(nftResult?.structuredContent?.nfts)
-              ? nftResult.structuredContent.nfts
-              : [];
-            const first =
-              nfts.find((nft) => nftAccountId(nft) === account) ||
-              nfts[0] ||
-              null;
-            if (first) {
-              assignedNftMetadataByAccount.set(account, first);
+          const uniqueMissing = Array.from(new Set(missingAccounts)).slice(0, 6);
+          for (const account of uniqueMissing) {
+            try {
+              const nftResult = await mcp.mcpToolCall("get_nft", {
+                mintAddress: account,
+              });
+              const nfts = Array.isArray(nftResult?.structuredContent?.nfts)
+                ? nftResult.structuredContent.nfts
+                : [];
+              const first =
+                nfts.find((nft) => nftAccountId(nft) === account) ||
+                nfts[0] ||
+                null;
+              if (first) {
+                assignedNftMetadataByAccount.set(account, first);
+              }
+            } catch (error) {
+              logDebug("check", "assigned_nft_metadata_fetch_failed", {
+                account,
+                error: error.message,
+              });
             }
-          } catch (error) {
-            logDebug("check", "assigned_nft_metadata_fetch_failed", {
-              account,
-              error: error.message,
-            });
           }
+        } catch (error) {
+          logDebug("check", "assigned_nft_metadata_batch_failed", {
+            error: error.message,
+          });
         }
-      } catch (error) {
-        logDebug("check", "assigned_nft_metadata_batch_failed", {
-          error: error.message,
-        });
       }
 
       ctx.guiMissionSlots = computeGuiMissionSlots(
@@ -3904,8 +4017,15 @@ function createChecksService(ctx, logger, mcp, services = {}) {
       logWithTimestamp(`[CHECK] ⏱ ${name}: ${ms}ms`);
     };
 
+    const startupSnapshot = startupAccountSnapshot();
+    if (startupSnapshot) {
+      seedStartupSnapshotCaches(startupSnapshot);
+    }
+
     let stepStartedAt = Date.now();
-    const whoami = await runWhoAmICheck();
+    const whoami =
+      whoAmIFromSnapshot(startupSnapshot) ||
+      (await runWhoAmICheck({ includeWalletSummary: false }));
     markStep("who_am_i", stepStartedAt);
     if (!whoami.ok) {
       logWithTimestamp("[CHECK] ❌ Loading data failed (not authenticated).");
@@ -3917,37 +4037,12 @@ function createChecksService(ctx, logger, mcp, services = {}) {
     ctx.currentUserWalletId = whoami.walletId || "unknown";
 
     stepStartedAt = Date.now();
-    await refreshFundingWalletSummary();
-    markStep("funding_wallet_summary", stepStartedAt);
-
-    stepStartedAt = Date.now();
-    await refreshMissionCatalog();
-    markStep("mission_catalog", stepStartedAt);
-
-    stepStartedAt = Date.now();
     validateConfiguredTargets();
     markStep("validate_targets", stepStartedAt);
 
     stepStartedAt = Date.now();
     logSelectedWatchTargetsAtStartup();
     markStep("log_targets", stepStartedAt);
-
-    stepStartedAt = Date.now();
-    const health = await runMcpHealthCheck();
-    markStep("mcp_health", stepStartedAt);
-
-    stepStartedAt = Date.now();
-    const missions = await refreshMissionHeaderStats({
-      refreshNftCount: true,
-      syncTargetsFromAssigned: true,
-      syncReason: "startup",
-    });
-    markStep("mission_header_stats", stepStartedAt);
-
-    if (!health.ok || !missions.ok) {
-      logWithTimestamp("[CHECK] ❌ Loading data failed.");
-      return false;
-    }
 
     const totalMs = Math.max(0, Date.now() - checkStartedAt);
     logWithTimestamp(`[CHECK] ⏱ total startup checks: ${totalMs}ms`);
@@ -3956,9 +4051,6 @@ function createChecksService(ctx, logger, mcp, services = {}) {
       steps: stepDurations,
     });
     logWithTimestamp("[CHECK] ✅ Loading data complete.");
-    logWithTimestamp(
-      `[INFO] 🎯 ${missions.stats.total} missions found: ${missions.stats.active} active, ${missions.stats.available} available, ${missions.stats.claimable} claimable, 💎 ${missions.stats.nftsAvailable}/${missions.stats.nftsTotal} NFT`,
-    );
     return true;
   }
 
@@ -3966,7 +4058,6 @@ function createChecksService(ctx, logger, mcp, services = {}) {
     runWhoAmICheck,
     refreshMissionCatalog,
     validateConfiguredTargets,
-    runMcpHealthCheck,
     refreshFundingWalletSummary,
     refreshMissionHeaderStats,
     syncConfiguredTargetMissionsFromAssigned,

@@ -2,8 +2,9 @@
   "version": "3.2.4",
   "downloadUrl": "https://github.com/smolpuff/mos-mission-manager/releases/latest",
   "notes": [
-    "added dev-gated mish competish result targeting. UMADBRO?",
-    "added mish competish soon/active startup dialog b/c i fucking hate that dogshit website",
+    "new startup flows",
+    "added dev-gated mish competish result targeting. UMADBRO",
+    "added mish competish startup dialog",
     "added rental reset stats"
   ]
 }

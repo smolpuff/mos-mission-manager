@@ -8,7 +8,7 @@ binaries/
 scripts/
 releases/
 config.json.bak
-DEV_DEBUG_AUDIT.md
+STARTUP_CALLS_ROLLBACK_NOTES.md
 
 # macOS junk
 .DS_Store
@@ -155,3 +155,6 @@ dist
 release/
 *.zip
 *.app
+
+# Standalone local analytics admin/tooling
+missions-analytics/
