@@ -31,8 +31,101 @@ const quickCommands = [
   "c",
 ];
 
+const COMPETITION_NOTIFICATION_SEED = "20";
+
 function useDesktopBridge() {
   return window.missionsDesktop;
+}
+
+function competitionSummaryFrom(raw) {
+  const competition = raw && typeof raw === "object" ? raw : {};
+  const competitionNumber = String(competition?.competitionNumber || "").trim();
+  const start = String(
+    competition?.start || competition?.datesText || "Unknown",
+  ).trim();
+  const end = String(
+    competition?.end || competition?.datesText || "Unknown",
+  ).trim();
+  return {
+    competitionNumber,
+    title: competitionNumber
+      ? `Competition ${competitionNumber}`
+      : "Mission Competition",
+    start,
+    end,
+    missions: Array.isArray(competition?.missions) ? competition.missions : [],
+    prizes: Array.isArray(competition?.prizes) ? competition.prizes : [],
+    resultsStatus: String(competition?.resultsStatus || "").trim() || null,
+  };
+}
+
+function missionNameKey(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/['".!,:;()\-]/g, " ")
+    .replace(/\s+/g, " ");
+}
+
+function missionNamesMatch(a, b) {
+  const left = missionNameKey(a);
+  const right = missionNameKey(b);
+  if (!left || !right) return false;
+  return left === right || left.includes(right) || right.includes(left);
+}
+
+function stripYearFromCompetitionDate(value) {
+  return String(value || "")
+    .replace(/,\s*\d{4}\b/g, "")
+    .replace(/\b\d{4}\b/g, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
+function competitionDateMs(value) {
+  const text = String(value || "").trim();
+  if (!text || /^unknown$/i.test(text)) return null;
+  const parsed = Date.parse(text);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function competitionStatusFrom(summary, isNewCompetition) {
+  const now = Date.now();
+  const startMs = competitionDateMs(summary?.start);
+  const endMs = competitionDateMs(summary?.end);
+  if (endMs && now > endMs) {
+    return null;
+  }
+  if (startMs && now < startMs) {
+    if (startMs - now <= 24 * 60 * 60 * 1000) {
+      return {
+        label: "Starting Soon!",
+        className: "badge bg-warning text-slate-900 border-transparent",
+      };
+    }
+    return {
+      label: "Soon",
+      className: "badge bg-warning text-slate-900 border-transparent",
+    };
+  }
+  return { label: "Live!", className: "badge badge-success" };
+}
+
+async function closeCompetitionNotificationModal({
+  modal,
+  suppressChecked,
+  setModal,
+  updateConfig,
+}) {
+  const competitionNumber = String(modal?.competitionNumber || "").trim();
+  if (typeof updateConfig === "function") {
+    await updateConfig({
+      suppressedMissionCompetitionNotificationId: suppressChecked
+        ? competitionNumber
+        : "",
+    });
+  }
+  setModal(null);
 }
 
 function MissionSlotImage({ src }) {
@@ -268,11 +361,18 @@ function ControlView() {
     useState("13");
   const [competitionRangeLockPollSeconds, setCompetitionRangeLockPollSeconds] =
     useState("150");
+  const [configuredTargetMissions, setConfiguredTargetMissions] = useState([]);
   const [autoUpdateCheckEnabled, setAutoUpdateCheckEnabledState] =
     useState(true);
   const [updateCheckBusy, setUpdateCheckBusy] = useState(false);
   const [updateCheckMessage, setUpdateCheckMessage] = useState(null);
   const [updateModal, setUpdateModal] = useState(null);
+  const [competitionNotificationModal, setCompetitionNotificationModal] =
+    useState(null);
+  const [
+    competitionNotificationSuppressChecked,
+    setCompetitionNotificationSuppressChecked,
+  ] = useState(false);
   const [modeSelection, setModeSelection] = useState(
     status.missionModeEnabled === true ? "mission" : "normal",
   );
@@ -306,6 +406,7 @@ function ControlView() {
   const lowBalanceArmedRef = useRef({ pbp: false, sol: false });
   const bootstrapWalletSummaryRequestedRef = useRef(false);
   const startupUpdateCheckRequestedRef = useRef(false);
+  const startupCompetitionCheckRequestedRef = useRef(false);
   const isMissionMode = modeSelection === "mission";
   const isNormalMode = !isMissionMode;
   const debugControlsVisible = bridge?.desktopDevMode === true;
@@ -438,6 +539,13 @@ function ControlView() {
       if (typeof config.level20ResetEnabled === "boolean") {
         setResetEnabled(config.level20ResetEnabled);
       }
+      setConfiguredTargetMissions(
+        Array.isArray(config.targetMissions)
+          ? config.targetMissions
+              .map((value) => String(value || "").trim())
+              .filter(Boolean)
+          : [],
+      );
       if (typeof config.debugMode === "boolean") {
         setDebugEnabled(config.debugMode);
       }
@@ -538,6 +646,69 @@ function ControlView() {
       setLatestCompetitionBusy(false);
     }
   };
+
+  const checkForNewMissionCompetition = async () => {
+    if (!bridge?.getLatestCompetition) return;
+    setLatestCompetitionBusy(true);
+    setLatestCompetitionError(null);
+    try {
+      const res = await bridge.getLatestCompetition({});
+      if (!res?.ok) throw new Error(res?.error || "Scrape failed.");
+      const competition = res.competition || null;
+      setLatestCompetition(competition);
+      if (!competition) return;
+      const summary = competitionSummaryFrom(competition);
+      if (!summary.competitionNumber) return;
+      const response = await bridge.getConfig();
+      const config = response?.config || {};
+      const lastSeenCompetitionId =
+        String(config.lastSeenMissionCompetitionId || "").trim() ||
+        COMPETITION_NOTIFICATION_SEED;
+      const suppressedCompetitionId = String(
+        config.suppressedMissionCompetitionNotificationId || "",
+      ).trim();
+      const isNewCompetition =
+        summary.competitionNumber !== lastSeenCompetitionId;
+      const isSuppressedForCurrentCompetition =
+        summary.competitionNumber === suppressedCompetitionId;
+      const statusBadge = competitionStatusFrom(summary, isNewCompetition);
+      if (!statusBadge) {
+        await applyConfigPatch({
+          lastSeenMissionCompetitionId: summary.competitionNumber,
+        });
+        return;
+      }
+      if (isNewCompetition) {
+        await applyConfigPatch({
+          suppressedMissionCompetitionNotificationId: "",
+        });
+      }
+      if (!isSuppressedForCurrentCompetition) {
+        setCompetitionNotificationSuppressChecked(false);
+        setCompetitionNotificationModal({
+          ...summary,
+          statusBadge,
+        });
+      }
+      await applyConfigPatch({
+        lastSeenMissionCompetitionId: summary.competitionNumber,
+      });
+    } catch (e) {
+      setLatestCompetitionError(String(e?.message || e));
+    } finally {
+      setLatestCompetitionBusy(false);
+    }
+  };
+
+  useEffect(() => {
+    if (startupCompetitionCheckRequestedRef.current) return;
+    if (!bridge?.getLatestCompetition) return;
+    const timer = setTimeout(() => {
+      startupCompetitionCheckRequestedRef.current = true;
+      void checkForNewMissionCompetition();
+    }, 700);
+    return () => clearTimeout(timer);
+  }, [bridge]);
 
   useEffect(() => {
     if (currentPage !== "mish_tish") return;
@@ -848,6 +1019,22 @@ function ControlView() {
   const liveSlots = Array.isArray(status.guiMissionSlots)
     ? status.guiMissionSlots
     : [];
+  const activeMissionNames = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          [
+            ...liveSlots.map((entry) =>
+              String(entry?.missionName || "").trim(),
+            ),
+            ...configuredTargetMissions.map((entry) =>
+              String(entry || "").trim(),
+            ),
+          ].filter(Boolean),
+        ),
+      ),
+    [configuredTargetMissions, liveSlots],
+  );
 
   useEffect(() => {
     const rewards = status.sessionRewardTotals || {};
@@ -918,8 +1105,7 @@ function ControlView() {
       .trim()
       .toLowerCase()
       .replace(/^@+/, "")
-      .replace(/\s+/g, "")
-      .replace(/[^a-z0-9._-]/g, "");
+      .replace(/[^a-z0-9]/g, "");
   const currentCompetitionUserKeys = [
     normalizeCompetitionName(status.currentUserDisplayName),
     normalizeCompetitionName(status.currentUserWalletId),
@@ -4397,6 +4583,184 @@ function ControlView() {
                     onClick={() => void copyText(bridgeLinkModal.url)}
                   >
                     Copy Link
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : null}
+          {competitionNotificationModal ? (
+            <div
+              className="fixed inset-0 z-60 grid place-items-center bg-black/50 p-4"
+              role="dialog"
+              aria-modal="true"
+              onMouseDown={(e) => {
+                if (e.target === e.currentTarget) {
+                  void closeCompetitionNotificationModal({
+                    modal: competitionNotificationModal,
+                    suppressChecked: competitionNotificationSuppressChecked,
+                    setModal: setCompetitionNotificationModal,
+                    updateConfig: applyConfigPatch,
+                  });
+                }
+              }}
+            >
+              <div
+                className="p-4 w-full rounded-xl shadow-2xl shadow-black/95 space-y-4 z-10 border-2 border-[#1D1C27] transition-all duration-250 ease-out"
+                style={{
+                  maxWidth: "680px",
+                  backgroundImage: `url(${backImg})`,
+                  backgroundSize: "cover",
+                  backgroundPosition: "center",
+                }}
+              >
+                <div className="relative pr-12">
+                  <div className="relative flex flex-col items-start">
+                    {competitionNotificationModal.statusBadge ? (
+                      <div
+                        className={`${competitionNotificationModal.statusBadge.className} absolute left-0 top-2 px-2 h-auto text-[11px] text-slate-900 uppercase shrink-0`}
+                      >
+                        {competitionNotificationModal.statusBadge.label}
+                      </div>
+                    ) : null}
+                    <div className="text-2xl font-normal competition__h leading-tight">
+                      Competition
+                      <span>
+                        {competitionNotificationModal.competitionNumber
+                          ? ` ${competitionNotificationModal.competitionNumber}`
+                          : ""}
+                      </span>
+                    </div>
+                    <div className="space-y-1 text-xs text-slate-200 -mt-6 flex justify-between max-w-[270px] w-full">
+                      <div className="text-xs text-slate-300">
+                        {stripYearFromCompetitionDate(
+                          competitionNotificationModal.start || "Unknown",
+                        )}
+                      </div>
+                      to
+                      <div className="text-xs text-slate-300">
+                        {stripYearFromCompetitionDate(
+                          competitionNotificationModal.end || "Unknown",
+                        )}
+                      </div>
+                      {competitionNotificationModal.resultsStatus ? (
+                        <div className="text-xs text-slate-400">
+                          {competitionNotificationModal.resultsStatus}
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    className="btn btn-clear btn-sm absolute right-0 top-0"
+                    onClick={() =>
+                      void closeCompetitionNotificationModal({
+                        modal: competitionNotificationModal,
+                        suppressChecked: competitionNotificationSuppressChecked,
+                        setModal: setCompetitionNotificationModal,
+                        updateConfig: applyConfigPatch,
+                      })
+                    }
+                    title="Close"
+                  >
+                    ✕
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="rounded-md border border-white/10 bg-black/20 p-3 space-y-2">
+                    <div className="text-sm font-semibold mish-gradient !text-xl !inline-flex">
+                      Missions
+                    </div>
+                    {competitionNotificationModal.missions.length ? (
+                      <ul className="space-y-0.5 text-xs text-slate-200">
+                        {competitionNotificationModal.missions
+                          .slice(0, 8)
+                          .map((mission, index) => {
+                            const isActiveMission = activeMissionNames.some(
+                              (activeMissionName) =>
+                                missionNamesMatch(activeMissionName, mission),
+                            );
+                            return (
+                              <li
+                                key={`comp-notify-mission-${index}-${mission}`}
+                                className={`flex items-center justify-between gap-1 rounded-md px-1 py-1 ${
+                                  isActiveMission
+                                    ? "bg-accent/25 border border-accent text-white shadow-sm shadow-accent/20"
+                                    : "text-slate-200"
+                                }`}
+                              >
+                                <span className="truncate">{mission}</span>
+                                {isActiveMission ? (
+                                  <span className="shrink-0 badge badge-accent  px- h-auto text-[9px] text-slate-900 uppercase tracking-wide">
+                                    Active
+                                  </span>
+                                ) : null}
+                              </li>
+                            );
+                          })}
+                      </ul>
+                    ) : (
+                      <div className="text-xs text-slate-400">
+                        No missions found.
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="rounded-md border border-white/10 bg-black/20 p-3 space-y-2">
+                    <div className="text-sm font-semibold mish-gradient !text-xl !inline-flex">
+                      Prizes
+                    </div>
+                    {competitionNotificationModal.prizes.length ? (
+                      <ul className="space-y-1 text-xs text-slate-200">
+                        {competitionNotificationModal.prizes
+                          .slice(0, 8)
+                          .map((prize, index) => (
+                            <li
+                              key={`comp-notify-prize-${index}-${prize}`}
+                              className="truncate"
+                            >
+                              {prize}
+                            </li>
+                          ))}
+                      </ul>
+                    ) : (
+                      <div className="text-xs text-slate-400">
+                        No prizes found.
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between gap-3">
+                  <label className="flex items-center gap-2 text-xs text-slate-200 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4 accent-[var(--color-accent)]"
+                      checked={competitionNotificationSuppressChecked}
+                      onChange={(event) =>
+                        setCompetitionNotificationSuppressChecked(
+                          event.target.checked,
+                        )
+                      }
+                    />
+                    <span>
+                      Do not show this again until the next competition
+                    </span>
+                  </label>
+
+                  <button
+                    type="button"
+                    className="btn btn-gradient btn-sm text-shadow-sm text-shadow-black/40"
+                    onClick={() =>
+                      void closeCompetitionNotificationModal({
+                        modal: competitionNotificationModal,
+                        suppressChecked: competitionNotificationSuppressChecked,
+                        setModal: setCompetitionNotificationModal,
+                        updateConfig: applyConfigPatch,
+                      })
+                    }
+                  >
+                    Close
                   </button>
                 </div>
               </div>

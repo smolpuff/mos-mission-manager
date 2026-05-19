@@ -35,6 +35,8 @@ const SALVAGE_TOP_LEVEL_KEYS = [
   "competitionRangeLockMinRank",
   "competitionRangeLockMaxRank",
   "competitionRangeLockPollSeconds",
+  "lastSeenMissionCompetitionId",
+  "suppressedMissionCompetitionNotificationId",
 ];
 
 function configBackupPath(configPath) {
@@ -369,6 +371,12 @@ function loadConfig(ctx, logWithTimestamp) {
     competitionRangeLockPollSeconds >= 60
       ? Math.floor(competitionRangeLockPollSeconds)
       : 150;
+  ctx.config.lastSeenMissionCompetitionId = String(
+    ctx.config.lastSeenMissionCompetitionId || "",
+  ).trim();
+  ctx.config.suppressedMissionCompetitionNotificationId = String(
+    ctx.config.suppressedMissionCompetitionNotificationId || "",
+  ).trim();
   if (ctx.config.watchLoopEnabled === true) {
     delete ctx.config.watchLoopEnabled;
   }

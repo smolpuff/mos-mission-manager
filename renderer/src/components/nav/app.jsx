@@ -114,8 +114,8 @@ export default function NavMain({
           </svg>
           Settings
         </a>
-        <div className="flex flex-1 w-full items-end justify-center pb-4 text-xs text-gray-400">
-          <div className="flex flex-col items-center justify-center gap-1 opacity-35 hover:opacity-100 transition-all select-none">
+        <div className="flex flex-1 w-full items-end justify-center pb-4 text-[9px] text-gray-400">
+          <div className="flex flex-col items-center justify-center opacity-35 hover:opacity-100 transition-all select-none">
             <img
               src={korea}
               alt="it's a meeeee, koreaaa!"
@@ -125,7 +125,7 @@ export default function NavMain({
             />
             v{APP_VERSION}
             {DESKTOP_DEV_MODE ? (
-              <span className="text-[10px] uppercase text-amber-300">DEV</span>
+              <span className="uppercase text-amber-300">DEV</span>
             ) : null}
           </div>
         </div>
