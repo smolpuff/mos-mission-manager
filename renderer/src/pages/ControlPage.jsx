@@ -342,7 +342,6 @@ function ControlView() {
   const [debugEnabled, setDebugEnabled] = useState(status?.debugMode === true);
   const debug = debugEnabled;
   const [currentPage, setCurrentPage] = useState("missions");
-  const [mountedPages, setMountedPages] = useState({ missions: true });
   const [isCliActive, setIsCliActive] = useState(false);
   const [fundingSource, setFundingSource] = useState("browser");
   const [fundingEnabled, setFundingEnabled] = useState(true);
@@ -412,7 +411,8 @@ function ControlView() {
   const startupCompetitionCheckRequestedRef = useRef(false);
   const isMissionMode = modeSelection === "mission";
   const isNormalMode = !isMissionMode;
-  const debugControlsVisible = bridge?.desktopDevMode === true;
+  const debugControlsVisible =
+    debug === true || bridge?.desktopDevMode === true;
   const competitionRangeLockDisabled = !debug || !isMissionMode;
   const competitionRangeLockInputsDisabled =
     competitionRangeLockDisabled || !competitionRangeLockEnabled;
@@ -1111,6 +1111,7 @@ function ControlView() {
   const isStarting = status.running && !isWatching;
   const [activityLabel, setActivityLabel] = useState(null);
   const [manualCheckBusy, setManualCheckBusy] = useState(false);
+  const manualCheckPendingRef = useRef(false);
   const [copiedLabel, setCopiedLabel] = useState(null);
   const [secretModalOpen, setSecretModalOpen] = useState(false);
   const [secretModalBusy, setSecretModalBusy] = useState(false);
@@ -1191,41 +1192,45 @@ function ControlView() {
   }, [onboardingMissionCatalog]);
   const slots = liveSlots;
 
-  useEffect(() => {
-    setMountedPages((current) =>
-      current[currentPage] ? current : { ...current, [currentPage]: true },
-    );
-  }, [currentPage]);
-
-  const mainStatusLabel = activityLabel
-    ? activityLabel
-    : status.running
-      ? isWatching
-        ? "Watching missions..."
-        : "Starting up..."
-      : "Stopped";
+  const mainStatusLabel = manualCheckBusy
+    ? "Manual check..."
+    : activityLabel
+      ? activityLabel
+      : status.running
+        ? isWatching
+          ? "Watching missions..."
+          : "Starting up..."
+        : "Stopped";
 
   useEffect(() => {
     if (status.running) return;
     setActivityLabel(null);
     setManualCheckBusy(false);
+    manualCheckPendingRef.current = false;
   }, [status.running]);
+
+  useEffect(() => {
+    if (!manualCheckBusy) {
+      setActivityLabel((current) =>
+        current === "Manual check..." ? null : current,
+      );
+      return;
+    }
+    setActivityLabel("Manual check...");
+  }, [manualCheckBusy]);
 
   useEffect(() => {
     if (!lastEvent || typeof lastEvent !== "object") return;
     if (!status.running || status.watchLoopEnabled === false) return;
     const type = String(lastEvent.type || "").trim();
-    if (type === "assigning") {
-      const state = String(lastEvent.state || "").trim();
-      if (state === "start") setManualCheckBusy(true);
-      if (state === "done" || state === "error") setManualCheckBusy(false);
-    }
-    if (type === "claiming") {
-      const state = String(lastEvent.state || "").trim();
-      if (state === "start") setManualCheckBusy(true);
-      if (state === "done" || state === "error") setManualCheckBusy(false);
-    }
-    if (type === "claimed" || type === "assigned") {
+    if (
+      manualCheckPendingRef.current &&
+      (type === "claimed" ||
+        type === "assigned" ||
+        ((type === "assigning" || type === "claiming") &&
+          ["done", "error"].includes(String(lastEvent.state || "").trim())))
+    ) {
+      manualCheckPendingRef.current = false;
       setManualCheckBusy(false);
     }
     let next = null;
@@ -2473,6 +2478,7 @@ function ControlView() {
             manualCheckBusy={manualCheckBusy}
             onManualClaim={() => {
               if (!status.running) return;
+              manualCheckPendingRef.current = true;
               setManualCheckBusy(true);
               bridge?.sendCommand?.("c");
             }}
@@ -3424,45 +3430,27 @@ function ControlView() {
               </div>
             </div>
           ) : null}
-          {mountedPages.mish_tish ? (
-            <div
-              style={{
-                display: currentPage === "mish_tish" ? "block" : "none",
-              }}
-            >
-              <CompetitionPage
-                latestCompetition={latestCompetition}
-                latestCompetitionBusy={latestCompetitionBusy}
-                latestCompetitionError={latestCompetitionError}
-                refreshLatestCompetition={refreshLatestCompetition}
-                isCurrentCompetitionRow={isCurrentCompetitionRow}
-              />
-            </div>
+          {currentPage === "mish_tish" ? (
+            <CompetitionPage
+              latestCompetition={latestCompetition}
+              latestCompetitionBusy={latestCompetitionBusy}
+              latestCompetitionError={latestCompetitionError}
+              refreshLatestCompetition={refreshLatestCompetition}
+              isCurrentCompetitionRow={isCurrentCompetitionRow}
+            />
           ) : null}
-          {mountedPages.stats ? (
-            <div
-              style={{ display: currentPage === "stats" ? "block" : "none" }}
-            >
-              <StatsPage
-                status={status}
-                logs={logs}
-                missionStats={missionStats}
-                sessionStartedAtMs={sessionStartedAtRef.current}
-              />
-            </div>
+          {currentPage === "stats" ? (
+            <StatsPage
+              status={status}
+              logs={logs}
+              missionStats={missionStats}
+              sessionStartedAtMs={sessionStartedAtRef.current}
+            />
           ) : null}
-          {mountedPages.nfts ? (
-            <div style={{ display: currentPage === "nfts" ? "block" : "none" }}>
-              <NftsPage bridge={bridge} signerMode={status.signerMode} />
-            </div>
+          {currentPage === "nfts" ? (
+            <NftsPage bridge={bridge} signerMode={status.signerMode} />
           ) : null}
-          {mountedPages.rentals ? (
-            <div
-              style={{ display: currentPage === "rentals" ? "block" : "none" }}
-            >
-              <RentalsPage bridge={bridge} />
-            </div>
-          ) : null}
+          {currentPage === "rentals" ? <RentalsPage bridge={bridge} /> : null}
           {currentPage !== "missions" ? null : (
             <>
               <div className="space-y-1.5">

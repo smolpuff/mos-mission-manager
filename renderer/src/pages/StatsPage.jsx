@@ -32,6 +32,54 @@ function missionName(value) {
   return String(value || "unknown mission").trim() || "unknown mission";
 }
 
+function missionNameKey(value) {
+  return missionName(value).toLowerCase().replace(/\s+/g, " ");
+}
+
+function looksLikeOpaqueMissionId(value) {
+  const text = String(value || "").trim();
+  if (!text) return false;
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+    text,
+  );
+}
+
+function preferMissionLabel(...values) {
+  let fallback = "";
+  for (const value of values) {
+    const text = String(value || "").trim();
+    if (!text) continue;
+    if (!looksLikeOpaqueMissionId(text) && text !== "unknown mission") {
+      return text;
+    }
+    if (!fallback) fallback = text;
+  }
+  return fallback || "unknown mission";
+}
+
+function buildMissionResolvers(guiMissionSlots = []) {
+  const byId = new Map();
+  const bySlot = new Map();
+  for (const entry of Array.isArray(guiMissionSlots) ? guiMissionSlots : []) {
+    const name = preferMissionLabel(entry?.missionName, entry?.name);
+    if (!name || name === "unknown mission") continue;
+    const ids = [
+      entry?.id,
+      entry?.assignedMissionId,
+      entry?.assigned_mission_id,
+    ]
+      .map((value) => String(value || "").trim())
+      .filter(Boolean);
+    for (const id of ids) {
+      if (!looksLikeOpaqueMissionId(id) && !byId.has(id)) byId.set(id, name);
+      if (looksLikeOpaqueMissionId(id) && !byId.has(id)) byId.set(id, name);
+    }
+    const slot = Number(entry?.slot);
+    if (Number.isFinite(slot) && !bySlot.has(slot)) bySlot.set(slot, name);
+  }
+  return { byId, bySlot };
+}
+
 function parseClaimEvents(logs = []) {
   const events = [];
   for (const entry of Array.isArray(logs) ? logs : []) {
@@ -54,71 +102,115 @@ function parseClaimEvents(logs = []) {
   return events.sort((a, b) => (a.atMs || 0) - (b.atMs || 0));
 }
 
-function buildMissionRows(events = [], missionClaims = {}, history = []) {
+function buildMissionRows(
+  events = [],
+  missionClaims = {},
+  history = [],
+  guiMissionSlots = [],
+) {
   const rows = new Map();
+  const aliasToCanonical = new Map();
+  const { byId, bySlot } = buildMissionResolvers(guiMissionSlots);
+
+  const rememberAlias = (value, canonical) => {
+    const alias = missionNameKey(value);
+    const target = missionName(canonical);
+    if (!alias || alias === "unknown mission") return;
+    if (!target || target === "unknown mission") return;
+    aliasToCanonical.set(alias, target);
+  };
+
+  for (const event of events) {
+    const canonical = preferMissionLabel(event?.mission);
+    rememberAlias(event?.mission, canonical);
+  }
+
+  for (const entry of Array.isArray(history) ? history : []) {
+    const canonical = preferMissionLabel(
+      entry?.mission,
+      byId.get(String(entry?.assignedMissionId || "").trim()),
+      bySlot.get(Number(entry?.slot)),
+    );
+    rememberAlias(entry?.mission, canonical);
+  }
+
+  const resolveMission = (value, meta = {}) => {
+    const raw = missionName(value);
+    const alias = missionNameKey(raw);
+    const canonical = aliasToCanonical.get(alias);
+    if (canonical) return canonical;
+    const assignedMissionId = String(meta?.assignedMissionId || "").trim();
+    if (assignedMissionId) {
+      const resolvedById = byId.get(assignedMissionId);
+      if (resolvedById) return resolvedById;
+    }
+    const slot = Number(meta?.slot);
+    if (Number.isFinite(slot)) {
+      const resolvedBySlot = bySlot.get(slot);
+      if (resolvedBySlot) return resolvedBySlot;
+    }
+    if (looksLikeOpaqueMissionId(raw)) return "unknown mission";
+    return raw;
+  };
+
+  const upsertRow = (value, meta = {}) => {
+    const mission = resolveMission(value, meta);
+    const current = rows.get(mission) || {
+      mission,
+      claims: 0,
+      pbp: 0,
+      tc: 0,
+      cc: 0,
+    };
+    rows.set(mission, current);
+    return current;
+  };
 
   if (missionClaims && typeof missionClaims === "object") {
     for (const [name, count] of Object.entries(missionClaims)) {
       const claims = asNumber(count, 0);
       if (claims <= 0) continue;
-      rows.set(missionName(name), {
-        mission: missionName(name),
-        claims,
-        pbp: 0,
-        tc: 0,
-        cc: 0,
-      });
+      const current = upsertRow(name);
+      current.claims += claims;
     }
   }
 
   if (rows.size === 0 && Array.isArray(history)) {
     for (const entry of history) {
-      const mission = missionName(entry?.mission);
+      const mission = resolveMission(entry?.mission, entry);
       if (!mission || mission === "unknown mission") continue;
-      const current = rows.get(mission) || {
-        mission,
-        claims: 0,
-        pbp: 0,
-        tc: 0,
-        cc: 0,
-      };
+      const current = upsertRow(mission, entry);
       current.claims += 1;
-      rows.set(mission, current);
     }
   }
 
   if (rows.size === 0) {
     for (const event of events) {
-      const current = rows.get(event.mission) || {
-        mission: event.mission,
-        claims: 0,
-        pbp: 0,
-        tc: 0,
-        cc: 0,
-      };
+      const current = upsertRow(event.mission);
       current.claims += 1;
       if (event.token === "PBP") current.pbp += event.amount;
       if (event.token === "TC") current.tc += event.amount;
       if (event.token === "CC") current.cc += event.amount;
-      rows.set(event.mission, current);
     }
   } else {
     for (const event of events) {
-      const current = rows.get(event.mission) || {
-        mission: event.mission,
-        claims: 0,
-        pbp: 0,
-        tc: 0,
-        cc: 0,
-      };
+      const current = upsertRow(event.mission);
       if (event.token === "PBP") current.pbp += event.amount;
       if (event.token === "TC") current.tc += event.amount;
       if (event.token === "CC") current.cc += event.amount;
-      rows.set(mission, current);
     }
   }
 
-  return Array.from(rows.values()).sort((a, b) => b.claims - a.claims);
+  if (rows.size > 1 && rows.has("unknown mission")) {
+    const unknown = rows.get("unknown mission");
+    if (unknown && asNumber(unknown.claims, 0) <= 1) {
+      rows.delete("unknown mission");
+    }
+  }
+
+  return Array.from(rows.values())
+    .filter((row) => row.mission !== "unknown mission" || row.claims > 0)
+    .sort((a, b) => b.claims - a.claims);
 }
 
 function buildClaimBuckets(history = []) {
@@ -297,6 +389,7 @@ export default function StatsPage({
     claimEvents,
     sessionMissionClaims,
     sessionHistory,
+    safeStatus.guiMissionSlots,
   );
   const rankedClaims = rows.reduce(
     (sum, row) => sum + asNumber(row.claims, 0),

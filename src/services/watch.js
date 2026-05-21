@@ -1005,7 +1005,9 @@ function createWatchService(
     let logged = 0;
     for (const entry of claimedTransitions) {
       const d = compactClaimDetails(entry, lookupByAssignedMissionId);
-      const missionText = String(entry?.name || "unknown mission").trim();
+      const missionText = String(
+        d.name || entry?.name || d.missionId || "unknown mission",
+      ).trim();
       const slotText = entry?.slot === null ? "" : ` slot=${entry.slot}`;
       const fromText =
         entry?.fromLevel === null ? "" : ` lvl=${Number(entry.fromLevel || 0)}`;
@@ -1017,9 +1019,9 @@ function createWatchService(
         ctx.guiBridge.sendEvent("stats_claim", {
           source: String(prefix || "").replace(/^\[WATCH\]\s+✅\s+/, ""),
           at: Date.now(),
-          assignedMissionId: entry?.assignedMissionId || entry?.id || null,
+          assignedMissionId: d.missionId || entry?.assignedMissionId || entry?.id || null,
           missionName: missionText,
-          slot: entry?.slot ?? null,
+          slot: d.slot ?? entry?.slot ?? null,
           level: entry?.fromLevel ?? null,
           rewardAmount: d.reward ?? null,
           rewardToken: d.prize ?? null,
@@ -2406,6 +2408,10 @@ function createWatchService(
       return;
 
     ctx.watchStartPending = false;
+    ctx.sessionTotalsEpoch = Math.max(
+      Date.now(),
+      Number(ctx.sessionTotalsEpoch || 0) + 1,
+    );
     resetSessionRewardTotals();
     resetSessionSpendTotals();
     ctx.watcherRunning = true;

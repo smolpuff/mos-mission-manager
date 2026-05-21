@@ -1,12 +1,12 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import useDesktopBridge from "../useDesktopBridge";
 
 function normalizeTotals(raw) {
   const src = raw && typeof raw === "object" ? raw : {};
   return {
-    pbp: typeof src.pbp === "number" ? src.pbp : 0,
-    tc: typeof src.tc === "number" ? src.tc : 0,
-    cc: typeof src.cc === "number" ? src.cc : 0,
+    pbp: Number(src.pbp || 0) || 0,
+    tc: Number(src.tc || 0) || 0,
+    cc: Number(src.cc || 0) || 0,
   };
 }
 
@@ -34,20 +34,15 @@ function totalsFromAnalyticsSpend(analytics) {
   });
 }
 
-function resolveTotals(current, next, analyticsFallback) {
-  const hasExplicit =
-    next &&
-    typeof next === "object" &&
-    ["pbp", "tc", "cc"].some((key) => typeof next[key] === "number");
-  if (hasExplicit) return normalizeTotals(next);
-  const hasAnalytics =
-    analyticsFallback &&
-    typeof analyticsFallback === "object" &&
-    ["pbp", "tc", "cc"].some(
-      (key) => typeof analyticsFallback[key] === "number",
-    );
-  if (hasAnalytics) return normalizeTotals(analyticsFallback);
-  return normalizeTotals(current);
+function mergeTotalsPeak(...sources) {
+  const merged = normalizeTotals();
+  for (const source of sources) {
+    const next = normalizeTotals(source);
+    merged.pbp = Math.max(merged.pbp, next.pbp);
+    merged.tc = Math.max(merged.tc, next.tc);
+    merged.cc = Math.max(merged.cc, next.cc);
+  }
+  return merged;
 }
 
 function normalizeBackendEvent(event) {
@@ -90,6 +85,7 @@ export default function useBackendState() {
     nftCooldownResetEnabled: null,
     nftCooldownResetMaxPbp: null,
     currentMissionResetLevel: null,
+    sessionTotalsEpoch: null,
     sessionRewardTotals: null,
     sessionSpendTotals: null,
     fundingWalletSummary: null,
@@ -109,24 +105,50 @@ export default function useBackendState() {
     tc: 0,
     cc: 0,
   });
+  const rewardTotalsEpochRef = useRef(null);
+  const spendTotalsEpochRef = useRef(null);
+
+  const mergeRewardTotalsForStatus = (current, nextStatus) => {
+    const nextEpoch = nextStatus?.sessionTotalsEpoch ?? null;
+    const didEpochChange =
+      nextEpoch !== null &&
+      nextEpoch !== undefined &&
+      rewardTotalsEpochRef.current !== null &&
+      nextEpoch !== rewardTotalsEpochRef.current;
+    rewardTotalsEpochRef.current =
+      nextEpoch !== undefined ? nextEpoch : rewardTotalsEpochRef.current;
+    const nextTotals = nextStatus?.sessionRewardTotals;
+    const analyticsTotals = totalsFromAnalyticsRewards(nextStatus?.analytics);
+    return didEpochChange
+      ? mergeTotalsPeak(nextTotals, analyticsTotals)
+      : mergeTotalsPeak(current, nextTotals, analyticsTotals);
+  };
+
+  const mergeSpendTotalsForStatus = (current, nextStatus) => {
+    const nextEpoch = nextStatus?.sessionTotalsEpoch ?? null;
+    const didEpochChange =
+      nextEpoch !== null &&
+      nextEpoch !== undefined &&
+      spendTotalsEpochRef.current !== null &&
+      nextEpoch !== spendTotalsEpochRef.current;
+    spendTotalsEpochRef.current =
+      nextEpoch !== undefined ? nextEpoch : spendTotalsEpochRef.current;
+    const nextTotals = nextStatus?.sessionSpendTotals;
+    const analyticsTotals = totalsFromAnalyticsSpend(nextStatus?.analytics);
+    return didEpochChange
+      ? mergeTotalsPeak(nextTotals, analyticsTotals)
+      : mergeTotalsPeak(current, nextTotals, analyticsTotals);
+  };
 
   useEffect(() => {
     let mounted = true;
     bridge.getState().then((state) => {
       if (!mounted) return;
       setPersistentRewardTotals((current) =>
-        resolveTotals(
-          current,
-          state.status?.sessionRewardTotals,
-          totalsFromAnalyticsRewards(state.status?.analytics),
-        ),
+        mergeRewardTotalsForStatus(current, state.status),
       );
       setPersistentSpendTotals((current) =>
-        resolveTotals(
-          current,
-          state.status?.sessionSpendTotals,
-          totalsFromAnalyticsSpend(state.status?.analytics),
-        ),
+        mergeSpendTotalsForStatus(current, state.status),
       );
       setStatus(state.status);
       setLogs(state.logs);
@@ -134,18 +156,10 @@ export default function useBackendState() {
 
     const offStatus = bridge.onBackendStatus((nextStatus) => {
       setPersistentRewardTotals((current) =>
-        resolveTotals(
-          current,
-          nextStatus?.sessionRewardTotals,
-          totalsFromAnalyticsRewards(nextStatus?.analytics),
-        ),
+        mergeRewardTotalsForStatus(current, nextStatus),
       );
       setPersistentSpendTotals((current) =>
-        resolveTotals(
-          current,
-          nextStatus?.sessionSpendTotals,
-          totalsFromAnalyticsSpend(nextStatus?.analytics),
-        ),
+        mergeSpendTotalsForStatus(current, nextStatus),
       );
       setStatus(nextStatus);
     });
@@ -177,18 +191,10 @@ export default function useBackendState() {
     bridge.getState().then(async (state) => {
       if (cancelled) return;
       setPersistentRewardTotals((current) =>
-        resolveTotals(
-          current,
-          state.status?.sessionRewardTotals,
-          totalsFromAnalyticsRewards(state.status?.analytics),
-        ),
+        mergeRewardTotalsForStatus(current, state.status),
       );
       setPersistentSpendTotals((current) =>
-        resolveTotals(
-          current,
-          state.status?.sessionSpendTotals,
-          totalsFromAnalyticsSpend(state.status?.analytics),
-        ),
+        mergeSpendTotalsForStatus(current, state.status),
       );
       setStatus(state.status);
     });

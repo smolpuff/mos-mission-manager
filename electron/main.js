@@ -164,6 +164,7 @@ const backendStatus = {
   nftCooldownResetEnabled: null,
   nftCooldownResetMaxPbp: null,
   currentMissionResetLevel: null,
+  sessionTotalsEpoch: null,
   sessionRewardTotals: null,
   sessionSpendTotals: null,
   fundingWalletSummary: null,
@@ -276,10 +277,14 @@ function normalizeClaimHistory(raw) {
     .map((entry) => {
       const at = Number(entry?.at);
       const claims = Number(entry?.claims);
+      const assignedMissionId = String(entry?.assignedMissionId || "").trim();
+      const slot = Number(entry?.slot);
       return {
         at: Number.isFinite(at) ? at : null,
         claims: Number.isFinite(claims) ? Math.max(0, claims) : 0,
         mission: String(entry?.mission || "").trim(),
+        assignedMissionId: assignedMissionId || null,
+        slot: Number.isFinite(slot) ? slot : null,
       };
     })
     .filter((entry) => entry.at && entry.claims > 0)
@@ -491,6 +496,14 @@ function missionNameKey(value) {
     .trim()
     .toLowerCase()
     .replace(/\s+/g, " ");
+}
+
+function looksLikeOpaqueMissionId(value) {
+  const text = String(value || "").trim();
+  if (!text) return false;
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+    text,
+  );
 }
 
 function hydrateMissionListWithCachedCatalog(missions = []) {
@@ -1178,16 +1191,14 @@ function saveAnalytics(analytics) {
     fs.mkdirSync(path.dirname(target), { recursive: true });
     fs.writeFileSync(target, JSON.stringify(next, null, 2));
     backendStatus.analytics = next;
-    backendStatus.sessionRewardTotals = {
-      pbp: Number(next?.session?.currencyEarned?.pbp || 0) || 0,
-      tc: Number(next?.session?.currencyEarned?.tc || 0) || 0,
-      cc: Number(next?.session?.currencyEarned?.cc || 0) || 0,
-    };
-    backendStatus.sessionSpendTotals = {
-      pbp: Number(next?.session?.totalResetCostPbp || 0) || 0,
-      tc: 0,
-      cc: 0,
-    };
+    backendStatus.sessionRewardTotals = mergeTotalsPeak(
+      backendStatus.sessionRewardTotals,
+      rewardTotalsFromAnalyticsSession(next),
+    );
+    backendStatus.sessionSpendTotals = mergeTotalsPeak(
+      backendStatus.sessionSpendTotals,
+      spendTotalsFromAnalyticsSession(next),
+    );
   } catch {}
 }
 
@@ -1433,26 +1444,30 @@ function spendTotalsFromAnalyticsSession(analytics = {}) {
   };
 }
 
-function totalValueOfTotals(raw = {}) {
-  return (
-    (Number(raw?.pbp || 0) || 0) +
-    (Number(raw?.tc || 0) || 0) +
-    (Number(raw?.cc || 0) || 0)
-  );
+function normalizeTotals(raw = {}) {
+  return {
+    pbp: Number(raw?.pbp || 0) || 0,
+    tc: Number(raw?.tc || 0) || 0,
+    cc: Number(raw?.cc || 0) || 0,
+  };
+}
+
+function mergeTotalsPeak(...sources) {
+  const merged = normalizeTotals();
+  for (const source of sources) {
+    const next = normalizeTotals(source);
+    merged.pbp = Math.max(merged.pbp, next.pbp);
+    merged.tc = Math.max(merged.tc, next.tc);
+    merged.cc = Math.max(merged.cc, next.cc);
+  }
+  return merged;
 }
 
 function applyAnalyticsClaimEvent(payload = {}) {
   const current = normalizeAnalytics(
     backendStatus.analytics || loadAnalytics(),
   );
-  const mission =
-    String(
-      payload?.missionName ||
-        payload?.name ||
-        payload?.mission ||
-        payload?.assignedMissionId ||
-        "unknown mission",
-    ).trim() || "unknown mission";
+  const mission = resolveMissionLabelFromPayload(payload);
   const at = Number(payload?.at || Date.now());
   const reward = rewardFromStatsPayload(payload);
 
@@ -1468,6 +1483,8 @@ function applyAnalyticsClaimEvent(payload = {}) {
       at: Number.isFinite(at) ? at : Date.now(),
       claims: current.lifetime.totalClaims,
       mission,
+      assignedMissionId: String(payload?.assignedMissionId || "").trim() || null,
+      slot: Number.isFinite(Number(payload?.slot)) ? Number(payload.slot) : null,
     },
   ]);
   current.session.claimHistory = normalizeClaimHistory([
@@ -1476,6 +1493,8 @@ function applyAnalyticsClaimEvent(payload = {}) {
       at: Number.isFinite(at) ? at : Date.now(),
       claims: current.session.totalClaims,
       mission,
+      assignedMissionId: String(payload?.assignedMissionId || "").trim() || null,
+      slot: Number.isFinite(Number(payload?.slot)) ? Number(payload.slot) : null,
     },
   ]);
   if (reward.token && reward.amount > 0) {
@@ -2028,6 +2047,52 @@ function missionDisplayName(mission = {}) {
     mission?.label ||
     "Unknown mission"
   );
+}
+
+function resolveMissionLabelFromPayload(payload = {}) {
+  const directName = String(
+    payload?.missionName || payload?.name || payload?.mission || "",
+  ).trim();
+  if (directName && !looksLikeOpaqueMissionId(directName)) {
+    return directName;
+  }
+
+  const assignedMissionId = String(payload?.assignedMissionId || "").trim();
+  const slot = Number(payload?.slot);
+  const guiSlots = Array.isArray(backendStatus.guiMissionSlots)
+    ? backendStatus.guiMissionSlots
+    : [];
+
+  if (assignedMissionId) {
+    const byId =
+      guiSlots.find(
+        (entry) =>
+          String(entry?.id || "").trim() === assignedMissionId ||
+          String(entry?.assignedMissionId || "").trim() === assignedMissionId,
+      ) || null;
+    const byIdName = String(byId?.missionName || byId?.name || "").trim();
+    if (byIdName && !looksLikeOpaqueMissionId(byIdName)) {
+      return byIdName;
+    }
+  }
+
+  if (Number.isFinite(slot) && slot >= 1) {
+    const bySlot =
+      guiSlots.find((entry) => Number(entry?.slot) === Math.floor(slot)) || null;
+    const bySlotName = String(
+      bySlot?.missionName || bySlot?.name || "",
+    ).trim();
+    if (bySlotName && !looksLikeOpaqueMissionId(bySlotName)) {
+      return bySlotName;
+    }
+  }
+
+  const fallbackId = String(payload?.assignedMissionId || "").trim();
+  if (fallbackId && !looksLikeOpaqueMissionId(fallbackId)) {
+    return fallbackId;
+  }
+
+  return "unknown mission";
 }
 
 function missionAssignedNftAccount(mission = {}) {
@@ -2624,6 +2689,7 @@ function startBackend() {
   backendStatus.nftCooldownResetEnabled = null;
   backendStatus.nftCooldownResetMaxPbp = null;
   backendStatus.currentMissionResetLevel = null;
+  backendStatus.sessionTotalsEpoch = null;
   backendStatus.sessionRewardTotals = null;
   backendStatus.sessionSpendTotals = null;
   backendStatus.guiMissionSlots = null;
@@ -3371,6 +3437,13 @@ app.whenReady().then(async () => {
       const signerMode = normalizedDesktopSignerMode(next.signerMode);
       if (signerMode) backendStatus.signerMode = signerMode;
     }
+    const previousSessionTotalsEpoch = backendStatus.sessionTotalsEpoch;
+    if (next.sessionTotalsEpoch !== undefined) {
+      backendStatus.sessionTotalsEpoch = next.sessionTotalsEpoch;
+    }
+    const sessionTotalsEpochChanged =
+      next.sessionTotalsEpoch !== undefined &&
+      next.sessionTotalsEpoch !== previousSessionTotalsEpoch;
     if (next.currentUserWalletSummary !== undefined) {
       backendStatus.currentUserWalletSummary = next.currentUserWalletSummary;
     }
@@ -3382,10 +3455,13 @@ app.whenReady().then(async () => {
         next.sessionRewardTotals && typeof next.sessionRewardTotals === "object"
           ? next.sessionRewardTotals
           : null;
-      backendStatus.sessionRewardTotals =
-        totalValueOfTotals(nextTotals) >= totalValueOfTotals(analyticsTotals)
-          ? next.sessionRewardTotals
-          : analyticsTotals;
+      backendStatus.sessionRewardTotals = sessionTotalsEpochChanged
+        ? mergeTotalsPeak(nextTotals, analyticsTotals)
+        : mergeTotalsPeak(
+            backendStatus.sessionRewardTotals,
+            nextTotals,
+            analyticsTotals,
+          );
     }
     if (next.sessionSpendTotals !== undefined) {
       const analyticsTotals = spendTotalsFromAnalyticsSession(
@@ -3395,10 +3471,13 @@ app.whenReady().then(async () => {
         next.sessionSpendTotals && typeof next.sessionSpendTotals === "object"
           ? next.sessionSpendTotals
           : null;
-      backendStatus.sessionSpendTotals =
-        totalValueOfTotals(nextTotals) >= totalValueOfTotals(analyticsTotals)
-          ? next.sessionSpendTotals
-          : analyticsTotals;
+      backendStatus.sessionSpendTotals = sessionTotalsEpochChanged
+        ? mergeTotalsPeak(nextTotals, analyticsTotals)
+        : mergeTotalsPeak(
+            backendStatus.sessionSpendTotals,
+            nextTotals,
+            analyticsTotals,
+          );
     }
     backendStatus.currentMode = backendStatus.missionModeEnabled
       ? `mission-${backendStatus.currentMissionResetLevel || backendStatus.defaultMissionResetLevel}`

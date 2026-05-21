@@ -72,6 +72,7 @@ function createGuiStateEmitter(ctx) {
       mcpConnection: ctx.mcpConnection,
       watcherRunning: ctx.watcherRunning,
       watchLoopEnabled: ctx.watchLoopEnabled,
+      sessionTotalsEpoch: ctx.sessionTotalsEpoch,
       currentUserDisplayName: ctx.currentUserDisplayName,
       currentUserWalletId: ctx.currentUserWalletId,
       currentUserWalletSummary: ctx.currentUserWalletSummary,

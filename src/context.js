@@ -79,6 +79,7 @@ function createContext() {
       process.argv.includes("--plain-output"),
     watchLoopEnabled: true,
     watcherRunning: false,
+    sessionTotalsEpoch: 0,
     watchStartPending: false,
     authRefreshSignal: 0,
     onAuthRefresh: null,
