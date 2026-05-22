@@ -43,6 +43,8 @@ const DESKTOP_DEVTOOLS_ENABLED = process.env.PBP_DESKTOP_DEVTOOLS === "1";
 
 function isDesktopDevMode() {
   if (process.env.PBP_DESKTOP_DEV_MODE === "1") return true;
+  if (process.env.NODE_ENV === "development") return true;
+  if (!app.isPackaged) return true;
   const lifecycle = String(process.env.npm_lifecycle_event || "").trim();
   return lifecycle === "desktop:dev";
 }

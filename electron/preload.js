@@ -4,6 +4,8 @@ const { contextBridge, ipcRenderer } = require("electron");
 
 function isDesktopDevMode() {
   if (process.env.PBP_DESKTOP_DEV_MODE === "1") return true;
+  if (process.env.NODE_ENV === "development") return true;
+  if (process.env.VITE_DEV_SERVER_URL) return true;
   const lifecycle = String(process.env.npm_lifecycle_event || "").trim();
   return lifecycle === "desktop:dev";
 }
