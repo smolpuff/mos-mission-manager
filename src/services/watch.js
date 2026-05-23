@@ -46,6 +46,18 @@ function createWatchService(
     return ctx.runtimeDefaults?.watchMinCycleSeconds || 30;
   }
 
+  function missionName(mission, fallback = "") {
+    return String(
+      mission?.missionName ||
+        mission?.name ||
+        mission?.mission_name ||
+        mission?.title ||
+        mission?.mission ||
+        mission?.label ||
+        fallback,
+    ).trim();
+  }
+
   function missionPageCooldownMs() {
     const sec = Number(ctx.config?.missionPageOpenCooldownSeconds);
     if (Number.isFinite(sec) && sec > 0) return Math.floor(sec * 1000);
@@ -551,7 +563,8 @@ function createWatchService(
         : null;
     return {
       missionId,
-      name: claim?.name || claim?.missionName || fromLookup?.name || null,
+      name:
+        missionName(claim) || missionName(fromLookup) || fromLookup?.name || null,
       level: claim?.level ?? claim?.current_level ?? fromLookup?.level ?? null,
       slot: claim?.slot ?? fromLookup?.slot ?? null,
       reward:
@@ -717,7 +730,7 @@ function createWatchService(
     for (const m of missions) {
       const id = m?.assignedMissionId || m?.assigned_mission_id;
       if (!id) continue;
-      const name = String(m?.name || m?.missionName || m?.mission_name || id);
+      const name = missionName(m, id);
       const slot = m?.slot ?? null;
       const status = missionStatusValue(m, statsByAssignedMissionId);
       const completed = m?.completed === true;
@@ -817,7 +830,7 @@ function createWatchService(
       const id = m?.assignedMissionId || m?.assigned_mission_id;
       if (!id) continue;
       byAssignedMissionId.set(id, {
-        name: m?.name || m?.missionName || m?.mission_name || null,
+        name: missionName(m) || null,
         slot: m?.slot ?? null,
         level: m?.current_level ?? m?.level ?? null,
         reward:
@@ -864,13 +877,11 @@ function createWatchService(
     for (const m of missions) {
       const rawAssignedMissionId =
         m?.assignedMissionId || m?.assigned_mission_id || "";
-      const missionName = String(
-        m?.name || m?.missionName || m?.mission_name || "unknown mission",
-      );
+      const missionLabel = missionName(m, "unknown mission");
       const slot = m?.slot ?? "na";
       const assignedMissionId =
         String(rawAssignedMissionId || "").trim() ||
-        `slot:${slot}:${missionName}`;
+        `slot:${slot}:${missionLabel}`;
       const completed = missionIsClaimable(m) || m?.completed === true;
       const assignedNftRaw =
         m?.assigned_nft ||
@@ -884,7 +895,7 @@ function createWatchService(
         null;
       byAssignedMissionId.set(assignedMissionId, {
         assignedMissionId,
-        name: missionName,
+        name: missionLabel,
         slot: m?.slot ?? null,
         completed,
         assignedNft: missionHasAssignedNft(m)
@@ -1749,10 +1760,8 @@ function createWatchService(
       .map((m) => ({
         assignedMissionId:
           String(m?.assignedMissionId || m?.assigned_mission_id || "").trim() ||
-          `slot:${m?.slot ?? "na"}:${String(m?.name || m?.missionName || m?.mission_name || "unknown mission")}`,
-        name: String(
-          m?.name || m?.missionName || m?.mission_name || "unknown mission",
-        ),
+          `slot:${m?.slot ?? "na"}:${missionName(m, "unknown mission")}`,
+        name: missionName(m, "unknown mission"),
         level: Number(parseResetLevel(m) || 0),
         slot: m?.slot ?? null,
         assignedNft: missionHasAssignedNft(m) ? "assigned" : null,
@@ -2561,6 +2570,13 @@ function createWatchService(
 
     while (ctx.watchLoopEnabled) {
       try {
+        const preCycleCooldownMs = getMcpCooldownRemainingMs();
+        if (preCycleCooldownMs > 0) {
+          logWithTimestamp(
+            `[WATCH] ⏳ MCP cooldown active. Waiting ${Math.ceil(preCycleCooldownMs / 1000)}s before next cycle.`,
+          );
+          await new Promise((resolve) => setTimeout(resolve, preCycleCooldownMs));
+        }
         const { claimed, summary } = await runWatchCycleExclusive();
         if (ctx.debugMode && claimed > 0) {
           logWithTimestamp(

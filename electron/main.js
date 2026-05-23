@@ -2053,7 +2053,13 @@ function missionDisplayName(mission = {}) {
 
 function resolveMissionLabelFromPayload(payload = {}) {
   const directName = String(
-    payload?.missionName || payload?.name || payload?.mission || "",
+    payload?.missionName ||
+      payload?.name ||
+      payload?.mission_name ||
+      payload?.title ||
+      payload?.mission ||
+      payload?.label ||
+      "",
   ).trim();
   if (directName && !looksLikeOpaqueMissionId(directName)) {
     return directName;
@@ -2072,7 +2078,7 @@ function resolveMissionLabelFromPayload(payload = {}) {
           String(entry?.id || "").trim() === assignedMissionId ||
           String(entry?.assignedMissionId || "").trim() === assignedMissionId,
       ) || null;
-    const byIdName = String(byId?.missionName || byId?.name || "").trim();
+    const byIdName = String(missionDisplayName(byId)).trim();
     if (byIdName && !looksLikeOpaqueMissionId(byIdName)) {
       return byIdName;
     }
@@ -2081,16 +2087,18 @@ function resolveMissionLabelFromPayload(payload = {}) {
   if (Number.isFinite(slot) && slot >= 1) {
     const bySlot =
       guiSlots.find((entry) => Number(entry?.slot) === Math.floor(slot)) || null;
-    const bySlotName = String(
-      bySlot?.missionName || bySlot?.name || "",
-    ).trim();
+    const bySlotName = String(missionDisplayName(bySlot)).trim();
     if (bySlotName && !looksLikeOpaqueMissionId(bySlotName)) {
       return bySlotName;
     }
   }
 
+  if (directName) {
+    return directName;
+  }
+
   const fallbackId = String(payload?.assignedMissionId || "").trim();
-  if (fallbackId && !looksLikeOpaqueMissionId(fallbackId)) {
+  if (fallbackId) {
     return fallbackId;
   }
 
@@ -2714,6 +2722,7 @@ function startBackend() {
     if (message && message.type === "pbp_event") {
       if (message.event === "stats_claim") {
         applyAnalyticsClaimEvent(message.payload || {});
+        triggerCompetitionRangeLockImmediateCheck("post_claim");
       } else if (message.event === "stats_spend") {
         applyAnalyticsSpendEvent(message.payload || {});
       } else if (message.event === "stats_reset") {
@@ -3085,6 +3094,23 @@ function scheduleCompetitionRangeLockTick(delayMs = 0) {
   );
 }
 
+function competitionRangeLockTopRank(lockConfig = {}) {
+  return Math.min(
+    Number(lockConfig?.minRank) || 0,
+    Number(lockConfig?.maxRank) || 0,
+  );
+}
+
+function triggerCompetitionRangeLockImmediateCheck(reason = "manual") {
+  const config = readDesktopConfig();
+  if (!shouldRunCompetitionRangeLock(config)) return;
+  const detail = String(reason || "").trim();
+  if (detail) {
+    pushSystemLog(`[COMP LOCK] Immediate recheck requested (${detail}).`);
+  }
+  scheduleCompetitionRangeLockTick(0);
+}
+
 async function applyCompetitionRangeLockAction(action, detail) {
   const desired = String(action || "").trim();
   if (desired !== "pause" && desired !== "resume") return;
@@ -3126,8 +3152,7 @@ async function runCompetitionRangeLockCycle() {
   }
   competitionRangeLockRunning = true;
   try {
-    const normalizedMinRank = Math.min(lockConfig.minRank, lockConfig.maxRank);
-    const normalizedMaxRank = Math.max(lockConfig.minRank, lockConfig.maxRank);
+    const topRank = competitionRangeLockTopRank(lockConfig);
     const userKeys = [
       normalizeCompetitionRowKey(backendStatus.currentUserDisplayName),
       normalizeCompetitionRowKey(backendStatus.currentUserWalletId),
@@ -3168,16 +3193,12 @@ async function runCompetitionRangeLockCycle() {
     }
 
     const rank = Number(currentRow.rank);
-    const detail = `rank=${rank} target=${normalizedMinRank}-${normalizedMaxRank} player=${String(currentRow.player || "unknown").trim() || "unknown"}`;
-    if (rank < normalizedMinRank) {
-      await applyCompetitionRangeLockAction("pause", `${detail} above range`);
+    const detail = `rank=${rank} threshold<=${topRank} player=${String(currentRow.player || "unknown").trim() || "unknown"}`;
+    if (rank <= topRank) {
+      await applyCompetitionRangeLockAction("pause", `${detail} at/above lock threshold`);
       return;
     }
-    if (rank > normalizedMaxRank) {
-      await applyCompetitionRangeLockAction("resume", `${detail} below range`);
-      return;
-    }
-    await applyCompetitionRangeLockAction("pause", `${detail} in range`);
+    await applyCompetitionRangeLockAction("resume", `${detail} below lock threshold`);
   } catch (error) {
     pushSystemLog(
       `[COMP LOCK] Poll failed: ${String(error?.message || error)}`,
