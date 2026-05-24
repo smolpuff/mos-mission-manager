@@ -1472,10 +1472,14 @@ function ControlView() {
       return;
     }
     if (isWatching) {
-      setActivityLabel((current) => current || "Watching missions...");
+      setActivityLabel((current) =>
+        !current || current === "Stopped" ? "Watching missions..." : current,
+      );
       return;
     }
-    setActivityLabel((current) => current || "Starting up...");
+    setActivityLabel((current) =>
+      !current || current === "Stopped" ? "Starting up..." : current,
+    );
   }, [status.running, isWatching, status.watchLoopEnabled]);
 
   useEffect(() => {

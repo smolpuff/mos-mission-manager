@@ -96,6 +96,7 @@ let startupMissionBootstrapPromise = null;
 let competitionRangeLockTimer = null;
 let competitionRangeLockRunning = false;
 let competitionRangeLockLastSummary = "";
+let competitionRangeLockPauseApplied = false;
 let missionCatalogResultCache = null;
 let missionCatalogResultPromise = null;
 let rentalsPreviewCache = null;
@@ -3137,6 +3138,7 @@ async function applyCompetitionRangeLockAction(action, detail) {
   pushSystemLog(`[COMP LOCK] ${detail}; sending ${command}.`);
   await sendBackendCommand(command);
   competitionRangeLockLastSummary = `${desired}:${detail}`;
+  competitionRangeLockPauseApplied = desired === "pause";
 }
 
 async function runCompetitionRangeLockCycle() {
@@ -3219,6 +3221,17 @@ function syncCompetitionRangeLockScheduler() {
   if (!shouldRunCompetitionRangeLock(config)) {
     clearCompetitionRangeLockTimer();
     competitionRangeLockLastSummary = "";
+    if (competitionRangeLockPauseApplied) {
+      competitionRangeLockPauseApplied = false;
+      void applyCompetitionRangeLockAction(
+        "resume",
+        "finish target disabled; releasing competition lock pause",
+      ).catch((error) => {
+        pushSystemLog(
+          `[COMP LOCK] Failed to resume after disable: ${String(error?.message || error)}`,
+        );
+      });
+    }
     return;
   }
   scheduleCompetitionRangeLockTick(250);

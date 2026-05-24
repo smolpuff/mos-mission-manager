@@ -80,6 +80,24 @@ function createWatchService(
     };
   }
 
+  function compactStructuredSummary(payload) {
+    if (!payload || typeof payload !== "object") return null;
+    return {
+      topLevelKeys: Object.keys(payload).slice(0, 8),
+      success:
+        typeof payload.success === "boolean" ? payload.success : undefined,
+      assignedMissionId: payload.assignedMissionId || null,
+      leaseId: payload.leaseId || payload.rentalLeaseId || null,
+      nftId: payload.nftId || payload.nftAccount || payload.nftMint || null,
+      message:
+        typeof payload.message === "string"
+          ? payload.message
+          : typeof payload.responseMessage === "string"
+            ? payload.responseMessage
+            : null,
+    };
+  }
+
   function browserBridgeUrlFromPrepared(prepared) {
     const sc =
       prepared?.structuredContent && typeof prepared.structuredContent === "object"
@@ -1406,7 +1424,7 @@ function createWatchService(
       name,
       level,
       slot,
-      structuredContent: prepared?.structuredContent || null,
+      structuredContent: compactStructuredSummary(prepared?.structuredContent),
     });
     if (usesBrowserBridgeSigning()) {
       if (!manualBridgeUrl) {
@@ -2104,38 +2122,6 @@ function createWatchService(
       eligible: summary.eligible,
       total: summary.total,
     });
-    trace("watch", "cycle_claim_parse", {
-      traceId,
-      summary,
-      rawClaimCounter,
-      claimed,
-      failedClaims,
-      claimEvents,
-      compactClaims: summary.claims.map((c) => compactClaimDetails(c)),
-    });
-    trace("watch", "cycle_claim_payload", {
-      traceId,
-      payload: summarizeWatchPayload(result),
-    });
-    const payloadClaimedRaw =
-      result?.structuredContent?.claimedCount ??
-      result?.structuredContent?.claim_count ??
-      result?.structuredContent?.claimed ??
-      result?.structuredContent?.totalClaimed ??
-      result?.structuredContent?.claimsProcessed ??
-      result?.structuredContent?.watch?.claimedCount ??
-      result?.structuredContent?.watch?.claim_count ??
-      result?.structuredContent?.watch?.claimed ??
-      result?.structuredContent?.watch?.totalClaimed ??
-      result?.structuredContent?.watch?.claimsProcessed;
-    logDebug("watch", "payload_counters", {
-      payloadClaimedCounter: payloadClaimedRaw ?? "n/a",
-      parsedSuccess: claimed,
-      parsedEvents: claimEvents,
-      rawCounter: rawClaimCounter ?? "n/a",
-      successEvents: summary.claims.filter((c) => c?.success !== false).length,
-      failedEvents: failedClaims,
-    });
     if (liveStateClaimedApplied > 0) {
       const beforeAdjustment = claimed;
       claimed = Math.max(0, claimed - liveStateClaimedApplied);
@@ -2161,7 +2147,7 @@ function createWatchService(
       claimed += Number(fallback?.claimed || 0);
     }
     if (claimed === 0 && opts.fallbackClaims && hasActiveMcpCooldown()) {
-      logDebug("watch", "fallback_claim_skipped_rate_limited", {
+      logDebug("watch", "⏳ fallback_claim_skipped_rate_limited", {
         retryAfterMs: getMcpCooldownRemainingMs(),
       });
     }
@@ -2181,7 +2167,7 @@ function createWatchService(
       claimEvents,
       failedClaims,
       claims: summary.claims.map((c) => compactClaimDetails(c)),
-      raw: result?.structuredContent || result,
+      rawSummary: compactStructuredSummary(result?.structuredContent || result),
     });
     let postCycleMissionResult = null;
     if ((claimed > 0 || summary.claims.length > 0) && !hasActiveMcpCooldown()) {
@@ -2235,13 +2221,8 @@ function createWatchService(
     }
 
     if (hasActiveMcpCooldown()) {
-      logDebug("watch", "cycle_followup_skipped_rate_limited", {
+      logDebug("watch", "⏳ cycle_followup_skipped_rate_limited", {
         retryAfterMs: getMcpCooldownRemainingMs(),
-      });
-      trace("watch", "cycle_post_followup", {
-        traceId,
-        postClaimAssigned: 0,
-        skipped: "rate_limited",
       });
     } else {
       const claimFollowup = await runClaimLifecycle({
@@ -2262,9 +2243,8 @@ function createWatchService(
       postClaimAssigned = claimFollowup.assigned;
       postClaimAssignRan = claimed > 0;
       postCycleMissionResult = claimFollowup.missionResult;
-      trace("watch", "cycle_post_followup", { traceId, postClaimAssigned });
       if (hasActiveMcpCooldown()) {
-        logDebug("watch", "cycle_end_checks_skipped_rate_limited", {
+        logDebug("watch", "⏳ cycle_end_checks_skipped_rate_limited", {
           retryAfterMs: getMcpCooldownRemainingMs(),
         });
       } else {
@@ -2297,7 +2277,7 @@ function createWatchService(
             logWithTimestamp(
               `[ASSIGN] ❌ cycle-end assign error: ${error.message}`,
             );
-            logDebug("watch", "cycle_end_assign_error", {
+            logDebug("watch", "❌ cycle_end_assign_error", {
               error: error.message,
               stack: error.stack,
             });
@@ -2317,14 +2297,6 @@ function createWatchService(
       total: summary.total,
       windowEnded: summary.windowEnded,
       elapsedMs: summary.elapsedMs,
-    });
-    trace("watch", "cycle_complete", {
-      traceId,
-      claimed,
-      assigned: postClaimAssigned,
-      polls: summary.polls,
-      eligible: summary.eligible,
-      total: summary.total,
     });
     return { claimed, opts, summary };
   }
@@ -2600,7 +2572,7 @@ function createWatchService(
           /request aborted|aborterror|aborted/i.test(msg) ||
           error?.name === "AbortError";
         if (!ctx.watchLoopEnabled || isAbort) {
-          logDebug("watch", "cycle_aborted", { message: msg });
+          logDebug("watch", "⏹️ cycle_aborted", { message: msg });
           break;
         }
         const isAuthError =
@@ -2632,7 +2604,7 @@ function createWatchService(
             logWithTimestamp(
               `[AUTH] ❌ Re-authentication error: ${reAuthError.message}`,
             );
-            logDebug("watch", "reauth_failed", {
+            logDebug("watch", "❌ reauth_failed", {
               error: reAuthError.message,
               stack: reAuthError.stack,
             });
@@ -2666,7 +2638,7 @@ function createWatchService(
         logWithTimestamp(
           `[WATCH] ❌ Cycle failed: ${displayMessage}. Retrying in ${Math.ceil(retryDelayMs / 1000)}s.`,
         );
-        logDebug("watch", "cycle_error", {
+        logDebug("watch", "❌ cycle_error", {
           error: error.message,
           stack: error.stack,
           retryAfterSeconds:

@@ -193,6 +193,122 @@ function createChecksService(ctx, logger, mcp, services = {}) {
     return /rate limited|retry in \d+s|HTTP 429/i.test(message);
   }
 
+  function compactMissionSelection(entry) {
+    if (!entry || typeof entry !== "object") return null;
+    return {
+      name: entry.name || null,
+      assignedMissionId: entry.assignedMissionId || null,
+      catalogMissionId: entry.catalogMissionId || null,
+      slot: Number.isFinite(Number(entry.slot)) ? Number(entry.slot) : null,
+      level: Number.isFinite(Number(entry.level)) ? Number(entry.level) : null,
+      hasAssignedNft: entry.hasAssignedNft === true,
+      claimable: entry.claimable === true,
+      resetBlocked: entry.resetBlocked === true,
+    };
+  }
+
+  function compactNftSelection(nft) {
+    if (!nft || typeof nft !== "object") return null;
+    return {
+      account:
+        nft.account ||
+        nft.nftAccount ||
+        nft.id ||
+        nft.mint ||
+        nft.address ||
+        null,
+      name:
+        nft.name ||
+        nft?.DASMetadata?.name ||
+        nft?.offChainMetadata?.metadata?.name ||
+        null,
+      level: Number.isFinite(Number(nft.level || nft?.stats?.level))
+        ? Number(nft.level || nft?.stats?.level)
+        : null,
+      onCooldown:
+        nft.onCooldown === true ||
+        Number(nft.cooldownSeconds || nft?.cooldown?.cooldown || 0) > 0,
+      cooldownSeconds: Number.isFinite(
+        Number(nft.cooldownSeconds || nft?.cooldown?.cooldown),
+      )
+        ? Number(nft.cooldownSeconds || nft?.cooldown?.cooldown)
+        : null,
+      rentalListingId: nft.rentalListingId || null,
+      rentalLeaseId: nft.rentalLeaseId || null,
+      rentalStatus: nft.rentalStatus || null,
+    };
+  }
+
+  function compactAssignResultSummary(result) {
+    const payload = result?.structuredContent || result || {};
+    const missions = payload?.missions?.missions;
+    return {
+      success: toolCallSucceeded(result),
+      assignedMissionId: payload.assignedMissionId || null,
+      nftAccount: payload.nftAccount || null,
+      missionCount: Array.isArray(missions) ? missions.length : null,
+      availableSlots: payload?.missions?.slotUnlockSummary?.availableSlots ?? null,
+      topLevelKeys:
+        payload && typeof payload === "object"
+          ? Object.keys(payload).slice(0, 8)
+          : [],
+    };
+  }
+
+  function compactStructuredSummary(payload) {
+    if (!payload || typeof payload !== "object") return null;
+    return {
+      topLevelKeys: Object.keys(payload).slice(0, 8),
+      success:
+        typeof payload.success === "boolean" ? payload.success : undefined,
+      assignedMissionId: payload.assignedMissionId || null,
+      nftId: payload.nftId || payload.nftAccount || payload.nftMint || null,
+      leaseId: payload.leaseId || payload.rentalLeaseId || null,
+      cost:
+        Number.isFinite(Number(payload.resetCost ?? payload.unlockCost ?? payload.cost))
+          ? Number(payload.resetCost ?? payload.unlockCost ?? payload.cost)
+          : null,
+      message:
+        typeof payload.message === "string"
+          ? payload.message
+          : typeof payload.responseMessage === "string"
+            ? payload.responseMessage
+            : null,
+    };
+  }
+
+  function compactSlotUnlockSummary(summary) {
+    if (!summary || typeof summary !== "object") return null;
+    return {
+      availableSlots:
+        Number.isFinite(Number(summary.availableSlots))
+          ? Number(summary.availableSlots)
+          : null,
+      totalMissionSlots:
+        Number.isFinite(Number(summary.totalMissionSlots))
+          ? Number(summary.totalMissionSlots)
+          : null,
+      remainingUnlockableSlots:
+        Number.isFinite(Number(summary.remainingUnlockableSlots))
+          ? Number(summary.remainingUnlockableSlots)
+          : null,
+      canUnlockMore: summary.canUnlockMore === true,
+      nextUnlockSlot:
+        Number.isFinite(Number(summary.nextUnlockSlot))
+          ? Number(summary.nextUnlockSlot)
+          : null,
+    };
+  }
+
+  function compactMissionStateList(entries) {
+    if (!Array.isArray(entries)) return [];
+    return entries.map((entry) => ({
+      name: entry?.name || null,
+      slot: Number.isFinite(Number(entry?.slot)) ? Number(entry.slot) : null,
+      level: Number.isFinite(Number(entry?.level)) ? Number(entry.level) : null,
+    }));
+  }
+
   async function getRentableNftsSerialized(args = {}, meta = {}) {
     const waitForPrior = rentableNftsCallChain.catch(() => {});
     let release;
@@ -1013,12 +1129,6 @@ function createChecksService(ctx, logger, mcp, services = {}) {
         if (seen.has(key)) return false;
         seen.add(key);
         return true;
-      })
-      .sort((a, b) => {
-        const aAvailable = nftIsAvailable(a.nft) ? 0 : 1;
-        const bAvailable = nftIsAvailable(b.nft) ? 0 : 1;
-        if (aAvailable !== bAvailable) return aAvailable - bAvailable;
-        return nftCooldownSeconds(a.nft) - nftCooldownSeconds(b.nft);
       });
     const safeLimit = Number(limit);
     return Number.isFinite(safeLimit) && safeLimit > 0
@@ -1128,7 +1238,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
               ? "watch stopped"
               : reason;
     logWithTimestamp(`[RENTAL] ⏹️ Fast refresh stopped (${reasonLabel}).`);
-    logDebug("assign", "rental_fast_refresh_stopped", { reason });
+      logDebug("assign", "⏹️ rental_fast_refresh_stopped", { reason });
   }
 
   function requestRentalFastRefresh({
@@ -1138,7 +1248,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
     rentalFastRefreshRequested = true;
     rentalFastRefreshRequestMeta = { reason, missionName };
     if (ctx.autoAssignRunning) {
-      logDebug("assign", "rental_fast_refresh_requested_pending_assign", {
+      logDebug("assign", "⏳ rental_fast_refresh_requested_pending_assign", {
         reason,
         missionName,
       });
@@ -1185,7 +1295,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
     logWithTimestamp(
       `[RENTAL] ⏱️ Fast refresh armed: checking rentals every ${tickMs}ms.`,
     );
-    logDebug("assign", "rental_fast_refresh_started", {
+    logDebug("assign", "🚀 rental_fast_refresh_started", {
       reason,
       missionName,
       tickMs,
@@ -1194,7 +1304,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
     const runRentalFastRefreshTick = async () => {
       if (rentalFastRefreshRunning) return;
       if (ctx.autoAssignRunning) {
-        logDebug("assign", "rental_fast_refresh_skipped_assign_in_progress", {
+        logDebug("assign", "⏸️ rental_fast_refresh_skipped_assign_in_progress", {
           reason,
           missionName,
         });
@@ -1202,7 +1312,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
       }
       if (hasActiveMcpCooldown()) {
         const retryAfterMs = getMcpCooldownRemainingMs();
-        logDebug("assign", "rental_fast_refresh_skipped_rate_limited", {
+        logDebug("assign", "⏳ rental_fast_refresh_skipped_rate_limited", {
           retryAfterMs,
           reason,
           missionName,
@@ -1271,7 +1381,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
           }
         }
       } catch (error) {
-        logDebug("assign", "rental_fast_refresh_failed", {
+        logDebug("assign", "❌ rental_fast_refresh_failed", {
           error: error.message,
           stack: error.stack,
         });
@@ -1760,7 +1870,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
           nftName,
           source,
           maxPbp: maxCost,
-          prepared: prepared?.structuredContent || prepared,
+          prepared: compactStructuredSummary(prepared?.structuredContent || prepared),
         });
         return {
           ok: false,
@@ -1872,7 +1982,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
       logWithTimestamp(
         `[RESET] ❌ Cooldown reset failed for ${missionName} nft=${nftName}: ${failureMessage}`,
       );
-      logDebug("assign", "cooldown_reset_failed", {
+      logDebug("assign", "❌ cooldown_reset_failed", {
         reason,
         missionName,
         missionId,
@@ -1954,8 +2064,8 @@ function createChecksService(ctx, logger, mcp, services = {}) {
       logDebug("assign", "cooldown_reset_browser_url_missing", {
         nftId: resolvedNftId,
         signerMode: ctx.signerMode,
-        structuredContent: prepared?.structuredContent || null,
-        content: prepared?.content || null,
+        structuredContent: compactStructuredSummary(prepared?.structuredContent),
+        contentCount: Array.isArray(prepared?.content) ? prepared.content.length : 0,
       });
       return {
         ok: true,
@@ -2146,8 +2256,8 @@ function createChecksService(ctx, logger, mcp, services = {}) {
             reason,
             targetSlotNumber,
             signerMode: ctx.signerMode,
-            structuredContent: prepared?.structuredContent || null,
-            content: prepared?.content || null,
+            structuredContent: compactStructuredSummary(prepared?.structuredContent),
+            contentCount: Array.isArray(prepared?.content) ? prepared.content.length : 0,
           });
           return {
             ok: false,
@@ -2223,7 +2333,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
       logWithTimestamp(
         `[UNLOCK] ❌ Mission slot unlock failed for slot ${targetSlotNumber}: ${error.message}`,
       );
-      logDebug("assign", "slot_unlock_failed", {
+      logDebug("assign", "❌ slot_unlock_failed", {
         reason,
         targetSlotNumber,
         nextUnlockSlot,
@@ -2446,8 +2556,8 @@ function createChecksService(ctx, logger, mcp, services = {}) {
             fromMissionId: currentCatalogMissionId || null,
             toMissionId: chosenMissionId,
             signerMode: ctx.signerMode,
-            structuredContent: prepared?.structuredContent || null,
-            content: prepared?.content || null,
+            structuredContent: compactStructuredSummary(prepared?.structuredContent),
+            contentCount: Array.isArray(prepared?.content) ? prepared.content.length : 0,
           });
           return {
             ok: false,
@@ -2704,14 +2814,13 @@ function createChecksService(ctx, logger, mcp, services = {}) {
     logDebug("assign", "sync_wait_snapshot", {
       reason,
       attempt: 0,
-      selected: summarizeSelectedMissionState(missions, resolved),
-      resetBlocked,
-      lockedSlotBlocked,
-      slotUnlockSummary,
+      selectedCount: summarizeSelectedMissionState(missions, resolved).length,
+      resetBlockedCount: resetBlocked.length,
+      lockedSlotBlockedCount: lockedSlotBlocked.length,
+      availableSlots:
+        Number(extractSlotUnlockSummary(result)?.availableSlots || 0) || 0,
       candidates: candidates.map((m) => ({
         name: missionName(m),
-        assignedMissionId: assignedMissionId(m),
-        catalogMissionId: catalogMissionId(m),
         slot: m?.slot ?? null,
         level: missionLevel(m),
       })),
@@ -2928,7 +3037,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
       usePrefetchedRentalOnly,
     });
     if (hasActiveMcpCooldown()) {
-      logDebug("assign", "check_skipped_rate_limited", {
+      logDebug("assign", "⏳ check_skipped_rate_limited", {
         reason,
         retryAfterMs: getMcpCooldownRemainingMs(),
       });
@@ -2958,24 +3067,13 @@ function createChecksService(ctx, logger, mcp, services = {}) {
         missions,
         candidates,
       } = await loadAssignableCandidates(reason, resolved, missionsResult);
-      logDebug("assign", "candidates_built", {
-        reason,
-        candidates: candidates.map((m) => ({
-          name: missionName(m),
-          assignedMissionId: assignedMissionId(m),
-          catalogMissionId: catalogMissionId(m),
-          slot: m?.slot ?? null,
-        })),
-      });
-      logDebug("assign", "check_result", {
-        reason,
-        candidates: candidates.length,
-      });
 
       if (candidates.length === 0) {
         logDebug("assign", "slot_unlock_skipped_auto", {
           reason,
-          summary: extractSlotUnlockSummary(currentMissionResult) || null,
+          summary: compactSlotUnlockSummary(
+            extractSlotUnlockSummary(currentMissionResult),
+          ),
         });
       }
 
@@ -2991,11 +3089,9 @@ function createChecksService(ctx, logger, mcp, services = {}) {
         }
         logDebug("assign", "no_candidates", {
           reason,
-          targetCount: resolved.targetIds.size || resolved.targetNames.size,
           configuredTargets: resolved.configured,
-          selectedMissionState: summarizeSelectedMissionState(
-            missions,
-            resolved,
+          foundTargets: compactMissionStateList(
+            summarizeSelectedMissionState(missions, resolved),
           ),
         });
         if (assigningStarted && ctx.guiBridge?.sendEvent) {
@@ -3050,7 +3146,16 @@ function createChecksService(ctx, logger, mcp, services = {}) {
             reason,
             name,
             slot: mission?.slot ?? null,
-            raw: mission,
+            raw: compactMissionSelection({
+              name,
+              assignedMissionId: assignedMissionId(mission),
+              catalogMissionId: catalogMissionId(mission),
+              slot: mission?.slot ?? null,
+              level: missionLevel(mission),
+              hasAssignedNft: missionHasAssignedNft(mission),
+              claimable: missionIsClaimable(mission),
+              resetBlocked: missionBlockedByResetThreshold(mission),
+            }),
           });
           logDebug("assign", "missing_mission_id", { name });
           continue;
@@ -3282,14 +3387,14 @@ function createChecksService(ctx, logger, mcp, services = {}) {
             } catch (error) {
               if (isRateLimitError(error)) {
                 abortedForRateLimit = true;
-                logDebug("assign", "rental_candidates_rate_limited", {
+                logDebug("assign", "⏳ rental_candidates_rate_limited", {
                   reason,
                   missionName: name,
                   missionId: id,
                   retryAfterMs: getMcpCooldownRemainingMs(),
                 });
               }
-              logDebug("assign", "rental_candidates_failed", {
+              logDebug("assign", "❌ rental_candidates_failed", {
                 reason,
                 missionName: name,
                 missionId: id,
@@ -3662,7 +3767,12 @@ function createChecksService(ctx, logger, mcp, services = {}) {
                 listingId: option.listingId,
                 leaseId: leaseId || null,
                 nftAccount: account,
-                result: leaseResult?.structuredContent || leaseResult,
+                result: {
+                  success: toolCallSucceeded(leaseResult),
+                  leaseId: leaseId || null,
+                  listingId: option.listingId || null,
+                  nftAccount: account || null,
+                },
               });
               option.leaseId = leaseId || null;
             }
@@ -3705,7 +3815,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
               maxAttempts: assignmentOptions.length,
               success: toolCallSucceeded(assignResult),
               selectedFrom: option.source,
-              result: assignResult?.structuredContent || assignResult,
+              result: compactAssignResultSummary(assignResult),
             });
             if (!toolCallSucceeded(assignResult)) {
               const message = assignFailureMessage(assignResult);
@@ -3798,7 +3908,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
             lastError = error;
             if (isRateLimitError(error)) {
               abortedForRateLimit = true;
-              logDebug("assign", "assign_rate_limited", {
+              logDebug("assign", "⏳ assign_rate_limited", {
                 missionName: name,
                 missionId: id,
                 attempt: index + 1,
@@ -3819,7 +3929,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
                 : option.source === "rental" || option.source === "owned_cooldown"
                   ? hasNext
                   : retryable && hasNext;
-            logDebug("assign", "assign_failed", {
+            logDebug("assign", "❌ assign_failed", {
               missionName: name,
               missionId: id,
               nftAccount: account,
@@ -3828,7 +3938,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
               error: error.message,
               retryable,
               willRetry: shouldTryNext,
-              selectedNft: nft || null,
+              selectedNft: compactNftSelection(nft),
               selectedFrom: option.source,
             });
             if (option.source === "rental") {
@@ -3892,7 +4002,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
           `[ASSIGN] ℹ️ done: reason=${reason} attempted=${candidates.length} assigned=0`,
         );
       }
-      logDebug("assign", "auto_assign_complete", {
+      logDebug("assign", "✅ auto_assign_complete", {
         reason,
         attempted: candidates.length,
         assigned,
@@ -3918,7 +4028,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
       };
     } catch (error) {
       logWithTimestamp(`[ASSIGN] ❌ Assign check failed: ${error.message}`);
-      logDebug("assign", "auto_assign_failed", {
+      logDebug("assign", "❌ auto_assign_failed", {
         reason,
         error: error.message,
         stack: error.stack,
