@@ -399,6 +399,8 @@ function ControlView() {
   const [missionPickerPrepared, setMissionPickerPrepared] = useState(null);
   const [bridgeLinkModal, setBridgeLinkModal] = useState(null);
   const [lowBalanceModal, setLowBalanceModal] = useState(null);
+  const [throttleModal, setThrottleModal] = useState(null);
+  const [throttleModalCountdown, setThrottleModalCountdown] = useState(5);
   const [statsHistory, setStatsHistory] = useState([]);
   const sessionStartedAtRef = useRef(Date.now());
   const [lowBalanceThresholds, setLowBalanceThresholds] = useState({
@@ -409,6 +411,7 @@ function ControlView() {
   const bootstrapWalletSummaryRequestedRef = useRef(false);
   const startupUpdateCheckRequestedRef = useRef(false);
   const startupCompetitionCheckRequestedRef = useRef(false);
+  const lastThrottleModalKeyRef = useRef(null);
   const isMissionMode = modeSelection === "mission";
   const isNormalMode = !isMissionMode;
   const debugControlsVisible =
@@ -1494,6 +1497,47 @@ function ControlView() {
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [onboardingOpen]);
+
+  useEffect(() => {
+    if (lastEvent?.type !== "throttle_notice") return;
+    const waitSeconds = Number(lastEvent.waitSeconds || 0) || null;
+    const retryAt = Number(lastEvent.retryAt || 0) || null;
+    const modalKey = [
+      String(lastEvent.source || "unknown"),
+      String(lastEvent.trigger || "unknown"),
+      String(retryAt || ""),
+      String(waitSeconds || ""),
+    ].join(":");
+    if (lastThrottleModalKeyRef.current === modalKey) return;
+    lastThrottleModalKeyRef.current = modalKey;
+    setThrottleModal({
+      source: String(lastEvent.source || "Unknown").trim(),
+      trigger: String(lastEvent.trigger || "Unknown action").trim(),
+      message: String(lastEvent.message || "The app was rate limited.").trim(),
+      waitSeconds,
+      retryAt,
+      detail: String(lastEvent.detail || "").trim() || null,
+      at: Number(lastEvent.at || Date.now()) || Date.now(),
+    });
+  }, [lastEvent]);
+
+  useEffect(() => {
+    if (!throttleModal) {
+      setThrottleModalCountdown(5);
+      return undefined;
+    }
+    setThrottleModalCountdown(5);
+    const closeTimer = setTimeout(() => {
+      setThrottleModal(null);
+    }, 5000);
+    const tickTimer = setInterval(() => {
+      setThrottleModalCountdown((current) => Math.max(0, current - 1));
+    }, 1000);
+    return () => {
+      clearTimeout(closeTimer);
+      clearInterval(tickTimer);
+    };
+  }, [throttleModal]);
 
   useEffect(() => {
     if (!onboardingOpen) {
@@ -5109,6 +5153,76 @@ function ControlView() {
                     type="button"
                     className="btn btn-gradient btn-sm"
                     onClick={() => setLowBalanceModal(null)}
+                  >
+                    OK
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : null}
+          {throttleModal ? (
+            <div
+              className="fixed inset-0 z-60 grid place-items-center bg-black/50 p-4"
+              role="dialog"
+              aria-modal="true"
+              onMouseDown={(e) => {
+                if (e.target === e.currentTarget) setThrottleModal(null);
+              }}
+            >
+              <div
+                className="p-4 w-full max-w-xl rounded-xl shadow-2xl shadow-black/95 space-y-4 z-10 border-2 border-[#1D1C27] transition-all duration-250 ease-out"
+                style={{
+                  backgroundImage: `url(${backImg})`,
+                  backgroundSize: "cover",
+                  backgroundPosition: "center",
+                }}
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <div className="text-lg font-semibold text-warning">
+                    Rate Limited
+                  </div>
+                  <button
+                    type="button"
+                    className="btn btn-clear btn-sm"
+                    onClick={() => setThrottleModal(null)}
+                    title="Close"
+                  >
+                    ✕
+                  </button>
+                </div>
+                <div className="text-sm text-slate-200">
+                  The app hit a temporary request limit and will retry after the
+                  cooldown.
+                </div>
+                <div className="rounded-md border border-warning/40 bg-warning/10 p-3 text-sm text-slate-100 space-y-1">
+                  <div>{throttleModal.message}</div>
+                  <div className="text-xs text-slate-200/80">
+                    Source: {throttleModal.source || "Unknown"}
+                  </div>
+                  <div className="text-xs text-slate-200/80">
+                    Triggered by: {throttleModal.trigger || "Unknown action"}
+                  </div>
+                  <div className="text-xs text-slate-200/80">
+                    Wait:{" "}
+                    {Number.isFinite(Number(throttleModal.waitSeconds)) &&
+                    Number(throttleModal.waitSeconds) > 0
+                      ? `${Math.ceil(Number(throttleModal.waitSeconds))}s`
+                      : "Unknown"}
+                  </div>
+                </div>
+                {throttleModal.detail ? (
+                  <div className="rounded-md border border-white/10 bg-black/20 p-3 text-xs text-slate-200 whitespace-pre-wrap break-words">
+                    {throttleModal.detail}
+                  </div>
+                ) : null}
+                <div className="flex items-center justify-end gap-3">
+                  <div className="text-xs text-slate-300">
+                    Closing in {Math.max(0, throttleModalCountdown)}s
+                  </div>
+                  <button
+                    type="button"
+                    className="btn btn-gradient btn-sm"
+                    onClick={() => setThrottleModal(null)}
                   >
                     OK
                   </button>

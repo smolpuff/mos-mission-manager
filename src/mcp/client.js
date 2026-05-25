@@ -188,6 +188,17 @@ function createMcpClient(ctx, logger) {
     return error;
   }
 
+  function emitThrottleNotice(payload = {}) {
+    if (!ctx.guiBridge || typeof ctx.guiBridge.sendEvent !== "function") return;
+    try {
+      ctx.guiBridge.sendEvent("throttle_notice", {
+        source: "mcp",
+        at: Date.now(),
+        ...payload,
+      });
+    } catch {}
+  }
+
   async function tryRefresh(reason = "proactive") {
     const record = tokenRecord();
     if (!record?.refresh_token) return false;
@@ -459,6 +470,13 @@ function createMcpClient(ctx, logger) {
             retryAfterSeconds: error.retryAfterSeconds,
             retryAt: error.retryAt,
           });
+          emitThrottleNotice({
+            trigger: error.toolName || toolName,
+            message: error.message,
+            waitSeconds: Number(error.retryAfterSeconds || 0) || null,
+            retryAt: Number(error.retryAt || 0) || null,
+            detail: `Triggered by: ${String(error.reason || "pre_call")}`,
+          });
         } else {
           logWithTimestamp(
             `[MCP] ⏳ ${toolName} rate limited. Retry after ${error.retryAfterSeconds}s.`,
@@ -467,6 +485,16 @@ function createMcpClient(ctx, logger) {
             toolName,
             retryAfterSeconds: error.retryAfterSeconds,
             retryAt: error.retryAt,
+          });
+          emitThrottleNotice({
+            trigger: toolName,
+            message: error.message,
+            waitSeconds: Number(error.retryAfterSeconds || 0) || null,
+            retryAt: Number(error.retryAt || 0) || null,
+            detail:
+              error?.bodyError && typeof error.bodyError === "object"
+                ? JSON.stringify(error.bodyError)
+                : null,
           });
         }
         throw error;
