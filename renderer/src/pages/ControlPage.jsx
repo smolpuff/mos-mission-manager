@@ -929,7 +929,8 @@ function ControlView() {
       const n = Number(value);
       if (!Number.isFinite(n)) return "0";
       return n.toLocaleString(undefined, {
-        maximumFractionDigits: 2,
+        minimumFractionDigits: 4,
+        maximumFractionDigits: 4,
       });
     };
     return [
