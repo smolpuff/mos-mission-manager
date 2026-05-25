@@ -545,7 +545,7 @@ export default function StatsPage({ status }) {
               {formatNumber(netPbp)} PBP
             </div>
           </div>
-          <div className=" grid min-w-0 grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(112px,0.9fr)] gap-x-5 gap-y-1.5">
+          <div className=" grid min-w-0 grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(112px,0.9fr)] gap-x-5 gap-y-1.5 mt-3">
             <DetailRow
               icon={<img src={pbpIcon} className={tokenIconClass} alt="" />}
               label="PBP earned"

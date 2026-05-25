@@ -896,7 +896,7 @@ button.btn.btn-gradient {
   font-size: 3rem;
   background-clip: text;
   background-image: linear-gradient(180deg, #FCC46D 0%, #FFD876 43%, #fbe6e7 50%, #f388b1 70%);
-  text-shadow: 0 1rem 1rem rgba(0, 0, 0, 0.2);
+  text-shadow: 0 1rem 1rem rgba(0, 0, 0, 0.26);
 
   span {
     font-size: 5rem;

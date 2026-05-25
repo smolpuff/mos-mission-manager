@@ -28,7 +28,7 @@
   "build": {
     "appId": "dephlect.pbp-missions.desktop",
     "productName": "missions-v3-mcp",
-    "icon": "icon",
+    "icon": "electron/icons/icon.png",
     "toolsets": {
       "winCodeSign": "1.1.0"
     },
@@ -46,7 +46,7 @@
       "package.json"
     ],
     "mac": {
-      "icon": "icon.icns",
+      "icon": "electron/icons/icon.icns",
       "category": "public.app-category.utilities",
       "target": [
         "dir",
@@ -54,7 +54,7 @@
       ]
     },
     "win": {
-      "icon": "icon.ico",
+      "icon": "electron/icons/icon.ico",
       "signAndEditExecutable": false,
       "target": [
         {
@@ -66,7 +66,7 @@
       ]
     },
     "linux": {
-      "icon": "icon.png",
+      "icon": "electron/icons/icon.png",
       "target": [
         "AppImage"
       ],

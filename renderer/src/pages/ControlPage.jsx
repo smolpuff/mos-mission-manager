@@ -925,12 +925,13 @@ function ControlView() {
     const effectiveSpendTotals = applyMainWalletSpend
       ? spendTotals
       : { pbp: 0, cc: 0, tc: 0 };
-    const formatWalletAmount = (value) => {
+    const formatWalletAmount = (value, options = {}) => {
       const n = Number(value);
       if (!Number.isFinite(n)) return "0";
+      const { minimumFractionDigits = 4, maximumFractionDigits = 4 } = options;
       return n.toLocaleString(undefined, {
-        minimumFractionDigits: 4,
-        maximumFractionDigits: 4,
+        minimumFractionDigits,
+        maximumFractionDigits,
       });
     };
     return [
@@ -981,10 +982,10 @@ function ControlView() {
     ].map((tile) => ({
       ...tile,
       balanceNumber: parseDisplayNumber(tile.balance),
-      balanceLabel:
-        typeof tile.balance === "string"
-          ? tile.balance
-          : formatWalletAmount(tile.balance),
+      balanceLabel: formatWalletAmount(parseDisplayNumber(tile.balance), {
+        minimumFractionDigits: tile.key === "sol" ? 4 : 0,
+        maximumFractionDigits: tile.key === "sol" ? 4 : 0,
+      }),
       earnedNumber: Math.abs(parseDisplayNumber(tile.earned)),
       earnedLabel: formatWalletAmount(Math.abs(tile.earned)),
       earnedDirection: Number(tile.earned || 0) < 0 ? "-" : "+",
@@ -4012,7 +4013,10 @@ function ControlView() {
                                 value={tile.balanceNumber}
                                 format={(n) =>
                                   Number(n || 0).toLocaleString(undefined, {
-                                    maximumFractionDigits: 3,
+                                    minimumFractionDigits:
+                                      tile.key === "sol" ? 3 : 0,
+                                    maximumFractionDigits:
+                                      tile.key === "sol" ? 3 : 0,
                                   })
                                 }
                               />
