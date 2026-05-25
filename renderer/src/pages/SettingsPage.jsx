@@ -109,7 +109,7 @@ export default function SettingsPage({
             <h3 className="flex gap-4 sm border-b border-white/20 pb-1 justify-between">
               App-Wallet Details ({lockLabel})
               <button
-                className="text-xs uppercase inline-flex px-4 py-1 bg-error max-w-max rounded-sm not-disabled:hover:bg-error-content transition-all opacity-50 hover:opacity-100 "
+                className="btn btn-xs bg-error font-normal border-error rounded-sm not-disabled:hover:bg-error-content transition-all opacity-70 hover:opacity-100 "
                 onClick={() => openCreateWalletModal()}
                 type="button"
               >
@@ -145,7 +145,7 @@ export default function SettingsPage({
                 >
                   <path d="M352 544L128 544C110.3 544 96 529.7 96 512L96 288C96 270.3 110.3 256 128 256L176 256L176 224L128 224C92.7 224 64 252.7 64 288L64 512C64 547.3 92.7 576 128 576L352 576C387.3 576 416 547.3 416 512L416 464L384 464L384 512C384 529.7 369.7 544 352 544zM288 384C270.3 384 256 369.7 256 352L256 128C256 110.3 270.3 96 288 96L512 96C529.7 96 544 110.3 544 128L544 352C544 369.7 529.7 384 512 384L288 384zM224 352C224 387.3 252.7 416 288 416L512 416C547.3 416 576 387.3 576 352L576 128C576 92.7 547.3 64 512 64L288 64C252.7 64 224 92.7 224 128L224 352z" />
                 </svg>
-                Copy
+                Copy Stats
               </button>
               <button
                 type="button"
@@ -213,7 +213,7 @@ export default function SettingsPage({
             <button
               type="button"
               onClick={() => void openSecretModal()}
-              className="text-sm uppercase  px-6 py-1.5 bg-[#9661E2] max-w-max rounded-sm hover:bg-[#5F0DD5] transition-colors"
+              className="text-sm   px-3 py-1.5 bg-[#9661E2] max-w-max rounded-sm hover:bg-[#5F0DD5] transition-colors"
             >
               View Secret Keys
             </button>
@@ -233,12 +233,12 @@ export default function SettingsPage({
             <h1 className="text-2xl font-normal ">App Updates</h1>
           </div>
           <div className="text-sm text-slate-300">
-            Checks GitHub for a newer version when the app launches.
+            Atomatically check for a newer version when the app launches.
           </div>
           <div className="flex items-center gap-3">
             <button
               type="button"
-              className="text-sm uppercase  px-6 py-1.5 bg-[#9661E2] max-w-max rounded-sm hover:bg-[#5F0DD5] transition-colors"
+              className="text-sm   px-3 py-1.5 bg-[#9661E2] max-w-max rounded-sm hover:bg-[#5F0DD5] transition-colors"
               onClick={() => void onManualUpdateCheck?.()}
               disabled={updateCheckBusy === true}
             >

@@ -3641,6 +3641,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
                       : `Rental NFT cooldown reset was not usable (${resetResult?.reason || "reset_failed"}).`,
                   );
                 }
+                option.rentalResetUsed = true;
                 option.nft = {
                   ...freshNft,
                   account,

@@ -16,30 +16,28 @@ export default function CompetitionPage({
                 ? ` ${latestCompetition.competitionNumber}`
                 : ""}
             </span>{" "}
-            <div className="flex items-center gap-2 ">
-              <button
-                type="button"
-                className="btn btn-clear btn-sm uppercase !tracking-wider font-light text-slate-300"
-                onClick={() => void refreshLatestCompetition()}
-                disabled={latestCompetitionBusy}
-                title={
-                  latestCompetition
-                    ? "Refresh competition data"
-                    : "Load competition data"
-                }
-              >
-                {latestCompetitionBusy
-                  ? latestCompetition
-                    ? "Refreshing..."
-                    : "Loading..."
-                  : latestCompetition
-                    ? "Refresh"
-                    : "Load"}
-              </button>
-            </div>
           </h1>
         </div>
-        <div className="gap-1 text-xs justify-self-end  flex flex-col flex-0">
+        <div className="gap-1 text-xs justify-self-end  flex flex-col flex-0 relative">
+          <button
+            type="button"
+            className="btn btn-xs btn-black z-10 rounded-sm font-normal px-2 inline-flex absolute -top-7 right-0"
+            onClick={() => void refreshLatestCompetition()}
+            disabled={latestCompetitionBusy}
+            title={
+              latestCompetition
+                ? "Refresh competition data"
+                : "Load competition data"
+            }
+          >
+            {latestCompetitionBusy
+              ? latestCompetition
+                ? "Refreshing..."
+                : "Loading..."
+              : latestCompetition
+                ? "Refresh Results"
+                : "Load"}
+          </button>
           <div>
             Start{" "}
             {latestCompetition?.start ||

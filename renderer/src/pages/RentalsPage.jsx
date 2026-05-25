@@ -7,8 +7,6 @@ export default function RentalsPage({ bridge }) {
     rentableCount: 0,
     rentable: [],
     activeRentals: [],
-    slotSummary: [],
-    poolByCollection: [],
   });
 
   const load = async () => {
@@ -25,10 +23,6 @@ export default function RentalsPage({ bridge }) {
         rentable: Array.isArray(next.rentable) ? next.rentable : [],
         activeRentals: Array.isArray(next.activeRentals)
           ? next.activeRentals
-          : [],
-        slotSummary: Array.isArray(next.slotSummary) ? next.slotSummary : [],
-        poolByCollection: Array.isArray(next.poolByCollection)
-          ? next.poolByCollection
           : [],
       });
     } catch (err) {
@@ -48,7 +42,7 @@ export default function RentalsPage({ bridge }) {
         <div className="card p-4 border border-white/10 bg-black/30 relative">
           <button
             type="button"
-            className="btn btn-xs btn-black z-10 !w-fit min-h-0 h-6 px-3 inline-flex ml-0 mr-0"
+            className="btn btn-xs btn-black z-10  rounded-sm font-normal h-6 px-2 inline-flex ml-0 "
             style={{
               position: "absolute",
               top: "18px",
@@ -77,31 +71,6 @@ export default function RentalsPage({ bridge }) {
           </div>
         </div>
       </div>
-      {/* <div className="card p-3 border border-white/10 bg-black/30">
-        <div className="text-xs uppercase text-slate-300">
-          Mission Slot State
-        </div>
-        {data.slotSummary.length === 0 ? (
-          <div className="text-xs text-slate-400 mt-1">No slot data yet.</div>
-        ) : (
-          <div className="mt-2 grid grid-cols-1 md:grid-cols-2 gap-x-3 gap-y-1">
-            {data.slotSummary.map((slot) => (
-              <div
-                key={slot.id}
-                className="text-xs text-slate-300 flex items-center justify-between gap-2"
-              >
-                <span className="truncate">
-                  S{slot.slot ?? "?"}: {slot.missionName || "Unknown"}
-                </span>
-                <span className="text-slate-400">
-                  {slot.nftSource ? `${slot.nftSource}` : "unassigned"}
-                </span>
-              </div>
-            ))}
-          </div>
-        )}
-      </div> */}
-
       {error ? (
         <div className="card p-4 border border-error/40 bg-error/10 text-error">
           {error}
@@ -128,10 +97,10 @@ export default function RentalsPage({ bridge }) {
                     <img
                       src={item.image}
                       alt={item.assignedNft || item.missionName || "Rental NFT"}
-                      className="w-8 h-8 rounded object-cover border border-white/10 shrink-0"
+                      className="w-12 h-12 rounded object-cover border border-white/10 shrink-0"
                     />
                   ) : (
-                    <div className="w-8 h-8 rounded border border-white/10 bg-black/30 shrink-0" />
+                    <div className="w-12 h-12 rounded border border-white/10 bg-black/30 shrink-0" />
                   )}
                   <div className="min-w-0">
                     <div className="font-semibold">

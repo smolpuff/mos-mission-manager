@@ -163,7 +163,9 @@ export default function NftsPage({ bridge, signerMode = "" }) {
       ) {
         return `Cooldown reset cost ${resetCost} PBP exceeds the configured max ${maxPbp} PBP.`;
       }
-      const nestedMessage = String(value.message || value.error || reason).trim();
+      const nestedMessage = String(
+        value.message || value.error || reason,
+      ).trim();
       if (nestedMessage) {
         return formatResetErrorMessage(nestedMessage);
       }
@@ -249,7 +251,9 @@ export default function NftsPage({ bridge, signerMode = "" }) {
         throw new Error(prepared?.reason || "Cooldown reset is not available.");
       }
       const resetCost = Number(prepared.resetCost);
-      const resetUrl = String(prepared.signingUrl || prepared.bridgeUrl || "").trim();
+      const resetUrl = String(
+        prepared.signingUrl || prepared.bridgeUrl || "",
+      ).trim();
       if (!Number.isFinite(resetCost) && !resetUrl) {
         throw new Error("Cooldown reset cost was not returned.");
       }
@@ -263,7 +267,8 @@ export default function NftsPage({ bridge, signerMode = "" }) {
               signingUrl: resetUrl || null,
               browserFallbackToPlayUrl:
                 prepared.browserFallbackToPlayUrl === true,
-              fallbackNotice: String(prepared.fallbackNotice || "").trim() || null,
+              fallbackNotice:
+                String(prepared.fallbackNotice || "").trim() || null,
               browserWalletMode,
             }
           : current,
@@ -345,9 +350,7 @@ export default function NftsPage({ bridge, signerMode = "" }) {
         return;
       }
       if (browserWalletMode) {
-        throw new Error(
-          "Browser wallet prepare did not return a signing URL.",
-        );
+        throw new Error("Browser wallet prepare did not return a signing URL.");
       }
       const response = await bridge.resetNftCooldown({
         nftId,
@@ -363,7 +366,9 @@ export default function NftsPage({ bridge, signerMode = "" }) {
         throw new Error(response?.error || "Cooldown reset failed.");
       }
       const reset = response.reset || null;
-      const resetUrl = String(reset?.signingUrl || reset?.bridgeUrl || "").trim();
+      const resetUrl = String(
+        reset?.signingUrl || reset?.bridgeUrl || "",
+      ).trim();
       if (resetUrl) {
         setResetModal((current) =>
           current
@@ -456,7 +461,7 @@ export default function NftsPage({ bridge, signerMode = "" }) {
 
           <button
             type="button"
-            className="btn btn-xs btn-black z-10 !w-fit min-h-0 h-6 px-3 inline-flex"
+            className="btn btn-xs btn-black z-10 px-2 inline-flex font-normal rounded-sm"
             onClick={() => void load()}
             disabled={loading}
             style={{
@@ -481,7 +486,7 @@ export default function NftsPage({ bridge, signerMode = "" }) {
             <label className="text-[11px] text-slate-400 flex items-center gap-2">
               <span>Sort by</span>
               <select
-                className="bg-black/30 border border-white/10 rounded-md px-2 py-1 text-xs text-slate-200"
+                className="select select-sm  bg-black/50 focus-within:bg-black border-white/10 text-slate-100 w-auto"
                 value={sortBy}
                 onChange={(event) => setSortBy(event.target.value)}
               >
@@ -704,7 +709,7 @@ export default function NftsPage({ bridge, signerMode = "" }) {
                       "Open the PbP missions page and reset the cooldown there."
                     : resetModal.signingMode === "manual_page"
                       ? "Open the PbP missions page and complete the reset manually."
-                    : "This reset opens in your browser. Complete it on the PbP signing page."}
+                      : "This reset opens in your browser. Complete it on the PbP signing page."}
                 </div>
                 <div className="rounded-md border border-white/10 bg-black/20 p-2 break-all">
                   {resetSigningUrl()}

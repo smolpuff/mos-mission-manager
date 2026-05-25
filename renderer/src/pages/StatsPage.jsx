@@ -1,6 +1,8 @@
 import pbpIcon from "../img/icon_pbp.webp";
 import ccIcon from "../img/icon_cc.webp";
 import tcIcon from "../img/icon_tc.webp";
+import { useEffect, useState } from "react";
+import useDesktopBridge from "../components/useDesktopBridge";
 
 function formatNumber(value, max = 2) {
   const n = Number(value || 0);
@@ -10,14 +12,6 @@ function formatNumber(value, max = 2) {
 function asNumber(value, fallback = 0) {
   const n = Number(value);
   return Number.isFinite(n) ? n : fallback;
-}
-
-function firstNumber(...values) {
-  for (const value of values) {
-    const n = Number(value);
-    if (Number.isFinite(n)) return n;
-  }
-  return 0;
 }
 
 function formatAge(hours) {
@@ -65,6 +59,7 @@ function buildMissionResolvers(guiMissionSlots = []) {
     if (!name || name === "unknown mission") continue;
     const ids = [
       entry?.id,
+      entry?.missionId,
       entry?.assignedMissionId,
       entry?.assigned_mission_id,
     ]
@@ -78,28 +73,6 @@ function buildMissionResolvers(guiMissionSlots = []) {
     if (Number.isFinite(slot) && !bySlot.has(slot)) bySlot.set(slot, name);
   }
   return { byId, bySlot };
-}
-
-function parseClaimEvents(logs = []) {
-  const events = [];
-  for (const entry of Array.isArray(logs) ? logs : []) {
-    const text = String(entry?.text || "");
-    const match = text.match(
-      /\[WATCH\]\s+✅\s+Claimed(?:\s+\([^)]+\))?:\s*(.+)$/i,
-    );
-    if (!match) continue;
-    const body = String(match[1] || "").trim();
-    if (!body || body.startsWith("+")) continue;
-    const reward = body.match(/([0-9]+(?:\.[0-9]+)?)\s+([A-Z]{2,4})/);
-    const atMs = new Date(entry?.at).getTime();
-    events.push({
-      mission: missionName(body.split(" slot=")[0]),
-      amount: asNumber(reward?.[1], 0),
-      token: String(reward?.[2] || "").toUpperCase(),
-      atMs: Number.isFinite(atMs) ? atMs : null,
-    });
-  }
-  return events.sort((a, b) => (a.atMs || 0) - (b.atMs || 0));
 }
 
 function buildMissionRows(
@@ -277,19 +250,42 @@ function buildClaimBuckets(history = []) {
   };
 }
 
-function buildTimelineFromEvents(events = []) {
-  return buildClaimBuckets(
-    events
-      .filter((event) => Number.isFinite(event.atMs))
-      .map((event, index) => ({
-        at: event.atMs,
-        claims: index + 1,
-      })),
-  );
-}
-
 function buildTimelineFromHistory(history = []) {
   return buildClaimBuckets(history);
+}
+
+function analyticsRefreshKey(analytics) {
+  const root = analytics && typeof analytics === "object" ? analytics : {};
+  const session =
+    root.session && typeof root.session === "object" ? root.session : {};
+  const lifetime =
+    root.lifetime && typeof root.lifetime === "object" ? root.lifetime : {};
+  const summarize = (bucket) => ({
+    startedAt: asNumber(bucket.startedAt, 0),
+    totalClaims: asNumber(bucket.totalClaims, 0),
+    totalResets: asNumber(bucket.totalResets, 0),
+    totalResetCostPbp: asNumber(bucket.totalResetCostPbp, 0),
+    totalLeased: asNumber(bucket.totalLeased, 0),
+    claimHistoryLength: Array.isArray(bucket.claimHistory)
+      ? bucket.claimHistory.length
+      : 0,
+    spendHistoryLength: Array.isArray(bucket.spendHistory)
+      ? bucket.spendHistory.length
+      : 0,
+    resetHistoryLength: Array.isArray(bucket.resetHistory)
+      ? bucket.resetHistory.length
+      : 0,
+    rentalHistoryLength: Array.isArray(bucket.rentalHistory)
+      ? bucket.rentalHistory.length
+      : 0,
+    assignmentHistoryLength: Array.isArray(bucket.assignmentHistory)
+      ? bucket.assignmentHistory.length
+      : 0,
+  });
+  return JSON.stringify({
+    session: summarize(session),
+    lifetime: summarize(lifetime),
+  });
 }
 
 function bucketLabel(bucket, mode, index, total) {
@@ -309,8 +305,8 @@ function bucketLabel(bucket, mode, index, total) {
 
 function DetailRow({ icon, label, value, tone = "text-slate-100" }) {
   return (
-    <div className="flex items-center justify-between gap-3 text-xs leading-5">
-      <span className="flex min-w-0 items-center gap-1.5 whitespace-nowrap text-slate-400">
+    <div className="flex items-center justify-between gap-2 text-xs leading-4.5">
+      <span className="flex min-w-0 items-center gap-1 whitespace-nowrap text-slate-400">
         {icon ? (
           <span className="flex h-4 w-4 shrink-0 items-center justify-center">
             {icon}
@@ -334,56 +330,68 @@ function DetailCard({ title, children }) {
   );
 }
 
-export default function StatsPage({
-  status,
-  logs,
-  missionStats,
-  sessionStartedAtMs,
-}) {
+export default function StatsPage({ status }) {
+  const bridge = useDesktopBridge();
   const safeStatus = status && typeof status === "object" ? status : {};
-  const safeMissionStats =
-    missionStats && typeof missionStats === "object" ? missionStats : {};
-  const analytics =
-    safeStatus.analytics && typeof safeStatus.analytics === "object"
-      ? safeStatus.analytics
-      : {};
-  const sessionAnalytics =
-    analytics.session && typeof analytics.session === "object"
-      ? analytics.session
+  const refreshKey = analyticsRefreshKey(safeStatus.analytics);
+  const [rangeKey, setRangeKey] = useState("session");
+  const [analyticsView, setAnalyticsView] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [actionBusy, setActionBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let mounted = true;
+    setLoading(true);
+    setError("");
+    bridge
+      .getAnalyticsView(rangeKey)
+      .then((result) => {
+        if (!mounted) return;
+        setAnalyticsView(result);
+      })
+      .catch((loadError) => {
+        if (!mounted) return;
+        setError(String(loadError?.message || loadError));
+      })
+      .finally(() => {
+        if (mounted) setLoading(false);
+      });
+    return () => {
+      mounted = false;
+    };
+  }, [bridge, rangeKey, refreshKey]);
+
+  const scopedAnalytics =
+    analyticsView?.analytics && typeof analyticsView.analytics === "object"
+      ? analyticsView.analytics
       : {};
 
-  const statusRewards = safeStatus.sessionRewardTotals || {};
-  const analyticsRewards = sessionAnalytics.currencyEarned || {};
   const rewards = {
-    pbp: asNumber(statusRewards.pbp ?? analyticsRewards.pbp, 0),
-    tc: asNumber(statusRewards.tc ?? analyticsRewards.tc, 0),
-    cc: asNumber(statusRewards.cc ?? analyticsRewards.cc, 0),
+    pbp: asNumber(scopedAnalytics?.currencyEarned?.pbp, 0),
+    tc: asNumber(scopedAnalytics?.currencyEarned?.tc, 0),
+    cc: asNumber(scopedAnalytics?.currencyEarned?.cc, 0),
   };
 
-  const statusSpend = safeStatus.sessionSpendTotals || {};
   const spend = {
-    pbp: asNumber(statusSpend.pbp ?? sessionAnalytics.totalResetCostPbp, 0),
-    tc: asNumber(statusSpend.tc, 0),
-    cc: asNumber(statusSpend.cc, 0),
+    pbp: asNumber(scopedAnalytics.totalResetCostPbp, 0),
+    tc: 0,
+    cc: 0,
   };
 
-  const claimEvents = parseClaimEvents(logs);
-  const claims = Math.max(
-    asNumber(sessionAnalytics.totalClaims, 0),
-    asNumber(safeMissionStats.claimed, 0),
-    claimEvents.length,
-  );
+  const claimEvents = [];
+  const claims = asNumber(scopedAnalytics.totalClaims, 0);
   const elapsedHours = Math.max(
     1 / 60,
-    (Date.now() - asNumber(sessionStartedAtMs, Date.now())) / 3600000,
+    (Date.now() - asNumber(scopedAnalytics.startedAt, Date.now())) / 3600000,
   );
-  const sessionHistory = Array.isArray(sessionAnalytics.claimHistory)
-    ? sessionAnalytics.claimHistory
+  const sessionHistory = Array.isArray(scopedAnalytics.claimHistory)
+    ? scopedAnalytics.claimHistory
     : [];
   const sessionMissionClaims =
-    sessionAnalytics.missionClaims &&
-    typeof sessionAnalytics.missionClaims === "object"
-      ? sessionAnalytics.missionClaims
+    scopedAnalytics.missionClaims &&
+    typeof scopedAnalytics.missionClaims === "object"
+      ? scopedAnalytics.missionClaims
       : {};
   const rows = buildMissionRows(
     claimEvents,
@@ -391,19 +399,8 @@ export default function StatsPage({
     sessionHistory,
     safeStatus.guiMissionSlots,
   );
-  const rankedClaims = rows.reduce(
-    (sum, row) => sum + asNumber(row.claims, 0),
-    0,
-  );
   const maxClaims = Math.max(1, ...rows.map((row) => asNumber(row.claims, 0)));
-  const chartClaimTotal = Math.max(
-    claims,
-    asNumber(sessionAnalytics.totalClaims, 0),
-    ...sessionHistory.map((entry) => asNumber(entry?.claims, 0)),
-  );
-  const timelineData = sessionHistory.length
-    ? buildTimelineFromHistory(sessionHistory)
-    : buildTimelineFromEvents(claimEvents);
+  const timelineData = buildTimelineFromHistory(sessionHistory);
   const chartBuckets = Array.isArray(timelineData.buckets)
     ? timelineData.buckets
     : [];
@@ -413,29 +410,25 @@ export default function StatsPage({
   );
   const netPbp = rewards.pbp - spend.pbp;
   const claimsPerHour = claims / elapsedHours;
-  const resets = asNumber(sessionAnalytics.totalResets, 0);
-  const missionResets = asNumber(sessionAnalytics.resetTypes?.mission, 0);
-  const nftResets = asNumber(sessionAnalytics.resetTypes?.nft, 0);
-  const resetCost = asNumber(
-    sessionAnalytics.totalResetCostPbp ?? spend.pbp,
-    0,
-  );
+  const missionResets = asNumber(scopedAnalytics.resetTypes?.mission, 0);
+  const nftResets = asNumber(scopedAnalytics.resetTypes?.nft, 0);
+  const resetCost = asNumber(scopedAnalytics.totalResetCostPbp ?? spend.pbp, 0);
   const spendByAction =
-    sessionAnalytics.spendByAction &&
-    typeof sessionAnalytics.spendByAction === "object"
-      ? sessionAnalytics.spendByAction
+    scopedAnalytics.spendByAction &&
+    typeof scopedAnalytics.spendByAction === "object"
+      ? scopedAnalytics.spendByAction
       : {};
   const missionResetPbp = asNumber(spendByAction.mission_reroll, 0);
   const nftResetPbp = asNumber(
     spendByAction.nft_cooldown_reset ?? spendByAction.cooldown_reset,
     0,
   );
-  const slotUnlockPbp = asNumber(spendByAction.mission_slot_unlock, 0);
-  const sessionRentals = asNumber(sessionAnalytics.totalLeased, 0);
+  const missionSelectionPbp = asNumber(spendByAction.mission_swap, 0);
+  const sessionRentals = asNumber(scopedAnalytics.totalLeased, 0);
   const nftResetUsage =
-    sessionAnalytics.nftResetUsage &&
-    typeof sessionAnalytics.nftResetUsage === "object"
-      ? sessionAnalytics.nftResetUsage
+    scopedAnalytics.nftResetUsage &&
+    typeof scopedAnalytics.nftResetUsage === "object"
+      ? scopedAnalytics.nftResetUsage
       : {};
   const ownedResetStats =
     nftResetUsage.owned && typeof nftResetUsage.owned === "object"
@@ -459,30 +452,100 @@ export default function StatsPage({
   );
   const netPerHour = netPbp / elapsedHours;
   const tokenIconClass = "h-3.5 w-3.5 object-contain";
+  const rangeLabel =
+    rangeKey === "session"
+      ? "Session"
+      : rangeKey === "24h"
+        ? "Last 24hrs"
+        : rangeKey === "7d"
+          ? "Last 7days"
+          : "All Time";
+
+  async function handleResetSession() {
+    if (actionBusy) return;
+    setActionBusy(true);
+    setError("");
+    try {
+      const next = await bridge.resetAnalyticsRange(rangeKey);
+      setAnalyticsView(next);
+    } catch (resetError) {
+      setError(String(resetError?.message || resetError));
+    } finally {
+      setActionBusy(false);
+    }
+  }
+
+  async function handleExportCsv() {
+    if (actionBusy) return;
+    setActionBusy(true);
+    setError("");
+    try {
+      const result = await bridge.exportAnalyticsCsv(rangeKey);
+      if (!result?.ok && result?.canceled !== true) {
+        throw new Error(result?.error || "CSV export failed.");
+      }
+    } catch (exportError) {
+      setError(String(exportError?.message || exportError));
+    } finally {
+      setActionBusy(false);
+    }
+  }
 
   return (
     <section className="h-full min-h-0 overflow-hidden">
-      <div className="grid h-full min-h-0 grid-rows-[118px_210px_minmax(0,1fr)_auto] gap-3 overflow-hidden">
-        <section className="card grid grid-cols-[minmax(195px,0.28fr)_minmax(0,1fr)] items-center gap-4 overflow-hidden">
-          <div className="min-w-0">
+      <div className="grid  grid-rows-[auto_200px_auto_auto] gap-3 overflow-hidden">
+        <section className="card grid grid-cols-[minmax(195px,0.28fr)_minmax(0,1fr)] items-center gap-4 ">
+          <div className=" col-span-full flex flex-row items-center gap-3 items-center w-full  justify-between">
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                className="btn btn-xs btn-black z-10 rounded-sm font-normal px-2 inline-flex ml-0 "
+                onClick={() => void handleExportCsv()}
+                disabled={actionBusy || loading}
+                title="Export stats to CSV"
+              >
+                Export .csv
+              </button>{" "}
+              <button
+                type="button"
+                className="btn btn-xs bg-error font-normal border-error rounded-sm not-disabled:hover:bg-error-content transition-all opacity-70 hover:opacity-100 "
+                onClick={() => void handleResetSession()}
+                disabled={actionBusy || loading}
+                title={`Clear persisted stats for ${rangeLabel}`}
+              >
+                Clear Stats
+              </button>
+            </div>
+            <div className="flex gap-2 items-center ">
+              <div className="text-[11px] text-slate-400 w-auto">
+                Stats Window
+              </div>
+              <select
+                className="select select-sm  bg-black/50 focus-within:bg-black border-white/10 text-slate-100 w-36"
+                value={rangeKey}
+                onChange={(event) =>
+                  setRangeKey(String(event.target.value || "session"))
+                }
+                disabled={loading || actionBusy}
+              >
+                <option value="session">This session</option>
+                <option value="24h">Last 24hrs</option>
+                <option value="7d">Last 7days</option>
+                <option value="all">All time</option>
+              </select>
+            </div>
+          </div>
+          <div className="">
             <div className="text-xs  text-slate-400">Net PBP</div>
             <div
-              className={`mt-1 text-4xl font-semibold leading-none ${
+              className={` text-4xl font-semibold leading-none ${
                 netPbp >= 0 ? "text-success" : "text-error"
               }`}
             >
               {formatNumber(netPbp)} PBP
             </div>
-            <div className="mt-2 flex gap-2 text-xs text-slate-300">
-              <span className="rounded-md bg-black/20 px-2 py-1">
-                {formatNumber(claims, 0)} claims
-              </span>
-              <span className="rounded-md bg-black/20 px-2 py-1">
-                {formatAge(elapsedHours)}
-              </span>
-            </div>
           </div>
-          <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(112px,0.9fr)] gap-x-5 gap-y-1.5">
+          <div className=" grid min-w-0 grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(112px,0.9fr)] gap-x-5 gap-y-1.5">
             <DetailRow
               icon={<img src={pbpIcon} className={tokenIconClass} alt="" />}
               label="PBP earned"
@@ -509,6 +572,11 @@ export default function StatsPage({
               label="PBP / hr"
               value={formatNumber(netPerHour)}
               tone={netPerHour >= 0 ? "text-success" : "text-error"}
+            />
+            <DetailRow
+              icon={<span>#</span>}
+              label="Claims / hr"
+              value={formatNumber(claimsPerHour)}
             />
           </div>
         </section>
@@ -586,7 +654,7 @@ export default function StatsPage({
             <section className="card min-h-0 overflow-hidden">
               <div className="flex items-center justify-between gap-2">
                 <div className="text-sm font-semibold text-slate-200">
-                  Session Missions
+                  {rangeLabel} Missions
                 </div>
               </div>
               <div className="mt-2 space-y-1 overflow-hidden">
@@ -635,55 +703,38 @@ export default function StatsPage({
         </div>
 
         <div className="grid grid-cols-2 gap-3 overflow-hidden">
-          <DetailCard title="Session Activity">
-            <DetailRow label="Claims" value={formatNumber(claims, 0)} />
+          <DetailCard title={`${rangeLabel} Activity`}>
+            <DetailRow label="Claims" value={formatNumber(claims, 0)} />{" "}
             <DetailRow
               label="Mission resets"
               value={formatNumber(missionResets, 0)}
             />
             <DetailRow label="NFT resets" value={formatNumber(nftResets, 0)} />
-            <DetailRow
-              label="Claims / hr"
-              value={formatNumber(claimsPerHour)}
-            />
           </DetailCard>
 
-          <DetailCard title="Session Costs">
+          <DetailCard title={`${rangeLabel} Costs`}>
             <DetailRow
-              label="Mission reset PBP"
+              label="Mission reset"
               value={formatNumber(missionResetPbp)}
             />
+            <DetailRow label="NFT reset" value={formatNumber(nftResetPbp)} />
             <DetailRow
-              label="NFT reset PBP"
-              value={formatNumber(nftResetPbp)}
-            />
-            <DetailRow
-              label="Slot unlock PBP"
-              value={formatNumber(slotUnlockPbp)}
-            />
-            <DetailRow
-              label="Total spent PBP"
-              value={formatNumber(resetCost)}
+              label="Mission changes"
+              value={formatNumber(missionSelectionPbp)}
             />
           </DetailCard>
         </div>
 
         <div className="grid grid-cols-2 gap-3 overflow-hidden">
-          <DetailCard title="Rentals">
+          <DetailCard title={`${rangeLabel} Rentals`}>
             <DetailRow
-              label="Session leases"
+              label="Rentals used"
               value={formatNumber(sessionRentals, 0)}
             />{" "}
             <DetailRow
-              label="Rental NFT resets"
+              label="NFT resets"
               value={formatNumber(rentalNftResets, 0)}
-            />
-          </DetailCard>{" "}
-          <DetailCard title="Rental Resets">
-            <DetailRow
-              label="Reset then assigned"
-              value={formatNumber(rentalNftResetAssigned, 0)}
-            />
+            />{" "}
             <DetailRow
               label="Missed after reset"
               value={formatNumber(rentalNftResetMissed, 0)}
@@ -691,7 +742,18 @@ export default function StatsPage({
                 rentalNftResetMissed > 0 ? "text-amber-300" : "text-slate-100"
               }
             />
-          </DetailCard>
+          </DetailCard>{" "}
+        </div>
+        <div
+          className={`min-h-[16px] text-xs ${
+            error
+              ? "text-error"
+              : loading
+                ? "text-slate-400"
+                : "text-transparent"
+          }`}
+        >
+          {error ? error : loading ? "Loading stats…" : "."}
         </div>
       </div>
     </section>

@@ -18,6 +18,11 @@ contextBridge.exposeInMainWorld("missionsDesktop", {
   restartBackend: () => ipcRenderer.invoke("backend:restart"),
   sendCommand: (command) => ipcRenderer.invoke("backend:send-command", command),
   getState: () => ipcRenderer.invoke("backend:get-state"),
+  getAnalyticsView: (rangeKey) => ipcRenderer.invoke("analytics:get-view", rangeKey),
+  resetAnalyticsRange: (rangeKey) =>
+    ipcRenderer.invoke("analytics:reset-range", rangeKey),
+  exportAnalyticsCsv: (rangeKey) =>
+    ipcRenderer.invoke("analytics:export-csv", rangeKey),
   getConfig: () => ipcRenderer.invoke("config:get"),
   updateConfig: (patch) => ipcRenderer.invoke("config:update", patch),
   checkForUpdates: (payload) => ipcRenderer.invoke("updates:check", payload),

@@ -1,12 +1,5 @@
 {
   "version": "3.2.7",
   "downloadUrl": "https://github.com/smolpuff/mos-mission-manager/releases/latest",
-  "notes": [
-    "lowered rental refresh tick for the peasants",
-    "added universal throttling control",
-    "rental flow optimization",
-    "fixed controlPage not unmounting causing hang/crash",
-    "fixed claim currency count",
-    "got real high. going to get even higher!"
-  ]
+  "notes": ["Stats rework"]
 }

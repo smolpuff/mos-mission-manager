@@ -8,6 +8,7 @@ const { fork, execFile } = require("child_process");
 const {
   app,
   BrowserWindow,
+  dialog,
   Menu,
   ipcMain,
   clipboard,
@@ -207,42 +208,31 @@ async function getMissionCatalogCached() {
 }
 
 function createEmptyAnalytics() {
+  const emptyBucket = {
+    startedAt: null,
+    totalClaims: 0,
+    totalResets: 0,
+    totalResetCostPbp: 0,
+    totalLeased: 0,
+    currencyEarned: { pbp: 0, tc: 0, cc: 0 },
+    missionClaims: {},
+    claimHistory: [],
+    spendHistory: [],
+    resetHistory: [],
+    rentalHistory: [],
+    assignmentHistory: [],
+    resetTypes: { mission: 0, nft: 0 },
+    nftResetUsage: {
+      owned: { resets: 0, assigned: 0 },
+      rental: { resets: 0, assigned: 0 },
+    },
+    spendByAction: {},
+    nftsUsed: [],
+  };
   return {
     version: ANALYTICS_VERSION,
-    lifetime: {
-      startedAt: null,
-      totalClaims: 0,
-      totalResets: 0,
-      totalResetCostPbp: 0,
-      totalLeased: 0,
-      currencyEarned: { pbp: 0, tc: 0, cc: 0 },
-      missionClaims: {},
-      claimHistory: [],
-      resetTypes: { mission: 0, nft: 0 },
-      nftResetUsage: {
-        owned: { resets: 0, assigned: 0 },
-        rental: { resets: 0, assigned: 0 },
-      },
-      spendByAction: {},
-      nftsUsed: [],
-    },
-    session: {
-      startedAt: null,
-      totalClaims: 0,
-      totalResets: 0,
-      totalResetCostPbp: 0,
-      totalLeased: 0,
-      currencyEarned: { pbp: 0, tc: 0, cc: 0 },
-      missionClaims: {},
-      claimHistory: [],
-      resetTypes: { mission: 0, nft: 0 },
-      nftResetUsage: {
-        owned: { resets: 0, assigned: 0 },
-        rental: { resets: 0, assigned: 0 },
-      },
-      spendByAction: {},
-      nftsUsed: [],
-    },
+    lifetime: { ...emptyBucket },
+    session: { ...emptyBucket },
   };
 }
 
@@ -282,16 +272,91 @@ function normalizeClaimHistory(raw) {
       const claims = Number(entry?.claims);
       const assignedMissionId = String(entry?.assignedMissionId || "").trim();
       const slot = Number(entry?.slot);
+      const rewardAmount = Number(entry?.rewardAmount);
+      const rewardToken = normalizeRewardToken(entry?.rewardToken);
       return {
         at: Number.isFinite(at) ? at : null,
         claims: Number.isFinite(claims) ? Math.max(0, claims) : 0,
         mission: String(entry?.mission || "").trim(),
         assignedMissionId: assignedMissionId || null,
         slot: Number.isFinite(slot) ? slot : null,
+        rewardAmount:
+          Number.isFinite(rewardAmount) && rewardAmount > 0 ? rewardAmount : null,
+        rewardToken: rewardToken || null,
       };
     })
     .filter((entry) => entry.at && entry.claims > 0)
     .slice(-1000);
+}
+
+function normalizeSpendHistory(raw) {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((entry) => {
+      const at = Number(entry?.at);
+      const amount = Number(entry?.amount);
+      const action = String(entry?.action || "").trim() || "other";
+      return {
+        at: Number.isFinite(at) ? at : null,
+        amount: Number.isFinite(amount) && amount > 0 ? amount : 0,
+        action,
+      };
+    })
+    .filter((entry) => entry.at && entry.amount > 0)
+    .slice(-2000);
+}
+
+function normalizeResetHistory(raw) {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((entry) => {
+      const at = Number(entry?.at);
+      const kind = String(entry?.kind || entry?.resetType || "")
+        .trim()
+        .toLowerCase();
+      const source = String(entry?.source || entry?.resetSource || "")
+        .trim()
+        .toLowerCase();
+      return {
+        at: Number.isFinite(at) ? at : null,
+        kind: kind === "nft" ? "nft" : "mission",
+        source: source === "rental" ? "rental" : "owned",
+      };
+    })
+    .filter((entry) => entry.at)
+    .slice(-2000);
+}
+
+function normalizeRentalHistory(raw) {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((entry) => {
+      const at = Number(entry?.at);
+      const source = String(entry?.source || "").trim().toLowerCase();
+      return {
+        at: Number.isFinite(at) ? at : null,
+        source: source || null,
+      };
+    })
+    .filter((entry) => entry.at)
+    .slice(-2000);
+}
+
+function normalizeAssignmentHistory(raw) {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((entry) => {
+      const at = Number(entry?.at);
+      const source = String(entry?.source || "").trim().toLowerCase();
+      const nft = String(entry?.nft || "").trim() || null;
+      return {
+        at: Number.isFinite(at) ? at : null,
+        source: source === "rental" ? "rental" : "owned",
+        nft,
+      };
+    })
+    .filter((entry) => entry.at)
+    .slice(-2000);
 }
 
 function normalizeAnalytics(raw) {
@@ -320,6 +385,12 @@ function normalizeAnalytics(raw) {
           ? src.lifetime.missionClaims
           : {},
       claimHistory: normalizeClaimHistory(src?.lifetime?.claimHistory),
+      spendHistory: normalizeSpendHistory(src?.lifetime?.spendHistory),
+      resetHistory: normalizeResetHistory(src?.lifetime?.resetHistory),
+      rentalHistory: normalizeRentalHistory(src?.lifetime?.rentalHistory),
+      assignmentHistory: normalizeAssignmentHistory(
+        src?.lifetime?.assignmentHistory,
+      ),
       resetTypes: {
         mission: Number(src?.lifetime?.resetTypes?.mission || 0) || 0,
         nft: Number(src?.lifetime?.resetTypes?.nft || 0) || 0,
@@ -353,6 +424,12 @@ function normalizeAnalytics(raw) {
           ? src.session.missionClaims
           : {},
       claimHistory: normalizeClaimHistory(src?.session?.claimHistory),
+      spendHistory: normalizeSpendHistory(src?.session?.spendHistory),
+      resetHistory: normalizeResetHistory(src?.session?.resetHistory),
+      rentalHistory: normalizeRentalHistory(src?.session?.rentalHistory),
+      assignmentHistory: normalizeAssignmentHistory(
+        src?.session?.assignmentHistory,
+      ),
       resetTypes: {
         mission: Number(src?.session?.resetTypes?.mission || 0) || 0,
         nft: Number(src?.session?.resetTypes?.nft || 0) || 0,
@@ -1229,6 +1306,10 @@ function beginAnalyticsSession({ force = false } = {}) {
     currencyEarned: { pbp: 0, tc: 0, cc: 0 },
     missionClaims: {},
     claimHistory: [],
+    spendHistory: [],
+    resetHistory: [],
+    rentalHistory: [],
+    assignmentHistory: [],
     resetTypes: { mission: 0, nft: 0 },
     nftResetUsage: {
       owned: { resets: 0, assigned: 0 },
@@ -1488,6 +1569,9 @@ function applyAnalyticsClaimEvent(payload = {}) {
       mission,
       assignedMissionId: String(payload?.assignedMissionId || "").trim() || null,
       slot: Number.isFinite(Number(payload?.slot)) ? Number(payload.slot) : null,
+      rewardAmount:
+        reward.amount > 0 && Number.isFinite(reward.amount) ? reward.amount : null,
+      rewardToken: reward.token || null,
     },
   ]);
   current.session.claimHistory = normalizeClaimHistory([
@@ -1498,6 +1582,9 @@ function applyAnalyticsClaimEvent(payload = {}) {
       mission,
       assignedMissionId: String(payload?.assignedMissionId || "").trim() || null,
       slot: Number.isFinite(Number(payload?.slot)) ? Number(payload.slot) : null,
+      rewardAmount:
+        reward.amount > 0 && Number.isFinite(reward.amount) ? reward.amount : null,
+      rewardToken: reward.token || null,
     },
   ]);
   if (reward.token && reward.amount > 0) {
@@ -1528,6 +1615,14 @@ function applyAnalyticsSpendEvent(payload = {}) {
     Number(current.lifetime.spendByAction[action] || 0) + amount;
   current.session.spendByAction[action] =
     Number(current.session.spendByAction[action] || 0) + amount;
+  current.lifetime.spendHistory = normalizeSpendHistory([
+    ...(current.lifetime.spendHistory || []),
+    { at: Date.now(), amount, action },
+  ]);
+  current.session.spendHistory = normalizeSpendHistory([
+    ...(current.session.spendHistory || []),
+    { at: Date.now(), amount, action },
+  ]);
   saveAnalytics(current);
   trackFeatureUsage("spend", {
     action_name: action,
@@ -1553,6 +1648,22 @@ function applyAnalyticsResetEvent(payload = {}) {
   current.session.totalResets += 1;
   current.lifetime.resetTypes[bucket] += 1;
   current.session.resetTypes[bucket] += 1;
+  current.lifetime.resetHistory = normalizeResetHistory([
+    ...(current.lifetime.resetHistory || []),
+    {
+      at: Date.now(),
+      kind: bucket,
+      source: String(payload?.resetSource || payload?.source || "").trim(),
+    },
+  ]);
+  current.session.resetHistory = normalizeResetHistory([
+    ...(current.session.resetHistory || []),
+    {
+      at: Date.now(),
+      kind: bucket,
+      source: String(payload?.resetSource || payload?.source || "").trim(),
+    },
+  ]);
   if (bucket === "nft") {
     const source = String(payload?.resetSource || payload?.source || "")
       .trim()
@@ -1577,6 +1688,14 @@ function applyAnalyticsRentalEvent() {
   );
   current.lifetime.totalLeased += 1;
   current.session.totalLeased += 1;
+  current.lifetime.rentalHistory = normalizeRentalHistory([
+    ...(current.lifetime.rentalHistory || []),
+    { at: Date.now() },
+  ]);
+  current.session.rentalHistory = normalizeRentalHistory([
+    ...(current.session.rentalHistory || []),
+    { at: Date.now() },
+  ]);
   saveAnalytics(current);
   trackFeatureUsage("rental_started");
   publishStatus();
@@ -1594,12 +1713,339 @@ function applyAnalyticsAssignmentEvent(payload = {}) {
   );
   current.lifetime.nftResetUsage[usageBucket].assigned += 1;
   current.session.nftResetUsage[usageBucket].assigned += 1;
+  current.lifetime.assignmentHistory = normalizeAssignmentHistory([
+    ...(current.lifetime.assignmentHistory || []),
+    { at: Date.now(), source: usageBucket, nft: payload?.nft || payload?.nftName },
+  ]);
+  current.session.assignmentHistory = normalizeAssignmentHistory([
+    ...(current.session.assignmentHistory || []),
+    { at: Date.now(), source: usageBucket, nft: payload?.nft || payload?.nftName },
+  ]);
   saveAnalytics(current);
   trackFeatureUsage("nft_reset_assignment", {
     source: usageBucket,
   });
   publishStatus();
   return true;
+}
+
+function analyticsBucketFromRange(bucket = {}, rangeKey = "session") {
+  const src = bucket && typeof bucket === "object" ? bucket : {};
+  if (rangeKey === "session") {
+    return {
+      startedAt: Number.isFinite(Number(src.startedAt)) ? Number(src.startedAt) : Date.now(),
+      totalClaims: Number(src.totalClaims || 0) || 0,
+      totalResets: Number(src.totalResets || 0) || 0,
+      totalResetCostPbp: Number(src.totalResetCostPbp || 0) || 0,
+      totalLeased: Number(src.totalLeased || 0) || 0,
+      currencyEarned: normalizeTotals(src.currencyEarned),
+      missionClaims: normalizeCounterObject(src.missionClaims),
+      claimHistory: normalizeClaimHistory(src.claimHistory),
+      spendHistory: normalizeSpendHistory(src.spendHistory),
+      resetHistory: normalizeResetHistory(src.resetHistory),
+      rentalHistory: normalizeRentalHistory(src.rentalHistory),
+      assignmentHistory: normalizeAssignmentHistory(src.assignmentHistory),
+      resetTypes: {
+        mission: Number(src?.resetTypes?.mission || 0) || 0,
+        nft: Number(src?.resetTypes?.nft || 0) || 0,
+      },
+      nftResetUsage: normalizeNftResetUsage(src.nftResetUsage),
+      spendByAction: normalizeCounterObject(src.spendByAction),
+      nftsUsed: Array.isArray(src.nftsUsed) ? src.nftsUsed.slice() : [],
+    };
+  }
+
+  const rangeMs =
+    rangeKey === "24h" ? 24 * 60 * 60 * 1000 : 7 * 24 * 60 * 60 * 1000;
+  const cutoff = Date.now() - rangeMs;
+  const claimHistory = normalizeClaimHistory(src.claimHistory).filter(
+    (entry) => Number(entry.at) >= cutoff,
+  );
+  const spendHistory = normalizeSpendHistory(src.spendHistory).filter(
+    (entry) => Number(entry.at) >= cutoff,
+  );
+  const resetHistory = normalizeResetHistory(src.resetHistory).filter(
+    (entry) => Number(entry.at) >= cutoff,
+  );
+  const rentalHistory = normalizeRentalHistory(src.rentalHistory).filter(
+    (entry) => Number(entry.at) >= cutoff,
+  );
+  const assignmentHistory = normalizeAssignmentHistory(
+    src.assignmentHistory,
+  ).filter((entry) => Number(entry.at) >= cutoff);
+  const currencyEarned = { pbp: 0, tc: 0, cc: 0 };
+  const missionClaims = {};
+  for (const entry of claimHistory) {
+    const mission = String(entry?.mission || "").trim() || "unknown mission";
+    missionClaims[mission] = Number(missionClaims[mission] || 0) + 1;
+    const token = normalizeRewardToken(entry?.rewardToken);
+    const amount = Number(entry?.rewardAmount || 0);
+    if (token && Number.isFinite(amount) && amount > 0) {
+      currencyEarned[token] += amount;
+    }
+  }
+  const spendByAction = {};
+  for (const entry of spendHistory) {
+    spendByAction[entry.action] = Number(spendByAction[entry.action] || 0) + Number(entry.amount || 0);
+  }
+  const resetTypes = { mission: 0, nft: 0 };
+  const nftResetUsage = {
+    owned: { resets: 0, assigned: 0 },
+    rental: { resets: 0, assigned: 0 },
+  };
+  for (const entry of resetHistory) {
+    if (entry.kind === "nft") {
+      resetTypes.nft += 1;
+      nftResetUsage[entry.source === "rental" ? "rental" : "owned"].resets += 1;
+    } else {
+      resetTypes.mission += 1;
+    }
+  }
+  for (const entry of assignmentHistory) {
+    nftResetUsage[entry.source === "rental" ? "rental" : "owned"].assigned += 1;
+  }
+  const nftsUsed = Array.from(
+    new Set(
+      assignmentHistory
+        .map((entry) => String(entry?.nft || "").trim())
+        .filter(Boolean),
+    ),
+  );
+  return {
+    startedAt: cutoff,
+    totalClaims: claimHistory.length,
+    totalResets: resetHistory.length,
+    totalResetCostPbp: spendHistory.reduce(
+      (sum, entry) => sum + Number(entry.amount || 0),
+      0,
+    ),
+    totalLeased: rentalHistory.length,
+    currencyEarned,
+    missionClaims,
+    claimHistory,
+    spendHistory,
+    resetHistory,
+    rentalHistory,
+    assignmentHistory,
+    resetTypes,
+    nftResetUsage,
+    spendByAction,
+    nftsUsed,
+  };
+}
+
+function rebuildAnalyticsBucketFromHistories(bucket = {}) {
+  const claimHistory = normalizeClaimHistory(bucket.claimHistory);
+  const spendHistory = normalizeSpendHistory(bucket.spendHistory);
+  const resetHistory = normalizeResetHistory(bucket.resetHistory);
+  const rentalHistory = normalizeRentalHistory(bucket.rentalHistory);
+  const assignmentHistory = normalizeAssignmentHistory(bucket.assignmentHistory);
+  const currencyEarned = { pbp: 0, tc: 0, cc: 0 };
+  const missionClaims = {};
+  for (const entry of claimHistory) {
+    const mission = String(entry?.mission || "").trim() || "unknown mission";
+    missionClaims[mission] = Number(missionClaims[mission] || 0) + 1;
+    const token = normalizeRewardToken(entry?.rewardToken);
+    const amount = Number(entry?.rewardAmount || 0);
+    if (token && Number.isFinite(amount) && amount > 0) {
+      currencyEarned[token] += amount;
+    }
+  }
+  const spendByAction = {};
+  for (const entry of spendHistory) {
+    spendByAction[entry.action] =
+      Number(spendByAction[entry.action] || 0) + Number(entry.amount || 0);
+  }
+  const resetTypes = { mission: 0, nft: 0 };
+  const nftResetUsage = {
+    owned: { resets: 0, assigned: 0 },
+    rental: { resets: 0, assigned: 0 },
+  };
+  for (const entry of resetHistory) {
+    if (entry.kind === "nft") {
+      resetTypes.nft += 1;
+      nftResetUsage[entry.source === "rental" ? "rental" : "owned"].resets += 1;
+    } else {
+      resetTypes.mission += 1;
+    }
+  }
+  for (const entry of assignmentHistory) {
+    nftResetUsage[entry.source === "rental" ? "rental" : "owned"].assigned += 1;
+  }
+  return {
+    ...bucket,
+    totalClaims: claimHistory.length,
+    totalResets: resetHistory.length,
+    totalResetCostPbp: spendHistory.reduce(
+      (sum, entry) => sum + Number(entry.amount || 0),
+      0,
+    ),
+    totalLeased: rentalHistory.length,
+    currencyEarned,
+    missionClaims,
+    claimHistory,
+    spendHistory,
+    resetHistory,
+    rentalHistory,
+    assignmentHistory,
+    resetTypes,
+    nftResetUsage,
+    spendByAction,
+    nftsUsed: Array.from(
+      new Set(
+        assignmentHistory
+          .map((entry) => String(entry?.nft || "").trim())
+          .filter(Boolean),
+      ),
+    ),
+  };
+}
+
+function analyticsView(rangeKey = "session") {
+  const analytics = normalizeAnalytics(backendStatus.analytics || loadAnalytics());
+  const key = ["session", "24h", "7d", "all"].includes(rangeKey)
+    ? rangeKey
+    : "session";
+  const bucket =
+    key === "session"
+      ? analytics.session
+      : key === "all"
+        ? analytics.lifetime
+        : analyticsBucketFromRange(analytics.lifetime, key);
+  return {
+    rangeKey: key,
+    analytics: bucket,
+    sourcePath: getAnalyticsPath(),
+  };
+}
+
+function resetAnalyticsRange(rangeKey = "session") {
+  const current = normalizeAnalytics(backendStatus.analytics || loadAnalytics());
+  const key = ["session", "24h", "7d", "all"].includes(rangeKey)
+    ? rangeKey
+    : "session";
+  const emptySession = {
+    startedAt: Date.now(),
+    totalClaims: 0,
+    totalResets: 0,
+    totalResetCostPbp: 0,
+    totalLeased: 0,
+    currencyEarned: { pbp: 0, tc: 0, cc: 0 },
+    missionClaims: {},
+    claimHistory: [],
+    spendHistory: [],
+    resetHistory: [],
+    rentalHistory: [],
+    assignmentHistory: [],
+    resetTypes: { mission: 0, nft: 0 },
+    nftResetUsage: {
+      owned: { resets: 0, assigned: 0 },
+      rental: { resets: 0, assigned: 0 },
+    },
+    spendByAction: {},
+    nftsUsed: [],
+  };
+
+  if (key === "all") {
+    current.lifetime = {
+      ...emptySession,
+      startedAt: current.lifetime?.startedAt || Date.now(),
+    };
+    current.session = {
+      ...emptySession,
+      startedAt: Date.now(),
+    };
+  } else if (key === "session") {
+    current.session = emptySession;
+  } else {
+    const cutoff = Date.now() - (key === "24h" ? 24 : 7 * 24) * 60 * 60 * 1000;
+    const keepRecent = (entry) => Number(entry?.at) < cutoff;
+    current.lifetime.claimHistory = normalizeClaimHistory(
+      (current.lifetime.claimHistory || []).filter(keepRecent),
+    );
+    current.lifetime.spendHistory = normalizeSpendHistory(
+      (current.lifetime.spendHistory || []).filter(keepRecent),
+    );
+    current.lifetime.resetHistory = normalizeResetHistory(
+      (current.lifetime.resetHistory || []).filter(keepRecent),
+    );
+    current.lifetime.rentalHistory = normalizeRentalHistory(
+      (current.lifetime.rentalHistory || []).filter(keepRecent),
+    );
+    current.lifetime.assignmentHistory = normalizeAssignmentHistory(
+      (current.lifetime.assignmentHistory || []).filter(keepRecent),
+    );
+    current.lifetime = rebuildAnalyticsBucketFromHistories({
+      ...current.lifetime,
+      startedAt: current.lifetime?.startedAt || Date.now(),
+    });
+  }
+  saveAnalytics(current);
+  publishStatus();
+  return analyticsView(key);
+}
+
+function csvEscape(value) {
+  const text = String(value ?? "");
+  if (!/[",\r\n]/.test(text)) return text;
+  return `"${text.replace(/"/g, '""')}"`;
+}
+
+function buildAnalyticsCsv(rangeKey = "session") {
+  const view = analyticsView(rangeKey);
+  const bucket = view.analytics || {};
+  const lines = [
+    ["Range", view.rangeKey],
+    ["Started At", Number(bucket.startedAt) > 0 ? new Date(bucket.startedAt).toISOString() : ""],
+    ["Claims", Number(bucket.totalClaims || 0)],
+    ["Mission Resets", Number(bucket?.resetTypes?.mission || 0)],
+    ["NFT Resets", Number(bucket?.resetTypes?.nft || 0)],
+    ["Total Resets", Number(bucket.totalResets || 0)],
+    ["Leases", Number(bucket.totalLeased || 0)],
+    ["PBP Earned", Number(bucket?.currencyEarned?.pbp || 0)],
+    ["TC Earned", Number(bucket?.currencyEarned?.tc || 0)],
+    ["CC Earned", Number(bucket?.currencyEarned?.cc || 0)],
+    ["PBP Spent", Number(bucket.totalResetCostPbp || 0)],
+    [],
+    ["Mission", "Claims"],
+    ...Object.entries(bucket.missionClaims || {}).map(([mission, claims]) => [
+      mission,
+      Number(claims || 0),
+    ]),
+    [],
+    ["Claim At", "Mission", "Assigned Mission ID", "Slot", "Reward Amount", "Reward Token"],
+    ...normalizeClaimHistory(bucket.claimHistory).map((entry) => [
+      new Date(entry.at).toISOString(),
+      entry.mission,
+      entry.assignedMissionId || "",
+      entry.slot ?? "",
+      entry.rewardAmount ?? "",
+      entry.rewardToken || "",
+    ]),
+  ];
+  return lines
+    .map((row) => row.map((value) => csvEscape(value)).join(","))
+    .join("\n");
+}
+
+async function exportAnalyticsCsv(rangeKey = "session") {
+  const key = ["session", "24h", "7d", "all"].includes(rangeKey)
+    ? rangeKey
+    : "session";
+  const defaultName = `missions-stats-${key}-${new Date()
+    .toISOString()
+    .slice(0, 10)}.csv`;
+  const result = await dialog.showSaveDialog(controlWindow || undefined, {
+    title: "Export Stats CSV",
+    defaultPath: path.join(getBackendWorkingDirectory(), "data", defaultName),
+    filters: [{ name: "CSV", extensions: ["csv"] }],
+  });
+  if (result.canceled || !result.filePath) {
+    return { ok: false, canceled: true };
+  }
+  fs.mkdirSync(path.dirname(result.filePath), { recursive: true });
+  fs.writeFileSync(result.filePath, buildAnalyticsCsv(key), "utf8");
+  return { ok: true, filePath: result.filePath };
 }
 
 function applyAnalyticsLine(line) {
@@ -3434,6 +3880,15 @@ app.whenReady().then(async () => {
     status: { ...backendStatus },
     logs: logHistory,
   }));
+  ipcMain.handle("analytics:get-view", async (_event, rangeKey = "session") =>
+    analyticsView(rangeKey),
+  );
+  ipcMain.handle("analytics:reset-range", async (_event, rangeKey = "session") =>
+    resetAnalyticsRange(rangeKey),
+  );
+  ipcMain.handle("analytics:export-csv", async (_event, rangeKey = "session") =>
+    exportAnalyticsCsv(rangeKey),
+  );
   ipcMain.handle("config:get", async () => {
     const config = readDesktopConfig();
     if (typeof config.autoUpdateCheckEnabled !== "boolean") {
@@ -3999,6 +4454,9 @@ app.whenReady().then(async () => {
       }));
 
       const missionList = normalizeMissionList(missionsResult || {});
+      const liveGuiSlots = Array.isArray(backendStatus.guiMissionSlots)
+        ? backendStatus.guiMissionSlots
+        : [];
       const slotSummary = missionList
         .map((mission, index) => ({
           id:
@@ -4027,30 +4485,50 @@ app.whenReady().then(async () => {
               mission?.nft_source || mission?.nftSource || "",
             ).toLowerCase() === "rental",
         )
-        .map((mission, index) => ({
-          id:
-            mission?.assignedMissionId ||
-            mission?.assigned_mission_id ||
-            `mission-rental-${index}`,
-          slot: Number.isFinite(Number(mission?.slot))
+        .map((mission, index) => {
+          const missionId = String(
+            mission?.assignedMissionId || mission?.assigned_mission_id || "",
+          ).trim();
+          const slot = Number.isFinite(Number(mission?.slot))
             ? Number(mission.slot)
-            : null,
-          missionName: missionDisplayName(mission),
-          assignedNft: mission?.assigned_nft || mission?.assignedNft || null,
-          image:
-            mission?.assignedNftImage ||
-            mission?.assigned_nft_image ||
-            mission?.nftImage ||
-            mission?.image ||
-            null,
-          rentalLeaseId:
-            mission?.rental_lease_id || mission?.rentalLeaseId || null,
-          currentLevel: Number.isFinite(Number(mission?.current_level))
-            ? Number(mission.current_level)
-            : Number.isFinite(Number(mission?.level))
-              ? Number(mission.level)
-              : null,
-        }));
+            : null;
+          const matchedGuiSlot =
+            liveGuiSlots.find(
+              (entry) =>
+                (missionId &&
+                  (String(entry?.missionId || "").trim() === missionId ||
+                    String(entry?.id || "").trim() === missionId ||
+                    String(entry?.assignedMissionId || "").trim() ===
+                      missionId)) ||
+                (Number.isFinite(slot) && Number(entry?.slot) === slot),
+            ) || null;
+          return {
+            id: missionId || `mission-rental-${index}`,
+            slot,
+            missionName:
+              matchedGuiSlot?.missionName || missionDisplayName(mission),
+            assignedNft:
+              matchedGuiSlot?.assignedNft ||
+              mission?.assigned_nft ||
+              mission?.assignedNft ||
+              null,
+            image:
+              matchedGuiSlot?.assignedNftImage ||
+              matchedGuiSlot?.image ||
+              assignedNftImageFromMission(mission) ||
+              mission?.image ||
+              null,
+            rentalLeaseId:
+              mission?.rental_lease_id || mission?.rentalLeaseId || null,
+            currentLevel: Number.isFinite(Number(mission?.current_level))
+              ? Number(mission.current_level)
+              : Number.isFinite(Number(mission?.level))
+                ? Number(mission.level)
+                : Number.isFinite(Number(matchedGuiSlot?.missionLevel))
+                  ? Number(matchedGuiSlot.missionLevel)
+                  : null,
+          };
+        });
 
       const rentableByCollection = new Map();
       for (const row of rentable) {
