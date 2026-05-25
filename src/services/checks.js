@@ -876,6 +876,53 @@ function createChecksService(ctx, logger, mcp, services = {}) {
         "",
     ).trim();
   }
+
+  function updateMissionLookupCache(result, missions) {
+    const nextLookup = {
+      ...(ctx.lastAssignedMissionLookup &&
+      typeof ctx.lastAssignedMissionLookup === "object"
+        ? ctx.lastAssignedMissionLookup
+        : {}),
+    };
+    let changed = false;
+    for (const mission of Array.isArray(missions) ? missions : []) {
+      const assignedMissionId = String(
+        mission?.assignedMissionId || mission?.assigned_mission_id || "",
+      ).trim();
+      if (!assignedMissionId) continue;
+      const nextEntry = {
+        name: missionName(mission) || null,
+        slot: Number.isFinite(Number(mission?.slot)) ? Number(mission.slot) : null,
+        level: Number.isFinite(Number(mission?.current_level ?? mission?.level))
+          ? Number(mission?.current_level ?? mission?.level)
+          : null,
+        reward:
+          mission?.prize_amount ??
+          mission?.prizeAmount ??
+          mission?.rewardAmount ??
+          mission?.reward_amount ??
+          null,
+        prize: mission?.prize ?? mission?.prizeToken ?? mission?.rewardToken ?? null,
+      };
+      const previous = nextLookup[assignedMissionId];
+      if (
+        !previous ||
+        previous.name !== nextEntry.name ||
+        previous.slot !== nextEntry.slot ||
+        previous.level !== nextEntry.level ||
+        previous.reward !== nextEntry.reward ||
+        previous.prize !== nextEntry.prize
+      ) {
+        nextLookup[assignedMissionId] = nextEntry;
+        changed = true;
+      }
+    }
+    ctx.lastUserMissionsResult = result;
+    ctx.lastUserMissionsFetchedAt = Date.now();
+    if (changed || !ctx.lastAssignedMissionLookup) {
+      ctx.lastAssignedMissionLookup = nextLookup;
+    }
+  }
   function missionLevel(mission) {
     const raw = mission?.current_level ?? mission?.level ?? null;
     const n = Number(raw);
@@ -4267,6 +4314,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
       const result =
         missionsResult || (await mcp.mcpToolCall("get_user_missions", {}));
       const missions = normalizeMissionList(result);
+      updateMissionLookupCache(result, missions);
       if (syncTargetsFromAssigned) {
         syncConfiguredTargetMissionsFromAssigned(missions, syncReason);
       }

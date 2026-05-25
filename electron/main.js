@@ -2076,6 +2076,7 @@ function resolveMissionLabelFromPayload(payload = {}) {
     const byId =
       guiSlots.find(
         (entry) =>
+          String(entry?.missionId || "").trim() === assignedMissionId ||
           String(entry?.id || "").trim() === assignedMissionId ||
           String(entry?.assignedMissionId || "").trim() === assignedMissionId,
       ) || null;

@@ -58,6 +58,67 @@ function createWatchService(
     ).trim();
   }
 
+  function looksLikeOpaqueMissionId(value) {
+    const text = String(value || "").trim();
+    if (!text) return false;
+    return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+      text,
+    );
+  }
+
+  function resolveClaimDisplayName({
+    missionName: providedMissionName = "",
+    assignedMissionId = "",
+    slot = null,
+  } = {}) {
+    const directName = missionName({ missionName: providedMissionName });
+    if (directName && !looksLikeOpaqueMissionId(directName)) return directName;
+
+    const wantedId = String(assignedMissionId || "").trim();
+    const slotNumber = Number(slot);
+    const cachedLookup =
+      ctx.lastAssignedMissionLookup && typeof ctx.lastAssignedMissionLookup === "object"
+        ? ctx.lastAssignedMissionLookup
+        : {};
+    const guiSlots = Array.isArray(ctx.guiMissionSlots) ? ctx.guiMissionSlots : [];
+
+    if (wantedId) {
+      const cached = cachedLookup[wantedId];
+      const cachedName = missionName(cached);
+      if (cachedName && !looksLikeOpaqueMissionId(cachedName)) return cachedName;
+    }
+
+    if (wantedId) {
+      const byId =
+        guiSlots.find(
+          (entry) =>
+            String(entry?.missionId || "").trim() === wantedId ||
+            String(entry?.assignedMissionId || "").trim() === wantedId ||
+            String(entry?.id || "").trim() === wantedId,
+        ) || null;
+      const byIdName = missionName(byId);
+      if (byIdName && !looksLikeOpaqueMissionId(byIdName)) return byIdName;
+    }
+
+    if (Number.isFinite(slotNumber) && slotNumber >= 1) {
+      const cachedBySlot =
+        Object.values(cachedLookup).find(
+          (entry) => Number(entry?.slot) === Math.floor(slotNumber),
+        ) || null;
+      const cachedSlotName = missionName(cachedBySlot);
+      if (cachedSlotName && !looksLikeOpaqueMissionId(cachedSlotName)) {
+        return cachedSlotName;
+      }
+      const bySlot =
+        guiSlots.find((entry) => Number(entry?.slot) === Math.floor(slotNumber)) ||
+        null;
+      const bySlotName = missionName(bySlot);
+      if (bySlotName && !looksLikeOpaqueMissionId(bySlotName)) return bySlotName;
+    }
+
+    return "";
+  }
+
   function missionPageCooldownMs() {
     const sec = Number(ctx.config?.missionPageOpenCooldownSeconds);
     if (Number.isFinite(sec) && sec > 0) return Math.floor(sec * 1000);
@@ -616,11 +677,16 @@ function createWatchService(
       } else {
         successCount += 1;
         if (ctx.guiBridge && typeof ctx.guiBridge.sendEvent === "function") {
+          const label = resolveClaimDisplayName({
+            missionName: d.name,
+            assignedMissionId: d.missionId,
+            slot: d.slot,
+          });
           ctx.guiBridge.sendEvent("stats_claim", {
             source: "watch_claims",
             at: Date.now(),
             assignedMissionId: d.missionId || null,
-            missionName: d.name || d.missionId || "unknown mission",
+            missionName: label || null,
             slot: d.slot ?? null,
             level: d.level ?? null,
             rewardAmount: d.reward ?? null,
@@ -1045,11 +1111,16 @@ function createWatchService(
           ? ""
           : ` -> lvl=${Number(entry.toLevel || 0)}`;
       if (ctx.guiBridge && typeof ctx.guiBridge.sendEvent === "function") {
+        const label = resolveClaimDisplayName({
+          missionName: d.name || entry?.name,
+          assignedMissionId: d.missionId || entry?.assignedMissionId || entry?.id,
+          slot: d.slot ?? entry?.slot ?? null,
+        });
         ctx.guiBridge.sendEvent("stats_claim", {
           source: String(prefix || "").replace(/^\[WATCH\]\s+✅\s+/, ""),
           at: Date.now(),
           assignedMissionId: d.missionId || entry?.assignedMissionId || entry?.id || null,
-          missionName: missionText,
+          missionName: label || null,
           slot: d.slot ?? entry?.slot ?? null,
           level: entry?.fromLevel ?? null,
           rewardAmount: d.reward ?? null,

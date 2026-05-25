@@ -45,6 +45,7 @@ function createContext() {
     mcpRateLimitReason: null,
     lastUserMissionsResult: null,
     lastUserMissionsFetchedAt: 0,
+    lastAssignedMissionLookup: {},
     currentUserDisplayName: "unknown",
     currentUserWalletId: "unknown",
     currentUserWalletSummary: null,

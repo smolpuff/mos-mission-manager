@@ -531,6 +531,106 @@ function createSignerService(ctx, logger) {
     }
   }
 
+  async function runWindowsPowerShellDiagnostic() {
+    const result = {
+      available: false,
+      version: null,
+      modulePath: null,
+      securityModule: {
+        listable: false,
+        importOk: false,
+        error: null,
+      },
+    };
+    if (process.platform !== "win32") return result;
+    try {
+      result.version = (
+        await execFileAsync("powershell", [
+          "-NoProfile",
+          "-NonInteractive",
+          "-Command",
+          "$PSVersionTable.PSVersion.ToString()",
+        ])
+      ).trim();
+      result.available = true;
+    } catch (error) {
+      result.securityModule.error = error.message;
+      return result;
+    }
+    try {
+      result.modulePath = (
+        await execFileAsync("powershell", [
+          "-NoProfile",
+          "-NonInteractive",
+          "-Command",
+          "$env:PSModulePath",
+        ])
+      ).trim();
+    } catch {}
+    try {
+      const listed = (
+        await execFileAsync("powershell", [
+          "-NoProfile",
+          "-NonInteractive",
+          "-Command",
+          "(Get-Module -ListAvailable Microsoft.PowerShell.Security | Select-Object -First 1 -ExpandProperty Path)",
+        ])
+      ).trim();
+      result.securityModule.listable = Boolean(listed);
+    } catch {}
+    try {
+      await execFileAsync("powershell", [
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        "Import-Module Microsoft.PowerShell.Security -Force; Get-Command ConvertTo-SecureString | Out-Null",
+      ]);
+      result.securityModule.importOk = true;
+    } catch (error) {
+      result.securityModule.error = error.message;
+    }
+    return result;
+  }
+
+  function windowsSystemPowerShellModulePath(env = process.env) {
+    const systemRoot = String(
+      env?.SystemRoot || process.env.SystemRoot || "C:\\WINDOWS",
+    ).trim();
+    const programFiles = String(
+      env?.ProgramFiles || process.env.ProgramFiles || "C:\\Program Files",
+    ).trim();
+    return [
+      path.join(programFiles, "WindowsPowerShell", "Modules"),
+      path.join(systemRoot, "System32", "WindowsPowerShell", "v1.0", "Modules"),
+    ].join(path.delimiter);
+  }
+
+  async function execWindowsPowerShellWithDpapiFallback(args, opts = {}) {
+    try {
+      return await execFileAsync("powershell", args, opts);
+    } catch (error) {
+      const message = String(error?.message || "");
+      const shouldRetry =
+        /Microsoft\.PowerShell\.Security/i.test(message) ||
+        /ConvertTo-SecureString/i.test(message) ||
+        /ConvertFrom-SecureString/i.test(message) ||
+        /CouldNotAutoLoadModule/i.test(message) ||
+        /CommandNotFoundException/i.test(message) ||
+        /TypesToProcess/i.test(message);
+      if (!shouldRetry) throw error;
+      return await execFileAsync("powershell", args, {
+        ...opts,
+        env: {
+          ...(opts?.env || {}),
+          PSModulePath: windowsSystemPowerShellModulePath({
+            ...process.env,
+            ...(opts?.env || {}),
+          }),
+        },
+      });
+    }
+  }
+
   async function writeVaultKeyToSecureStorage(vaultKey) {
     const provider = secureStorageProvider();
     const encoded = vaultKey.toString("base64");
@@ -561,17 +661,37 @@ function createSignerService(ctx, logger) {
         "$enc=ConvertFrom-SecureString -SecureString $secure; " +
         "if (-not $enc) { throw 'Vault key encryption failed.' }; " +
         "[Console]::Out.Write($enc);";
-      const encrypted = (
-        await execFileAsync(
-          "powershell",
-          ["-NoProfile", "-NonInteractive", "-Command", script],
-          {
-            env: {
-              SIGNER_VAULT_KEY_B64: encoded,
+      let encrypted = "";
+      try {
+        encrypted = (
+          await execWindowsPowerShellWithDpapiFallback(
+            ["-NoProfile", "-NonInteractive", "-Command", script],
+            {
+              env: {
+                SIGNER_VAULT_KEY_B64: encoded,
+              },
             },
-          },
-        )
-      ).trim();
+          )
+        ).trim();
+      } catch (error) {
+        const diag = await runWindowsPowerShellDiagnostic();
+        throw new Error(
+          [
+            error.message,
+            `[windows_dpapi] psVersion=${diag.version || "unknown"}`,
+            `[windows_dpapi] securityModule.listable=${diag.securityModule.listable}`,
+            `[windows_dpapi] securityModule.importOk=${diag.securityModule.importOk}`,
+            diag.modulePath
+              ? `[windows_dpapi] PSModulePath=${diag.modulePath}`
+              : null,
+            diag.securityModule.error
+              ? `[windows_dpapi] moduleError=${diag.securityModule.error}`
+              : null,
+          ]
+            .filter(Boolean)
+            .join("\n"),
+        );
+      }
       if (!encrypted) {
         throw new Error("Vault key encryption output is empty.");
       }
@@ -659,15 +779,35 @@ function createSignerService(ctx, logger) {
         "try { $plain=[Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr) } finally { if ($bstr -ne [IntPtr]::Zero) { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr) } }; " +
         "if (-not $plain) { throw 'Vault key decrypt failed.' }; " +
         "[Console]::Out.Write($plain);";
-      const stdout = await execFileAsync(
-        "powershell",
-        ["-NoProfile", "-NonInteractive", "-Command", script],
-        {
-          env: {
-            SIGNER_VAULT_KEY_FILE: file,
+      let stdout = "";
+      try {
+        stdout = await execWindowsPowerShellWithDpapiFallback(
+          ["-NoProfile", "-NonInteractive", "-Command", script],
+          {
+            env: {
+              SIGNER_VAULT_KEY_FILE: file,
+            },
           },
-        },
-      );
+        );
+      } catch (error) {
+        const diag = await runWindowsPowerShellDiagnostic();
+        throw new Error(
+          [
+            error.message,
+            `[windows_dpapi] psVersion=${diag.version || "unknown"}`,
+            `[windows_dpapi] securityModule.listable=${diag.securityModule.listable}`,
+            `[windows_dpapi] securityModule.importOk=${diag.securityModule.importOk}`,
+            diag.modulePath
+              ? `[windows_dpapi] PSModulePath=${diag.modulePath}`
+              : null,
+            diag.securityModule.error
+              ? `[windows_dpapi] moduleError=${diag.securityModule.error}`
+              : null,
+          ]
+            .filter(Boolean)
+            .join("\n"),
+        );
+      }
       return String(stdout || "").trim();
     }
     if (provider === "linux_secret_service") {
@@ -1539,6 +1679,10 @@ function createSignerService(ctx, logger) {
     const provider = secureStorageProvider();
     const keyStoreFile =
       provider === "windows_dpapi" ? keyStoreFileRelative() : null;
+    const windowsPowerShell =
+      provider === "windows_dpapi"
+        ? await runWindowsPowerShellDiagnostic()
+        : null;
     const diagnostics = {
       platform: process.platform,
       signerMode: ctx.signerMode,
@@ -1558,15 +1702,11 @@ function createSignerService(ctx, logger) {
         provider === "macos_keychain"
           ? fs.existsSync("/usr/bin/security")
           : provider === "windows_dpapi"
-            ? await checkCommandAvailable("powershell", [
-                "-NoProfile",
-                "-NonInteractive",
-                "-Command",
-                "$PSVersionTable.PSVersion.ToString()",
-              ])
+            ? windowsPowerShell?.available === true
             : provider === "linux_secret_service"
               ? await checkCommandAvailable("secret-tool", ["--help"])
               : false,
+      windowsPowerShell,
       vaultVersion: vault?.version ?? null,
       vaultAlgorithm: vault?.algorithm ?? null,
       unlockFailures: ctx.signerUnlockFailures || 0,
@@ -1584,6 +1724,16 @@ function createSignerService(ctx, logger) {
       logWithTimestamp(
         `[SIGNER] ❌ Required secure-storage backend is unavailable: ${diagnostics.secureStorageDisplayName()}`,
       );
+    }
+    if (windowsPowerShell && windowsPowerShell.available) {
+      logWithTimestamp(
+        `[SIGNER] doctor powershell version=${windowsPowerShell.version || "unknown"} importOk=${windowsPowerShell.securityModule.importOk} listable=${windowsPowerShell.securityModule.listable}`,
+      );
+      if (windowsPowerShell.securityModule.importOk !== true) {
+        logWithTimestamp(
+          `[SIGNER] doctor moduleError=${windowsPowerShell.securityModule.error || "unknown"}`,
+        );
+      }
     }
     return diagnostics;
   }

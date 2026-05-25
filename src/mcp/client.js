@@ -1,6 +1,7 @@
 "use strict";
 
 const fs = require("fs");
+const { normalizeMissionList } = require("../missions/normalize");
 const {
   login: mcpLogin,
   refreshAccessToken,
@@ -77,6 +78,66 @@ function createMcpClient(ctx, logger) {
 
   function sleep(ms) {
     return new Promise((resolve) => setTimeout(resolve, Math.max(0, ms || 0)));
+  }
+
+  function missionName(mission) {
+    return String(
+      mission?.missionName ||
+        mission?.name ||
+        mission?.mission_name ||
+        mission?.title ||
+        mission?.mission ||
+        mission?.label ||
+        "",
+    ).trim();
+  }
+
+  function updateMissionLookupCache(result) {
+    const missions = normalizeMissionList(result);
+    const nextLookup = {
+      ...(ctx.lastAssignedMissionLookup &&
+      typeof ctx.lastAssignedMissionLookup === "object"
+        ? ctx.lastAssignedMissionLookup
+        : {}),
+    };
+    let changed = false;
+    for (const mission of missions) {
+      const assignedMissionId = String(
+        mission?.assignedMissionId || mission?.assigned_mission_id || "",
+      ).trim();
+      if (!assignedMissionId) continue;
+      const nextEntry = {
+        name: missionName(mission) || null,
+        slot: Number.isFinite(Number(mission?.slot)) ? Number(mission.slot) : null,
+        level: Number.isFinite(Number(mission?.current_level ?? mission?.level))
+          ? Number(mission?.current_level ?? mission?.level)
+          : null,
+        reward:
+          mission?.prize_amount ??
+          mission?.prizeAmount ??
+          mission?.rewardAmount ??
+          mission?.reward_amount ??
+          null,
+        prize: mission?.prize ?? mission?.prizeToken ?? mission?.rewardToken ?? null,
+      };
+      const previous = nextLookup[assignedMissionId];
+      if (
+        !previous ||
+        previous.name !== nextEntry.name ||
+        previous.slot !== nextEntry.slot ||
+        previous.level !== nextEntry.level ||
+        previous.reward !== nextEntry.reward ||
+        previous.prize !== nextEntry.prize
+      ) {
+        nextLookup[assignedMissionId] = nextEntry;
+        changed = true;
+      }
+    }
+    ctx.lastUserMissionsResult = result;
+    ctx.lastUserMissionsFetchedAt = Date.now();
+    if (changed || !ctx.lastAssignedMissionLookup) {
+      ctx.lastAssignedMissionLookup = nextLookup;
+    }
   }
 
   function parseRetryAfterSeconds(value) {
@@ -376,6 +437,15 @@ function createMcpClient(ctx, logger) {
 
     try {
       const result = await runOnce();
+      if (toolName === "get_user_missions" && result && typeof result === "object") {
+        try {
+          updateMissionLookupCache(result);
+        } catch (cacheError) {
+          logDebug("mcp", "mission_cache_update_failed", {
+            error: cacheError.message,
+          });
+        }
+      }
       logDebug("tool", "call_ok", { toolName });
       ctx.mcpRateLimitReason = null;
       setMcpConnection("connected");
@@ -408,6 +478,15 @@ function createMcpClient(ctx, logger) {
       const refreshed = await recoverAuthAfterRefreshFailure("auth_failure");
       if (!refreshed) throw error;
       const result = await runOnce();
+      if (toolName === "get_user_missions" && result && typeof result === "object") {
+        try {
+          updateMissionLookupCache(result);
+        } catch (cacheError) {
+          logDebug("mcp", "mission_cache_update_failed", {
+            error: cacheError.message,
+          });
+        }
+      }
       logDebug("tool", "call_ok_after_refresh", { toolName });
       setMcpConnection("connected");
       return result;
