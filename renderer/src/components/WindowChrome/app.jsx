@@ -1,7 +1,7 @@
-import React, { useEffect, useRef } from "react";
+import { useEffect, useRef } from "react";
 import useDesktopBridge from "../useDesktopBridge";
 
-export default function WindowChrome({ title, subtitle, styling }) {
+export default function WindowChrome({ title, styling }) {
   const bridge = useDesktopBridge();
   const isWindows = bridge?.platform === "win32";
   const dragStateRef = useRef({

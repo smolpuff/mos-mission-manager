@@ -54,7 +54,6 @@ const commands = createCommandHandler(
 const STARTUP_FX_ENABLED = !ctx.plainOutputMode;
 const STARTUP_FX_FRAME_MS = 95;
 const STARTUP_PROGRESS_PULSE_MS = 220;
-const WATCH_START_DELAY_MS = 2000;
 
 function createGuiStateEmitter(ctx) {
   let last = null;

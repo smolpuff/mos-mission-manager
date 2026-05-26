@@ -1354,13 +1354,6 @@ function beginAnalyticsSession({ force = false } = {}) {
   return current;
 }
 
-function shouldServeCachedPagePreview(cachedAt) {
-  return (
-    Number.isFinite(Number(cachedAt)) &&
-    Date.now() - Number(cachedAt) <= PAGE_PREVIEW_CACHE_TTL_MS
-  );
-}
-
 function shouldServeCachedRentalsPreview(cachedAt) {
   return (
     Number.isFinite(Number(cachedAt)) &&
@@ -2746,55 +2739,6 @@ function assignedNftImageFromMission(mission = {}) {
     deepFindImageUrl(mission?.metadata) ||
     deepFindImageUrl(mission)
   );
-}
-
-function slotSummaryFromMissionList(
-  missionList = [],
-  nftByAccount = new Map(),
-) {
-  return missionList
-    .map((mission, index) => {
-      const assignedAccount = String(
-        missionAssignedNftAccount(mission) || "",
-      ).trim();
-      const matchedNft = assignedAccount
-        ? nftByAccount.get(assignedAccount)
-        : null;
-      return {
-        id:
-          mission?.assignedMissionId ||
-          mission?.assigned_mission_id ||
-          `slot-${index}`,
-        slot: Number.isFinite(Number(mission?.slot))
-          ? Number(mission.slot)
-          : null,
-        missionName: missionDisplayName(mission),
-        assignedNft: mission?.assigned_nft || mission?.assignedNft || null,
-        assignedNftAccount: assignedAccount || null,
-        nftSource: mission?.nft_source || mission?.nftSource || null,
-        rentalLeaseId:
-          mission?.rental_lease_id || mission?.rentalLeaseId || null,
-        missionLevel: Number.isFinite(Number(mission?.current_level))
-          ? Number(mission.current_level)
-          : Number.isFinite(Number(mission?.level))
-            ? Number(mission.level)
-            : null,
-        nftImage:
-          assignedNftImageFromMission(mission) ||
-          assignedNftImageFromMission(matchedNft) ||
-          null,
-        assignedNftImage:
-          assignedNftImageFromMission(mission) ||
-          assignedNftImageFromMission(matchedNft) ||
-          null,
-        image:
-          assignedNftImageFromMission(mission) ||
-          assignedNftImageFromMission(matchedNft) ||
-          mission?.image ||
-          null,
-      };
-    })
-    .sort((a, b) => Number(a.slot || 99) - Number(b.slot || 99));
 }
 
 function missionRewardLabel(mission = {}) {

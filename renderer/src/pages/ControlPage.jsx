@@ -2507,7 +2507,6 @@ function ControlView() {
     <main className="shell">
       <WindowChrome
         title="missions-v3-mcp"
-        subtitle="vibed by a tiny giraffe"
         styling="min-w-full"
       />
 
@@ -2521,9 +2520,7 @@ function ControlView() {
         />
         <div className="main-wrapper  h-full">
           <HeaderUser
-            lockLabel={lockLabel}
             status={status}
-            debug={debug}
             isAuthenticated={status.isAuthenticated}
             manualCheckBusy={manualCheckBusy}
             onManualClaim={() => {
@@ -5266,7 +5263,7 @@ function CliView() {
 
   return (
     <main className="cli-shell">
-      <WindowChrome title="CLI Bridge" subtitle="Manual Control" />
+      <WindowChrome title="CLI Bridge" />
       <div className="cli-drag-strip" aria-hidden="true" />
 
       <section className=" flex-1  ">

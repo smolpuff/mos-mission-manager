@@ -14,14 +14,6 @@ function asNumber(value, fallback = 0) {
   return Number.isFinite(n) ? n : fallback;
 }
 
-function formatAge(hours) {
-  const n = Number(hours);
-  if (!Number.isFinite(n) || n <= 0) return "n/a";
-  if (n < 1) return `${Math.max(1, Math.round(n * 60))}m`;
-  if (n < 24) return `${formatNumber(n, 1)}h`;
-  return `${formatNumber(n / 24, 1)}d`;
-}
-
 function missionName(value) {
   return String(value || "unknown mission").trim() || "unknown mission";
 }

@@ -1,12 +1,9 @@
-import React from "react";
 import solIcon from "../../img/icon-sm__sol.svg";
 import pbpIcon from "../../img/icon-sm__pbp.webp";
 import StatusBadge from "../StatusBadge/app";
 
 export default function HeaderUser({
-  lockLabel,
   status,
-  debug,
   isAuthenticated,
   onManualClaim,
   manualCheckBusy = false,

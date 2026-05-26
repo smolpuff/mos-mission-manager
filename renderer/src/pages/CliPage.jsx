@@ -2,9 +2,6 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import WindowChrome from "../components/WindowChrome/app";
 import useBackendState from "../components/useBackendState/app";
 
-const debug = false;
-const quickCommands = ["login", "logout", "check", "pause", "resume", "status", "r", "c"];
-
 export default function CliPage() {
   const { bridge, status, logs } = useBackendState();
   const [command, setCommand] = useState("");
@@ -142,7 +139,7 @@ export default function CliPage() {
         flexDirection: "column",
       }}
     >
-      <WindowChrome title="CLI Bridge" subtitle="Manual Control" />
+      <WindowChrome title="CLI Bridge" />
       <div className="cli-drag-strip z-10" aria-hidden="true" />
 
       <section className="flex-1" style={{ minHeight: 0, overflow: "hidden" }}>
@@ -198,26 +195,6 @@ export default function CliPage() {
           </form>
         </div>
       </section>
-
-      {debug && (
-        <section className="panel">
-          <div className="panel-header">
-            <h2>Quick Commands</h2>
-            <span className="badge badge-outline">Raw stdin</span>
-          </div>
-          <div className="quick-row">
-            {quickCommands.map((item) => (
-              <button
-                className="btn btn-sm btn-ghost"
-                key={item}
-                onClick={() => submitCommand(item)}
-              >
-                {item}
-              </button>
-            ))}
-          </div>
-        </section>
-      )}
     </main>
   );
 }
