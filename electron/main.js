@@ -284,7 +284,9 @@ function normalizeClaimHistory(raw) {
         assignedMissionId: assignedMissionId || null,
         slot: Number.isFinite(slot) ? slot : null,
         rewardAmount:
-          Number.isFinite(rewardAmount) && rewardAmount > 0 ? rewardAmount : null,
+          Number.isFinite(rewardAmount) && rewardAmount > 0
+            ? rewardAmount
+            : null,
         rewardToken: rewardToken || null,
       };
     })
@@ -335,7 +337,9 @@ function normalizeRentalHistory(raw) {
   return raw
     .map((entry) => {
       const at = Number(entry?.at);
-      const source = String(entry?.source || "").trim().toLowerCase();
+      const source = String(entry?.source || "")
+        .trim()
+        .toLowerCase();
       return {
         at: Number.isFinite(at) ? at : null,
         source: source || null,
@@ -350,7 +354,9 @@ function normalizeAssignmentHistory(raw) {
   return raw
     .map((entry) => {
       const at = Number(entry?.at);
-      const source = String(entry?.source || "").trim().toLowerCase();
+      const source = String(entry?.source || "")
+        .trim()
+        .toLowerCase();
       const nft = String(entry?.nft || "").trim() || null;
       return {
         at: Number.isFinite(at) ? at : null,
@@ -1647,10 +1653,15 @@ function applyAnalyticsClaimEvent(payload = {}) {
       at: Number.isFinite(at) ? at : Date.now(),
       claims: current.lifetime.totalClaims,
       mission,
-      assignedMissionId: String(payload?.assignedMissionId || "").trim() || null,
-      slot: Number.isFinite(Number(payload?.slot)) ? Number(payload.slot) : null,
+      assignedMissionId:
+        String(payload?.assignedMissionId || "").trim() || null,
+      slot: Number.isFinite(Number(payload?.slot))
+        ? Number(payload.slot)
+        : null,
       rewardAmount:
-        reward.amount > 0 && Number.isFinite(reward.amount) ? reward.amount : null,
+        reward.amount > 0 && Number.isFinite(reward.amount)
+          ? reward.amount
+          : null,
       rewardToken: reward.token || null,
     },
   ]);
@@ -1660,10 +1671,15 @@ function applyAnalyticsClaimEvent(payload = {}) {
       at: Number.isFinite(at) ? at : Date.now(),
       claims: current.session.totalClaims,
       mission,
-      assignedMissionId: String(payload?.assignedMissionId || "").trim() || null,
-      slot: Number.isFinite(Number(payload?.slot)) ? Number(payload.slot) : null,
+      assignedMissionId:
+        String(payload?.assignedMissionId || "").trim() || null,
+      slot: Number.isFinite(Number(payload?.slot))
+        ? Number(payload.slot)
+        : null,
       rewardAmount:
-        reward.amount > 0 && Number.isFinite(reward.amount) ? reward.amount : null,
+        reward.amount > 0 && Number.isFinite(reward.amount)
+          ? reward.amount
+          : null,
       rewardToken: reward.token || null,
     },
   ]);
@@ -1795,11 +1811,19 @@ function applyAnalyticsAssignmentEvent(payload = {}) {
   current.session.nftResetUsage[usageBucket].assigned += 1;
   current.lifetime.assignmentHistory = normalizeAssignmentHistory([
     ...(current.lifetime.assignmentHistory || []),
-    { at: Date.now(), source: usageBucket, nft: payload?.nft || payload?.nftName },
+    {
+      at: Date.now(),
+      source: usageBucket,
+      nft: payload?.nft || payload?.nftName,
+    },
   ]);
   current.session.assignmentHistory = normalizeAssignmentHistory([
     ...(current.session.assignmentHistory || []),
-    { at: Date.now(), source: usageBucket, nft: payload?.nft || payload?.nftName },
+    {
+      at: Date.now(),
+      source: usageBucket,
+      nft: payload?.nft || payload?.nftName,
+    },
   ]);
   saveAnalytics(current);
   trackFeatureUsage("nft_reset_assignment", {
@@ -1813,7 +1837,9 @@ function analyticsBucketFromRange(bucket = {}, rangeKey = "session") {
   const src = bucket && typeof bucket === "object" ? bucket : {};
   if (rangeKey === "session") {
     return {
-      startedAt: Number.isFinite(Number(src.startedAt)) ? Number(src.startedAt) : Date.now(),
+      startedAt: Number.isFinite(Number(src.startedAt))
+        ? Number(src.startedAt)
+        : Date.now(),
       totalClaims: Number(src.totalClaims || 0) || 0,
       totalResets: Number(src.totalResets || 0) || 0,
       totalResetCostPbp: Number(src.totalResetCostPbp || 0) || 0,
@@ -1866,7 +1892,8 @@ function analyticsBucketFromRange(bucket = {}, rangeKey = "session") {
   }
   const spendByAction = {};
   for (const entry of spendHistory) {
-    spendByAction[entry.action] = Number(spendByAction[entry.action] || 0) + Number(entry.amount || 0);
+    spendByAction[entry.action] =
+      Number(spendByAction[entry.action] || 0) + Number(entry.amount || 0);
   }
   const resetTypes = { mission: 0, nft: 0 };
   const nftResetUsage = {
@@ -1919,7 +1946,9 @@ function rebuildAnalyticsBucketFromHistories(bucket = {}) {
   const spendHistory = normalizeSpendHistory(bucket.spendHistory);
   const resetHistory = normalizeResetHistory(bucket.resetHistory);
   const rentalHistory = normalizeRentalHistory(bucket.rentalHistory);
-  const assignmentHistory = normalizeAssignmentHistory(bucket.assignmentHistory);
+  const assignmentHistory = normalizeAssignmentHistory(
+    bucket.assignmentHistory,
+  );
   const currencyEarned = { pbp: 0, tc: 0, cc: 0 };
   const missionClaims = {};
   for (const entry of claimHistory) {
@@ -1982,7 +2011,9 @@ function rebuildAnalyticsBucketFromHistories(bucket = {}) {
 }
 
 function analyticsView(rangeKey = "session") {
-  const analytics = normalizeAnalytics(backendStatus.analytics || loadAnalytics());
+  const analytics = normalizeAnalytics(
+    backendStatus.analytics || loadAnalytics(),
+  );
   const key = ["session", "24h", "7d", "all"].includes(rangeKey)
     ? rangeKey
     : "session";
@@ -2000,7 +2031,9 @@ function analyticsView(rangeKey = "session") {
 }
 
 function resetAnalyticsRange(rangeKey = "session") {
-  const current = normalizeAnalytics(backendStatus.analytics || loadAnalytics());
+  const current = normalizeAnalytics(
+    backendStatus.analytics || loadAnalytics(),
+  );
   const key = ["session", "24h", "7d", "all"].includes(rangeKey)
     ? rangeKey
     : "session";
@@ -2076,7 +2109,12 @@ function buildAnalyticsCsv(rangeKey = "session") {
   const bucket = view.analytics || {};
   const lines = [
     ["Range", view.rangeKey],
-    ["Started At", Number(bucket.startedAt) > 0 ? new Date(bucket.startedAt).toISOString() : ""],
+    [
+      "Started At",
+      Number(bucket.startedAt) > 0
+        ? new Date(bucket.startedAt).toISOString()
+        : "",
+    ],
     ["Claims", Number(bucket.totalClaims || 0)],
     ["Mission Resets", Number(bucket?.resetTypes?.mission || 0)],
     ["NFT Resets", Number(bucket?.resetTypes?.nft || 0)],
@@ -2093,7 +2131,14 @@ function buildAnalyticsCsv(rangeKey = "session") {
       Number(claims || 0),
     ]),
     [],
-    ["Claim At", "Mission", "Assigned Mission ID", "Slot", "Reward Amount", "Reward Token"],
+    [
+      "Claim At",
+      "Mission",
+      "Assigned Mission ID",
+      "Slot",
+      "Reward Amount",
+      "Reward Token",
+    ],
     ...normalizeClaimHistory(bucket.claimHistory).map((entry) => [
       new Date(entry.at).toISOString(),
       entry.mission,
@@ -2614,7 +2659,8 @@ function resolveMissionLabelFromPayload(payload = {}) {
 
   if (Number.isFinite(slot) && slot >= 1) {
     const bySlot =
-      guiSlots.find((entry) => Number(entry?.slot) === Math.floor(slot)) || null;
+      guiSlots.find((entry) => Number(entry?.slot) === Math.floor(slot)) ||
+      null;
     const bySlotName = String(missionDisplayName(bySlot)).trim();
     if (bySlotName && !looksLikeOpaqueMissionId(bySlotName)) {
       return bySlotName;
@@ -3675,10 +3721,16 @@ async function runCompetitionRangeLockCycle() {
     const rank = Number(currentRow.rank);
     const detail = `rank=${rank} threshold<=${topRank} player=${String(currentRow.player || "unknown").trim() || "unknown"}`;
     if (rank <= topRank) {
-      await applyCompetitionRangeLockAction("pause", `${detail} at/above lock threshold`);
+      await applyCompetitionRangeLockAction(
+        "pause",
+        `${detail} at/above lock threshold`,
+      );
       return;
     }
-    await applyCompetitionRangeLockAction("resume", `${detail} below lock threshold`);
+    await applyCompetitionRangeLockAction(
+      "resume",
+      `${detail} below lock threshold`,
+    );
   } catch (error) {
     pushSystemLog(
       `[COMP LOCK] Poll failed: ${String(error?.message || error)}`,
@@ -3852,8 +3904,8 @@ function createSplashWindow() {
         gap: 0;
       }
       .track {
-        width: 224px;
-        height: 6px;
+        width: 200px;
+        height: 14px;
         overflow: hidden;
         position: relative;
         border-radius: 999px;
@@ -3873,9 +3925,6 @@ function createSplashWindow() {
           #D496EB 75%,
           #E3BFF1 100%
         );
-        box-shadow:
-          0 0 14px rgba(156, 135, 219, 0.18),
-          inset 0 0 6px rgba(255, 255, 255, 0.16);
       }
       .fill-mask {
         position: absolute;
@@ -3894,7 +3943,7 @@ function createSplashWindow() {
         top: 50%;
         transform: translate(-50%, -50%);
         z-index: 3;
-        font-size: 9px;
+        font-size: 10px;
         line-height: 1;
         color: rgba(241, 241, 241, 0.95);
         text-shadow: 0 1px 2px rgba(0, 0, 0, 0.55);
@@ -4000,8 +4049,9 @@ app.whenReady().then(async () => {
   ipcMain.handle("analytics:get-view", async (_event, rangeKey = "session") =>
     analyticsView(rangeKey),
   );
-  ipcMain.handle("analytics:reset-range", async (_event, rangeKey = "session") =>
-    resetAnalyticsRange(rangeKey),
+  ipcMain.handle(
+    "analytics:reset-range",
+    async (_event, rangeKey = "session") => resetAnalyticsRange(rangeKey),
   );
   ipcMain.handle("analytics:export-csv", async (_event, rangeKey = "session") =>
     exportAnalyticsCsv(rangeKey),
@@ -4184,7 +4234,11 @@ app.whenReady().then(async () => {
         // Don't crash the renderer on RPC rate limits; keep the last known good summary.
         const message = String(error?.message || error);
         pushSystemLog(`Funding wallet summary refresh failed: ${message}`);
-        if (/rate limited|http 429|too many requests|retry after|retry in/i.test(message)) {
+        if (
+          /rate limited|http 429|too many requests|retry after|retry in/i.test(
+            message,
+          )
+        ) {
           publishThrottleNotice({
             source: "rpc",
             trigger: "funding_wallet_refresh",
