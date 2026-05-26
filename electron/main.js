@@ -85,6 +85,9 @@ let controlWindow = null;
 let cliWindow = null;
 let splashWindow = null;
 let backend = null;
+let splashProgressCurrent = 0;
+let splashProgressTarget = 0;
+let splashProgressTimer = null;
 let stopTimer = null;
 let logHistory = [];
 const pendingBackendRequests = new Map();
@@ -569,6 +572,58 @@ function logConfigPatch(source, patch = {}) {
 
 function publishStatus() {
   publish("backend:status", { ...backendStatus });
+}
+
+function sendSplashProgressToWindow(progress) {
+  if (!splashWindow || splashWindow.isDestroyed()) return;
+  const safeProgress = Math.max(0, Math.min(100, Number(progress) || 0));
+  splashWindow.webContents
+    .executeJavaScript(
+      `window.__updateSplashProgress__ && window.__updateSplashProgress__(${JSON.stringify({ progress: safeProgress })});`,
+      true,
+    )
+    .catch(() => {});
+}
+
+function stopSplashProgressTimer() {
+  if (!splashProgressTimer) return;
+  clearInterval(splashProgressTimer);
+  splashProgressTimer = null;
+}
+
+function ensureSplashProgressTimer() {
+  if (splashProgressTimer) return;
+  splashProgressTimer = setInterval(() => {
+    if (!splashWindow || splashWindow.isDestroyed()) {
+      stopSplashProgressTimer();
+      return;
+    }
+    if (splashProgressCurrent >= splashProgressTarget) {
+      if (splashProgressCurrent >= 100) {
+        stopSplashProgressTimer();
+      }
+      return;
+    }
+    const gap = splashProgressTarget - splashProgressCurrent;
+    const step = gap > 20 ? 4 : gap > 10 ? 3 : gap > 4 ? 2 : 1;
+    splashProgressCurrent = Math.min(
+      splashProgressTarget,
+      splashProgressCurrent + step,
+    );
+    sendSplashProgressToWindow(splashProgressCurrent);
+    if (splashProgressCurrent >= 100 && splashProgressTarget >= 100) {
+      stopSplashProgressTimer();
+    }
+  }, 40);
+}
+
+function setSplashProgress(target) {
+  splashProgressTarget = Math.max(0, Math.min(100, Number(target) || 0));
+  if (splashProgressTarget <= splashProgressCurrent) {
+    sendSplashProgressToWindow(splashProgressCurrent);
+    return;
+  }
+  ensureSplashProgressTimer();
 }
 
 function missionNameKey(value) {
@@ -3688,11 +3743,30 @@ async function createControlWindow() {
     controlWindow = null;
   });
 
+  controlWindow.webContents.on("did-start-loading", () => {
+    setSplashProgress(22);
+  });
+  controlWindow.webContents.on("dom-ready", () => {
+    setSplashProgress(56);
+  });
+  controlWindow.webContents.on("did-frame-finish-load", () => {
+    setSplashProgress(76);
+  });
+  controlWindow.webContents.on("did-stop-loading", () => {
+    setSplashProgress(88);
+  });
+  controlWindow.once("ready-to-show", () => {
+    setSplashProgress(100);
+  });
+
   hardenWindow(controlWindow);
   await loadWindow(controlWindow);
 }
 
 function createSplashWindow() {
+  splashProgressCurrent = 0;
+  splashProgressTarget = 0;
+  stopSplashProgressTimer();
   splashWindow = new BrowserWindow({
     width: 800,
     height: 800,
@@ -3765,39 +3839,106 @@ function createSplashWindow() {
         display: grid;
         place-items: center;
       }
+      .stack {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        align-items: center;
+        opacity: 0.92;
+      }
       .row {
         display: flex;
         align-items: center;
-        gap: 12px;
-        opacity: 0.92;
+        gap: 0;
       }
-      .spinner {
-        width: 20px;
-        height: 20px;
+      .track {
+        width: 224px;
+        height: 6px;
+        overflow: hidden;
+        position: relative;
         border-radius: 999px;
-        border: 2px solid rgba(255, 255, 255, 0.18);
-        border-top-color: rgba(127, 191, 233, 0.95);
-        animation: spin 700ms linear infinite;
+        background: rgba(24, 24, 27, 0.92);
+        box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.04);
       }
-      @keyframes spin {
-        from { transform: rotate(0deg); }
-        to { transform: rotate(360deg); }
+      .fill {
+        position: absolute;
+        inset: 0;
+        height: 100%;
+        border-radius: inherit;
+        background-image: linear-gradient(
+          90deg,
+          #82E9AB 0%,
+          #7FBFE9 25%,
+          #9C87DB 50%,
+          #D496EB 75%,
+          #E3BFF1 100%
+        );
+        box-shadow:
+          0 0 14px rgba(156, 135, 219, 0.18),
+          inset 0 0 6px rgba(255, 255, 255, 0.16);
+      }
+      .fill-mask {
+        position: absolute;
+        top: 0;
+        right: 0;
+        z-index: 2;
+        width: 100%;
+        height: 100%;
+        border-radius: 0 999px 999px 0;
+        background: rgba(24, 24, 27, 0.92);
+        transition: width 220ms ease-out;
+      }
+      .track-percent {
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        transform: translate(-50%, -50%);
+        z-index: 3;
+        font-size: 9px;
+        line-height: 1;
+        color: rgba(241, 241, 241, 0.95);
+        text-shadow: 0 1px 2px rgba(0, 0, 0, 0.55);
+        font-variant-numeric: tabular-nums;
+        pointer-events: none;
+        mix-blend-mode: screen;
+      }
+      .message {
+        color: #cfe6f5;
       }
     </style>
   </head>
   <body>
     <div class="wrap">
-      <div class="row">
-        <div class="spinner"></div>
-        <div>Draining pixel's wallets...</div>
+      <div class="stack">
+        <div class="row">
+          <div class="message">Draining pixel's wallets...</div>
+        </div>
+        <div class="track" aria-hidden="true">
+          <div class="fill" id="splash-fill"></div>
+          <div class="fill-mask" id="splash-fill-mask"></div>
+          <div class="track-percent" id="splash-percent">0%</div>
+        </div>
       </div>
     </div>
+    <script>
+      window.__updateSplashProgress__ = function updateSplashProgress(payload) {
+        var state = payload && typeof payload === "object" ? payload : {};
+        var progress = Math.max(0, Math.min(100, Number(state.progress) || 0));
+        var mask = document.getElementById("splash-fill-mask");
+        var percent = document.getElementById("splash-percent");
+        if (mask) mask.style.width = (100 - progress) + "%";
+        if (percent) percent.textContent = Math.round(progress) + "%";
+      };
+    </script>
   </body>
 </html>`;
 
   splashWindow.loadURL(
     `data:text/html;charset=UTF-8,${encodeURIComponent(splashHtml)}`,
   );
+  splashWindow.webContents.once("did-finish-load", () => {
+    setSplashProgress(8);
+  });
 }
 
 async function createCliWindow() {
@@ -4887,6 +5028,10 @@ app.whenReady().then(async () => {
     publishStatus();
   } catch {}
   const closeSplash = () => {
+    splashProgressCurrent = 100;
+    splashProgressTarget = 100;
+    sendSplashProgressToWindow(100);
+    stopSplashProgressTimer();
     if (splashWindow && !splashWindow.isDestroyed()) splashWindow.close();
     splashWindow = null;
     if (controlWindow && !controlWindow.isDestroyed()) controlWindow.show();
