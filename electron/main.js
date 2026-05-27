@@ -5092,7 +5092,6 @@ app.whenReady().then(async () => {
   };
   if (controlWindow && !controlWindow.isDestroyed()) {
     controlWindow.once("ready-to-show", closeSplash);
-    controlWindow.webContents.once("dom-ready", closeSplash);
     setTimeout(closeSplash, 1800);
   }
 
