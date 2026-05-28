@@ -54,6 +54,8 @@ const commands = createCommandHandler(
 const STARTUP_FX_ENABLED = !ctx.plainOutputMode;
 const STARTUP_FX_FRAME_MS = 95;
 const STARTUP_PROGRESS_PULSE_MS = 220;
+const START_PAUSED_FOR_COMP_LOCK =
+  process.env.PBP_START_PAUSED_FOR_COMP_LOCK === "1";
 
 function createGuiStateEmitter(ctx) {
   let last = null;
@@ -422,6 +424,12 @@ async function runStartupSequence() {
   ctx.startupFxProgress = 5;
 
   loadConfig(ctx, logger.logWithTimestamp);
+  if (START_PAUSED_FOR_COMP_LOCK) {
+    ctx.watchLoopEnabled = false;
+    logger.logWithTimestamp(
+      "[COMP LOCK] Startup watch auto-start held until initial finish target check completes.",
+    );
+  }
   signer.updateSignerState();
   emitGuiState();
   ctx.currentMissionStats.totalClaimed = Number(ctx.config.totalClaimed || 0);

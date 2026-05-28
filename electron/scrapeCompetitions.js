@@ -11,7 +11,7 @@ function coerceText(value) {
 }
 
 async function scrapeLatestCompetition(opts = {}) {
-  const competitionPick = ["first", "second", "last"].includes(opts?.competitionPick)
+  const competitionPick = ["first", "second", "last", "active"].includes(opts?.competitionPick)
     ? opts.competitionPick
     : "first";
   return withHeadlessWindow(
@@ -217,6 +217,21 @@ async function scrapeLatestCompetition(opts = {}) {
   const pickCompetitionCard = (pick) => {
     const cards = findCompetitionCards();
     if (!cards.length) return null;
+    if (pick === "active") {
+      const activeCard =
+        cards.find((card) => {
+          const text = coerceText(card?.innerText || "");
+          return /\b(in progress|active)\b/i.test(text);
+        }) || null;
+      if (activeCard) return activeCard;
+      const startedCard =
+        cards.find((card) => {
+          const text = coerceText(card?.innerText || "");
+          return !/\bnot started\b/i.test(text);
+        }) || null;
+      if (startedCard) return startedCard;
+      return cards[0];
+    }
     if (pick === "second") return cards[1] || cards[0];
     if (pick === "last") return cards[cards.length - 1] || cards[0];
     return cards[0];
@@ -873,9 +888,7 @@ async function scrapeLatestCompetition(opts = {}) {
             .filter(
               (x) =>
                 /\\brank\\b/i.test(x.t) &&
-                /\\bplayer\\b/i.test(x.t) &&
-                /\\bcompleted\\b/i.test(x.t) &&
-                /unique\\s*nft/i.test(x.t),
+                /\\bplayer\\b/i.test(x.t),
             )
             .sort((a, b) => a.t.length - b.t.length);
           return candidates[0]?.el || null;
@@ -884,6 +897,7 @@ async function scrapeLatestCompetition(opts = {}) {
         const parseGridRowText = (rowText) => {
           const t = coerceText(rowText);
           if (!t) return null;
+          if (/^rank\\b/i.test(t) && /player/i.test(t)) return null;
           const patterns = [
             /^\\s*(\\d{1,4})\\s*(?:[-–—]|\\s)+\\s*([a-z0-9_\\-.]{2,})\\s+(\\d{1,8})\\s+(\\d{1,8})\\s*$/i,
             /^\\s*(\\d{1,4})\\s+([a-z0-9_\\-. ]{2,40}?)\\s+(\\d{1,8})\\s+(\\d{1,8})\\s*$/i,
@@ -898,6 +912,21 @@ async function scrapeLatestCompetition(opts = {}) {
             const uniqueNFTs = Number(m[4]);
             if (!player || !/[a-z]/i.test(player)) continue;
             return { rank, player, completed, uniqueNFTs };
+          }
+          const simpleMatch = t.match(
+            /^\\s*(\\d{1,4})(?:\\s+([+\\-]?\\d+|[-–—]))?\\s+([a-z0-9][a-z0-9_\\-. ]{1,50})\\s*$/i,
+          );
+          if (simpleMatch) {
+            const rank = Number(simpleMatch[1]);
+            const player = coerceText(simpleMatch[3]);
+            if (Number.isFinite(rank) && player && /[a-z]/i.test(player)) {
+              return {
+                rank,
+                player,
+                completed: null,
+                uniqueNFTs: null,
+              };
+            }
           }
           return null;
         };
@@ -1044,18 +1073,31 @@ async function scrapeLatestCompetition(opts = {}) {
 
     await waitForContent();
     let cards = findCompetitionCards();
-    await bruteForceExpandCompetitionScopes(cards.slice(0, 5));
+    const initialPickedCard = pickCompetitionCard(${JSON.stringify(competitionPick)});
+    const rootsToExpand = [];
+    if (initialPickedCard) rootsToExpand.push(initialPickedCard);
+    for (const card of cards.slice(0, 5)) {
+      if (!card || rootsToExpand.includes(card)) continue;
+      rootsToExpand.push(card);
+    }
+    await bruteForceExpandCompetitionScopes(rootsToExpand);
     cards = findCompetitionCards();
     const pickedCard = pickCompetitionCard(${JSON.stringify(competitionPick)});
     const fallbackRoot = findFallbackCompetitionRoot();
-    const orderedRoots = cards.length
-      ? cards.slice(0, 5)
-      : [pickedCard || fallbackRoot].filter(Boolean);
+    const orderedRoots = [];
+    if (pickedCard) orderedRoots.push(pickedCard);
+    for (const card of cards.slice(0, 5)) {
+      if (!card || orderedRoots.includes(card)) continue;
+      orderedRoots.push(card);
+    }
+    if (!orderedRoots.length && fallbackRoot) orderedRoots.push(fallbackRoot);
     const competitions = [];
     for (let i = 0; i < orderedRoots.length; i += 1) {
       competitions.push(await extractCompetitionFromRoot(orderedRoots[i], i));
     }
-    const primary = competitions[0] || (await extractCompetitionFromRoot(pickedCard || fallbackRoot, 0));
+    const primary =
+      competitions[0] ||
+      (await extractCompetitionFromRoot(pickedCard || fallbackRoot, 0));
     const discoveredNumbers = cards
       .map((el) => {
         const m = coerceText(el.innerText).match(/Competition\\s*#?\\s*(\\d{1,6})/i);

@@ -437,14 +437,24 @@ function createCommandHandler(ctx, logger, actions, configApi, services = {}) {
       pause: async () => {
         ctx.watchLoopEnabled = false;
         ctx.watchStartPending = false;
+        if (
+          ctx.activeClaimAbortController &&
+          typeof ctx.activeClaimAbortController.abort === "function"
+        ) {
+          try {
+            ctx.activeClaimAbortController.abort();
+          } catch {}
+        }
         ctx.config.watchLoopEnabled = false;
         flushConfig(ctx, logger.logDebug);
+        if (ctx.guiBridge?.emitNow) ctx.guiBridge.emitNow();
         logWithTimestamp("[WATCH] ⏸️ Paused.");
       },
       resume: async () => {
         ctx.watchLoopEnabled = true;
         delete ctx.config.watchLoopEnabled;
         flushConfig(ctx, logger.logDebug);
+        if (ctx.guiBridge?.emitNow) ctx.guiBridge.emitNow();
         logWithTimestamp("[WATCH] ▶️ Resumed.");
         await startWatchLoopWithDelay({ reason: "resume" });
       },

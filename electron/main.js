@@ -100,8 +100,10 @@ let bootstrapWalletSummaryLastAttemptAt = 0;
 let startupMissionBootstrapPromise = null;
 let competitionRangeLockTimer = null;
 let competitionRangeLockRunning = false;
+let competitionRangeLockRefreshPending = false;
 let competitionRangeLockLastSummary = "";
 let competitionRangeLockPauseApplied = false;
+let competitionRangeLockLiveEnabled = null;
 let missionCatalogResultCache = null;
 let missionCatalogResultPromise = null;
 let rentalsPreviewCache = null;
@@ -922,6 +924,11 @@ function updateBackendStateFromIpc(payload) {
   if (identityChanged && analyticsTelemetrySessionId) {
     trackTelemetryEvent("heartbeat", { event_name: "identity_refresh" });
   }
+  if (identityChanged && shouldRunCompetitionRangeLock()) {
+    triggerCompetitionRangeLockImmediateCheck(
+      "identity_refresh",
+    );
+  }
 }
 
 function publishEvent(payload) {
@@ -1371,8 +1378,12 @@ function competitionRangeLockConfigFrom(config = {}) {
   const minRank = Number(config?.competitionRangeLockMinRank);
   const maxRank = Number(config?.competitionRangeLockMaxRank);
   const pollSeconds = Number(config?.competitionRangeLockPollSeconds);
+  const enabled =
+    typeof competitionRangeLockLiveEnabled === "boolean"
+      ? competitionRangeLockLiveEnabled
+      : config?.competitionRangeLockEnabled === true;
   return {
-    enabled: config?.competitionRangeLockEnabled === true,
+    enabled,
     minRank: Number.isFinite(minRank) && minRank > 0 ? Math.floor(minRank) : 11,
     maxRank: Number.isFinite(maxRank) && maxRank > 0 ? Math.floor(maxRank) : 13,
     pollSeconds:
@@ -1383,14 +1394,24 @@ function competitionRangeLockConfigFrom(config = {}) {
   };
 }
 
-function shouldRunCompetitionRangeLock(config = readDesktopConfig()) {
+function competitionRangeLockRuntimeState(config = readDesktopConfig()) {
   const lockConfig = competitionRangeLockConfigFrom(config);
-  return (
-    isDesktopDevMode() &&
-    lockConfig.enabled &&
-    config?.debugMode === true &&
-    config?.missionModeEnabled === true
-  );
+  const reasons = [];
+  if (lockConfig.enabled !== true) reasons.push("disabled");
+  if (config?.debugMode !== true) reasons.push("debug_mode_off");
+  if (config?.missionModeEnabled !== true) reasons.push("mission_mode_off");
+  return {
+    enabled:
+      lockConfig.enabled === true &&
+      config?.debugMode === true &&
+      config?.missionModeEnabled === true,
+    lockConfig,
+    reasons,
+  };
+}
+
+function shouldRunCompetitionRangeLock(config = readDesktopConfig()) {
+  return competitionRangeLockRuntimeState(config).enabled;
 }
 
 function loadAnalytics() {
@@ -2292,10 +2313,18 @@ function applyDesktopConfigPatch(patch = {}) {
   try {
     if (fs.existsSync(file)) {
       const existing = fs.readFileSync(file, "utf8");
-      if (existing === json) return next;
+      if (existing === json) {
+        if (typeof next.competitionRangeLockEnabled === "boolean") {
+          competitionRangeLockLiveEnabled = next.competitionRangeLockEnabled;
+        }
+        return next;
+      }
     }
   } catch {}
   fs.writeFileSync(file, json);
+  if (typeof next.competitionRangeLockEnabled === "boolean") {
+    competitionRangeLockLiveEnabled = next.competitionRangeLockEnabled;
+  }
   return next;
 }
 
@@ -2341,6 +2370,9 @@ function normalizedDesktopSignerMode(value) {
 
 function hydrateBackendStatusFromConfig() {
   const config = readDesktopConfig();
+  if (typeof config?.competitionRangeLockEnabled === "boolean") {
+    competitionRangeLockLiveEnabled = config.competitionRangeLockEnabled;
+  }
   backendStatus.analytics = loadAnalytics();
   beginAnalyticsSession({ force: true });
   backendStatus.defaultMissionResetLevel =
@@ -3265,6 +3297,12 @@ function startBackend() {
 
   logHistory = [];
   const currentConfig = readDesktopConfig();
+  if (typeof currentConfig?.competitionRangeLockEnabled === "boolean") {
+    competitionRangeLockLiveEnabled = currentConfig.competitionRangeLockEnabled;
+  }
+  const startPausedForCompLock =
+    shouldRunCompetitionRangeLock(currentConfig) &&
+    currentConfig?.watchLoopEnabled === true;
   const startupSnapshotPath = writeStartupSnapshotFile();
   backend = fork(path.join(ROOT_DIR, "app.js"), ["--plain-output"], {
     cwd: getBackendWorkingDirectory(),
@@ -3276,6 +3314,9 @@ function startBackend() {
       PBP_CONFIG_DIR: getBackendWorkingDirectory(),
       PBP_DEFAULT_MISSION_RESET_LEVEL:
         defaultMissionResetLevelForConfig(currentConfig),
+      ...(startPausedForCompLock
+        ? { PBP_START_PAUSED_FOR_COMP_LOCK: "1" }
+        : {}),
       ...(startupSnapshotPath
         ? { PBP_STARTUP_SNAPSHOT_PATH: startupSnapshotPath }
         : {}),
@@ -3623,6 +3664,15 @@ async function sendBackendCommand(command) {
   if (!trimmed) {
     throw new Error("Command is empty.");
   }
+  const normalized = trimmed.toLowerCase();
+  if (normalized === "resume" && shouldRunCompetitionRangeLock()) {
+    pushOutput("stdin", `> ${trimmed}\n`);
+    pushSystemLog(
+      "[COMP LOCK] Resume requested while finish target is armed; checking rank before allowing watcher start.",
+    );
+    triggerCompetitionRangeLockImmediateCheck("resume_gate");
+    return true;
+  }
   if (!backend || !backendStatus.running) {
     const parsed = parseStoppedModeCommand(trimmed);
     if (parsed.type === "mr") {
@@ -3759,9 +3809,94 @@ function competitionRangeLockTopRank(lockConfig = {}) {
   );
 }
 
+function competitionLockDateMs(value) {
+  const text = String(value || "").trim();
+  if (!text || /^unknown$/i.test(text)) return null;
+  const parsed = Date.parse(text);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function competitionLifecycleState(competition = {}) {
+  const startMs = competitionLockDateMs(
+    competition?.start || competition?.datesText || "",
+  );
+  const endMs = competitionLockDateMs(
+    competition?.end || competition?.datesText || "",
+  );
+  const now = Date.now();
+  const hasRows = Array.isArray(competition?.userRows) && competition.userRows.length > 0;
+  if (Number.isFinite(startMs) && now < startMs) {
+    return { state: "upcoming", hasRows, startMs, endMs };
+  }
+  if (Number.isFinite(endMs) && now > endMs) {
+    return { state: "ended", hasRows, startMs, endMs };
+  }
+  if (Number.isFinite(startMs) || Number.isFinite(endMs) || hasRows) {
+    return { state: "active", hasRows, startMs, endMs };
+  }
+  return { state: "unknown", hasRows, startMs, endMs };
+}
+
+function selectCompetitionForRangeLock(scraped = {}) {
+  const rawList = Array.isArray(scraped?.competitions) && scraped.competitions.length
+    ? scraped.competitions
+    : scraped
+      ? [scraped]
+      : [];
+  const competitions = rawList.filter(
+    (competition) => competition && typeof competition === "object",
+  );
+  if (!competitions.length) {
+    return {
+      selected: null,
+      summary: [],
+      reason: "no_competitions",
+    };
+  }
+  const ranked = competitions.map((competition, index) => {
+    const lifecycle = competitionLifecycleState(competition);
+    const rows = Array.isArray(competition?.userRows) ? competition.userRows.length : 0;
+    const number = String(competition?.competitionNumber || "").trim() || `index_${index}`;
+    let score = 0;
+    if (lifecycle.state === "active") score += 100;
+    if (rows > 0) score += 50;
+    if (lifecycle.state === "unknown" && rows > 0) score += 20;
+    if (lifecycle.state === "ended") score -= 25;
+    if (lifecycle.state === "upcoming") score -= 50;
+    score -= index;
+    return {
+      competition,
+      index,
+      number,
+      rows,
+      lifecycle,
+      score,
+    };
+  });
+  ranked.sort((a, b) => b.score - a.score || a.index - b.index);
+  return {
+    selected: ranked[0]?.competition || null,
+    reason: ranked[0]?.lifecycle?.state || "unknown",
+    summary: ranked.map((entry) => ({
+      number: entry.number,
+      rows: entry.rows,
+      state: entry.lifecycle.state,
+      score: entry.score,
+    })),
+  };
+}
+
 function triggerCompetitionRangeLockImmediateCheck(reason = "manual") {
   const config = readDesktopConfig();
-  if (!shouldRunCompetitionRangeLock(config)) return;
+  const state = competitionRangeLockRuntimeState(config);
+  if (!state.enabled) {
+    if (state.lockConfig.enabled === true) {
+      pushSystemLog(
+        `[COMP LOCK] Immediate recheck skipped (${String(reason || "manual").trim() || "manual"}): ${state.reasons.join(", ") || "inactive"}.`,
+      );
+    }
+    return;
+  }
   const detail = String(reason || "").trim();
   if (detail) {
     pushSystemLog(`[COMP LOCK] Immediate recheck requested (${detail}).`);
@@ -3772,6 +3907,15 @@ function triggerCompetitionRangeLockImmediateCheck(reason = "manual") {
 async function applyCompetitionRangeLockAction(action, detail) {
   const desired = String(action || "").trim();
   if (desired !== "pause" && desired !== "resume") return;
+  if (desired === "pause") {
+    const latestConfig = readDesktopConfig();
+    if (!shouldRunCompetitionRangeLock(latestConfig)) {
+      pushSystemLog(
+        "[COMP LOCK] Toggle/config inactive at action time; skipping pause.",
+      );
+      return;
+    }
+  }
   if (!backendStatus.running) {
     pushSystemLog(
       `[COMP LOCK] ${detail}; backend is stopped, skipping ${desired}.`,
@@ -3800,13 +3944,15 @@ async function applyCompetitionRangeLockAction(action, detail) {
 
 async function runCompetitionRangeLockCycle() {
   const config = readDesktopConfig();
-  const lockConfig = competitionRangeLockConfigFrom(config);
-  if (!shouldRunCompetitionRangeLock(config)) {
+  const state = competitionRangeLockRuntimeState(config);
+  const { lockConfig } = state;
+  if (!state.enabled) {
     competitionRangeLockLastSummary = "";
+    competitionRangeLockRefreshPending = false;
     return;
   }
   if (competitionRangeLockRunning) {
-    scheduleCompetitionRangeLockTick(lockConfig.pollSeconds * 1000);
+    competitionRangeLockRefreshPending = true;
     return;
   }
   competitionRangeLockRunning = true;
@@ -3823,18 +3969,35 @@ async function runCompetitionRangeLockCycle() {
       return;
     }
 
-    const competition = await scrapeLatestCompetition({});
-    if (competition?.debug?.challenge) {
+    const scrapedCompetition = await scrapeLatestCompetition({
+      competitionPick: "active",
+    });
+    if (scrapedCompetition?.debug?.challenge) {
       pushSystemLog(
-        `[COMP LOCK] Competition scrape blocked (${competition.debug.challenge}).`,
+        `[COMP LOCK] Competition scrape blocked (${scrapedCompetition.debug.challenge}).`,
       );
+      return;
+    }
+    const competitionSelection =
+      selectCompetitionForRangeLock(scrapedCompetition);
+    const competition = competitionSelection.selected;
+    if (!competition) {
+      pushSystemLog("[COMP LOCK] No competition data available; no action.");
       return;
     }
     const rows = Array.isArray(competition?.userRows)
       ? competition.userRows
       : [];
     if (!rows.length) {
-      pushSystemLog("[COMP LOCK] Competition rows unavailable; no action.");
+      const selectedNumber = String(
+        competition?.competitionNumber || "unknown",
+      ).trim();
+      const candidates = competitionSelection.summary
+        .map((entry) => `${entry.number}:${entry.state}:rows=${entry.rows}`)
+        .join(", ");
+      pushSystemLog(
+        `[COMP LOCK] Competition rows unavailable; selected=${selectedNumber} reason=${competitionSelection.reason} candidates=[${candidates}]`,
+      );
       return;
     }
     const currentRow =
@@ -3848,6 +4011,12 @@ async function runCompetitionRangeLockCycle() {
       }) || null;
     if (!currentRow || !Number.isFinite(Number(currentRow.rank))) {
       pushSystemLog("[COMP LOCK] Current user row not found; no action.");
+      return;
+    }
+
+    const latestConfig = readDesktopConfig();
+    if (!shouldRunCompetitionRangeLock(latestConfig)) {
+      pushSystemLog("[COMP LOCK] Disabled during active check; skipping action.");
       return;
     }
 
@@ -3870,20 +4039,28 @@ async function runCompetitionRangeLockCycle() {
     );
   } finally {
     competitionRangeLockRunning = false;
+    const pending = competitionRangeLockRefreshPending === true;
+    competitionRangeLockRefreshPending = false;
     const nextRawConfig = readDesktopConfig();
-    const nextConfig = competitionRangeLockConfigFrom(nextRawConfig);
+    if (pending && shouldRunCompetitionRangeLock(nextRawConfig)) {
+      scheduleCompetitionRangeLockTick(0);
+      return;
+    }
+    const nextLockConfig = competitionRangeLockConfigFrom(nextRawConfig);
     if (shouldRunCompetitionRangeLock(nextRawConfig)) {
-      scheduleCompetitionRangeLockTick(nextConfig.pollSeconds * 1000);
+      scheduleCompetitionRangeLockTick(nextLockConfig.pollSeconds * 1000);
     }
   }
 }
 
 function syncCompetitionRangeLockScheduler() {
   const config = readDesktopConfig();
-  const lockConfig = competitionRangeLockConfigFrom(config);
-  if (!shouldRunCompetitionRangeLock(config)) {
+  const state = competitionRangeLockRuntimeState(config);
+  const { lockConfig } = state;
+  if (!state.enabled) {
     clearCompetitionRangeLockTimer();
     competitionRangeLockLastSummary = "";
+    competitionRangeLockRefreshPending = false;
     if (competitionRangeLockPauseApplied) {
       competitionRangeLockPauseApplied = false;
       void applyCompetitionRangeLockAction(
@@ -3894,10 +4071,14 @@ function syncCompetitionRangeLockScheduler() {
           `[COMP LOCK] Failed to resume after disable: ${String(error?.message || error)}`,
         );
       });
+    } else if (lockConfig.enabled === true) {
+      pushSystemLog(
+        `[COMP LOCK] Finish target armed but inactive: ${state.reasons.join(", ") || "inactive"}.`,
+      );
     }
     return;
   }
-  scheduleCompetitionRangeLockTick(250);
+  scheduleCompetitionRangeLockTick(0);
 }
 
 async function createControlWindow() {

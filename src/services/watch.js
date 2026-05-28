@@ -50,6 +50,10 @@ function createWatchService(
     return ctx.runtimeDefaults?.watchMinCycleSeconds || 30;
   }
 
+  function claimWorkPaused() {
+    return ctx.watchLoopEnabled === false;
+  }
+
   function missionName(mission, fallback = "") {
     return String(
       mission?.missionName ||
@@ -1206,6 +1210,18 @@ function createWatchService(
     finalTraceAction = "",
     finalTraceMeta = {},
   } = {}) {
+    if (claimWorkPaused()) {
+      trace("watch", "claim_lifecycle_skipped_paused", {
+        traceId,
+        claimed: Number(claimed || 0),
+        assignReason,
+      });
+      return {
+        claimed: Number(claimed || 0),
+        assigned: 0,
+        missionResult: initialMissionResult,
+      };
+    }
     let currentClaimed = Number(claimed || 0);
     if (Array.isArray(claims) && claims.length > 0) {
       const successFromClaimLines = logClaimDetails(
@@ -1240,9 +1256,29 @@ function createWatchService(
       traceId,
     });
 
+    if (claimWorkPaused()) {
+      trace("watch", "claim_lifecycle_after_followup_paused", {
+        traceId,
+        claimed: followup.claimed,
+        assigned: followup.assigned,
+        assignReason,
+      });
+      return followup;
+    }
+
     await checks.refreshMissionHeaderStats({
       missionsResult: followup.missionResult,
     });
+
+    if (claimWorkPaused()) {
+      trace("watch", "claim_lifecycle_after_stats_paused", {
+        traceId,
+        claimed: followup.claimed,
+        assigned: followup.assigned,
+        assignReason,
+      });
+      return followup;
+    }
 
     if (finalTraceAction) {
       try {
@@ -1289,6 +1325,14 @@ function createWatchService(
     });
 
     if (!(missionResult && typeof missionResult === "object")) {
+      if (claimWorkPaused()) {
+        trace("watch", "claim_followup_skipped_before_load_paused", {
+          traceId,
+          assignReason,
+          claimed: currentClaimed,
+        });
+        return { claimed: currentClaimed, assigned, missionResult };
+      }
       try {
         missionResult = await mcp.mcpToolCall("get_user_missions", {});
         trace("watch", "claim_followup_loaded_missions", {
@@ -1316,6 +1360,14 @@ function createWatchService(
         });
       }
       try {
+        if (claimWorkPaused()) {
+          trace("watch", "claim_followup_skipped_before_refetch_paused", {
+            traceId,
+            assignReason,
+            claimed: currentClaimed,
+          });
+          return { claimed: currentClaimed, assigned, missionResult };
+        }
         missionResult = await mcp.mcpToolCall("get_user_missions", {});
         trace("watch", "claim_followup_refetched_after_claim", {
           traceId,
@@ -1326,8 +1378,24 @@ function createWatchService(
           error: error.message,
         });
       }
+      if (claimWorkPaused()) {
+        trace("watch", "claim_followup_skipped_before_assign_paused", {
+          traceId,
+          assignReason,
+          claimed: currentClaimed,
+        });
+        return { claimed: currentClaimed, assigned, missionResult };
+      }
       logWithTimestamp(assignIntro);
       try {
+        if (claimWorkPaused()) {
+          trace("watch", "claim_followup_assign_aborted_paused", {
+            traceId,
+            assignReason,
+            claimed: currentClaimed,
+          });
+          return { claimed: currentClaimed, assigned, missionResult };
+        }
         logDebug("watch", "assign_check_start", { reason: assignReason });
         const assignResult = await checks.autoAssignConfiguredMissions({
           reason: assignReason,
@@ -1349,6 +1417,14 @@ function createWatchService(
           skipped: assignResult?.skipped === true,
         });
         if (assigned > 0) {
+          if (claimWorkPaused()) {
+            trace("watch", "claim_followup_skipped_before_assign_refetch_paused", {
+              traceId,
+              assignReason,
+              assigned,
+            });
+            return { claimed: currentClaimed, assigned, missionResult };
+          }
           missionResult = await mcp.mcpToolCall("get_user_missions", {});
           trace("watch", "claim_followup_refetched_after_assign", {
             traceId,
@@ -1369,6 +1445,13 @@ function createWatchService(
 
     if (allowStateFallback && currentClaimed === 0 && beforeSnapshot.size > 0) {
       try {
+        if (claimWorkPaused()) {
+          trace("watch", "claim_followup_state_fallback_skipped_paused", {
+            traceId,
+            assignReason,
+          });
+          return { claimed: currentClaimed, assigned, missionResult };
+        }
         const afterSnapshot = await loadSelectedMissionSnapshot(missionResult);
         const transitions = deriveStateTransitions(
           beforeSnapshot,
@@ -1399,6 +1482,14 @@ function createWatchService(
           );
           applyClaimCountUpdate(currentClaimed, { logLabel: claimLogLabel });
           if (assigned === 0) {
+            if (claimWorkPaused()) {
+              trace("watch", "claim_followup_fallback_assign_skipped_paused", {
+                traceId,
+                assignReason,
+                claimed: currentClaimed,
+              });
+              return { claimed: currentClaimed, assigned, missionResult };
+            }
             logWithTimestamp(
               "[ASSIGN] ▶ Post-claim assign check (state fallback)...",
             );
@@ -1424,6 +1515,18 @@ function createWatchService(
               skipped: fallbackAssign?.skipped === true,
             });
             if (assigned > 0) {
+              if (claimWorkPaused()) {
+                trace(
+                  "watch",
+                  "claim_followup_fallback_assign_refetch_skipped_paused",
+                  {
+                    traceId,
+                    assignReason,
+                    assigned,
+                  },
+                );
+                return { claimed: currentClaimed, assigned, missionResult };
+              }
               missionResult = await mcp.mcpToolCall("get_user_missions", {});
               trace("watch", "claim_followup_refetched_after_fallback_assign", {
                 traceId,
@@ -2211,6 +2314,10 @@ function createWatchService(
       });
       claimed += Number(fallback?.claimed || 0);
     }
+    if (claimWorkPaused()) {
+      logDebug("watch", "cycle_followup_skipped_paused", { claimed });
+      return { claimed, opts, summary };
+    }
     if (claimed === 0 && opts.fallbackClaims && hasActiveMcpCooldown()) {
       logDebug("watch", "⏳ fallback_claim_skipped_rate_limited", {
         retryAfterMs: getMcpCooldownRemainingMs(),
@@ -2409,6 +2516,12 @@ function createWatchService(
         onlySelected: false,
         missionsResult: preManualMissionResult,
       });
+      if (claimWorkPaused()) {
+        logDebug("watch", "manual_followup_skipped_paused", {
+          claimed: Number(claimResult?.claimed || 0),
+        });
+        return { claimed: Number(claimResult?.claimed || 0), assigned: 0 };
+      }
       const followup = await runClaimLifecycle({
         traceId,
         beforeSnapshot,
@@ -2526,7 +2639,11 @@ function createWatchService(
             reason: "startup",
             missionsResult: startupActionMissionResult,
           });
-          if (Number(claimResult?.claimed || 0) > 0) {
+          if (claimWorkPaused()) {
+            logDebug("watch", "startup_followup_skipped_paused", {
+              claimed: Number(claimResult?.claimed || 0),
+            });
+          } else if (Number(claimResult?.claimed || 0) > 0) {
             startupDidClaimOrAssign = true;
             const followup = await runClaimLifecycle({
               traceId,
@@ -2543,7 +2660,11 @@ function createWatchService(
             });
             initialMissionResult = followup.missionResult || initialMissionResult;
           }
-        } else if (!hasActiveMcpCooldown() && startupAvailable > 0) {
+        } else if (
+          !claimWorkPaused() &&
+          !hasActiveMcpCooldown() &&
+          startupAvailable > 0
+        ) {
           logWithTimestamp("[ASSIGN] ▶ Startup assign check...");
           const assignResult = await checks.autoAssignConfiguredMissions({
             reason: "startup_unassigned_check",
@@ -2555,7 +2676,11 @@ function createWatchService(
           }
         }
 
-        if (startupDidClaimOrAssign && !hasActiveMcpCooldown()) {
+        if (
+          !claimWorkPaused() &&
+          startupDidClaimOrAssign &&
+          !hasActiveMcpCooldown()
+        ) {
           try {
             const settledMissionResult = await mcp.mcpToolCall(
               "get_user_missions",

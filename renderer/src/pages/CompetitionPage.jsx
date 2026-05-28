@@ -147,20 +147,20 @@ export default function CompetitionPage({
                 ) : Array.isArray(selectedCompetition.userRows) &&
                   selectedCompetition.userRows.length ? (
                   <div className=" overflow-hidden overflow-y-scroll w-full flex-1 min-h-0">
-                    <table className="results-table w-full text-xs border-collapse h-full">
-                      <thead className="">
-                        <tr className="text-slate-400 border-b border-slate-700/70 ">
-                          <th className="text-left font-normal py-1 pr-2">
+                    <table className="results-table w-full text-xs border-collapse h-full ">
+                      <thead className="sticky top-1">
+                        <tr className="text-slate-400 border-b border-slate-700/70  p-0">
+                          <th className="text-left font-normal py-1 !pt-0 pr-2">
                             Place
                           </th>
-                          <th className="text-left   font-normal py-1 pr-2">
+                          <th className="text-left   font-normal py-1 !pt-0 pr-2">
                             Player
                           </th>
-                          <th className="text-right font-normal py-1 pr-2">
+                          <th className="text-right font-normal py-1 !pt-0 pr-2">
                             Completed
                           </th>
-                          <th className="text-right font-normal py-1">
-                            Unique NFTs
+                          <th className="text-right font-normal py-1 !pt-0 ">
+                            Unique
                           </th>
                         </tr>
                       </thead>

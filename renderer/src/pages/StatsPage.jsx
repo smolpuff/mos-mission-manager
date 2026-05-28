@@ -306,7 +306,7 @@ function DetailRow({ icon, label, value, tone = "text-slate-100" }) {
         ) : null}
         {label}
       </span>
-      <span className={`shrink-0 text-right font-semibold ${tone}`}>
+      <span className={`min-w-0 truncate text-right font-semibold ${tone}`}>
         {value}
       </span>
     </div>
@@ -527,12 +527,13 @@ export default function StatsPage({ status }) {
               </select>
             </div>
           </div>
-          <div className="">
+          <div className="min-w-0">
             <div className="text-xs  text-slate-400">Net PBP</div>
             <div
-              className={` text-4xl font-semibold leading-none ${
+              className={`truncate text-4xl font-semibold leading-none ${
                 netPbp >= 0 ? "text-success" : "text-error"
               }`}
+              title={`${formatNumber(netPbp)} PBP`}
             >
               {formatNumber(netPbp)} PBP
             </div>

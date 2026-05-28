@@ -4089,7 +4089,20 @@ function createChecksService(ctx, logger, mcp, services = {}) {
     missionsResult = null,
   } = {}) {
     const limit = Math.max(1, Number(maxClaims || 10));
+    const claimsPaused = () => ctx.watchLoopEnabled === false;
     try {
+      if (claimsPaused()) {
+        logDebug("watch", "claim_scan_skipped_paused", { reason, limit });
+        if (ctx.guiBridge?.sendEvent) {
+          ctx.guiBridge.sendEvent("claiming", {
+            state: "done",
+            reason,
+            claimed: 0,
+          });
+        }
+        if (ctx.guiBridge?.emitNow) ctx.guiBridge.emitNow();
+        return { ok: true, claimed: 0, skipped: true, paused: true };
+      }
       const result =
         missionsResult || (await mcp.mcpToolCall("get_user_missions", {}));
       const missionsAll = normalizeMissionList(result);
@@ -4136,10 +4149,24 @@ function createChecksService(ctx, logger, mcp, services = {}) {
 
       let claimed = 0;
       for (const mission of candidates) {
-        try {
-          const claimResult = await mcp.mcpToolCall("claim_mission_reward", {
-            assignedMissionId: mission.id,
+        if (claimsPaused()) {
+          logDebug("watch", "claim_scan_stopped_paused", {
+            reason,
+            claimed,
+            nextMissionId: mission.id,
           });
+          break;
+        }
+        const claimAbortController = new AbortController();
+        ctx.activeClaimAbortController = claimAbortController;
+        try {
+          const claimResult = await mcp.mcpToolCall(
+            "claim_mission_reward",
+            {
+              assignedMissionId: mission.id,
+            },
+            { signal: claimAbortController.signal },
+          );
           if (!toolCallSucceeded(claimResult)) {
             const message =
               claimResult?.structuredContent?.details?.message ||
@@ -4197,6 +4224,18 @@ function createChecksService(ctx, logger, mcp, services = {}) {
             `[WATCH] ✅ Claimed (fallback): ${mission.name}${slotText}${levelText}`,
           );
         } catch (error) {
+          if (
+            claimsPaused() ||
+            error?.name === "AbortError" ||
+            /abort/i.test(String(error?.message || ""))
+          ) {
+            logDebug("watch", "claim_aborted_paused", {
+              reason,
+              missionId: mission.id,
+              error: String(error?.message || error),
+            });
+            break;
+          }
           const levelText =
             mission.level === null ? "" : ` lvl=${mission.level}`;
           const slotText = mission.slot === null ? "" : ` slot=${mission.slot}`;
@@ -4208,6 +4247,10 @@ function createChecksService(ctx, logger, mcp, services = {}) {
             missionId: mission.id,
             error: error.message,
           });
+        } finally {
+          if (ctx.activeClaimAbortController === claimAbortController) {
+            ctx.activeClaimAbortController = null;
+          }
         }
       }
       if (claimed > 0) scheduleFundingWalletRefresh("claim_fallback");
