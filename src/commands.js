@@ -766,6 +766,71 @@ function createCommandHandler(ctx, logger, actions, configApi, services = {}) {
         );
         return;
       }
+      if (cmd === "mr" || cmd.startsWith("mr ")) {
+        const arg = cmd.slice(2).trim();
+        if (!arg) {
+          if (ctx.debugMode !== true) {
+            logWithTimestamp("[MODE] Per-slot mission reset overrides require debug mode.");
+            return;
+          }
+          ctx.missionResetPerSlotModeEnabled =
+            ctx.missionResetPerSlotModeEnabled !== true;
+        } else if (arg === "off") {
+          ctx.missionResetPerSlotModeEnabled = false;
+        } else if (arg === "on") {
+          if (ctx.debugMode !== true) {
+            logWithTimestamp("[MODE] Per-slot mission reset overrides require debug mode.");
+            return;
+          }
+          ctx.missionResetPerSlotModeEnabled = true;
+        } else {
+          logWithTimestamp("Usage: mr [off|on]");
+          return;
+        }
+        ctx.config.missionResetPerSlotModeEnabled =
+          ctx.missionResetPerSlotModeEnabled;
+        if (
+          !ctx.config.missionResetPerSlotEnabledBySlot ||
+          typeof ctx.config.missionResetPerSlotEnabledBySlot !== "object"
+        ) {
+          ctx.config.missionResetPerSlotEnabledBySlot = {
+            1: false,
+            2: false,
+            3: false,
+            4: false,
+          };
+        }
+        if (
+          !ctx.config.missionResetPerSlotLevelBySlot ||
+          typeof ctx.config.missionResetPerSlotLevelBySlot !== "object"
+        ) {
+          const fallbackLevel = Number(
+            ctx.currentMissionResetLevel ||
+              process.env.PBP_DEFAULT_MISSION_RESET_LEVEL ||
+              ctx.runtimeDefaults?.missionResetLevel ||
+              11,
+          );
+          ctx.config.missionResetPerSlotLevelBySlot = {
+            1: fallbackLevel,
+            2: fallbackLevel,
+            3: fallbackLevel,
+            4: fallbackLevel,
+          };
+        }
+        ctx.missionResetPerSlotEnabledBySlot = {
+          ...ctx.config.missionResetPerSlotEnabledBySlot,
+        };
+        ctx.missionResetPerSlotLevelBySlot = {
+          ...ctx.config.missionResetPerSlotLevelBySlot,
+        };
+        flushConfig(ctx, logger.logDebug);
+        logWithTimestamp(
+          ctx.missionResetPerSlotModeEnabled
+            ? "[MODE] Per-slot mission reset overrides enabled."
+            : "[MODE] Per-slot mission reset overrides disabled.",
+        );
+        return;
+      }
       const handler = handlers[cmd];
       if (handler) {
         await handler();

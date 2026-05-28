@@ -81,6 +81,9 @@ function createGuiStateEmitter(ctx) {
       currentMode: ctx.currentMode,
       level20ResetEnabled: ctx.level20ResetEnabled,
       missionModeEnabled: ctx.missionModeEnabled,
+      missionResetPerSlotModeEnabled: ctx.missionResetPerSlotModeEnabled,
+      missionResetPerSlotEnabledBySlot: ctx.missionResetPerSlotEnabledBySlot,
+      missionResetPerSlotLevelBySlot: ctx.missionResetPerSlotLevelBySlot,
       debugMode: ctx.debugMode,
       nftCooldownResetEnabled: ctx.nftCooldownResetEnabled,
       nftCooldownResetMaxPbp: ctx.config?.nftCooldownResetMaxPbp ?? 20,
@@ -277,6 +280,46 @@ if (process.env.PBP_GUI_BRIDGE === "1" && typeof process.send === "function") {
           ctx.nftCooldownResetEnabled = payload.nftCooldownResetEnabled;
           ctx.config.nftCooldownResetEnabled = payload.nftCooldownResetEnabled;
         }
+        if (typeof payload.missionResetPerSlotModeEnabled === "boolean") {
+          ctx.missionResetPerSlotModeEnabled =
+            payload.missionResetPerSlotModeEnabled;
+          ctx.config.missionResetPerSlotModeEnabled =
+            payload.missionResetPerSlotModeEnabled;
+        }
+        if (
+          payload.missionResetPerSlotEnabledBySlot &&
+          typeof payload.missionResetPerSlotEnabledBySlot === "object"
+        ) {
+          const nextEnabledBySlot = {};
+          for (let slot = 1; slot <= 4; slot += 1) {
+            nextEnabledBySlot[String(slot)] =
+              payload.missionResetPerSlotEnabledBySlot[slot] === true ||
+              payload.missionResetPerSlotEnabledBySlot[String(slot)] === true;
+          }
+          ctx.missionResetPerSlotEnabledBySlot = nextEnabledBySlot;
+          ctx.config.missionResetPerSlotEnabledBySlot = { ...nextEnabledBySlot };
+        }
+        if (
+          payload.missionResetPerSlotLevelBySlot &&
+          typeof payload.missionResetPerSlotLevelBySlot === "object"
+        ) {
+          const nextLevelBySlot = {};
+          for (let slot = 1; slot <= 4; slot += 1) {
+            const nextLevel = Number(
+              payload.missionResetPerSlotLevelBySlot[slot] ??
+                payload.missionResetPerSlotLevelBySlot[String(slot)],
+            );
+            if (Number.isFinite(nextLevel) && nextLevel > 0) {
+              nextLevelBySlot[String(slot)] = Math.floor(nextLevel);
+            }
+          }
+          if (Object.keys(nextLevelBySlot).length === 4) {
+            ctx.missionResetPerSlotLevelBySlot = nextLevelBySlot;
+            ctx.config.missionResetPerSlotLevelBySlot = {
+              ...nextLevelBySlot,
+            };
+          }
+        }
         if (payload.nftCooldownResetMaxPbp !== undefined) {
           const maxPbp = Number(payload.nftCooldownResetMaxPbp);
           if (Number.isFinite(maxPbp) && maxPbp >= 0) {
@@ -285,12 +328,16 @@ if (process.env.PBP_GUI_BRIDGE === "1" && typeof process.send === "function") {
         }
         flushConfig(ctx, logger.logDebug);
         logger.logWithTimestamp(
-          `[CONFIG] Auto NFT cooldown resets ${ctx.nftCooldownResetEnabled ? "enabled" : "disabled"} (max ${Number(ctx.config.nftCooldownResetMaxPbp ?? 20)} PBP).`,
+          `[CONFIG] Runtime config updated: debug=${ctx.debugMode}, per-slot mission resets=${ctx.missionResetPerSlotModeEnabled ? "enabled" : "disabled"}, auto NFT resets=${ctx.nftCooldownResetEnabled ? "enabled" : "disabled"} (max ${Number(ctx.config.nftCooldownResetMaxPbp ?? 20)} PBP).`,
         );
         sendGuiResponse(requestId, {
           ok: true,
           config: {
             debugMode: ctx.debugMode,
+            missionResetPerSlotModeEnabled: ctx.missionResetPerSlotModeEnabled,
+            missionResetPerSlotEnabledBySlot:
+              ctx.missionResetPerSlotEnabledBySlot,
+            missionResetPerSlotLevelBySlot: ctx.missionResetPerSlotLevelBySlot,
             nftCooldownResetEnabled: ctx.nftCooldownResetEnabled,
             nftCooldownResetMaxPbp: ctx.config.nftCooldownResetMaxPbp,
           },

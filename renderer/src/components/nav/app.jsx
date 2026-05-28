@@ -115,7 +115,7 @@ export default function NavMain({
           Settings
         </a>
         <div className="flex flex-1 w-full items-end justify-center pb-4 text-[9px] text-gray-400">
-          <div className="flex flex-col items-center justify-center opacity-35 hover:opacity-100 transition-all select-none">
+          <div className="flex flex-col items-center justify-center opacity-35 hover:opacity-80 transition-all select-none">
             <img
               src={korea}
               alt="it's a meeeee, koreaaa!"

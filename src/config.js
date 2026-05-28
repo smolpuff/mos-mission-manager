@@ -3,6 +3,10 @@
 const fs = require("fs");
 const path = require("path");
 const { applyRuntimeDefaults } = require("./runtime-defaults");
+const {
+  normalizeMissionResetPerSlotEnabledBySlot,
+  normalizeMissionResetPerSlotLevelBySlot,
+} = require("./mission-reset-policy");
 
 const SAVE_DEBOUNCE_MS = 350;
 const pendingSaves = new WeakMap();
@@ -11,6 +15,9 @@ const SALVAGE_TOP_LEVEL_KEYS = [
   "targetMissions",
   "level20ResetEnabled",
   "missionModeEnabled",
+  "missionResetPerSlotModeEnabled",
+  "missionResetPerSlotEnabledBySlot",
+  "missionResetPerSlotLevelBySlot",
   "nftCooldownResetEnabled",
   "nftCooldownResetMissionModeEnabled",
   "nftCooldownResetMaxPbp",
@@ -297,6 +304,31 @@ function loadConfig(ctx, logWithTimestamp) {
   if (typeof ctx.config.missionModeEnabled === "boolean") {
     ctx.missionModeEnabled = ctx.config.missionModeEnabled;
   }
+  if (typeof ctx.config.missionResetPerSlotModeEnabled !== "boolean") {
+    ctx.config.missionResetPerSlotModeEnabled = false;
+  }
+  ctx.missionResetPerSlotModeEnabled =
+    ctx.config.missionResetPerSlotModeEnabled === true;
+  const perSlotFallbackLevel =
+    ctx.currentMissionResetLevel ||
+    process.env.PBP_DEFAULT_MISSION_RESET_LEVEL ||
+    ctx.runtimeDefaults?.missionResetLevel ||
+    "11";
+  ctx.config.missionResetPerSlotEnabledBySlot =
+    normalizeMissionResetPerSlotEnabledBySlot(
+      ctx.config.missionResetPerSlotEnabledBySlot,
+    );
+  ctx.config.missionResetPerSlotLevelBySlot =
+    normalizeMissionResetPerSlotLevelBySlot(
+      ctx.config.missionResetPerSlotLevelBySlot,
+      perSlotFallbackLevel,
+    );
+  ctx.missionResetPerSlotEnabledBySlot = {
+    ...ctx.config.missionResetPerSlotEnabledBySlot,
+  };
+  ctx.missionResetPerSlotLevelBySlot = {
+    ...ctx.config.missionResetPerSlotLevelBySlot,
+  };
   if (typeof ctx.config.nftCooldownResetEnabled === "boolean") {
     ctx.nftCooldownResetEnabled = ctx.config.nftCooldownResetEnabled;
   } else {

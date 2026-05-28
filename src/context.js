@@ -52,6 +52,19 @@ function createContext() {
     currentMode: "normal",
     level20ResetEnabled: false,
     missionModeEnabled: false,
+    missionResetPerSlotModeEnabled: false,
+    missionResetPerSlotEnabledBySlot: {
+      1: false,
+      2: false,
+      3: false,
+      4: false,
+    },
+    missionResetPerSlotLevelBySlot: {
+      1: Number(defaults.missionResetLevel) || 11,
+      2: Number(defaults.missionResetLevel) || 11,
+      3: Number(defaults.missionResetLevel) || 11,
+      4: Number(defaults.missionResetLevel) || 11,
+    },
     nftCooldownResetEnabled: false,
     currentMissionResetLevel:
       String(process.env.PBP_DEFAULT_MISSION_RESET_LEVEL || "").trim() ||

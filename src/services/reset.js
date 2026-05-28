@@ -22,11 +22,13 @@ function parseResetLevel(mission) {
 }
 
 function evaluateResetCandidates(snapshotMap, threshold) {
-  const t = Number(threshold);
-  if (!Number.isFinite(t) || t <= 0) return { ready: [], blocked: [] };
   const ready = [];
   const blocked = [];
   for (const mission of snapshotMap.values()) {
+    const rawThreshold =
+      typeof threshold === "function" ? threshold(mission) : threshold;
+    const t = Number(rawThreshold);
+    if (!Number.isFinite(t) || t <= 0) continue;
     const level = Number(parseResetLevel(mission) || 0);
     if (!Number.isFinite(level) || level < t) continue;
     if (missionHasAssignedNft(mission) || mission?.assignedNft) {

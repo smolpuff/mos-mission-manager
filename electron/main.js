@@ -3,6 +3,7 @@
 const crypto = require("crypto");
 const fs = require("fs");
 const net = require("net");
+const os = require("os");
 const path = require("path");
 const { fork, execFile } = require("child_process");
 const {
@@ -19,7 +20,7 @@ const {
 } = require("../src/wallet/onchain-summary");
 const { scrapeLatestCompetition } = require("./scrapeCompetitions");
 const { checkForUpdates } = require("./update-checker");
-const { login: mcpLogin, callTool: mcpCallTool } = require("../lib/mcp");
+const { createMcpClient } = require("../src/mcp/client");
 const {
   normalizeMissionList,
   normalizeMissionCatalogList,
@@ -167,6 +168,9 @@ const backendStatus = {
   defaultMissionResetLevel: null,
   level20ResetEnabled: null,
   missionModeEnabled: null,
+  missionResetPerSlotModeEnabled: null,
+  missionResetPerSlotEnabledBySlot: null,
+  missionResetPerSlotLevelBySlot: null,
   debugMode: null,
   nftCooldownResetEnabled: null,
   nftCooldownResetMaxPbp: null,
@@ -183,6 +187,47 @@ const backendStatus = {
 
 const ANALYTICS_VERSION = 1;
 const OUTPUT_LINE_BUFFER = { stdout: "", stderr: "", system: "", stdin: "" };
+const desktopMcpCtx = {
+  APP_VERSION: app.getVersion(),
+  MCP_URL: "https://pixelbypixel.studio/mcp",
+  MCP_PROTOCOL_VERSION: "2025-03-26",
+  tokenFilePath: path.join(os.homedir(), ".pbp-mcp", "token.json"),
+  interactiveAuth: true,
+  debugMode: isDesktopDevMode(),
+  isAuthenticated: false,
+  authRefreshSignal: 0,
+  onAuthRefresh: null,
+  mcpConnection: {
+    state: "disconnected",
+    lastError: null,
+    updatedAt: 0,
+  },
+  mcpRateLimitedUntil: 0,
+  mcpRateLimitReason: null,
+  lastAssignedMissionLookup: {},
+  lastUserMissionsResult: null,
+  lastUserMissionsFetchedAt: 0,
+  currentUserDisplayName: "unknown",
+  currentUserWalletId: "unknown",
+  currentUserWalletSummary: null,
+};
+const desktopMcpLogger = {
+  logWithTimestamp(message) {
+    pushSystemLog(String(message || ""));
+  },
+  logDebug(scope, event, meta = {}) {
+    if (!isDesktopDevMode()) return;
+    const detail =
+      meta && typeof meta === "object" && Object.keys(meta).length > 0
+        ? ` ${JSON.stringify(meta)}`
+        : "";
+    pushSystemLog(`[DEBUG:${String(scope || "mcp")}] ${String(event || "event")}${detail}`);
+  },
+};
+const desktopMcp = createMcpClient(desktopMcpCtx, desktopMcpLogger);
+async function mcpCallTool(toolName, args = {}, opts = {}) {
+  return desktopMcp.mcpToolCall(toolName, args, opts);
+}
 
 async function getMissionCatalogCached() {
   if (missionCatalogResultCache) {
@@ -2307,6 +2352,45 @@ function hydrateBackendStatusFromConfig() {
   if (typeof config.missionModeEnabled === "boolean") {
     backendStatus.missionModeEnabled = config.missionModeEnabled;
   }
+  if (typeof config.missionResetPerSlotModeEnabled === "boolean") {
+    backendStatus.missionResetPerSlotModeEnabled =
+      config.missionResetPerSlotModeEnabled;
+  } else {
+    backendStatus.missionResetPerSlotModeEnabled = false;
+  }
+  if (
+    config.missionResetPerSlotEnabledBySlot &&
+    typeof config.missionResetPerSlotEnabledBySlot === "object"
+  ) {
+    backendStatus.missionResetPerSlotEnabledBySlot = {
+      ...config.missionResetPerSlotEnabledBySlot,
+    };
+  } else {
+    backendStatus.missionResetPerSlotEnabledBySlot = {
+      1: false,
+      2: false,
+      3: false,
+      4: false,
+    };
+  }
+  if (
+    config.missionResetPerSlotLevelBySlot &&
+    typeof config.missionResetPerSlotLevelBySlot === "object"
+  ) {
+    backendStatus.missionResetPerSlotLevelBySlot = {
+      ...config.missionResetPerSlotLevelBySlot,
+    };
+  } else {
+    const fallbackLevel =
+      Number(config.missionResetLevel || defaultMissionResetLevelForConfig(config)) ||
+      11;
+    backendStatus.missionResetPerSlotLevelBySlot = {
+      1: fallbackLevel,
+      2: fallbackLevel,
+      3: fallbackLevel,
+      4: fallbackLevel,
+    };
+  }
   if (typeof config.nftCooldownResetEnabled === "boolean") {
     backendStatus.nftCooldownResetEnabled = config.nftCooldownResetEnabled;
   } else {
@@ -3011,17 +3095,12 @@ function isAuthFailureMessage(message) {
 }
 
 async function runOnboardingPopupLogin({
-  url = "https://pixelbypixel.studio/mcp",
-  timeoutMs = 30000,
-  loginTimeoutMs = 180000,
 } = {}) {
-  await mcpLogin({
-    url,
-    noBrowser: false,
-    printAuthUrl: false,
-    timeoutMs,
-    loginTimeoutMs,
+  const ok = await desktopMcp.runLoginFlow({
+    forceInteractive: true,
+    forceBrowser: true,
   });
+  if (!ok) throw new Error("login_failed");
 }
 
 function installMinimalApplicationMenu() {
@@ -3221,6 +3300,9 @@ function startBackend() {
   backendStatus.currentMode = null;
   backendStatus.level20ResetEnabled = null;
   backendStatus.missionModeEnabled = null;
+  backendStatus.missionResetPerSlotModeEnabled = null;
+  backendStatus.missionResetPerSlotEnabledBySlot = null;
+  backendStatus.missionResetPerSlotLevelBySlot = null;
   backendStatus.nftCooldownResetEnabled = null;
   backendStatus.nftCooldownResetMaxPbp = null;
   backendStatus.currentMissionResetLevel = null;
@@ -3403,6 +3485,12 @@ function parseStoppedModeCommand(command) {
     return { type: "invalidMm" };
   }
 
+  if (cmd === "mr") {
+    if (parts.length === 1) return { type: "mr", mode: "toggle" };
+    if (arg === "on" || arg === "off") return { type: "mr", mode: arg };
+    return { type: "invalidMr" };
+  }
+
   if (cmd === "debug") {
     if (parts.length === 1) return { type: "debug_status" };
     if (arg === "on" || arg === "off") return { type: "debug", mode: arg };
@@ -3451,12 +3539,28 @@ function applyStoppedModeConfig(parsed) {
     patch.debugMode = parsed.mode === "on";
   }
 
+  if (parsed.type === "mr") {
+    if (parsed.mode === "off") {
+      patch.missionResetPerSlotModeEnabled = false;
+    } else {
+      if (current.debugMode !== true) return current;
+      patch.missionResetPerSlotModeEnabled =
+        parsed.mode === "toggle"
+          ? current.missionResetPerSlotModeEnabled !== true
+          : true;
+    }
+  }
+
   const next = applyDesktopConfigPatch(patch);
   if (typeof next.level20ResetEnabled === "boolean") {
     backendStatus.level20ResetEnabled = next.level20ResetEnabled;
   }
   if (typeof next.missionModeEnabled === "boolean") {
     backendStatus.missionModeEnabled = next.missionModeEnabled;
+  }
+  if (typeof next.missionResetPerSlotModeEnabled === "boolean") {
+    backendStatus.missionResetPerSlotModeEnabled =
+      next.missionResetPerSlotModeEnabled;
   }
   if (typeof next.debugMode === "boolean") {
     backendStatus.debugMode = next.debugMode;
@@ -3473,6 +3577,22 @@ function applyStoppedModeConfig(parsed) {
   }
   if (typeof next.missionResetLevel === "string") {
     backendStatus.currentMissionResetLevel = next.missionResetLevel;
+  }
+  if (
+    next.missionResetPerSlotEnabledBySlot &&
+    typeof next.missionResetPerSlotEnabledBySlot === "object"
+  ) {
+    backendStatus.missionResetPerSlotEnabledBySlot = {
+      ...next.missionResetPerSlotEnabledBySlot,
+    };
+  }
+  if (
+    next.missionResetPerSlotLevelBySlot &&
+    typeof next.missionResetPerSlotLevelBySlot === "object"
+  ) {
+    backendStatus.missionResetPerSlotLevelBySlot = {
+      ...next.missionResetPerSlotLevelBySlot,
+    };
   }
   backendStatus.currentMode = backendStatus.missionModeEnabled
     ? `mission-${backendStatus.currentMissionResetLevel || backendStatus.defaultMissionResetLevel}`
@@ -3505,11 +3625,22 @@ async function sendBackendCommand(command) {
   }
   if (!backend || !backendStatus.running) {
     const parsed = parseStoppedModeCommand(trimmed);
+    if (parsed.type === "mr") {
+      const current = readDesktopConfig();
+      const wouldEnable =
+        parsed.mode === "on" ||
+        (parsed.mode === "toggle" &&
+          current.missionResetPerSlotModeEnabled !== true);
+      if (wouldEnable && current.debugMode !== true) {
+        throw new Error("mr requires debug mode to be enabled.");
+      }
+    }
     if (parsed.type === "start") {
       startBackend();
     } else if (
       parsed.type === "20r" ||
       parsed.type === "mm" ||
+      parsed.type === "mr" ||
       parsed.type === "debug"
     ) {
       const next = applyStoppedModeConfig(parsed);
@@ -3537,6 +3668,8 @@ async function sendBackendCommand(command) {
       throw new Error("Usage: mm [off|on|<level>]");
     } else if (parsed.type === "invalidDebug") {
       throw new Error("Usage: debug [on|off]");
+    } else if (parsed.type === "invalidMr") {
+      throw new Error("Usage: mr [on|off]");
     } else {
       throw new Error("Backend is not running. Use 'start' to launch it.");
     }
@@ -4076,6 +4209,10 @@ app.whenReady().then(async () => {
     if (typeof next.missionModeEnabled === "boolean") {
       backendStatus.missionModeEnabled = next.missionModeEnabled;
     }
+    if (typeof next.missionResetPerSlotModeEnabled === "boolean") {
+      backendStatus.missionResetPerSlotModeEnabled =
+        next.missionResetPerSlotModeEnabled;
+    }
     if (typeof next.nftCooldownResetEnabled === "boolean") {
       backendStatus.nftCooldownResetEnabled = next.nftCooldownResetEnabled;
     }
@@ -4091,6 +4228,22 @@ app.whenReady().then(async () => {
     }
     if (typeof next.missionResetLevel === "string") {
       backendStatus.currentMissionResetLevel = next.missionResetLevel;
+    }
+    if (
+      next.missionResetPerSlotEnabledBySlot &&
+      typeof next.missionResetPerSlotEnabledBySlot === "object"
+    ) {
+      backendStatus.missionResetPerSlotEnabledBySlot = {
+        ...next.missionResetPerSlotEnabledBySlot,
+      };
+    }
+    if (
+      next.missionResetPerSlotLevelBySlot &&
+      typeof next.missionResetPerSlotLevelBySlot === "object"
+    ) {
+      backendStatus.missionResetPerSlotLevelBySlot = {
+        ...next.missionResetPerSlotLevelBySlot,
+      };
     }
     if (typeof next.signerMode === "string") {
       const signerMode = normalizedDesktopSignerMode(next.signerMode);
@@ -4150,6 +4303,18 @@ app.whenReady().then(async () => {
       (Object.prototype.hasOwnProperty.call(requestedPatch, "debugMode") ||
         Object.prototype.hasOwnProperty.call(
           requestedPatch,
+          "missionResetPerSlotModeEnabled",
+        ) ||
+        Object.prototype.hasOwnProperty.call(
+          requestedPatch,
+          "missionResetPerSlotEnabledBySlot",
+        ) ||
+        Object.prototype.hasOwnProperty.call(
+          requestedPatch,
+          "missionResetPerSlotLevelBySlot",
+        ) ||
+        Object.prototype.hasOwnProperty.call(
+          requestedPatch,
           "nftCooldownResetEnabled",
         ) ||
         Object.prototype.hasOwnProperty.call(
@@ -4159,6 +4324,9 @@ app.whenReady().then(async () => {
     ) {
       requestBackend("update_runtime_config", {
         debugMode: next.debugMode,
+        missionResetPerSlotModeEnabled: next.missionResetPerSlotModeEnabled,
+        missionResetPerSlotEnabledBySlot: next.missionResetPerSlotEnabledBySlot,
+        missionResetPerSlotLevelBySlot: next.missionResetPerSlotLevelBySlot,
         nftCooldownResetEnabled: next.nftCooldownResetEnabled,
         nftCooldownResetMaxPbp: next.nftCooldownResetMaxPbp,
       }).catch((error) => {

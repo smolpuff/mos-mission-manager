@@ -1,10 +1,28 @@
 export default function CompetitionPage({
   latestCompetition,
+  latestCompetitionList,
+  selectedCompetitionNumber,
+  setSelectedCompetitionNumber,
   latestCompetitionBusy,
   latestCompetitionError,
   refreshLatestCompetition,
   isCurrentCompetitionRow,
 }) {
+  const competitions = Array.isArray(latestCompetitionList)
+    ? latestCompetitionList
+    : latestCompetition
+      ? [latestCompetition]
+      : [];
+  const selectedCompetition =
+    competitions.find(
+      (competition) =>
+        String(
+          competition?.competitionNumber || competition?.scrapedAt || "",
+        ) === String(selectedCompetitionNumber || ""),
+    ) ||
+    competitions[0] ||
+    latestCompetition;
+
   return (
     <section className=" h-160 flex flex-col gap-3">
       <div className="competition__header grid gap-4 grid-cols-2 items-center">
@@ -12,11 +30,37 @@ export default function CompetitionPage({
           <h1 className="text-2xl font-normal competition__h leading-tight">
             Competition
             <span>
-              {latestCompetition?.competitionNumber
-                ? ` ${latestCompetition.competitionNumber}`
+              {selectedCompetition?.competitionNumber
+                ? ` ${selectedCompetition.competitionNumber}`
                 : ""}
             </span>{" "}
           </h1>
+          {competitions.length > 1 ? (
+            <select
+              className="select select-sm  bg-black/50 focus-within:bg-black border-white/10 text-slate-100 w-auto"
+              value={String(selectedCompetitionNumber || "")}
+              onChange={(event) =>
+                setSelectedCompetitionNumber?.(event.target.value)
+              }
+              disabled={latestCompetitionBusy}
+            >
+              {competitions.map((competition, index) => {
+                const value = String(
+                  competition?.competitionNumber ||
+                    competition?.scrapedAt ||
+                    index,
+                );
+                const label = competition?.competitionNumber
+                  ? `Competition ${competition.competitionNumber}`
+                  : `Competition ${index + 1}`;
+                return (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                );
+              })}
+            </select>
+          ) : null}
         </div>
         <div className="gap-1 text-xs justify-self-end  flex flex-col flex-0 relative">
           <button
@@ -31,23 +75,23 @@ export default function CompetitionPage({
             }
           >
             {latestCompetitionBusy
-              ? latestCompetition
+              ? selectedCompetition
                 ? "Refreshing..."
                 : "Loading..."
-              : latestCompetition
+              : selectedCompetition
                 ? "Refresh Results"
                 : "Load"}
           </button>
           <div>
             Start{" "}
-            {latestCompetition?.start ||
-              latestCompetition?.datesText ||
+            {selectedCompetition?.start ||
+              selectedCompetition?.datesText ||
               "Unknown"}
           </div>
           <div>
             End{" "}
-            {latestCompetition?.end ||
-              latestCompetition?.datesText ||
+            {selectedCompetition?.end ||
+              selectedCompetition?.datesText ||
               "Unknown"}
           </div>
         </div>
@@ -55,10 +99,10 @@ export default function CompetitionPage({
 
       <div className="card gap-4 competition__missions">
         <div className="text-sm text-slate-400 hidden">Missions</div>
-        {Array.isArray(latestCompetition?.missions) &&
-        latestCompetition.missions.length ? (
+        {Array.isArray(selectedCompetition?.missions) &&
+        selectedCompetition.missions.length ? (
           <ul className="text-sm list-disc pl-5 space-y-0.5 flex flex-wrap">
-            {latestCompetition.missions.map((m, idx) => (
+            {selectedCompetition.missions.map((m, idx) => (
               <li className=" basis-1/2" key={`${idx}_${m}`}>
                 {m}
               </li>
@@ -75,7 +119,7 @@ export default function CompetitionPage({
             <div className="text-sm text-red-300">{latestCompetitionError}</div>
           ) : null}
 
-          {!latestCompetition ? (
+          {!selectedCompetition ? (
             <div className="text-sm text-slate-300">
               {latestCompetitionBusy
                 ? "Loading competition..."
@@ -83,10 +127,10 @@ export default function CompetitionPage({
             </div>
           ) : (
             <div className="h-full min-h-0 flex flex-col gap-3">
-              {latestCompetition.debug?.challenge ? (
+              {selectedCompetition.debug?.challenge ? (
                 <div className="text-sm text-amber-200">
                   Headless scrape looks blocked (
-                  {latestCompetition.debug.challenge}
+                  {selectedCompetition.debug.challenge}
                   ). Try again after opening the competitions page once in-app,
                   or disable bot protection.
                 </div>
@@ -96,12 +140,12 @@ export default function CompetitionPage({
                 <div className="text-sm text-slate-400 w-full | hidden">
                   Results
                 </div>
-                {latestCompetition.resultsStatus ? (
+                {selectedCompetition.resultsStatus ? (
                   <div className="text-sm text-slate-300">
-                    {latestCompetition.resultsStatus}
+                    {selectedCompetition.resultsStatus}
                   </div>
-                ) : Array.isArray(latestCompetition.userRows) &&
-                  latestCompetition.userRows.length ? (
+                ) : Array.isArray(selectedCompetition.userRows) &&
+                  selectedCompetition.userRows.length ? (
                   <div className=" overflow-hidden overflow-y-scroll w-full flex-1 min-h-0">
                     <table className="results-table w-full text-xs border-collapse h-full">
                       <thead className="">
@@ -121,7 +165,7 @@ export default function CompetitionPage({
                         </tr>
                       </thead>
                       <tbody className="w-full">
-                        {latestCompetition.userRows.map((row, idx) => {
+                        {selectedCompetition.userRows.map((row, idx) => {
                           const isCurrentUserRow = isCurrentCompetitionRow(
                             row.player,
                           );
@@ -156,10 +200,10 @@ export default function CompetitionPage({
                       </tbody>
                     </table>
                   </div>
-                ) : Array.isArray(latestCompetition.users) &&
-                  latestCompetition.users.length ? (
+                ) : Array.isArray(selectedCompetition.users) &&
+                  selectedCompetition.users.length ? (
                   <ul className="text-sm list-disc pl-5 space-y-0.5">
-                    {latestCompetition.users.map((u, idx) => (
+                    {selectedCompetition.users.map((u, idx) => (
                       <li key={`${idx}_${u}`}>{u}</li>
                     ))}
                   </ul>
@@ -174,10 +218,10 @@ export default function CompetitionPage({
           <div className="text-sm text-slate-400 mish-gradient !text-2xl">
             Prizes
           </div>
-          {Array.isArray(latestCompetition?.prizes) &&
-          latestCompetition.prizes.length ? (
+          {Array.isArray(selectedCompetition?.prizes) &&
+          selectedCompetition.prizes.length ? (
             <ul className="text-xs space-y-0.5 ">
-              {latestCompetition.prizes.map((p, idx) => (
+              {selectedCompetition.prizes.map((p, idx) => (
                 <li key={`${idx}_${p}`} className="flex flex-col gap-2">
                   {p}
                 </li>

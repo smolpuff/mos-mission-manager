@@ -15,6 +15,10 @@ const {
 } = require("../missions/gui-slots");
 const { parseResetLevel } = require("./reset");
 const {
+  defaultResetPolicy,
+  resetPolicyForMission,
+} = require("../mission-reset-policy");
+const {
   openMissionPlayPage,
   MISSION_PLAY_URL,
   MISSION_PAGE_OPEN_COOLDOWN_MS_DEFAULT,
@@ -2723,31 +2727,11 @@ function createChecksService(ctx, logger, mcp, services = {}) {
   }
 
   function getResetPolicy() {
-    const mmEnabled =
-      ctx.missionModeEnabled || ctx.config.missionModeEnabled === true;
-    if (mmEnabled) {
-      const rawLevel =
-        ctx.currentMissionResetLevel ||
-        ctx.config.missionResetLevel ||
-        String(
-          process.env.PBP_DEFAULT_MISSION_RESET_LEVEL ||
-            ctx.runtimeDefaults?.missionResetLevel ||
-            "11",
-        );
-      const threshold = Number(rawLevel);
-      if (Number.isFinite(threshold) && threshold > 0) {
-        return { enabled: true, threshold };
-      }
-      return { enabled: true, threshold: 11 };
-    }
-    if (ctx.level20ResetEnabled || ctx.config.level20ResetEnabled === true) {
-      return { enabled: true, threshold: 20 };
-    }
-    return { enabled: false, threshold: null };
+    return defaultResetPolicy(ctx);
   }
 
   function missionBlockedByResetThreshold(mission) {
-    const resetPolicy = getResetPolicy();
+    const resetPolicy = resetPolicyForMission(ctx, mission);
     if (!resetPolicy.enabled) return false;
     const level = Number(parseResetLevel(mission) || 0);
     return Number.isFinite(level) && level >= Number(resetPolicy.threshold);

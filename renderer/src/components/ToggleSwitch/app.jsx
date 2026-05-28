@@ -11,6 +11,7 @@ export default function ToggleSwitch({
   name,
   value,
   styling,
+  size = "default",
 }) {
   const stopDisabledInteraction = (event) => {
     if (!disabled) return;
@@ -21,7 +22,9 @@ export default function ToggleSwitch({
   return (
     <label
       htmlFor={forID || switchID}
-      className={`inline-flex items-center gap-3 select-none ${
+      className={`inline-flex items-center select-none ${
+        size === "tiny" ? "gap-2" : "gap-3"
+      } ${
         disabled ? "cursor-not-allowed" : "cursor-pointer"
       }`}
       aria-disabled={disabled}
@@ -48,7 +51,7 @@ export default function ToggleSwitch({
         disabled={disabled}
       />
 
-      <span className="switch-wrap">
+      <span className={`switch-wrap ${size === "tiny" ? "switch-wrap--tiny" : ""}`}>
         <span className="switch-track" />
       </span>
 

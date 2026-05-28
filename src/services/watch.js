@@ -7,6 +7,10 @@ const {
 } = require("../missions/normalize");
 const { parseResetLevel, evaluateResetCandidates } = require("./reset");
 const {
+  defaultResetPolicy,
+  resetPolicyForMission,
+} = require("../mission-reset-policy");
+const {
   MISSION_PLAY_URL,
   openMissionPlayPage,
   MISSION_PAGE_OPEN_COOLDOWN_MS_DEFAULT,
@@ -1588,40 +1592,26 @@ function createWatchService(
   }
 
   function getResetPolicy() {
-    const mmEnabled =
-      ctx.missionModeEnabled || ctx.config.missionModeEnabled === true;
-    if (mmEnabled) {
-      const rawLevel =
-        ctx.currentMissionResetLevel ||
-        ctx.config.missionResetLevel ||
-        String(
-          process.env.PBP_DEFAULT_MISSION_RESET_LEVEL ||
-            ctx.runtimeDefaults?.missionResetLevel ||
-            "11",
-        );
-      const threshold = Number(rawLevel);
-      if (Number.isFinite(threshold) && threshold > 0) {
-        return {
-          enabled: true,
-          threshold,
-          label: `mm(${Math.floor(threshold)})`,
-        };
-      }
-      return { enabled: true, threshold: 11, label: "mm(11)" };
-    }
-    if (ctx.level20ResetEnabled || ctx.config.level20ResetEnabled === true) {
-      return { enabled: true, threshold: 20, label: "20r" };
-    }
-    return { enabled: false, threshold: null, label: "" };
+    return defaultResetPolicy(ctx);
   }
 
   // reset my heart, version control girl
   async function handleLevelResetIfNeeded(
     snapshotMap,
-    { reason = "cycle", threshold = 20, label = "reset" } = {},
+    {
+      reason = "cycle",
+      threshold = 20,
+      label = "reset",
+      thresholdForMission = null,
+    } = {},
   ) {
     const { ready: thresholdHits, blocked: blockedHits } =
-      evaluateResetCandidates(snapshotMap, threshold);
+      evaluateResetCandidates(
+        snapshotMap,
+        typeof thresholdForMission === "function"
+          ? thresholdForMission
+          : threshold,
+      );
     // Once the mission NFT is cleared, this mission is reroll-eligible even if
     // the source payload still reports stale active/completed flags.
     const resetHits = thresholdHits;
@@ -1832,6 +1822,8 @@ function createWatchService(
       reason,
       threshold: resetPolicy.threshold,
       label: resetPolicy.label,
+      thresholdForMission: (mission) =>
+        resetPolicyForMission(ctx, mission).threshold,
     });
     if (openedFromSnapshot) return true;
 
@@ -1859,7 +1851,7 @@ function createWatchService(
       .filter(
         (m) =>
           Number.isFinite(m.level) &&
-          m.level >= Number(resetPolicy.threshold) &&
+          m.level >= Number(resetPolicyForMission(ctx, m).threshold) &&
           !m.assignedNft,
       );
     if (hits.length === 0) return false;
@@ -1869,6 +1861,8 @@ function createWatchService(
       reason,
       threshold: resetPolicy.threshold,
       label: resetPolicy.label,
+      thresholdForMission: (mission) =>
+        resetPolicyForMission(ctx, mission).threshold,
     });
   }
 
