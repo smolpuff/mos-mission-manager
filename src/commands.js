@@ -62,7 +62,7 @@ function createCommandHandler(ctx, logger, actions, configApi, services = {}) {
 
   function showHelp() {
     logWithTimestamp(
-      "[HELP] h/help, clear, status, login, logout, check, c, r, reset20, 20r [on|off], mm [off|on|<level>], debug [on|off], pause, resume, q",
+      "[HELP] h/help, clear, status, i, login, logout, check, c, r, reset20, 20r [on|off], mm [off|on|<level>], debug [on|off], pause, resume, q",
     );
     logWithTimestamp(
       "[HELP] signer [status|doctor|setup|create|reveal|app_wallet|manual|dapp|import [path-or-key]|remove|unlock|lock]",
@@ -79,6 +79,62 @@ function createCommandHandler(ctx, logger, actions, configApi, services = {}) {
     if (signer) {
       logWithTimestamp(`[INFO] signer ${signer.modeSummary()}`);
     }
+  }
+
+  function pushDisplayLines(lines = []) {
+    const list = Array.isArray(lines)
+      ? lines.map((line) => String(line ?? ""))
+      : [String(lines ?? "")];
+    if (list.length === 0) return;
+    const maxSize = ctx.debugMode ? ctx.LOG_BUFFER_SIZE_DEBUG : ctx.LOG_BUFFER_SIZE;
+    for (const line of list) {
+      ctx.logBuffer.push(line);
+    }
+    while (ctx.logBuffer.length > maxSize) ctx.logBuffer.shift();
+    if (ctx.plainOutputMode) {
+      for (const line of list) {
+        process.stdout.write(`${line}\n`);
+      }
+      return;
+    }
+    if (ctx.startupFxActive) return;
+    if (typeof logger.redrawHeaderAndLog === "function") {
+      logger.redrawHeaderAndLog(ctx.currentMissionStats);
+    }
+  }
+
+  function makeColor(enabled, code, text) {
+    return enabled ? `\x1b[${code}m${text}\x1b[0m` : text;
+  }
+
+  function showToggleSettings() {
+    const configuredMissionResetLevel = String(
+      ctx.currentMissionResetLevel ||
+        ctx.config?.missionResetLevel ||
+        ctx.runtimeDefaults?.missionResetLevel ||
+        "11",
+    );
+    const nftResetMaxPbp = Number(ctx.config?.nftCooldownResetMaxPbp);
+    const normalizedNftResetMaxPbp =
+      Number.isFinite(nftResetMaxPbp) && nftResetMaxPbp >= 0
+        ? nftResetMaxPbp
+        : 20;
+    const useColor = !ctx.plainOutputMode && process.stdout.isTTY === true;
+    const onOff = (enabled) =>
+      enabled
+        ? makeColor(useColor, "32;1", "ON")
+        : makeColor(useColor, "31;1", "OFF");
+    const value = (text) => makeColor(useColor, "36;1", String(text));
+    const title = makeColor(useColor, "33;1", "TOGGLES");
+    pushDisplayLines([
+      `┌─ ${title} ${"─".repeat(44)}`,
+      `│ Mode              ${value(ctx.missionModeEnabled ? "MISSION" : "NORMAL")}    Reset level ${value(configuredMissionResetLevel)}`,
+      `│ Level 20 reset    ${onOff(ctx.level20ResetEnabled)}        Per-slot reset ${onOff(ctx.missionResetPerSlotModeEnabled)}`,
+      `│ NFT reset         ${onOff(ctx.nftCooldownResetEnabled)}        Max cost ${value(`${normalizedNftResetMaxPbp} PBP`)}`,
+      `│ Rentals           ${onOff(ctx.config?.enableRentals === true)}        Fast refresh ${onOff(ctx.config?.rentalFastRefreshEnabled === true)}`,
+      `│ Debug             ${onOff(ctx.debugMode)}        Watch loop ${onOff(ctx.watchLoopEnabled)}`,
+      `└${"─".repeat(57)}`,
+    ]);
   }
 
   async function startWatchLoopWithDelay({ reason = "start" } = {}) {
@@ -459,6 +515,9 @@ function createCommandHandler(ctx, logger, actions, configApi, services = {}) {
         await startWatchLoopWithDelay({ reason: "resume" });
       },
       status: async () => showStatus(),
+      i: async () => showToggleSettings(),
+      settings: async () => showToggleSettings(),
+      toggles: async () => showToggleSettings(),
       debug: async (raw) => {
         const parts = String(raw || "")
           .trim()
@@ -700,6 +759,10 @@ function createCommandHandler(ctx, logger, actions, configApi, services = {}) {
       }
       if (cmd === "debug" || cmd.startsWith("debug ")) {
         await handlers.debug(raw);
+        return;
+      }
+      if (cmd === "i" || cmd === "settings" || cmd === "toggles") {
+        await handlers.i();
         return;
       }
       if (cmd === "exit") {

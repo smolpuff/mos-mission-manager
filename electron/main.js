@@ -3659,12 +3659,44 @@ function debugToggleSummaryLines(config = {}) {
   ];
 }
 
+function toggleSettingsSummaryLines(config = {}, runtimeStatus = {}) {
+  const configuredMissionResetLevel = String(
+    runtimeStatus?.currentMissionResetLevel ||
+      config?.missionResetLevel ||
+      defaultMissionResetLevelForConfig(config) ||
+      "11",
+  );
+  const nftResetMaxPbp = Number(config?.nftCooldownResetMaxPbp);
+  const normalizedNftResetMaxPbp =
+    Number.isFinite(nftResetMaxPbp) && nftResetMaxPbp >= 0 ? nftResetMaxPbp : 20;
+  const onOff = (enabled) => (enabled ? "ON" : "OFF");
+  return [
+    `┌─ TOGGLES ${"─".repeat(44)}`,
+    `│ Mode              ${config?.missionModeEnabled === true ? "MISSION" : "NORMAL"}    Reset level ${configuredMissionResetLevel}`,
+    `│ Level 20 reset    ${onOff(config?.level20ResetEnabled === true)}        Per-slot reset ${onOff(config?.missionResetPerSlotModeEnabled === true)}`,
+    `│ NFT reset         ${onOff(config?.nftCooldownResetEnabled === true)}        Max cost ${normalizedNftResetMaxPbp} PBP`,
+    `│ Rentals           ${onOff(config?.enableRentals === true)}        Fast refresh ${onOff(config?.rentalFastRefreshEnabled === true)}`,
+    `│ Debug             ${onOff(config?.debugMode === true)}        Watch loop ${onOff(config?.watchLoopEnabled !== false)}`,
+    `└${"─".repeat(57)}`,
+  ];
+}
+
 async function sendBackendCommand(command) {
   const trimmed = String(command || "").trim();
   if (!trimmed) {
     throw new Error("Command is empty.");
   }
   const normalized = trimmed.toLowerCase();
+  if (normalized === "i" || normalized === "settings" || normalized === "toggles") {
+    if (!backend || !backendStatus.running) {
+      const current = readDesktopConfig();
+      pushOutput("stdin", `> ${trimmed}\n`);
+      for (const line of toggleSettingsSummaryLines(current, backendStatus)) {
+        pushOutput("system", `${line}\n`);
+      }
+      return true;
+    }
+  }
   if (normalized === "resume" && shouldRunCompetitionRangeLock()) {
     pushOutput("stdin", `> ${trimmed}\n`);
     pushSystemLog(
