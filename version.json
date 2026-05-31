@@ -1,5 +1,8 @@
 {
-  "version": "3.2.7",
+  "version": "3.2.9",
   "downloadUrl": "https://github.com/smolpuff/mos-mission-manager/releases/latest",
-  "notes": ["Stats rework"]
+  "notes": [
+    "Added ability to enable/disable individual missions",
+    "Stats rework"
+  ]
 }
