@@ -5,6 +5,7 @@ import HeaderUser from "../components/HeaderUser/app";
 import useBackendState from "../components/useBackendState/app";
 import ToggleSwitch from "../components/ToggleSwitch/app";
 import CompetitionPage from "./CompetitionPage";
+import DebugPage from "./DebugPage";
 import SettingsPage from "./SettingsPage";
 import StatsPage from "./StatsPage";
 import RentalsPage from "./RentalsPage";
@@ -379,6 +380,7 @@ function ControlView() {
   const debug = debugEnabled;
   const [currentPage, setCurrentPage] = useState("missions");
   const [isCliActive, setIsCliActive] = useState(false);
+  const [reducedMotionEnabled, setReducedMotionEnabledState] = useState(true);
   const [fundingSource, setFundingSource] = useState("browser");
   const [fundingEnabled, setFundingEnabled] = useState(true);
   const [resetEnabled, setResetEnabled] = useState(
@@ -473,6 +475,7 @@ function ControlView() {
   const isNormalMode = !isMissionMode;
   const debugControlsVisible =
     debug === true || bridge?.desktopDevMode === true;
+  const debugPageVisible = bridge?.desktopDevMode === true && debug === true;
   const competitionRangeLockDisabled = !debug || !isMissionMode;
   const competitionRangeLockInputsDisabled =
     competitionRangeLockDisabled || !competitionRangeLockEnabled;
@@ -584,6 +587,22 @@ function ControlView() {
   }, [status.debugMode]);
 
   useEffect(() => {
+    const root = document.documentElement;
+    const body = document.body;
+    if (reducedMotionEnabled) {
+      root.setAttribute("data-reduced-motion", "true");
+      body?.setAttribute("data-reduced-motion", "true");
+    } else {
+      root.removeAttribute("data-reduced-motion");
+      body?.removeAttribute("data-reduced-motion");
+    }
+    return () => {
+      root.removeAttribute("data-reduced-motion");
+      body?.removeAttribute("data-reduced-motion");
+    };
+  }, [reducedMotionEnabled]);
+
+  useEffect(() => {
     setMissionActionEnabledBySlot((current) => ({
       ...current,
       ...normalizeSlotBooleanMap(status.missionActionEnabledBySlot, true),
@@ -644,6 +663,11 @@ function ControlView() {
       );
       if (typeof config.debugMode === "boolean") {
         setDebugEnabled(config.debugMode);
+      }
+      if (typeof config.reducedMotionEnabled === "boolean") {
+        setReducedMotionEnabledState(config.reducedMotionEnabled);
+      } else {
+        setReducedMotionEnabledState(true);
       }
       if (typeof config.enableRentals === "boolean") {
         setRentalsEnabled(config.enableRentals);
@@ -722,6 +746,12 @@ function ControlView() {
       cancelled = true;
     };
   }, [bridge]);
+
+  useEffect(() => {
+    if (currentPage === "debug" && !debugPageVisible) {
+      setCurrentPage("missions");
+    }
+  }, [currentPage, debugPageVisible]);
 
   useEffect(() => {
     if (startupUpdateCheckRequestedRef.current) return;
@@ -924,6 +954,23 @@ function ControlView() {
     const next = enabled === true;
     setAutoUpdateCheckEnabledState(next);
     await applyConfigPatch({ autoUpdateCheckEnabled: next });
+  };
+  const setDebugMode = async (enabled) => {
+    const next = enabled === true;
+    setDebugEnabled(next);
+    await applyConfigPatch({ debugMode: next });
+  };
+  const setReducedMotionEnabled = async (enabled) => {
+    const next = enabled === true;
+    setReducedMotionEnabledState(next);
+    await applyConfigPatch({ reducedMotionEnabled: next });
+  };
+  const setPerSlotMissionResetModeEnabled = async (enabled) => {
+    const next = enabled === true;
+    setMissionResetPerSlotModeEnabled(next);
+    await applyConfigPatch({
+      missionResetPerSlotModeEnabled: next,
+    });
   };
   const setCompetitionRangeLock = async (enabled) => {
     const next = enabled === true;
@@ -2699,6 +2746,7 @@ function ControlView() {
           onNavigate={setCurrentPage}
           currentPage={currentPage}
           isCliActive={isCliActive || status.cliWindowOpen === true}
+          debugPageVisible={debugPageVisible}
         />
         <div className="main-wrapper  h-full">
           <HeaderUser
@@ -2720,7 +2768,6 @@ function ControlView() {
               setSignerMode={setSignerMode}
               appWalletAddress={appWalletAddress}
               copyText={copyText}
-              setCopiedLabel={setCopiedLabel}
               openExternalUrl={openExternalUrl}
               lockLabel={lockLabel}
               fundingWalletSummary={fundingWalletSummary}
@@ -2729,9 +2776,45 @@ function ControlView() {
               openCreateWalletModal={openCreateWalletModal}
               autoUpdateCheckEnabled={autoUpdateCheckEnabled}
               setAutoUpdateCheckEnabled={setAutoUpdateCheckEnabled}
+              reducedMotionEnabled={reducedMotionEnabled}
+              setReducedMotionEnabled={setReducedMotionEnabled}
               onManualUpdateCheck={() => runUpdateCheck({ manual: true })}
               updateCheckBusy={updateCheckBusy}
               updateCheckMessage={updateCheckMessage}
+            />
+          ) : null}
+          {currentPage === "debug" ? (
+            <DebugPage
+              desktopDevMode={bridge?.desktopDevMode === true}
+              debugEnabled={debug}
+              setDebugMode={setDebugMode}
+              reducedMotionEnabled={reducedMotionEnabled}
+              setReducedMotionEnabled={setReducedMotionEnabled}
+              isMissionMode={isMissionMode}
+              competitionRangeLockEnabled={competitionRangeLockEnabled}
+              competitionRangeLockMinRank={competitionRangeLockMinRank}
+              competitionRangeLockMaxRank={competitionRangeLockMaxRank}
+              competitionRangeLockPollSeconds={competitionRangeLockPollSeconds}
+              setCompetitionRangeLock={setCompetitionRangeLock}
+              setCompetitionRangeLockMin={setCompetitionRangeLockMin}
+              setCompetitionRangeLockMax={setCompetitionRangeLockMax}
+              setCompetitionRangeLockPoll={setCompetitionRangeLockPoll}
+              nftResetEnabled={nftResetEnabled}
+              nftResetMaxPbp={nftResetMaxPbp}
+              setAutoNftResetEnabled={setAutoNftResetEnabled}
+              setAutoNftResetMaxPbp={setAutoNftResetMaxPbp}
+              missionActionEnabledBySlot={missionActionEnabledBySlot}
+              setMissionActionEnabled={setMissionActionEnabled}
+              missionResetPerSlotModeEnabled={missionResetPerSlotModeEnabled}
+              setMissionResetPerSlotModeEnabled={
+                setPerSlotMissionResetModeEnabled
+              }
+              missionResetPerSlotEnabledBySlot={
+                missionResetPerSlotEnabledBySlot
+              }
+              setPerSlotMissionResetEnabled={setPerSlotMissionResetEnabled}
+              missionResetPerSlotLevelBySlot={missionResetPerSlotLevelBySlot}
+              setPerSlotMissionResetLevel={setPerSlotMissionResetLevel}
             />
           ) : null}
           {onboardingOpen ? (
@@ -2863,7 +2946,7 @@ function ControlView() {
                                     </div>
                                     {onboardingAppWalletAddress ? (
                                       <div className="flex items-center gap-4 flex-wrap">
-                                        <div className="text-sm text-slate-100 break-all">
+                                        <div className=" break-all flex min-h-13 w-full items-center gap-3 rounded-lg border border-accent/50 bg-accent/10 p-2 px-3">
                                           {onboardingAppWalletAddress}
                                         </div>
                                         <button
@@ -2975,12 +3058,24 @@ function ControlView() {
                               <button
                                 type="button"
                                 key={`onboarding-slot-${slot}`}
-                                className="rounded-md border-2 border-white/10 bg-black/20 p-3 h-full flex flex-col gap-2"
+                                className="rounded-md border-1 border-white/10 bg-black/20 p-3 h-full flex flex-col gap-2 aspect-square"
                                 onClick={() =>
                                   setOnboardingMissionPickerSlot(slot)
                                 }
                                 disabled={loadingSlot || onboardingBusy}
                               >
+                                <div className="flex gap-2 justify-between">
+                                <div
+                                  className={`${assigned && assigned.isActive ? "badge badge-success" : "badge"} px-2 h-auto text-[11px] text-slate-900`}
+                                >
+                                  {selectedName
+                                    ? assigned?.isActive
+                                      ? "Active"
+                                      : assigned
+                                        ? "Assigned"
+                                        : "Selected"
+                                    : "No mission"}
+                                </div>
                                 <div className="flex gap flex-row justify-between items-center">
                                   <div className="text-[11px] text-slate-400">
                                     {selectedCard?.currentLevel !== null &&
@@ -2988,17 +3083,7 @@ function ControlView() {
                                       ? `Level ${selectedCard.currentLevel}`
                                       : "Level —"}
                                   </div>
-                                  <div
-                                    className={`${assigned && assigned.isActive ? "badge badge-success" : "badge"} px-2 h-auto text-[11px] text-slate-900`}
-                                  >
-                                    {selectedName
-                                      ? assigned?.isActive
-                                        ? "Active"
-                                        : assigned
-                                          ? "Assigned"
-                                          : "Selected"
-                                      : "No mission"}
-                                  </div>
+                                </div>
                                 </div>
                                 {loadingSlot ? (
                                   <div className="grid place-items-center flex-1">
@@ -3006,9 +3091,6 @@ function ControlView() {
                                   </div>
                                 ) : (
                                   <div className="flex flex-col flex-1">
-                                    <div className="text-[11px] text-slate-400 mb-1">
-                                      Mission
-                                    </div>
                                     <div className="text-sm text-slate-100 text-left">
                                       {selectedName || "Select mission"}
                                     </div>
@@ -3016,8 +3098,9 @@ function ControlView() {
                                       <RewardBadge
                                         reward={selectedCard?.reward}
                                       />
+                                      {/* this needs fixing */}
                                     </div>
-                                    <div className="text-[11px] text-accent mt-1 text-left">
+                                    <div className="text-[11px] text-accent mt-1 text-left | hidden">
                                       Click to change
                                     </div>
                                   </div>
@@ -3710,7 +3793,7 @@ function ControlView() {
                   </div>
                   <div className="flex items-center justify-center">
                     <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-base ">
-                      <div className="w-full col-span-2 text-sm">Session</div>
+                      {/* <div className="w-full col-span-2 text-sm">Session</div> */}
                       <div>
                         🎯{" "}
                         <strong>
@@ -3772,9 +3855,7 @@ function ControlView() {
                         <div className="z-10 mode__name font-bold text-2xl leading-7">
                           Normal Mode
                         </div>
-                        <div className="text-xs">
-                          Resets level 20. Can be toggled.
-                        </div>
+                        <div className="text-xs">Resets level 20</div>
                       </div>
                     </button>
                     <button
@@ -3789,7 +3870,7 @@ function ControlView() {
                           Mission Mode
                         </div>
                         <div className="text-xs">
-                          Resets level 11. Cannot be toggled.
+                          Resets level {debugEnabled ? "6" : "11"}
                         </div>
                       </div>
                       <div class="mo-fire">
@@ -4201,7 +4282,7 @@ function ControlView() {
                         />
                       </div>
                     </div>
-                    <div className="grid  grid-cols-2 gap-x-2 gap-y-1 mx-8  user__wallet-balance  h-1/2 items-center">
+                    <div className="grid  grid-cols-2 gap-x-2 gap-y-1 mx-8  mb-5 user__wallet-balance  mt-auto items-center">
                       {walletTiles.map((tile) => (
                         <div
                           key={tile.key}
@@ -4301,7 +4382,7 @@ function ControlView() {
                     return (
                       <div key={slot} className="flex flex-col gap-1">
                         <div
-                          className={`card-mission ${slotError ? "card-mission--error" : ""} ${slotLocked ? "opacity-70" : "cursor-pointer"}`}
+                          className={`card-mission ${slotError ? "card-mission--error" : ""} ${slotLocked ? "opacity-70" : "cursor-pointer"} `}
                           role={slotLocked ? undefined : "button"}
                           tabIndex={slotLocked ? undefined : 0}
                           title={
@@ -4320,10 +4401,14 @@ function ControlView() {
                             }
                           }}
                         >
-                          <div className="card-mission__header relative overflow-clip">
+                          <div
+                            className={`card-mission__header transition-all relative overflow-clip ${!slotAutomationEnabled ? "opacity-70 grayscale" : "cursor-pointer"} `}
+                          >
                             <MissionSlotImage src={imgSrc} />
                             {isStarting || slotImageLoading ? (
-                              <span className="loading loading-spinner loading-xs text-white/30 absolute top-2 right-2 z-20" />
+                              <span
+                                className={`loading loading-spinner loading-xs text-white/30 absolute top-2 right-2 z-20}  `}
+                              />
                             ) : null}
                             {slotError ? (
                               <button

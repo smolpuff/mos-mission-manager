@@ -1003,10 +1003,10 @@ button.btn.btn-gradient {
 }
 
 .signer-type {
-  @apply flex gap-4;
+  @apply flex gap-3;
 
   [class*="signer-type__"] {
-    @apply rounded-md w-full basis-1/2 relative p-3 text-[13px] text-gray-300 flex gap-2 cursor-pointer;
+    @apply rounded-lg w-full basis-1/2 relative p-3 text-xs text-gray-300 flex gap-2 cursor-pointer;
 
     &::after {
       content: "";
@@ -1030,9 +1030,9 @@ button.btn.btn-gradient {
 
     &::before {
       content: "";
-      @apply absolute inset-px pointer-events-none z-1;
+      @apply absolute inset-px pointer-events-none z-1 bg-black/15;
       border-radius: inherit;
-      background: rgb(255 255 255 / 0.08);
+      /* background: rgb(255 255 255 / 0.08); */
       mix-blend-mode: overlay;
     }
 
@@ -1550,4 +1550,61 @@ button.btn.btn-gradient {
     transform: translate(-69px, -190px) rotate(180deg);
     opacity: 0;
   }
+}
+
+html[data-reduced-motion="true"],
+body[data-reduced-motion="true"] {
+  scroll-behavior: auto !important;
+}
+
+html[data-reduced-motion="true"] .mission-image,
+body[data-reduced-motion="true"] .mission-image {
+  will-change: auto;
+}
+
+html[data-reduced-motion="true"] .mission-image--in,
+html[data-reduced-motion="true"] .mission-image--out,
+html[data-reduced-motion="true"] .num-ticker__item--in-up,
+html[data-reduced-motion="true"] .num-ticker__item--out-up,
+html[data-reduced-motion="true"] .num-ticker__item--in-down,
+html[data-reduced-motion="true"] .num-ticker__item--out-down,
+html[data-reduced-motion="true"] .results-table .results-row--current td::after,
+html[data-reduced-motion="true"] .mission-choice-card--selected::after,
+html[data-reduced-motion="true"] .signer-type label:has(input:checked)::after,
+html[data-reduced-motion="true"] .claim-bar,
+html[data-reduced-motion="true"] .stats-live-card::before,
+html[data-reduced-motion="true"] .card-mission.card-mission--error .card-mission__header,
+body[data-reduced-motion="true"] .mission-image--in,
+body[data-reduced-motion="true"] .mission-image--out,
+body[data-reduced-motion="true"] .num-ticker__item--in-up,
+body[data-reduced-motion="true"] .num-ticker__item--out-up,
+body[data-reduced-motion="true"] .num-ticker__item--in-down,
+body[data-reduced-motion="true"] .num-ticker__item--out-down,
+body[data-reduced-motion="true"] .results-table .results-row--current td::after,
+body[data-reduced-motion="true"] .mission-choice-card--selected::after,
+body[data-reduced-motion="true"] .signer-type label:has(input:checked)::after,
+body[data-reduced-motion="true"] .claim-bar,
+body[data-reduced-motion="true"] .stats-live-card::before,
+body[data-reduced-motion="true"] .card-mission.card-mission--error .card-mission__header {
+  animation: none !important;
+}
+
+html[data-reduced-motion="true"] .mission-progress-mask,
+body[data-reduced-motion="true"] .mission-progress-mask {
+  transition: width 140ms linear !important;
+}
+
+html[data-reduced-motion="true"] #mission-mode-mm_button .mo-fire,
+body[data-reduced-motion="true"] #mission-mode-mm_button .mo-fire {
+  opacity: 1 !important;
+  transform: translateX(-50%) translateY(0) scaleY(1) !important;
+  filter: drop-shadow(0 0 10px rgba(255, 80, 80, 0.35)) !important;
+}
+
+html[data-reduced-motion="true"] #mission-mode-mm_button .flame,
+html[data-reduced-motion="true"] #mission-mode-mm_button .flame-main,
+body[data-reduced-motion="true"] #mission-mode-mm_button .flame,
+body[data-reduced-motion="true"] #mission-mode-mm_button .flame-main {
+  animation: none !important;
+  opacity: 0.7 !important;
 }

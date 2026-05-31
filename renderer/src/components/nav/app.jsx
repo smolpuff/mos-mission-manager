@@ -8,6 +8,7 @@ export default function NavMain({
   onNavigate,
   currentPage,
   isCliActive,
+  debugPageVisible,
 }) {
   return (
     <>
@@ -114,6 +115,23 @@ export default function NavMain({
           </svg>
           Settings
         </a>
+        {debugPageVisible ? (
+          <a
+            href="#"
+            className={`items-center justify-center flex aspect-square w-full | text-[10px] font-thin uppercase ${
+              currentPage === "debug" ? "is-active nav-active" : ""
+            }`}
+            onClick={(e) => {
+              e.preventDefault();
+              onNavigate?.("debug");
+            }}
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 640">
+              <path d="M128 224L128 160L192 160L192 96L256 96L256 160L384 160L384 96L448 96L448 160L512 160L512 224L448 224L448 352L512 352L512 416L448 416L448 480L384 480L384 416L256 416L256 480L192 480L192 416L128 416L128 352L192 352L192 224L128 224zM256 224L256 352L384 352L384 224L256 224zM96 256L96 320L64 320L64 256L96 256zM576 256L576 320L544 320L544 256L576 256zM320 64L320 32L384 32L384 64L320 64zM256 576L256 544L320 544L320 576L256 576z" />
+            </svg>
+            Debug
+          </a>
+        ) : null}
         <div className="flex flex-1 w-full items-end justify-center pb-4 text-[9px] text-gray-400">
           <div className="flex flex-col items-center justify-center opacity-35 hover:opacity-80 transition-all select-none">
             <img

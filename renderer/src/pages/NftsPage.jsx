@@ -547,7 +547,7 @@ export default function NftsPage({ bridge, signerMode = "" }) {
         </div>
       ) : null}
 
-      <div className="card p-4 border border-white/10 bg-black/30 h-120 flex flex-col overflow-hidden">
+      <div className="card !pr-2 border border-white/10 bg-black/30 h-120 flex flex-col overflow-hidden">
         {data.nfts.length === 0 ? (
           <div className="text-sm text-slate-400 mt-3 flex items-center gap-2">
             {loading ? (

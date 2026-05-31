@@ -4427,6 +4427,12 @@ app.whenReady().then(async () => {
         applyDesktopConfigPatch({ autoUpdateCheckEnabled: true });
       } catch {}
     }
+    if (typeof config.reducedMotionEnabled !== "boolean") {
+      config.reducedMotionEnabled = true;
+      try {
+        applyDesktopConfigPatch({ reducedMotionEnabled: true });
+      } catch {}
+    }
     return { config };
   });
   ipcMain.handle("config:update", async (_event, patch) => {

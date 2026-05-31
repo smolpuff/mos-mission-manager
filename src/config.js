@@ -42,6 +42,7 @@ const SALVAGE_TOP_LEVEL_KEYS = [
   "lowBalanceSolThreshold",
   "signerSetupCompleted",
   "autoUpdateCheckEnabled",
+  "reducedMotionEnabled",
   "competitionRangeLockEnabled",
   "competitionRangeLockMinRank",
   "competitionRangeLockMaxRank",
