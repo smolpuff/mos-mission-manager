@@ -52,6 +52,12 @@ function createContext() {
     currentMode: "normal",
     level20ResetEnabled: false,
     missionModeEnabled: false,
+    missionActionEnabledBySlot: {
+      1: true,
+      2: true,
+      3: true,
+      4: true,
+    },
     missionResetPerSlotModeEnabled: false,
     missionResetPerSlotEnabledBySlot: {
       1: false,

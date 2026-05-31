@@ -19,6 +19,9 @@ const { createWatchService } = require("./src/services/watch");
 const { createCommandHandler } = require("./src/commands");
 const { startStartupFx } = require("./src/ui/startup-fx");
 const { applyRuntimeDefaults } = require("./src/runtime-defaults");
+const {
+  normalizeMissionActionEnabledBySlot,
+} = require("./src/mission-slot-policy");
 
 const ctx = createContext();
 const logger = createLogger(ctx);
@@ -83,6 +86,7 @@ function createGuiStateEmitter(ctx) {
       currentMode: ctx.currentMode,
       level20ResetEnabled: ctx.level20ResetEnabled,
       missionModeEnabled: ctx.missionModeEnabled,
+      missionActionEnabledBySlot: ctx.missionActionEnabledBySlot,
       missionResetPerSlotModeEnabled: ctx.missionResetPerSlotModeEnabled,
       missionResetPerSlotEnabledBySlot: ctx.missionResetPerSlotEnabledBySlot,
       missionResetPerSlotLevelBySlot: ctx.missionResetPerSlotLevelBySlot,
@@ -289,6 +293,16 @@ if (process.env.PBP_GUI_BRIDGE === "1" && typeof process.send === "function") {
             payload.missionResetPerSlotModeEnabled;
         }
         if (
+          payload.missionActionEnabledBySlot &&
+          typeof payload.missionActionEnabledBySlot === "object"
+        ) {
+          const nextEnabledBySlot = normalizeMissionActionEnabledBySlot(
+            payload.missionActionEnabledBySlot,
+          );
+          ctx.missionActionEnabledBySlot = nextEnabledBySlot;
+          ctx.config.missionActionEnabledBySlot = { ...nextEnabledBySlot };
+        }
+        if (
           payload.missionResetPerSlotEnabledBySlot &&
           typeof payload.missionResetPerSlotEnabledBySlot === "object"
         ) {
@@ -330,12 +344,13 @@ if (process.env.PBP_GUI_BRIDGE === "1" && typeof process.send === "function") {
         }
         flushConfig(ctx, logger.logDebug);
         logger.logWithTimestamp(
-          `[CONFIG] Runtime config updated: debug=${ctx.debugMode}, per-slot mission resets=${ctx.missionResetPerSlotModeEnabled ? "enabled" : "disabled"}, auto NFT resets=${ctx.nftCooldownResetEnabled ? "enabled" : "disabled"} (max ${Number(ctx.config.nftCooldownResetMaxPbp ?? 20)} PBP).`,
+          `[CONFIG] Runtime config updated: debug=${ctx.debugMode}, slot automation=${JSON.stringify(ctx.missionActionEnabledBySlot)}, per-slot mission resets=${ctx.missionResetPerSlotModeEnabled ? "enabled" : "disabled"}, auto NFT resets=${ctx.nftCooldownResetEnabled ? "enabled" : "disabled"} (max ${Number(ctx.config.nftCooldownResetMaxPbp ?? 20)} PBP).`,
         );
         sendGuiResponse(requestId, {
           ok: true,
           config: {
             debugMode: ctx.debugMode,
+            missionActionEnabledBySlot: ctx.missionActionEnabledBySlot,
             missionResetPerSlotModeEnabled: ctx.missionResetPerSlotModeEnabled,
             missionResetPerSlotEnabledBySlot:
               ctx.missionResetPerSlotEnabledBySlot,

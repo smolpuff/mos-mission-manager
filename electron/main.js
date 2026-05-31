@@ -170,6 +170,7 @@ const backendStatus = {
   defaultMissionResetLevel: null,
   level20ResetEnabled: null,
   missionModeEnabled: null,
+  missionActionEnabledBySlot: null,
   missionResetPerSlotModeEnabled: null,
   missionResetPerSlotEnabledBySlot: null,
   missionResetPerSlotLevelBySlot: null,
@@ -2384,6 +2385,21 @@ function hydrateBackendStatusFromConfig() {
   if (typeof config.missionModeEnabled === "boolean") {
     backendStatus.missionModeEnabled = config.missionModeEnabled;
   }
+  if (
+    config.missionActionEnabledBySlot &&
+    typeof config.missionActionEnabledBySlot === "object"
+  ) {
+    backendStatus.missionActionEnabledBySlot = {
+      ...config.missionActionEnabledBySlot,
+    };
+  } else {
+    backendStatus.missionActionEnabledBySlot = {
+      1: true,
+      2: true,
+      3: true,
+      4: true,
+    };
+  }
   if (typeof config.missionResetPerSlotModeEnabled === "boolean") {
     backendStatus.missionResetPerSlotModeEnabled =
       config.missionResetPerSlotModeEnabled;
@@ -3341,6 +3357,7 @@ function startBackend() {
   backendStatus.currentMode = null;
   backendStatus.level20ResetEnabled = null;
   backendStatus.missionModeEnabled = null;
+  backendStatus.missionActionEnabledBySlot = null;
   backendStatus.missionResetPerSlotModeEnabled = null;
   backendStatus.missionResetPerSlotEnabledBySlot = null;
   backendStatus.missionResetPerSlotLevelBySlot = null;
@@ -4422,6 +4439,14 @@ app.whenReady().then(async () => {
     if (typeof next.missionModeEnabled === "boolean") {
       backendStatus.missionModeEnabled = next.missionModeEnabled;
     }
+    if (
+      next.missionActionEnabledBySlot &&
+      typeof next.missionActionEnabledBySlot === "object"
+    ) {
+      backendStatus.missionActionEnabledBySlot = {
+        ...next.missionActionEnabledBySlot,
+      };
+    }
     if (typeof next.missionResetPerSlotModeEnabled === "boolean") {
       backendStatus.missionResetPerSlotModeEnabled =
         next.missionResetPerSlotModeEnabled;
@@ -4516,6 +4541,10 @@ app.whenReady().then(async () => {
       (Object.prototype.hasOwnProperty.call(requestedPatch, "debugMode") ||
         Object.prototype.hasOwnProperty.call(
           requestedPatch,
+          "missionActionEnabledBySlot",
+        ) ||
+        Object.prototype.hasOwnProperty.call(
+          requestedPatch,
           "missionResetPerSlotModeEnabled",
         ) ||
         Object.prototype.hasOwnProperty.call(
@@ -4537,6 +4566,7 @@ app.whenReady().then(async () => {
     ) {
       requestBackend("update_runtime_config", {
         debugMode: next.debugMode,
+        missionActionEnabledBySlot: next.missionActionEnabledBySlot,
         missionResetPerSlotModeEnabled: next.missionResetPerSlotModeEnabled,
         missionResetPerSlotEnabledBySlot: next.missionResetPerSlotEnabledBySlot,
         missionResetPerSlotLevelBySlot: next.missionResetPerSlotLevelBySlot,

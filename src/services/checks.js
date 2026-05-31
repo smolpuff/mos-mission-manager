@@ -19,6 +19,10 @@ const {
   resetPolicyForMission,
 } = require("../mission-reset-policy");
 const {
+  missionActionEnabledForSlot,
+  missionActionEnabledForMission,
+} = require("../mission-slot-policy");
+const {
   openMissionPlayPage,
   MISSION_PLAY_URL,
   MISSION_PAGE_OPEN_COOLDOWN_MS_DEFAULT,
@@ -2526,6 +2530,9 @@ function createChecksService(ctx, logger, mcp, services = {}) {
     if (!Number.isFinite(slotNumber) || slotNumber < 1 || slotNumber > 4) {
       return { ok: false, reason: "invalid_slot" };
     }
+    if (!missionActionEnabledForSlot(ctx, slotNumber)) {
+      return { ok: false, reason: "slot_disabled", slot: slotNumber };
+    }
     if (!Array.isArray(ctx.missionCatalogEntries) || ctx.missionCatalogEntries.length === 0) {
       await refreshMissionCatalog();
     }
@@ -2737,6 +2744,10 @@ function createChecksService(ctx, logger, mcp, services = {}) {
     return Number.isFinite(level) && level >= Number(resetPolicy.threshold);
   }
 
+  function missionBlockedByDisabledSlot(mission) {
+    return !missionActionEnabledForMission(ctx, mission);
+  }
+
   function missionBlockedByLockedSlot(mission, slotUnlockSummary = null) {
     const summary = normalizeSlotUnlockSummary({
       structuredContent: { slotUnlockSummary },
@@ -2758,6 +2769,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
       const selectedByName = key ? resolved.targetNames.has(key) : false;
       return (
         (selectedById || selectedByName) &&
+        !missionBlockedByDisabledSlot(m) &&
         !missionHasAssignedNft(m) &&
         !missionBlockedByResetThreshold(m) &&
         !missionBlockedByLockedSlot(m, slotUnlockSummary)
@@ -2783,6 +2795,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
         level: missionLevel(m),
         hasAssignedNft: missionHasAssignedNft(m),
         claimable: missionIsClaimable(m),
+        automationEnabled: !missionBlockedByDisabledSlot(m),
         resetBlocked: missionBlockedByResetThreshold(m),
       }));
   }
@@ -2821,6 +2834,26 @@ function createChecksService(ctx, logger, mcp, services = {}) {
         slot: m?.slot ?? null,
         level: missionLevel(m),
       }));
+    const disabledSlotBlocked = missions
+      .filter((m) => {
+        const name = missionName(m).toLowerCase();
+        const key = canonicalNameKey(name);
+        const id = catalogMissionId(m);
+        const selectedById = id ? resolved.targetIds.has(id) : false;
+        const selectedByName = key ? resolved.targetNames.has(key) : false;
+        return (
+          (selectedById || selectedByName) &&
+          !missionHasAssignedNft(m) &&
+          missionBlockedByDisabledSlot(m)
+        );
+      })
+      .map((m) => ({
+        name: missionName(m),
+        assignedMissionId: assignedMissionId(m),
+        catalogMissionId: catalogMissionId(m),
+        slot: m?.slot ?? null,
+        level: missionLevel(m),
+      }));
     const lockedSlotBlocked = missions
       .filter((m) => {
         const name = missionName(m).toLowerCase();
@@ -2846,6 +2879,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
       reason,
       attempt: 0,
       selectedCount: summarizeSelectedMissionState(missions, resolved).length,
+      disabledSlotBlockedCount: disabledSlotBlocked.length,
       resetBlockedCount: resetBlocked.length,
       lockedSlotBlockedCount: lockedSlotBlocked.length,
       availableSlots:
@@ -2862,6 +2896,14 @@ function createChecksService(ctx, logger, mcp, services = {}) {
         .join(", ");
       logWithTimestamp(
         `[ASSIGN] ⏸️ Holding mission(s) for reset threshold; not assigning NFT: ${names}`,
+      );
+    }
+    if (disabledSlotBlocked.length > 0) {
+      const names = disabledSlotBlocked
+        .map((m) => `${m.name} slot=${m.slot ?? "?"}`)
+        .join(", ");
+      logWithTimestamp(
+        `[ASSIGN] ⏸️ Holding disabled slot(s); not assigning NFT: ${names}`,
       );
     }
     if (lockedSlotBlocked.length > 0) {
@@ -4110,6 +4152,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
         ? filterSelectedMissions(missionsAll)
         : missionsAll;
       const candidates = missions
+        .filter((m) => !missionBlockedByDisabledSlot(m))
         .filter((m) => missionIsClaimable(m))
         .map((m) => ({
           id: assignedMissionId(m),

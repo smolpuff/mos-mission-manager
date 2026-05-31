@@ -337,11 +337,20 @@ function SlideNumberFormatted({ value, format }) {
   );
 }
 
-function normalizeSlotBooleanMap(raw) {
+function normalizeSlotBooleanMap(raw, fallback = false) {
   const src = raw && typeof raw === "object" ? raw : {};
+  const defaultValue = fallback === true;
   const out = {};
   for (let slot = 1; slot <= 4; slot += 1) {
-    out[String(slot)] = src[slot] === true || src[String(slot)] === true;
+    if (src[slot] === true || src[String(slot)] === true) {
+      out[String(slot)] = true;
+      continue;
+    }
+    if (src[slot] === false || src[String(slot)] === false) {
+      out[String(slot)] = false;
+      continue;
+    }
+    out[String(slot)] = defaultValue;
   }
   return out;
 }
@@ -404,6 +413,9 @@ function ControlView() {
   ] = useState(false);
   const [modeSelection, setModeSelection] = useState(
     status.missionModeEnabled === true ? "mission" : "normal",
+  );
+  const [missionActionEnabledBySlot, setMissionActionEnabledBySlot] = useState(
+    normalizeSlotBooleanMap(status.missionActionEnabledBySlot, true),
   );
   const [missionResetPerSlotModeEnabled, setMissionResetPerSlotModeEnabled] =
     useState(status.missionResetPerSlotModeEnabled === true);
@@ -572,6 +584,13 @@ function ControlView() {
   }, [status.debugMode]);
 
   useEffect(() => {
+    setMissionActionEnabledBySlot((current) => ({
+      ...current,
+      ...normalizeSlotBooleanMap(status.missionActionEnabledBySlot, true),
+    }));
+  }, [status.missionActionEnabledBySlot]);
+
+  useEffect(() => {
     if (typeof status.missionResetPerSlotModeEnabled === "boolean") {
       setMissionResetPerSlotModeEnabled(status.missionResetPerSlotModeEnabled);
     }
@@ -632,6 +651,9 @@ function ControlView() {
       if (typeof config.missionModeEnabled === "boolean") {
         setModeSelection(config.missionModeEnabled ? "mission" : "normal");
       }
+      setMissionActionEnabledBySlot(
+        normalizeSlotBooleanMap(config.missionActionEnabledBySlot, true),
+      );
       if (typeof config.missionResetPerSlotModeEnabled === "boolean") {
         setMissionResetPerSlotModeEnabled(
           config.missionResetPerSlotModeEnabled,
@@ -858,6 +880,17 @@ function ControlView() {
     const next = Number(raw);
     if (!Number.isFinite(next) || next < 0) return;
     await applyConfigPatch({ nftCooldownResetMaxPbp: next });
+  };
+  const setMissionActionEnabled = async (slot, enabled) => {
+    const key = String(slot);
+    const nextEnabledBySlot = {
+      ...missionActionEnabledBySlot,
+      [key]: enabled === true,
+    };
+    setMissionActionEnabledBySlot(nextEnabledBySlot);
+    await applyConfigPatch({
+      missionActionEnabledBySlot: nextEnabledBySlot,
+    });
   };
   const setPerSlotMissionResetEnabled = async (slot, enabled) => {
     const key = String(slot);
@@ -4258,6 +4291,8 @@ function ControlView() {
                       status.startupMissionSlotsLoading === true &&
                       !status.running &&
                       (!entry || !imgSrc);
+                    const slotAutomationEnabled =
+                      missionActionEnabledBySlot[String(slot)] !== false;
                     const perSlotResetEnabled =
                       missionResetPerSlotEnabledBySlot[String(slot)] === true;
                     const perSlotResetLevel =
@@ -4303,76 +4338,95 @@ function ControlView() {
                                 i
                               </button>
                             ) : null}
-                            <div
-                              className={`flex place-items-start ${
-                                perSlotMissionResetControlsVisible
-                                  ? "justify-between"
-                                  : "justify-end"
-                              }`}
-                            >
-                              {perSlotMissionResetControlsVisible ? (
-                                <div
-                                  className={`relative z-20 ${perSlotMissionResetControlsDisabled ? "grayscale opacity-60" : ""}`}
-                                  onClick={(event) => event.stopPropagation()}
-                                  onMouseDown={(event) =>
-                                    event.stopPropagation()
+                            <div className="flex items-start justify-between gap-2">
+                              <div
+                                className="relative z-20"
+                                onClick={(event) => event.stopPropagation()}
+                                onMouseDown={(event) => event.stopPropagation()}
+                                onKeyDown={(event) => event.stopPropagation()}
+                              >
+                                <ToggleSwitch
+                                  switchID={`slot-action-enabled-${slot}`}
+                                  checked={slotAutomationEnabled}
+                                  title=""
+                                  styling="hidden"
+                                  size="tiny"
+                                  onChange={(event) =>
+                                    void setMissionActionEnabled(
+                                      slot,
+                                      event.target.checked,
+                                    )
                                   }
-                                  onKeyDown={(event) => event.stopPropagation()}
-                                >
-                                  <div className="flex flex-col items-center justify-between gap-0.5">
-                                    <ToggleSwitch
-                                      switchID={`slot-reset-override-${slot}`}
-                                      checked={perSlotResetEnabled}
-                                      title=""
-                                      styling="hidden"
-                                      size="tiny"
-                                      disabled={
-                                        perSlotMissionResetControlsDisabled
-                                      }
-                                      onChange={(event) =>
-                                        void setPerSlotMissionResetEnabled(
-                                          slot,
-                                          event.target.checked,
-                                        )
-                                      }
-                                    />
-                                    {perSlotResetEnabled ? (
-                                      <label
-                                        className="flex items-center gap-2 text-xs text-white/80"
-                                        onClick={(event) =>
-                                          event.stopPropagation()
-                                        }
-                                        onMouseDown={(event) =>
-                                          event.stopPropagation()
-                                        }
-                                      >
-                                        <input
-                                          type="number"
-                                          min="1"
-                                          step="1"
-                                          value={perSlotResetLevel}
-                                          onChange={(event) =>
-                                            void setPerSlotMissionResetLevel(
-                                              slot,
-                                              event.target.value,
-                                            )
-                                          }
-                                          disabled={
-                                            perSlotMissionResetControlsDisabled
-                                          }
-                                          className="input-no-spinner slot-level-input h-min"
-                                        />
-                                      </label>
-                                    ) : null}
-                                  </div>
-                                </div>
-                              ) : null}
+                                />
+                              </div>
 
-                              {missionLevel ? (
-                                <div className="z-10 text-sm flex items-center rounded-[5px] justify-center w-7 h-7 opacity-100 self-start shadow-md shadow-black/20 font-semibold bg-amber-500 border-orange-200 border-2">
-                                  {missionLevel}
-                                </div>
-                              ) : null}
+                              <div className="flex flex-col items-end gap-1">
+                                {missionLevel ? (
+                                  <div className="z-10 text-sm flex items-center rounded-[5px] justify-center w-7 h-7 opacity-100 self-end shadow-md shadow-black/20 font-semibold bg-amber-500 border-orange-200 border-2">
+                                    {missionLevel}
+                                  </div>
+                                ) : null}
+
+                                {perSlotMissionResetControlsVisible ? (
+                                  <div
+                                    className={`relative z-20 ${perSlotMissionResetControlsDisabled ? "grayscale opacity-60" : ""}`}
+                                    onClick={(event) => event.stopPropagation()}
+                                    onMouseDown={(event) =>
+                                      event.stopPropagation()
+                                    }
+                                    onKeyDown={(event) =>
+                                      event.stopPropagation()
+                                    }
+                                  >
+                                    <div className="flex flex-col items-end gap-1">
+                                      <ToggleSwitch
+                                        switchID={`slot-reset-override-${slot}`}
+                                        checked={perSlotResetEnabled}
+                                        title=""
+                                        styling="hidden"
+                                        size="tiny"
+                                        disabled={
+                                          perSlotMissionResetControlsDisabled
+                                        }
+                                        onChange={(event) =>
+                                          void setPerSlotMissionResetEnabled(
+                                            slot,
+                                            event.target.checked,
+                                          )
+                                        }
+                                      />
+                                      {perSlotResetEnabled ? (
+                                        <label
+                                          className="flex items-center gap-1 text-xs text-white/80"
+                                          onClick={(event) =>
+                                            event.stopPropagation()
+                                          }
+                                          onMouseDown={(event) =>
+                                            event.stopPropagation()
+                                          }
+                                        >
+                                          <input
+                                            type="number"
+                                            min="1"
+                                            step="1"
+                                            value={perSlotResetLevel}
+                                            onChange={(event) =>
+                                              void setPerSlotMissionResetLevel(
+                                                slot,
+                                                event.target.value,
+                                              )
+                                            }
+                                            disabled={
+                                              perSlotMissionResetControlsDisabled
+                                            }
+                                            className="input-no-spinner slot-level-input h-min"
+                                          />
+                                        </label>
+                                      ) : null}
+                                    </div>
+                                  </div>
+                                ) : null}
+                              </div>
                             </div>
                             {!slotError & hasProgress ? (
                               <div className="relative w-full h-4 rounded-full overflow-hidden bg-zinc-800 opacity-90 shadow-md shadow-black/20 after:hidden ">

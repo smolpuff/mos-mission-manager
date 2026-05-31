@@ -7,6 +7,9 @@ const {
   normalizeMissionResetPerSlotEnabledBySlot,
   normalizeMissionResetPerSlotLevelBySlot,
 } = require("./mission-reset-policy");
+const {
+  normalizeMissionActionEnabledBySlot,
+} = require("./mission-slot-policy");
 
 const SAVE_DEBOUNCE_MS = 350;
 const pendingSaves = new WeakMap();
@@ -15,6 +18,7 @@ const SALVAGE_TOP_LEVEL_KEYS = [
   "targetMissions",
   "level20ResetEnabled",
   "missionModeEnabled",
+  "missionActionEnabledBySlot",
   "missionResetPerSlotModeEnabled",
   "missionResetPerSlotEnabledBySlot",
   "missionResetPerSlotLevelBySlot",
@@ -304,6 +308,12 @@ function loadConfig(ctx, logWithTimestamp) {
   if (typeof ctx.config.missionModeEnabled === "boolean") {
     ctx.missionModeEnabled = ctx.config.missionModeEnabled;
   }
+  ctx.config.missionActionEnabledBySlot = normalizeMissionActionEnabledBySlot(
+    ctx.config.missionActionEnabledBySlot,
+  );
+  ctx.missionActionEnabledBySlot = {
+    ...ctx.config.missionActionEnabledBySlot,
+  };
   if (typeof ctx.config.missionResetPerSlotModeEnabled !== "boolean") {
     ctx.config.missionResetPerSlotModeEnabled = false;
   }

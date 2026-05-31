@@ -81,6 +81,7 @@ export default function useBackendState() {
     defaultMissionResetLevel: null,
     level20ResetEnabled: null,
     missionModeEnabled: null,
+    missionActionEnabledBySlot: null,
     missionResetPerSlotModeEnabled: null,
     missionResetPerSlotEnabledBySlot: null,
     missionResetPerSlotLevelBySlot: null,

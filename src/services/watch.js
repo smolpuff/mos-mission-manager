@@ -11,6 +11,9 @@ const {
   resetPolicyForMission,
 } = require("../mission-reset-policy");
 const {
+  missionActionEnabledForMission,
+} = require("../mission-slot-policy");
+const {
   MISSION_PLAY_URL,
   openMissionPlayPage,
   MISSION_PAGE_OPEN_COOLDOWN_MS_DEFAULT,
@@ -52,6 +55,10 @@ function createWatchService(
 
   function claimWorkPaused() {
     return ctx.watchLoopEnabled === false;
+  }
+
+  function missionAutomationEnabled(mission) {
+    return missionActionEnabledForMission(ctx, mission);
   }
 
   function missionName(mission, fallback = "") {
@@ -967,6 +974,7 @@ function createWatchService(
       : allMissions;
     const byAssignedMissionId = new Map();
     for (const m of missions) {
+      if (!missionAutomationEnabled(m)) continue;
       const rawAssignedMissionId =
         m?.assignedMissionId || m?.assigned_mission_id || "";
       const missionLabel = missionName(m, "unknown mission");
@@ -1566,6 +1574,17 @@ function createWatchService(
     if (!assignedMissionId) {
       throw new Error("Assigned mission id is missing for reroll.");
     }
+    if (!missionAutomationEnabled(mission)) {
+      logDebug("watch", "mission_reroll_skipped_disabled_slot", {
+        reason,
+        label,
+        assignedMissionId,
+        name,
+        level,
+        slot,
+      });
+      return false;
+    }
     if (!signer) {
       throw new Error("Signer service unavailable.");
     }
@@ -1715,11 +1734,13 @@ function createWatchService(
           ? thresholdForMission
           : threshold,
       );
+    const enabledThresholdHits = thresholdHits.filter(missionAutomationEnabled);
+    const enabledBlockedHits = blockedHits.filter(missionAutomationEnabled);
     // Once the mission NFT is cleared, this mission is reroll-eligible even if
     // the source payload still reports stale active/completed flags.
-    const resetHits = thresholdHits;
-    if (blockedHits.length > 0) {
-      const blockedNames = blockedHits
+    const resetHits = enabledThresholdHits;
+    if (enabledBlockedHits.length > 0) {
+      const blockedNames = enabledBlockedHits
         .map(
           (m) => `${m.name} lvl=${Number(m.level || 0)} slot=${m.slot ?? "?"}`,
         )
@@ -1941,6 +1962,7 @@ function createWatchService(
       normalizeMissionList(resolvedMissionResult),
     );
     const hits = missions
+      .filter(missionAutomationEnabled)
       .map((m) => ({
         assignedMissionId:
           String(m?.assignedMissionId || m?.assigned_mission_id || "").trim() ||
@@ -1990,6 +2012,22 @@ function createWatchService(
     return getMcpCooldownRemainingMs() > 0;
   }
 
+  function hasDisabledMissionSlots() {
+    const map =
+      ctx.missionActionEnabledBySlot &&
+      typeof ctx.missionActionEnabledBySlot === "object"
+        ? ctx.missionActionEnabledBySlot
+        : ctx.config?.missionActionEnabledBySlot &&
+            typeof ctx.config.missionActionEnabledBySlot === "object"
+          ? ctx.config.missionActionEnabledBySlot
+          : null;
+    if (!map) return false;
+    for (let slot = 1; slot <= 4; slot += 1) {
+      if (map[String(slot)] === false || map[slot] === false) return true;
+    }
+    return false;
+  }
+
   function startupMissionResult() {
     const wrapper =
       ctx.startupAccountSnapshot && typeof ctx.startupAccountSnapshot === "object"
@@ -2007,8 +2045,9 @@ function createWatchService(
   async function runWatchCycle() {
     const traceId = nextTraceId("cycle");
     const opts = watchConfig();
+    const watchSafeLocalMode = hasDisabledMissionSlots();
     logDebug("watch", "cycle_start", opts);
-    trace("watch", "cycle_start", { traceId, opts });
+    trace("watch", "cycle_start", { traceId, opts, watchSafeLocalMode });
     logWithTimestamp("[WATCH] Watching missions...");
 
     let beforeSnapshot = new Map();
@@ -2102,7 +2141,8 @@ function createWatchService(
             Math.floor(clientConfiguredPollSeconds),
           )
         : 0;
-    const clientPollingEnabled = ctx.debugMode || clientPollIntervalSeconds > 0;
+    const clientPollingEnabled =
+      watchSafeLocalMode || ctx.debugMode || clientPollIntervalSeconds > 0;
 
     const runLiveMissionCheck = (reason) => {
       if (missionStatePollRunning) {
@@ -2236,27 +2276,69 @@ function createWatchService(
     }
 
     let result;
+    let usedLocalSafeWatch = false;
+    let localSafeElapsedMs = 0;
     cycleAbortController = new AbortController();
     try {
-      logDebug("watch", "watch_call_start", {
-        watchSeconds: opts.watchSeconds,
-        pollIntervalSeconds: opts.pollIntervalSeconds,
-        maxClaims: opts.maxClaims,
-        watchTimeoutMs,
-      });
-      result = await mcp.mcpToolCall(
-        "watch_and_claim",
-        {
+      if (watchSafeLocalMode) {
+        usedLocalSafeWatch = true;
+        logWithTimestamp(
+          "[WATCH] Disabled slots detected. Using local safe watch mode.",
+        );
+        logDebug("watch", "watch_call_skipped_local_safe_mode", {
           watchSeconds: opts.watchSeconds,
           pollIntervalSeconds: opts.pollIntervalSeconds,
           maxClaims: opts.maxClaims,
-        },
-        { timeoutMs: watchTimeoutMs, signal: cycleAbortController.signal },
-      );
-      logDebug("watch", "watch_call_done", {
-        success: result?.structuredContent?.success,
-        watch: result?.structuredContent?.watch || {},
-      });
+        });
+        if (clientPollingEnabled) runLiveMissionCheck("local_safe_start");
+        const localStartedAt = Date.now();
+        await new Promise((resolve, reject) => {
+          const timer = setTimeout(resolve, Math.max(1000, opts.watchSeconds * 1000));
+          cycleAbortController.signal.addEventListener(
+            "abort",
+            () => {
+              clearTimeout(timer);
+              const error = new Error("request aborted");
+              error.name = "AbortError";
+              reject(error);
+            },
+            { once: true },
+          );
+        });
+        localSafeElapsedMs = Date.now() - localStartedAt;
+        result = {
+          structuredContent: {
+            success: true,
+            watch: {
+              polls: 0,
+              timedOut: true,
+              elapsedMs: localSafeElapsedMs,
+              mode: "local_safe",
+            },
+            missionSnapshot: {},
+          },
+        };
+      } else {
+        logDebug("watch", "watch_call_start", {
+          watchSeconds: opts.watchSeconds,
+          pollIntervalSeconds: opts.pollIntervalSeconds,
+          maxClaims: opts.maxClaims,
+          watchTimeoutMs,
+        });
+        result = await mcp.mcpToolCall(
+          "watch_and_claim",
+          {
+            watchSeconds: opts.watchSeconds,
+            pollIntervalSeconds: opts.pollIntervalSeconds,
+            maxClaims: opts.maxClaims,
+          },
+          { timeoutMs: watchTimeoutMs, signal: cycleAbortController.signal },
+        );
+        logDebug("watch", "watch_call_done", {
+          success: result?.structuredContent?.success,
+          watch: result?.structuredContent?.watch || {},
+        });
+      }
     } finally {
       if (tickTimer) clearInterval(tickTimer);
       ctx.onAuthRefresh = previousAuthRefreshHandler || null;
@@ -2283,6 +2365,7 @@ function createWatchService(
     }
 
     logDebug("watch", "watch_and_claim_returned", {
+      localSafeMode: usedLocalSafeWatch,
       success: watchSuccess === undefined ? "n/a" : String(watchSuccess),
       claimEvents,
       parsedSuccess: claimed,
