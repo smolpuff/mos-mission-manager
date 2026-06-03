@@ -3065,25 +3065,25 @@ function ControlView() {
                                 disabled={loadingSlot || onboardingBusy}
                               >
                                 <div className="flex gap-2 justify-between">
-                                <div
-                                  className={`${assigned && assigned.isActive ? "badge badge-success" : "badge"} px-2 h-auto text-[11px] text-slate-900`}
-                                >
-                                  {selectedName
-                                    ? assigned?.isActive
-                                      ? "Active"
-                                      : assigned
-                                        ? "Assigned"
-                                        : "Selected"
-                                    : "No mission"}
-                                </div>
-                                <div className="flex gap flex-row justify-between items-center">
-                                  <div className="text-[11px] text-slate-400">
-                                    {selectedCard?.currentLevel !== null &&
-                                    selectedCard?.currentLevel !== undefined
-                                      ? `Level ${selectedCard.currentLevel}`
-                                      : "Level —"}
+                                  <div
+                                    className={`${assigned && assigned.isActive ? "badge badge-success" : "badge"} px-2 h-auto text-[11px] text-slate-900`}
+                                  >
+                                    {selectedName
+                                      ? assigned?.isActive
+                                        ? "Active"
+                                        : assigned
+                                          ? "Assigned"
+                                          : "Selected"
+                                      : "No mission"}
                                   </div>
-                                </div>
+                                  <div className="flex gap flex-row justify-between items-center">
+                                    <div className="text-[11px] text-slate-400">
+                                      {selectedCard?.currentLevel !== null &&
+                                      selectedCard?.currentLevel !== undefined
+                                        ? `Level ${selectedCard.currentLevel}`
+                                        : "Level —"}
+                                    </div>
+                                  </div>
                                 </div>
                                 {loadingSlot ? (
                                   <div className="grid place-items-center flex-1">
@@ -4402,7 +4402,7 @@ function ControlView() {
                           }}
                         >
                           <div
-                            className={`card-mission__header transition-all relative overflow-clip ${!slotAutomationEnabled ? "opacity-70 grayscale" : "cursor-pointer"} `}
+                            className={`card-mission__header transition-all relative overflow-clip ${!slotAutomationEnabled ? "card-mission__header--disabled" : "cursor-pointer"} `}
                           >
                             <MissionSlotImage src={imgSrc} />
                             {isStarting || slotImageLoading ? (
@@ -4436,6 +4436,7 @@ function ControlView() {
                                   title=""
                                   styling="hidden"
                                   size="tiny"
+                                  switchWrapClassName="slot-card-toggle-muted"
                                   onChange={(event) =>
                                     void setMissionActionEnabled(
                                       slot,
@@ -4443,14 +4444,6 @@ function ControlView() {
                                     )
                                   }
                                 />
-                              </div>
-
-                              <div className="flex flex-col items-end gap-1">
-                                {missionLevel ? (
-                                  <div className="z-10 text-sm flex items-center rounded-[5px] justify-center w-7 h-7 opacity-100 self-end shadow-md shadow-black/20 font-semibold bg-amber-500 border-orange-200 border-2">
-                                    {missionLevel}
-                                  </div>
-                                ) : null}
 
                                 {perSlotMissionResetControlsVisible ? (
                                   <div
@@ -4512,9 +4505,17 @@ function ControlView() {
                                   </div>
                                 ) : null}
                               </div>
+
+                              <div className="flex flex-col items-end gap-1">
+                                {missionLevel ? (
+                                  <div className="card-mission__level z-10 text-sm flex items-center rounded-[5px] justify-center w-7 h-7 opacity-100 self-end shadow-md shadow-black/20 font-semibold bg-amber-500 border-orange-200 border-2">
+                                    {missionLevel}
+                                  </div>
+                                ) : null}
+                              </div>
                             </div>
                             {!slotError & hasProgress ? (
-                              <div className="relative w-full h-4 rounded-full overflow-hidden bg-zinc-800 opacity-90 shadow-md shadow-black/20 after:hidden ">
+                              <div className="card-mission__progress relative w-full h-4 rounded-full overflow-hidden bg-zinc-800 opacity-90 shadow-md shadow-black/20 after:hidden ">
                                 <div className="absolute rounded-full inset-0 z-0 bg-linear-to-r from-violet-500 via-fuchsia-500 to-pink-500 after:hidden transition-all"></div>
                                 <div
                                   className="absolute rounded-r-full rounded-l-none top-0 right-0 z-10 h-full bg-zinc-800 after:hidden transition-all"

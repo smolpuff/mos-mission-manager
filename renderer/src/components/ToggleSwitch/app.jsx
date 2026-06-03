@@ -12,6 +12,7 @@ export default function ToggleSwitch({
   value,
   styling,
   size = "default",
+  switchWrapClassName = "",
 }) {
   const stopDisabledInteraction = (event) => {
     if (!disabled) return;
@@ -51,7 +52,9 @@ export default function ToggleSwitch({
         disabled={disabled}
       />
 
-      <span className={`switch-wrap ${size === "tiny" ? "switch-wrap--tiny" : ""}`}>
+      <span
+        className={`switch-wrap ${size === "tiny" ? "switch-wrap--tiny" : ""} ${switchWrapClassName}`}
+      >
         <span className="switch-track" />
       </span>
 

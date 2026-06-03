@@ -46,7 +46,9 @@ export default function SettingsPage({
                 })()
               }
             />
-            <h1 className="text-2xl font-normal ">Funding Wallet</h1>{" "}
+            <h1 className="text-[1.35rem] font-normal leading-tight">
+              Funding Wallet
+            </h1>
           </div>
 
           {fundingEnabled && (
@@ -246,7 +248,9 @@ export default function SettingsPage({
                   void setAutoUpdateCheckEnabled(e.target.checked === true)
                 }
               />
-              <h1 className="text-2xl font-normal ">App Updates</h1>
+              <h1 className="text-[1.35rem] font-normal leading-tight">
+                App Updates
+              </h1>
             </div>
             <div className="text-xs text-slate-300">
               Atomatically check for a newer version when the app launches.
@@ -278,7 +282,9 @@ export default function SettingsPage({
                   void setReducedMotionEnabled(e.target.checked === true)
                 }
               />
-              <h1 className="text-2xl font-normal ">Reduced Motion</h1>
+              <h1 className="text-[1.35rem] font-normal leading-tight">
+                Reduced Motion
+              </h1>
             </div>
             <div className="text-xs text-slate-300">
               Disable heavy motion effects like the mission fire animation to

@@ -152,7 +152,7 @@
     .switch-track {
       position: relative;
       display: block;
-      width: 4.25rem;
+      width: 4.05rem;
       height: 1.68rem;
       border-radius: 999px;
       background: rgba(255, 255, 255, 0.06);
@@ -167,8 +167,8 @@
         content: "";
         position: absolute;
         top: 3px;
-        left: 4px;
-        width: 2.25rem;
+        left: 5px;
+        width: 2.12rem;
         height: 1.2rem;
         border: inset 2px solid rgba(255, 255, 255, 1);
         border-radius: 999px;
@@ -187,12 +187,19 @@
     &::before {
       inset: -3px;
       filter: blur(6px);
+      background: rgba(255, 255, 255, 0.16);
+      opacity: 0.24;
     }
 
     .switch-track {
       width: 2.45rem;
       height: 1rem;
-      box-shadow: inset 0 0 0 1.25px rgba(255, 255, 255, 0.07), 0 3px 5px rgba(0, 0, 0, 0.2);
+      backdrop-filter: blur(2px);
+      -webkit-backdrop-filter: blur(2px);
+      background: rgba(255, 255, 255, 0.24);
+      box-shadow:
+        inset 0 0 0 1.25px rgba(255, 255, 255, 0.26),
+        0 3px 7px rgba(0, 0, 0, 0.24);
 
       &::after {
         top: 2px;
@@ -202,6 +209,31 @@
         box-shadow:
           inset 0 0 0 1.25px rgba(255, 255, 255, 0.25),
           0 1px 2px rgba(0, 0, 0, 0.2);
+      }
+    }
+  }
+
+  .switch-wrap--tiny.slot-card-toggle-muted {
+    &::before {
+      background: rgba(234, 72, 72, 0.38);
+      opacity: 0.24;
+      filter: blur(7px);
+    }
+
+    .switch-track {
+      background: rgba(255, 255, 255, 0.24);
+      box-shadow:
+        inset 0 0 0 1.25px rgba(255, 255, 255, 0.26),
+        0 3px 7px rgba(0, 0, 0, 0.24);
+
+      &::after {
+        background: linear-gradient(110deg,
+            var(--color-error),
+            rgba(209, 67, 67, 1),
+            var(--color-error));
+        box-shadow:
+          inset 0 0 0 1.25px rgba(255, 255, 255, 0.22),
+          0 1px 3px rgba(0, 0, 0, 0.3);
       }
     }
   }
@@ -219,11 +251,13 @@
           0 2px 4px rgba(0, 0, 0, 0.2),
           inset 0 0 4px rgba(0, 0, 0, 0.4);
 
+
+
         &::after {
           background: linear-gradient(110deg, var(--color-info),
               var(--color-primary),
               var(--color-secondary));
-          transform: translateX(1.5rem);
+          transform: translateX(1.38rem);
           box-shadow:
             inset 0 0 0 1.5px rgba(255, 255, 255, 0.25),
             0 2px 2px rgba(0, 0, 0, 0.4);
@@ -234,12 +268,51 @@
 
   .peer {
     &:checked+.switch-wrap--tiny {
+      &::before {
+        opacity: 0.24;
+      }
+
+      .switch-track {
+        background: rgba(255, 255, 255, 0.24);
+        box-shadow:
+          inset 0 0 0 1.25px rgba(255, 255, 255, 0.28),
+          0 3px 7px rgba(0, 0, 0, 0.24);
+
+      }
+
       .switch-track {
         &::after {
           transform: translateX(0.65rem);
           box-shadow:
             inset 0 0 0 1.25px rgba(255, 255, 255, 0.25),
             0 1px 2px rgba(0, 0, 0, 0.4);
+        }
+      }
+    }
+  }
+
+  .peer {
+    &:checked+.switch-wrap.slot-card-toggle-muted {
+      &::before {
+        opacity: 0.34;
+        background: rgba(130, 233, 171, 0.7);
+      }
+
+      .switch-track {
+        background: rgba(255, 255, 255, 0.24);
+        box-shadow:
+          inset 0 0 0 1.25px rgba(255, 255, 255, 0.28),
+          0 3px 7px rgba(0, 0, 0, 0.24);
+        backdrop-filter: blur(1rem);
+        -webkit-backdrop-filter: blur(1rem);
+
+        &::after {
+          background: linear-gradient(110deg,
+              var(--color-success), rgba(94, 208, 135, 1),
+              var(--color-success));
+          box-shadow:
+            inset 0 0 0 1.25px rgba(255, 255, 255, 0.22),
+            0 1px 3px rgba(0, 0, 0, 0.28);
         }
       }
     }
@@ -265,6 +338,33 @@
 
   .slot-level-input:disabled {
     @apply opacity-50;
+  }
+
+  .card-mission__header--disabled .mission-image,
+  .card-mission__header--disabled .mission-image-placeholder,
+  .card-mission__header--disabled .card-mission__level,
+  .card-mission__header--disabled .card-mission__progress {
+    filter: grayscale(1);
+    opacity: 0.7 !important;
+  }
+
+  .card-mission__header--disabled .card-mission__progress > div,
+  .card-mission__header--disabled .card-mission__level,
+  .card-mission__header--disabled .mission-image,
+  .card-mission__header--disabled .mission-image-placeholder {
+    opacity: 0.7 !important;
+  }
+
+  .card-mission__header--disabled .mission-image-placeholder,
+  .card-mission__header--disabled .card-mission__level,
+  .card-mission__header--disabled .card-mission__progress,
+  .card-mission__header--disabled .card-mission__progress > div {
+    filter: grayscale(1) !important;
+  }
+
+  .card-mission__header--disabled .card-mission__title,
+  .card-mission__header--disabled .card-mission__slot {
+    opacity: 0.72;
   }
 
 
@@ -1006,7 +1106,7 @@ button.btn.btn-gradient {
   @apply flex gap-3;
 
   [class*="signer-type__"] {
-    @apply rounded-lg w-full basis-1/2 relative p-3 text-xs text-gray-300 flex gap-2 cursor-pointer;
+    @apply rounded-lg w-full basis-1/2 relative p-4 text-xs text-gray-300 flex gap-2 cursor-pointer;
 
     &::after {
       content: "";
@@ -1562,24 +1662,12 @@ body[data-reduced-motion="true"] .mission-image {
   will-change: auto;
 }
 
-html[data-reduced-motion="true"] .mission-image--in,
-html[data-reduced-motion="true"] .mission-image--out,
-html[data-reduced-motion="true"] .num-ticker__item--in-up,
-html[data-reduced-motion="true"] .num-ticker__item--out-up,
-html[data-reduced-motion="true"] .num-ticker__item--in-down,
-html[data-reduced-motion="true"] .num-ticker__item--out-down,
 html[data-reduced-motion="true"] .results-table .results-row--current td::after,
 html[data-reduced-motion="true"] .mission-choice-card--selected::after,
 html[data-reduced-motion="true"] .signer-type label:has(input:checked)::after,
 html[data-reduced-motion="true"] .claim-bar,
 html[data-reduced-motion="true"] .stats-live-card::before,
 html[data-reduced-motion="true"] .card-mission.card-mission--error .card-mission__header,
-body[data-reduced-motion="true"] .mission-image--in,
-body[data-reduced-motion="true"] .mission-image--out,
-body[data-reduced-motion="true"] .num-ticker__item--in-up,
-body[data-reduced-motion="true"] .num-ticker__item--out-up,
-body[data-reduced-motion="true"] .num-ticker__item--in-down,
-body[data-reduced-motion="true"] .num-ticker__item--out-down,
 body[data-reduced-motion="true"] .results-table .results-row--current td::after,
 body[data-reduced-motion="true"] .mission-choice-card--selected::after,
 body[data-reduced-motion="true"] .signer-type label:has(input:checked)::after,

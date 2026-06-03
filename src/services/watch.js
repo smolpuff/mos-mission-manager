@@ -2069,7 +2069,7 @@ function createWatchService(
     let liveStateClaimedApplied = 0;
     let nextAssignRecheckAtMs = 0;
     const ASSIGN_RECHECK_COOLDOWN_MS = Math.max(
-      10000,
+      15000,
       opts.pollIntervalSeconds * 1000,
     );
     const maybeRunLiveStateRecovery = async (missionResult, reason) => {
