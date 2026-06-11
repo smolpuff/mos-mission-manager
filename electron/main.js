@@ -584,6 +584,22 @@ function pushSystemLog(message) {
   pushOutput("system", `[GUI] ${text}\n`);
 }
 
+function clearStoppedBackendAuthState() {
+  backendStatus.isAuthenticated = false;
+  backendStatus.currentUserDisplayName = null;
+  backendStatus.currentUserWalletId = null;
+  backendStatus.currentUserWalletSummary = null;
+  backendStatus.currentMissionStats = null;
+  backendStatus.guiMissionSlots = null;
+  backendStatus.slotUnlockSummary = null;
+  rentalsPreviewCache = null;
+  rentalsPreviewCacheAt = 0;
+  accountSnapshotCache = null;
+  accountSnapshotCacheAt = 0;
+  nftListCache = null;
+  nftListCacheAt = 0;
+}
+
 function formatConfigValueForLog(value) {
   if (value === null) return "null";
   if (value === undefined) return "undefined";
@@ -3753,6 +3769,30 @@ async function sendBackendCommand(command) {
     return true;
   }
   if (!backend || !backendStatus.running) {
+    if (normalized === "login") {
+      pushOutput("stdin", `> ${trimmed}\n`);
+      pushSystemLog("Runner is stopped. Starting desktop login flow.");
+      const ok = await desktopMcp.runLoginFlow({
+        forceInteractive: true,
+        forceBrowser: true,
+      });
+      if (!ok) {
+        clearStoppedBackendAuthState();
+        publishStatus();
+        throw new Error("Login failed.");
+      }
+      await bootstrapStartupMissionSlots();
+      publishStatus();
+      return true;
+    }
+    if (normalized === "logout") {
+      pushOutput("stdin", `> ${trimmed}\n`);
+      desktopMcp.logout();
+      clearStoppedBackendAuthState();
+      publishStatus();
+      pushOutput("system", "[GUI] [AUTH] Logged out. Saved token cleared.\n");
+      return true;
+    }
     const parsed = parseStoppedModeCommand(trimmed);
     if (parsed.type === "mr") {
       const current = readDesktopConfig();

@@ -53,6 +53,7 @@ function createContext() {
     },
     mcpRateLimitedUntil: 0,
     mcpRateLimitReason: null,
+    autoAssignRateLimitedUntil: 0,
     lastUserMissionsResult: null,
     lastUserMissionsFetchedAt: 0,
     lastAssignedMissionLookup: {},

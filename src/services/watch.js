@@ -2283,6 +2283,7 @@ function createWatchService(
         return;
       }
       missionStatePollRunning = true;
+      let updatedMissionResult = null;
       const pollPromise = (async () => {
         const result = await getMissionResultShared({
           forceFresh: true,
@@ -2298,6 +2299,7 @@ function createWatchService(
             },
           );
         }
+        updatedMissionResult = result;
         return result;
       })();
       pollPromise
@@ -2328,7 +2330,7 @@ function createWatchService(
             checks
               .autoAssignConfiguredMissions({
                 reason: "poll_tick_available_recheck",
-                missionsResult: updated,
+                missionsResult: updatedMissionResult,
               })
               .then((assignResult) => {
                 if (Number(assignResult?.assigned || 0) > 0) {
