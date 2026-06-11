@@ -1,8 +1,8 @@
 {
-  "version": "3.2.9",
+  "version": "3.2.10",
   "downloadUrl": "https://github.com/smolpuff/mos-mission-manager/releases/latest",
   "notes": [
-    "Added ability to enable/disable individual missions",
-    "Stats rework"
+    "New rentals flow to account for mcp changes. hope it works im too nft rich to try",
+    "Added level 20 colleciton reservation that probably doesn't work"
   ]
 }
