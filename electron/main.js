@@ -186,6 +186,7 @@ const backendStatus = {
   startupMissionSlotsLoading: false,
   cliWindowOpen: false,
   analytics: null,
+  throttleDebug: null,
 };
 
 const ANALYTICS_VERSION = 1;
@@ -934,6 +935,33 @@ function updateBackendStateFromIpc(payload) {
 
 function publishEvent(payload) {
   publish("backend:event", payload);
+}
+
+function throttleDebugLogPath() {
+  return path.join(getBackendWorkingDirectory(), "mcp-throttle-debug.log");
+}
+
+function readThrottleDebugLog() {
+  const filePath = throttleDebugLogPath();
+  try {
+    if (!fs.existsSync(filePath)) {
+      return { ok: true, path: filePath, text: "", exists: false };
+    }
+    return {
+      ok: true,
+      path: filePath,
+      text: fs.readFileSync(filePath, "utf8"),
+      exists: true,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      path: filePath,
+      text: "",
+      exists: false,
+      error: String(error?.message || error),
+    };
+  }
 }
 
 function parseRetrySecondsFromMessage(message) {
@@ -3369,6 +3397,7 @@ function startBackend() {
   backendStatus.sessionSpendTotals = null;
   backendStatus.guiMissionSlots = null;
   backendStatus.slotUnlockSummary = null;
+  backendStatus.throttleDebug = null;
   syncCompetitionRangeLockScheduler();
   publishStatus();
   pushOutput("system", "[GUI] Backend started.\n");
@@ -3423,6 +3452,7 @@ function startBackend() {
     backendStatus.exitCode = code;
     backendStatus.exitSignal = signal;
     backendStatus.currentMissionStats = null;
+    backendStatus.throttleDebug = null;
     backendStatus.guiMissionSlots = null;
     backendStatus.slotUnlockSummary = null;
     backend = null;
@@ -4409,6 +4439,7 @@ app.whenReady().then(async () => {
     status: { ...backendStatus },
     logs: logHistory,
   }));
+  ipcMain.handle("debug:get-throttle-log", async () => readThrottleDebugLog());
   ipcMain.handle("analytics:get-view", async (_event, rangeKey = "session") =>
     analyticsView(rangeKey),
   );

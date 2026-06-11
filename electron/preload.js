@@ -18,6 +18,7 @@ contextBridge.exposeInMainWorld("missionsDesktop", {
   restartBackend: () => ipcRenderer.invoke("backend:restart"),
   sendCommand: (command) => ipcRenderer.invoke("backend:send-command", command),
   getState: () => ipcRenderer.invoke("backend:get-state"),
+  getThrottleDebugLog: () => ipcRenderer.invoke("debug:get-throttle-log"),
   getAnalyticsView: (rangeKey) => ipcRenderer.invoke("analytics:get-view", rangeKey),
   resetAnalyticsRange: (rangeKey) =>
     ipcRenderer.invoke("analytics:reset-range", rangeKey),

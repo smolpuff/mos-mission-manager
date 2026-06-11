@@ -120,6 +120,7 @@ async function closeCompetitionNotificationModal({
   suppressChecked,
   setModal,
   updateConfig,
+  onClosed,
 }) {
   const competitionNumber = String(modal?.competitionNumber || "").trim();
   if (typeof updateConfig === "function") {
@@ -127,6 +128,12 @@ async function closeCompetitionNotificationModal({
       suppressedMissionCompetitionNotificationId: suppressChecked
         ? competitionNumber
         : "",
+    });
+  }
+  if (typeof onClosed === "function") {
+    onClosed({
+      competitionNumber,
+      suppressChecked: suppressChecked === true,
     });
   }
   setModal(null);
@@ -470,6 +477,7 @@ function ControlView() {
   const bootstrapWalletSummaryRequestedRef = useRef(false);
   const startupUpdateCheckRequestedRef = useRef(false);
   const startupCompetitionCheckRequestedRef = useRef(false);
+  const dismissedCompetitionNotificationIdsRef = useRef(new Set());
   const lastThrottleModalKeyRef = useRef(null);
   const isMissionMode = modeSelection === "mission";
   const isNormalMode = !isMissionMode;
@@ -839,15 +847,29 @@ function ControlView() {
       const lastSeenCompetitionId =
         String(config.lastSeenMissionCompetitionId || "").trim() ||
         COMPETITION_NOTIFICATION_SEED;
+      const suppressedCompetitionId = String(
+        config.suppressedMissionCompetitionNotificationId || "",
+      ).trim();
       const isNewCompetition =
         summary.competitionNumber !== lastSeenCompetitionId;
+      const isSuppressedCompetition =
+        suppressedCompetitionId !== "" &&
+        suppressedCompetitionId === summary.competitionNumber;
+      const isDismissedThisSession =
+        dismissedCompetitionNotificationIdsRef.current.has(
+          summary.competitionNumber,
+        );
       const statusBadge = competitionStatusFrom(summary, isNewCompetition);
       if (isNewCompetition) {
         await applyConfigPatch({
           suppressedMissionCompetitionNotificationId: "",
         });
       }
-      if (isNewCompetition) {
+      if (
+        isNewCompetition &&
+        !isSuppressedCompetition &&
+        !isDismissedThisSession
+      ) {
         setCompetitionNotificationSuppressChecked(false);
         setCompetitionNotificationModal({
           ...summary,
@@ -2748,7 +2770,23 @@ function ControlView() {
           isCliActive={isCliActive || status.cliWindowOpen === true}
           debugPageVisible={debugPageVisible}
         />
-        <div className="main-wrapper  h-full">
+        <div
+          className={`main-wrapper h-full ${
+            currentPage === "debug" ? "!min-h-0 !overflow-hidden" : ""
+          }`}
+          style={
+            currentPage === "debug"
+              ? {
+                  display: "flex",
+                  flex: 1,
+                  minHeight: 0,
+                  flexDirection: "column",
+                  gap: "0.75rem",
+                  overflow: "hidden",
+                }
+              : undefined
+          }
+        >
           <HeaderUser
             status={status}
             isAuthenticated={status.isAuthenticated}
@@ -2784,38 +2822,16 @@ function ControlView() {
             />
           ) : null}
           {currentPage === "debug" ? (
-            <DebugPage
-              desktopDevMode={bridge?.desktopDevMode === true}
-              debugEnabled={debug}
-              setDebugMode={setDebugMode}
-              reducedMotionEnabled={reducedMotionEnabled}
-              setReducedMotionEnabled={setReducedMotionEnabled}
-              isMissionMode={isMissionMode}
-              competitionRangeLockEnabled={competitionRangeLockEnabled}
-              competitionRangeLockMinRank={competitionRangeLockMinRank}
-              competitionRangeLockMaxRank={competitionRangeLockMaxRank}
-              competitionRangeLockPollSeconds={competitionRangeLockPollSeconds}
-              setCompetitionRangeLock={setCompetitionRangeLock}
-              setCompetitionRangeLockMin={setCompetitionRangeLockMin}
-              setCompetitionRangeLockMax={setCompetitionRangeLockMax}
-              setCompetitionRangeLockPoll={setCompetitionRangeLockPoll}
-              nftResetEnabled={nftResetEnabled}
-              nftResetMaxPbp={nftResetMaxPbp}
-              setAutoNftResetEnabled={setAutoNftResetEnabled}
-              setAutoNftResetMaxPbp={setAutoNftResetMaxPbp}
-              missionActionEnabledBySlot={missionActionEnabledBySlot}
-              setMissionActionEnabled={setMissionActionEnabled}
-              missionResetPerSlotModeEnabled={missionResetPerSlotModeEnabled}
-              setMissionResetPerSlotModeEnabled={
-                setPerSlotMissionResetModeEnabled
-              }
-              missionResetPerSlotEnabledBySlot={
-                missionResetPerSlotEnabledBySlot
-              }
-              setPerSlotMissionResetEnabled={setPerSlotMissionResetEnabled}
-              missionResetPerSlotLevelBySlot={missionResetPerSlotLevelBySlot}
-              setPerSlotMissionResetLevel={setPerSlotMissionResetLevel}
-            />
+            <div
+              className="min-h-0 flex-1 overflow-hidden"
+              style={{ minHeight: 0, flex: 1, overflow: "hidden" }}
+            >
+              <DebugPage
+                desktopDevMode={bridge?.desktopDevMode === true}
+                throttleDebug={status.throttleDebug}
+                lastEvent={lastEvent}
+              />
+            </div>
           ) : null}
           {onboardingOpen ? (
             <div
@@ -5108,6 +5124,12 @@ function ControlView() {
                     suppressChecked: competitionNotificationSuppressChecked,
                     setModal: setCompetitionNotificationModal,
                     updateConfig: applyConfigPatch,
+                    onClosed: ({ competitionNumber }) => {
+                      if (!competitionNumber) return;
+                      dismissedCompetitionNotificationIdsRef.current.add(
+                        competitionNumber,
+                      );
+                    },
                   });
                 }
               }}
@@ -5166,6 +5188,12 @@ function ControlView() {
                         suppressChecked: competitionNotificationSuppressChecked,
                         setModal: setCompetitionNotificationModal,
                         updateConfig: applyConfigPatch,
+                        onClosed: ({ competitionNumber }) => {
+                          if (!competitionNumber) return;
+                          dismissedCompetitionNotificationIdsRef.current.add(
+                            competitionNumber,
+                          );
+                        },
                       })
                     }
                     title="Close"
@@ -5265,6 +5293,12 @@ function ControlView() {
                         suppressChecked: competitionNotificationSuppressChecked,
                         setModal: setCompetitionNotificationModal,
                         updateConfig: applyConfigPatch,
+                        onClosed: ({ competitionNumber }) => {
+                          if (!competitionNumber) return;
+                          dismissedCompetitionNotificationIdsRef.current.add(
+                            competitionNumber,
+                          );
+                        },
                       })
                     }
                   >

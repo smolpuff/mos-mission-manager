@@ -74,6 +74,7 @@ function createGuiStateEmitter(ctx) {
       appVersion: ctx.APP_VERSION,
       isAuthenticated: ctx.isAuthenticated,
       mcpConnection: ctx.mcpConnection,
+      throttleDebug: ctx.throttleDebug,
       watcherRunning: ctx.watcherRunning,
       watchLoopEnabled: ctx.watchLoopEnabled,
       sessionTotalsEpoch: ctx.sessionTotalsEpoch,

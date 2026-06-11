@@ -978,11 +978,14 @@ function createChecksService(ctx, logger, mcp, services = {}) {
       nft?.collectionSymbol,
       nft?.collection_symbol,
       nft?.symbol,
+      nft?.metadata?.symbol,
       nft?.metadata?.collection,
       nft?.metadata?.collectionName,
       nft?.metadata?.collection_name,
+      nft?.DASMetadata?.symbol,
       nft?.DASMetadata?.collection,
       nft?.DASMetadata?.collectionName,
+      nft?.offChainMetadata?.metadata?.symbol,
       nft?.offChainMetadata?.metadata?.collection,
       nft?.offChainMetadata?.metadata?.collectionName,
     ];
@@ -992,28 +995,92 @@ function createChecksService(ctx, logger, mcp, services = {}) {
       .join(" ");
   }
 
-  function isLevel20ReservedCollectionNft(nft) {
-    const text = `${nftCollectionText(nft)} ${nftDisplayName(nft)}`
+  function normalizeCollectionKey(value) {
+    return String(value || "")
+      .trim()
       .toLowerCase()
-      .replace(/[^a-z0-9]+/g, " ");
-    return /\b100k\b/.test(text) || /\b500k\b/.test(text);
+      .replace(/&/g, " and ")
+      .replace(/\s+/g, " ")
+      .replace(/[^a-z0-9 ]/g, "")
+      .trim();
   }
 
-  function shouldReserveLevel20CollectionNfts() {
-    const resetPolicy = getResetPolicy();
+  function nftCollectionKeys(nft) {
+    const values = [
+      nft?.collection,
+      nft?.collectionName,
+      nft?.collection_name,
+      nft?.collectionSymbol,
+      nft?.collection_symbol,
+      nft?.symbol,
+      nft?.metadata?.symbol,
+      nft?.metadata?.collection,
+      nft?.metadata?.collectionName,
+      nft?.metadata?.collection_name,
+      nft?.DASMetadata?.symbol,
+      nft?.DASMetadata?.collection,
+      nft?.DASMetadata?.collectionName,
+      nft?.offChainMetadata?.metadata?.symbol,
+      nft?.offChainMetadata?.metadata?.collection,
+      nft?.offChainMetadata?.metadata?.collectionName,
+    ];
+    return values.map((value) => normalizeCollectionKey(value)).filter(Boolean);
+  }
+
+  function isLevel20ReservedCollectionNft(nft) {
+    const reservedCollectionKeys = new Set([
+      "100k",
+      "100 k",
+      "100000",
+      "100 000",
+      "100k club",
+      "500k",
+      "500 k",
+      "500000",
+      "500 000",
+      "500k club",
+    ]);
+    if (nftCollectionKeys(nft).some((key) => reservedCollectionKeys.has(key))) {
+      return true;
+    }
+    const fallbackKeys = [
+      nft?.name,
+      nft?.nftName,
+      nft?.offChainMetadata?.metadata?.name,
+      nft?.DASMetadata?.name,
+    ];
+    return fallbackKeys
+      .map((value) => normalizeCollectionKey(value))
+      .filter(Boolean)
+      .some((key) => reservedCollectionKeys.has(key));
+  }
+
+  function isLevel20Mission(mission) {
+    const level = Number(missionLevel(mission));
+    return Number.isFinite(level) && level >= 20;
+  }
+
+  function shouldReserveLevel20CollectionNfts(mission) {
+    const resetPolicy = resetPolicyForMission(ctx, mission);
     if (!resetPolicy.enabled) return true;
     const threshold = Number(resetPolicy.threshold);
     return !Number.isFinite(threshold) || threshold > 20;
   }
 
-  function ownedCandidateReservePriority(entry, mission) {
-    const reserveLevel20Collections = shouldReserveLevel20CollectionNfts();
-    if (!reserveLevel20Collections) return 0;
-    const level = Number(missionLevel(mission));
-    const level20Mission = Number.isFinite(level) && level >= 20;
-    const reserved = isLevel20ReservedCollectionNft(entry.nft);
-    if (level20Mission) return reserved ? 0 : 1;
-    return reserved ? 1 : 0;
+  function prioritizeOwnedCandidatesForMission(entries, mission) {
+    if (!shouldReserveLevel20CollectionNfts(mission)) return entries;
+    const reserved = [];
+    const standard = [];
+    for (const entry of entries) {
+      if (isLevel20ReservedCollectionNft(entry.nft)) reserved.push(entry);
+      else standard.push(entry);
+    }
+    if (reserved.length === 0 || standard.length === 0) {
+      return isLevel20Mission(mission) ? [...reserved, ...standard] : entries;
+    }
+    return isLevel20Mission(mission)
+      ? [...reserved, ...standard]
+      : [...standard, ...reserved];
   }
 
   function assignFailureMessage(assignResult) {
@@ -1191,9 +1258,13 @@ function createChecksService(ctx, logger, mcp, services = {}) {
       : normalized;
   }
 
+  function rentalDevAdvantagesEnabled() {
+    return ctx.debugMode === true || ctx.devMode === true;
+  }
+
   function autoNftCooldownResetEnabled() {
     return (
-      ctx.debugMode === true &&
+      rentalDevAdvantagesEnabled() &&
       (ctx.missionModeEnabled === true ||
         ctx.config?.missionModeEnabled === true) &&
       (ctx.nftCooldownResetEnabled === true ||
@@ -1255,11 +1326,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
   }
 
   function rentalFastRefreshEnabled() {
-    return (
-      ctx.debugMode === true ||
-      ctx.config?.debugMode === true ||
-      ctx.config?.rentalFastRefreshEnabled === true
-    );
+    return rentalDevAdvantagesEnabled();
   }
   // tick
   function rentalFastRefreshTickMs() {
@@ -3286,34 +3353,37 @@ function createChecksService(ctx, logger, mcp, services = {}) {
           .filter((entry) => !alreadyAssignedNftAccounts.has(entry.account))
           .filter((entry) => nftIsAvailable(entry.nft))
           .filter((entry) => entry.account)
-          .sort(
-            (a, b) =>
-              ownedCandidateReservePriority(a, mission) -
-              ownedCandidateReservePriority(b, mission),
-          )
-          .slice(0, 3);
+          .sort((a, b) =>
+            nftDisplayName(a.nft).localeCompare(nftDisplayName(b.nft)),
+          );
+        const prioritizedReadyOwnedCandidates = prioritizeOwnedCandidatesForMission(
+          readyOwnedCandidates,
+          mission,
+        ).slice(0, 3);
 
-        if (readyOwnedCandidates.length > 0) {
-          assignmentOptions = readyOwnedCandidates.map((entry) => ({
+        if (prioritizedReadyOwnedCandidates.length > 0) {
+          assignmentOptions = prioritizedReadyOwnedCandidates.map((entry) => ({
             ...entry,
             source: "owned",
           }));
           assignmentSourceStage = "ready_owned";
           logWithTimestamp(
-            `[ASSIGN] ✅ ${name}: found ${readyOwnedCandidates.length} ready owned NFT candidate(s).`,
+            `[ASSIGN] ✅ ${name}: found ${prioritizedReadyOwnedCandidates.length} ready owned NFT candidate(s).`,
           );
         } else {
-          const ownedCooldownCandidates = nfts
-            .map((nft) => ({ nft, account: nftAccountId(nft) }))
-            .filter((entry) => entry.account)
-            .filter((entry) => !alreadyAssignedNftAccounts.has(entry.account))
-            .filter((entry) => !nftIsAvailable(entry.nft))
-            .sort(
-              (a, b) =>
-                ownedCandidateReservePriority(a, mission) -
-                  ownedCandidateReservePriority(b, mission) ||
-                nftCooldownSeconds(a.nft) - nftCooldownSeconds(b.nft),
-            )
+          const ownedCooldownCandidates = prioritizeOwnedCandidatesForMission(
+            nfts
+              .map((nft) => ({ nft, account: nftAccountId(nft) }))
+              .filter((entry) => entry.account)
+              .filter((entry) => !alreadyAssignedNftAccounts.has(entry.account))
+              .filter((entry) => !nftIsAvailable(entry.nft))
+              .sort(
+                (a, b) =>
+                  nftCooldownSeconds(a.nft) - nftCooldownSeconds(b.nft) ||
+                  nftDisplayName(a.nft).localeCompare(nftDisplayName(b.nft)),
+              ),
+            mission,
+          )
             .slice(0, autoNftCooldownResetProbeLimit());
 
           logDebug("assign", "owned_ready_empty", {

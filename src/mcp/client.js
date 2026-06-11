@@ -1,6 +1,7 @@
 "use strict";
 
 const fs = require("fs");
+const path = require("path");
 const { normalizeMissionList } = require("../missions/normalize");
 const {
   login: mcpLogin,
@@ -15,6 +16,194 @@ function createMcpClient(ctx, logger) {
   const MCP_REQUEST_TIMEOUT_MS = 30000;
   const REFRESH_RETRY_ATTEMPTS = 3;
   const REFRESH_RETRY_DELAY_MS = 1000;
+  const THROTTLE_DEBUG_WINDOW_MS = 5000;
+  const THROTTLE_DEBUG_MAX_EVENTS = 200;
+  const THROTTLE_DEBUG_BEFORE_COUNT = 5;
+  let throttleDebugSequence = 0;
+  const recentToolCalls = [];
+
+  function throttleDebugEnabled() {
+    return ctx.debugMode === true;
+  }
+
+  function throttleDebugLogPath() {
+    const configDir = path.dirname(String(ctx.configPath || process.cwd()));
+    return path.join(configDir, "mcp-throttle-debug.log");
+  }
+
+  function trimText(value, maxLen = 320) {
+    const text = String(value ?? "").trim();
+    if (!text) return "";
+    if (text.length <= maxLen) return text;
+    return `${text.slice(0, Math.max(0, maxLen - 3))}...`;
+  }
+
+  function safeJson(value, maxLen = 320) {
+    if (value === undefined) return "";
+    try {
+      return trimText(JSON.stringify(value), maxLen);
+    } catch {
+      return trimText(String(value), maxLen);
+    }
+  }
+
+  function captureStack(skipLines = 2) {
+    const stack = String(new Error().stack || "")
+      .split("\n")
+      .slice(skipLines)
+      .map((line) => line.trimEnd())
+      .join("\n")
+      .trim();
+    return trimText(stack, 4000);
+  }
+
+  function compactStack(stackText, maxFrames = 6) {
+    const lines = String(stackText || "")
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean);
+    if (lines.length === 0) return [];
+    return lines
+      .map((line) => {
+        const stripped = line.replace(/^at\s+/, "");
+        const match =
+          stripped.match(/^(.+?)\s+\((.+)\)$/) ||
+          stripped.match(/^(.+?)\s+(.+)$/);
+        const rawName = match ? match[1] : stripped;
+        const name = String(rawName || "")
+          .replace(/^async\s+/, "")
+          .replace(/^Object\./, "")
+          .replace(/^Module\./, "")
+          .replace(/^new\s+/, "")
+          .trim();
+        return name || stripped;
+      })
+      .filter((name, index, arr) => Boolean(name) && arr.indexOf(name) === index)
+      .slice(0, maxFrames);
+  }
+
+  function formatCallerChain(stackText, maxFrames = 6) {
+    const frames = compactStack(stackText, maxFrames);
+    if (frames.length === 0) return "(unknown)";
+    return frames.join(" <- ");
+  }
+
+  function pruneRecentToolCalls(now = Date.now()) {
+    while (
+      recentToolCalls.length > THROTTLE_DEBUG_MAX_EVENTS ||
+      (recentToolCalls.length > 0 &&
+        now - Number(recentToolCalls[0]?.startedAt || 0) >
+          THROTTLE_DEBUG_WINDOW_MS * 6)
+    ) {
+      recentToolCalls.shift();
+    }
+  }
+
+  function recordToolCallStart(toolName, args) {
+    if (!throttleDebugEnabled()) return null;
+    const entry = {
+      id: `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+      toolName: String(toolName || "unknown"),
+      argsSummary: safeJson(args, 500),
+      startedAt: Date.now(),
+      endedAt: null,
+      durationMs: null,
+      status: "started",
+      errorMessage: null,
+      stack: captureStack(3),
+    };
+    recentToolCalls.push(entry);
+    pruneRecentToolCalls(entry.startedAt);
+    return entry;
+  }
+
+  function finalizeToolCallEntry(entry, status, error = null) {
+    if (!entry) return;
+    entry.endedAt = Date.now();
+    entry.durationMs = Math.max(0, entry.endedAt - Number(entry.startedAt || 0));
+    entry.status = status;
+    entry.errorMessage = error ? trimText(error.message || error, 500) : null;
+    pruneRecentToolCalls(entry.endedAt);
+  }
+
+  function writeThrottleDebugLog(event = {}) {
+    if (!throttleDebugEnabled()) return;
+    const now = Date.now();
+    pruneRecentToolCalls(now);
+    const seq = ++throttleDebugSequence;
+    if (!ctx.throttleDebug || typeof ctx.throttleDebug !== "object") {
+      ctx.throttleDebug = {
+        count: 0,
+        lastRequestedTool: null,
+        lastTriggerTool: null,
+        lastType: null,
+        lastWaitSeconds: null,
+        lastRetryAt: null,
+        lastAt: 0,
+        logPath: throttleDebugLogPath(),
+      };
+    }
+    ctx.throttleDebug = {
+      ...ctx.throttleDebug,
+      count: Number(ctx.throttleDebug.count || 0) + 1,
+      lastRequestedTool: event.requestedTool || null,
+      lastTriggerTool: event.triggerTool || null,
+      lastType: event.type || null,
+      lastWaitSeconds: Number(event.waitSeconds || 0) || null,
+      lastRetryAt: Number(event.retryAt || 0) || null,
+      lastAt: now,
+      logPath: throttleDebugLogPath(),
+    };
+    const recent = recentToolCalls.filter(
+      (entry) => now - Number(entry.startedAt || 0) <= THROTTLE_DEBUG_WINDOW_MS,
+    );
+    const trace = recent.slice(-THROTTLE_DEBUG_BEFORE_COUNT);
+    const lines = [
+      "",
+      "=".repeat(88),
+      `THROTTLE EVENT #${seq}`,
+      "=".repeat(88),
+      `timestamp: ${new Date(now).toISOString()}`,
+      `type: ${event.type || "unknown"}`,
+      `requestedTool: ${event.requestedTool || "unknown"}`,
+      `triggerTool: ${event.triggerTool || "unknown"}`,
+      `waitSeconds: ${Number(event.waitSeconds || 0) || 0}`,
+      `retryAt: ${event.retryAt ? new Date(event.retryAt).toISOString() : "n/a"}`,
+      `reason: ${event.reason || "n/a"}`,
+      `detail: ${event.detail || "n/a"}`,
+      "",
+      `Throttle caller chain: ${formatCallerChain(event.stack, 8)}`,
+      "",
+      `Trace calls shown: ${trace.length} of ${recent.length} seen in last ${Math.floor(THROTTLE_DEBUG_WINDOW_MS / 1000)}s`,
+    ];
+
+    if (trace.length === 0) {
+      lines.push("(none)");
+    } else {
+      trace.forEach((entry, index) => {
+        lines.push("-".repeat(88));
+        lines.push(
+          `${index + 1}. ${new Date(entry.startedAt).toISOString()} | ${entry.toolName} | status=${entry.status}${entry.durationMs !== null ? ` | durationMs=${entry.durationMs}` : ""}`,
+        );
+        lines.push(`args: ${entry.argsSummary || "{}"}`);
+        if (entry.errorMessage) lines.push(`error: ${entry.errorMessage}`);
+        lines.push(`callers: ${formatCallerChain(entry.stack, 6)}`);
+      });
+    }
+
+    lines.push("=".repeat(88));
+    lines.push("");
+
+    try {
+      fs.appendFileSync(throttleDebugLogPath(), `${lines.join("\n")}\n`);
+      if (ctx.guiBridge?.emitSoon) ctx.guiBridge.emitSoon();
+    } catch (error) {
+      logDebug("mcp", "throttle_debug_write_failed", {
+        error: error.message,
+        file: throttleDebugLogPath(),
+      });
+    }
+  }
 
   function setMcpConnection(state, { error = null } = {}) {
     if (!ctx.mcpConnection || typeof ctx.mcpConnection !== "object") {
@@ -391,14 +580,17 @@ function createMcpClient(ctx, logger) {
 
   async function mcpToolCall(toolName, args = {}, opts = {}) {
     logDebug("tool", "call_start", { toolName, args });
+    const toolCallEntry = recordToolCallStart(toolName, args);
     const record = tokenRecord();
     if (!record?.access_token) {
+      finalizeToolCallEntry(toolCallEntry, "missing_token");
       setMcpConnection("expired", { error: "missing_token" });
       throw new Error("Missing token. Run login.");
     }
     if (tokenExpiresSoon(record)) {
       const refreshed = await recoverAuthAfterRefreshFailure("expires_soon");
       if (!refreshed) {
+        finalizeToolCallEntry(toolCallEntry, "auth_expired");
         setMcpConnection("expired", { error: "refresh_failed" });
         throw new Error("Authentication expired. Login required.");
       }
@@ -457,18 +649,34 @@ function createMcpClient(ctx, logger) {
           });
         }
       }
+      finalizeToolCallEntry(toolCallEntry, "ok");
       logDebug("tool", "call_ok", { toolName });
       ctx.mcpRateLimitReason = null;
       setMcpConnection("connected");
       return result;
     } catch (error) {
       if (error?.rateLimited) {
+        finalizeToolCallEntry(
+          toolCallEntry,
+          error.cooldownActive === true ? "cooldown_blocked" : "rate_limited",
+          error,
+        );
         setMcpConnection("disconnected", { error: error.message });
         if (error.cooldownActive === true) {
           logDebug("tool", "call_rate_limited_active", {
             toolName,
             retryAfterSeconds: error.retryAfterSeconds,
             retryAt: error.retryAt,
+          });
+          writeThrottleDebugLog({
+            type: "active_cooldown",
+            requestedTool: toolName,
+            triggerTool: error.toolName || toolName,
+            waitSeconds: error.retryAfterSeconds,
+            retryAt: error.retryAt,
+            reason: error.reason || "pre_call",
+            detail: "Call skipped because an MCP cooldown was already active.",
+            stack: captureStack(3),
           });
           emitThrottleNotice({
             trigger: error.toolName || toolName,
@@ -486,6 +694,19 @@ function createMcpClient(ctx, logger) {
             retryAfterSeconds: error.retryAfterSeconds,
             retryAt: error.retryAt,
           });
+          writeThrottleDebugLog({
+            type: "http_429",
+            requestedTool: toolName,
+            triggerTool: error.toolName || toolName,
+            waitSeconds: error.retryAfterSeconds,
+            retryAt: error.retryAt,
+            reason: "server_429",
+            detail:
+              error?.bodyError && typeof error.bodyError === "object"
+                ? safeJson(error.bodyError, 2000)
+                : trimText(error?.bodyError || "", 2000) || "n/a",
+            stack: captureStack(3),
+          });
           emitThrottleNotice({
             trigger: toolName,
             message: error.message,
@@ -499,6 +720,7 @@ function createMcpClient(ctx, logger) {
         }
         throw error;
       }
+      finalizeToolCallEntry(toolCallEntry, "error", error);
       if (!isAuthHttpError(error?.message || "")) {
         setMcpConnection("disconnected", { error: error.message });
         throw error;
@@ -515,6 +737,7 @@ function createMcpClient(ctx, logger) {
           });
         }
       }
+      finalizeToolCallEntry(toolCallEntry, "ok_after_refresh");
       logDebug("tool", "call_ok_after_refresh", { toolName });
       setMcpConnection("connected");
       return result;

@@ -126,13 +126,47 @@ function createCommandHandler(ctx, logger, actions, configApi, services = {}) {
         : makeColor(useColor, "31;1", "OFF");
     const value = (text) => makeColor(useColor, "36;1", String(text));
     const title = makeColor(useColor, "33;1", "TOGGLES");
+    const stripAnsi = (text) =>
+      String(text || "").replace(/\x1b\[[0-9;]*m/g, "");
+    const padRight = (text, width) => {
+      const raw = String(text || "");
+      const visibleWidth = stripAnsi(raw).length;
+      return raw + " ".repeat(Math.max(0, width - visibleWidth));
+    };
+    const toggleRow = (leftLabel, leftValue, rightLabel, rightValue) =>
+      `│ ${padRight(leftLabel, 18)} ${padRight(leftValue, 8)} ${padRight(rightLabel, 16)} ${rightValue}`;
     pushDisplayLines([
       `┌─ ${title} ${"─".repeat(44)}`,
-      `│ Mode              ${value(ctx.missionModeEnabled ? "MISSION" : "NORMAL")}    Reset level ${value(configuredMissionResetLevel)}`,
-      `│ Level 20 reset    ${onOff(ctx.level20ResetEnabled)}        Per-slot reset ${onOff(ctx.missionResetPerSlotModeEnabled)}`,
-      `│ NFT reset         ${onOff(ctx.nftCooldownResetEnabled)}        Max cost ${value(`${normalizedNftResetMaxPbp} PBP`)}`,
-      `│ Rentals           ${onOff(ctx.config?.enableRentals === true)}        Fast refresh ${onOff(ctx.config?.rentalFastRefreshEnabled === true)}`,
-      `│ Debug             ${onOff(ctx.debugMode)}        Watch loop ${onOff(ctx.watchLoopEnabled)}`,
+      toggleRow(
+        "Mode",
+        value(ctx.missionModeEnabled ? "MISSION" : "NORMAL"),
+        "Reset level",
+        value(configuredMissionResetLevel),
+      ),
+      toggleRow(
+        "Level 20 reset",
+        onOff(ctx.level20ResetEnabled),
+        "Per-slot reset",
+        onOff(ctx.missionResetPerSlotModeEnabled),
+      ),
+      toggleRow(
+        "NFT reset",
+        onOff(ctx.nftCooldownResetEnabled),
+        "Max cost",
+        value(`${normalizedNftResetMaxPbp} PBP`),
+      ),
+      toggleRow(
+        "Rentals",
+        onOff(ctx.config?.enableRentals === true),
+        "Fast refresh",
+        onOff(ctx.config?.rentalFastRefreshEnabled === true),
+      ),
+      toggleRow(
+        "Debug",
+        onOff(ctx.debugMode),
+        "Watch loop",
+        onOff(ctx.watchLoopEnabled),
+      ),
       `└${"─".repeat(57)}`,
     ]);
   }

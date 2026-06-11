@@ -94,6 +94,7 @@ export default function useBackendState() {
     sessionSpendTotals: null,
     fundingWalletSummary: null,
     mcpConnection: null,
+    throttleDebug: null,
     cliWindowOpen: false,
     analytics: null,
   });

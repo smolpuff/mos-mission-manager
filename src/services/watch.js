@@ -49,6 +49,72 @@ function createWatchService(
   let currentWalletSummaryRefreshTimer = null;
   let currentWalletSummaryRefreshPendingReason = null;
 
+  function createMissionResultCoordinator({
+    ttlMs = 1200,
+    debugScope = "watch",
+  } = {}) {
+    let cachedResult = null;
+    let cachedAt = 0;
+    let inflight = null;
+    let inflightForceFresh = false;
+
+    function seed(result) {
+      if (!(result && typeof result === "object")) return result;
+      cachedResult = result;
+      cachedAt = Date.now();
+      return result;
+    }
+
+    async function get({ forceFresh = false, reason = "general" } = {}) {
+      const now = Date.now();
+      if (
+        !forceFresh &&
+        cachedResult &&
+        now - Number(cachedAt || 0) <= Math.max(0, Number(ttlMs) || 0)
+      ) {
+        logDebug(debugScope, "mission_result_cache_hit", { reason });
+        return cachedResult;
+      }
+      if (inflight && (!forceFresh || inflightForceFresh)) {
+        logDebug(debugScope, "mission_result_inflight_reused", {
+          reason,
+          forceFresh: Boolean(forceFresh),
+          inflightForceFresh,
+        });
+        return inflight;
+      }
+      if (inflight && forceFresh && !inflightForceFresh) {
+        logDebug(debugScope, "mission_result_force_fresh_bypass_inflight", {
+          reason,
+        });
+      }
+      inflightForceFresh = Boolean(forceFresh);
+      const request = mcp
+        .mcpToolCall("get_user_missions", {})
+        .then((result) => seed(result))
+        .finally(() => {
+          if (inflight === request) {
+            inflight = null;
+            inflightForceFresh = false;
+          }
+        });
+      inflight = request;
+      return request;
+    }
+
+    return {
+      get,
+      seed,
+      peek: () => cachedResult,
+      clear: () => {
+        cachedResult = null;
+        cachedAt = 0;
+        inflight = null;
+        inflightForceFresh = false;
+      },
+    };
+  }
+
   function watchMinCycleSeconds() {
     return ctx.runtimeDefaults?.watchMinCycleSeconds || 30;
   }
@@ -850,10 +916,15 @@ function createWatchService(
   async function pollMissionStateChanges(
     previousState,
     reason,
-    { logInitial = false, missionResult = null } = {},
+    { logInitial = false, missionResult = null, missionResultLoader = null } = {},
   ) {
     const result =
-      missionResult || (await mcp.mcpToolCall("get_user_missions", {}));
+      missionResult ||
+      (missionResultLoader
+        ? await missionResultLoader({
+            reason: `poll_state_${reason}`,
+          })
+        : await mcp.mcpToolCall("get_user_missions", {}));
     const currentState = buildMissionStateMap(result);
     if (logInitial) {
       for (const entry of currentState.values()) {
@@ -920,9 +991,15 @@ function createWatchService(
     return currentState;
   }
 
-  async function loadAssignedMissionLookup(missionResult = null) {
+  async function loadAssignedMissionLookup(
+    missionResult = null,
+    missionResultLoader = null,
+  ) {
     const result =
-      missionResult || (await mcp.mcpToolCall("get_user_missions", {}));
+      missionResult ||
+      (missionResultLoader
+        ? await missionResultLoader({ reason: "assigned_mission_lookup" })
+        : await mcp.mcpToolCall("get_user_missions", {}));
     const missions = normalizeMissionList(result);
     const byAssignedMissionId = new Map();
     for (const m of missions) {
@@ -964,10 +1041,13 @@ function createWatchService(
 
   async function loadMissionSnapshot(
     missionResult = null,
-    { selectedOnly = true } = {},
+    { selectedOnly = true, missionResultLoader = null } = {},
   ) {
     const result =
-      missionResult || (await mcp.mcpToolCall("get_user_missions", {}));
+      missionResult ||
+      (missionResultLoader
+        ? await missionResultLoader({ reason: "mission_snapshot" })
+        : await mcp.mcpToolCall("get_user_missions", {}));
     const allMissions = normalizeMissionList(result);
     const missions = selectedOnly
       ? checks.filterSelectedMissions(allMissions)
@@ -1008,8 +1088,14 @@ function createWatchService(
     return byAssignedMissionId;
   }
 
-  async function loadSelectedMissionSnapshot(missionResult = null) {
-    return loadMissionSnapshot(missionResult, { selectedOnly: true });
+  async function loadSelectedMissionSnapshot(
+    missionResult = null,
+    missionResultLoader = null,
+  ) {
+    return loadMissionSnapshot(missionResult, {
+      selectedOnly: true,
+      missionResultLoader,
+    });
   }
 
   function deriveStateTransitions(beforeMap, afterMap) {
@@ -1195,10 +1281,16 @@ function createWatchService(
   }
 
   // this was poopoo method.
-  async function fetchSelectedSnapshot(missionResult = null) {
+  async function fetchSelectedSnapshot(
+    missionResult = null,
+    missionResultLoader = null,
+  ) {
     const result =
-      missionResult || (await mcp.mcpToolCall("get_user_missions", {}));
-    const snapshot = await loadSelectedMissionSnapshot(result);
+      missionResult ||
+      (missionResultLoader
+        ? await missionResultLoader({ reason: "selected_snapshot" })
+        : await mcp.mcpToolCall("get_user_missions", {}));
+    const snapshot = await loadSelectedMissionSnapshot(result, missionResultLoader);
     return { result, snapshot };
   }
 
@@ -1217,6 +1309,7 @@ function createWatchService(
     allowStateFallback = true,
     finalTraceAction = "",
     finalTraceMeta = {},
+    missionResultLoader = null,
   } = {}) {
     if (claimWorkPaused()) {
       trace("watch", "claim_lifecycle_skipped_paused", {
@@ -1262,6 +1355,7 @@ function createWatchService(
       initialMissionResult,
       allowStateFallback,
       traceId,
+      missionResultLoader,
     });
 
     if (claimWorkPaused()) {
@@ -1292,6 +1386,7 @@ function createWatchService(
       try {
         const finalSnapshot = await loadSelectedMissionSnapshot(
           followup.missionResult,
+          missionResultLoader,
         );
         trace("watch", finalTraceAction, {
           traceId,
@@ -1319,6 +1414,7 @@ function createWatchService(
     initialMissionResult = null,
     allowStateFallback = true,
     traceId = null,
+    missionResultLoader = null,
   } = {}) {
     let currentClaimed = Number(claimed || 0);
     let assigned = 0;
@@ -1342,7 +1438,12 @@ function createWatchService(
         return { claimed: currentClaimed, assigned, missionResult };
       }
       try {
-        missionResult = await mcp.mcpToolCall("get_user_missions", {});
+        missionResult = missionResultLoader
+          ? await missionResultLoader({
+              forceFresh: true,
+              reason: `${assignReason || "claim_followup"}_initial_load`,
+            })
+          : await mcp.mcpToolCall("get_user_missions", {});
         trace("watch", "claim_followup_loaded_missions", {
           traceId,
           assignReason,
@@ -1376,7 +1477,12 @@ function createWatchService(
           });
           return { claimed: currentClaimed, assigned, missionResult };
         }
-        missionResult = await mcp.mcpToolCall("get_user_missions", {});
+        missionResult = missionResultLoader
+          ? await missionResultLoader({
+              forceFresh: true,
+              reason: `${assignReason || "claim_followup"}_after_claim`,
+            })
+          : await mcp.mcpToolCall("get_user_missions", {});
         trace("watch", "claim_followup_refetched_after_claim", {
           traceId,
           assignReason,
@@ -1433,7 +1539,12 @@ function createWatchService(
             });
             return { claimed: currentClaimed, assigned, missionResult };
           }
-          missionResult = await mcp.mcpToolCall("get_user_missions", {});
+          missionResult = missionResultLoader
+            ? await missionResultLoader({
+                forceFresh: true,
+                reason: `${assignReason || "claim_followup"}_after_assign`,
+              })
+            : await mcp.mcpToolCall("get_user_missions", {});
           trace("watch", "claim_followup_refetched_after_assign", {
             traceId,
             assignReason,
@@ -1460,7 +1571,10 @@ function createWatchService(
           });
           return { claimed: currentClaimed, assigned, missionResult };
         }
-        const afterSnapshot = await loadSelectedMissionSnapshot(missionResult);
+        const afterSnapshot = await loadSelectedMissionSnapshot(
+          missionResult,
+          missionResultLoader,
+        );
         const transitions = deriveStateTransitions(
           beforeSnapshot,
           afterSnapshot,
@@ -2064,6 +2178,7 @@ function createWatchService(
     let postClaimAssigned = 0;
     let missionStatePollRunning = false;
     let refreshKickPending = false;
+    let claimFollowupRunning = false;
     let liveSelectedSnapshot = beforeSnapshot;
     let liveStateRecoveryRunning = false;
     let liveStateClaimedApplied = 0;
@@ -2072,11 +2187,22 @@ function createWatchService(
       15000,
       opts.pollIntervalSeconds * 1000,
     );
+    const missionResultCoordinator = createMissionResultCoordinator({
+      ttlMs: 1200,
+      debugScope: "watch",
+    });
+    const getMissionResultShared = (options = {}) =>
+      missionResultCoordinator.get(options);
+    const seedMissionResult = (result) => missionResultCoordinator.seed(result);
     const maybeRunLiveStateRecovery = async (missionResult, reason) => {
       if (liveStateRecoveryRunning) return;
       if (!(missionResult && typeof missionResult === "object")) return;
+      seedMissionResult(missionResult);
       try {
-        const afterSnapshot = await loadSelectedMissionSnapshot(missionResult);
+        const afterSnapshot = await loadSelectedMissionSnapshot(
+          missionResult,
+          getMissionResultShared,
+        );
         const transitions = deriveStateTransitions(
           liveSelectedSnapshot,
           afterSnapshot,
@@ -2089,8 +2215,10 @@ function createWatchService(
         });
         if (transitions.claimedTransitions > 0) {
           liveStateRecoveryRunning = true;
-          const liveClaimLookup =
-            await loadAssignedMissionLookup(missionResult);
+          const liveClaimLookup = await loadAssignedMissionLookup(
+            missionResult,
+            getMissionResultShared,
+          );
           logClaimTransitionDetails(
             transitions.claimed,
             "[WATCH] ✅ Claimed (live state)",
@@ -2114,10 +2242,15 @@ function createWatchService(
           if (assigned > 0) {
             postClaimAssignRan = true;
             postClaimAssigned = Math.max(postClaimAssigned, assigned);
-            missionResult = await mcp.mcpToolCall("get_user_missions", {});
+            missionResult = await getMissionResultShared({
+              forceFresh: true,
+              reason: "post_claim_live_state_after_assign",
+            });
           }
-          liveSelectedSnapshot =
-            await loadSelectedMissionSnapshot(missionResult);
+          liveSelectedSnapshot = await loadSelectedMissionSnapshot(
+            missionResult,
+            getMissionResultShared,
+          );
           return;
         }
         liveSelectedSnapshot = afterSnapshot;
@@ -2145,19 +2278,23 @@ function createWatchService(
       watchSafeLocalMode || ctx.debugMode || clientPollIntervalSeconds > 0;
 
     const runLiveMissionCheck = (reason) => {
-      if (missionStatePollRunning) {
+      if (missionStatePollRunning || claimFollowupRunning) {
         refreshKickPending = true;
         return;
       }
       missionStatePollRunning = true;
       const pollPromise = (async () => {
-        const result = await mcp.mcpToolCall("get_user_missions", {});
+        const result = await getMissionResultShared({
+          forceFresh: true,
+          reason,
+        });
         if (ctx.debugMode) {
           missionStateById = await pollMissionStateChanges(
             missionStateById,
             reason,
             {
               missionResult: result,
+              missionResultLoader: getMissionResultShared,
             },
           );
         }
@@ -2191,11 +2328,14 @@ function createWatchService(
             checks
               .autoAssignConfiguredMissions({
                 reason: "poll_tick_available_recheck",
+                missionsResult: updated,
               })
               .then((assignResult) => {
                 if (Number(assignResult?.assigned || 0) > 0) {
-                  return mcp
-                    .mcpToolCall("get_user_missions", {})
+                  return getMissionResultShared({
+                    forceFresh: true,
+                    reason: "poll_tick_available_recheck_after_assign",
+                  })
                     .then((fresh) =>
                       checks.refreshMissionHeaderStats({
                         missionsResult: fresh,
@@ -2237,7 +2377,11 @@ function createWatchService(
         missionStateById = await pollMissionStateChanges(
           missionStateById,
           "cycle_start",
-          { logInitial: true, missionResult: preCycleMissionResult },
+          {
+            logInitial: true,
+            missionResult: preCycleMissionResult,
+            missionResultLoader: getMissionResultShared,
+          },
         );
       } catch (error) {
         logDebug("watch", "mission_state_poll_failed", {
@@ -2427,7 +2571,10 @@ function createWatchService(
     let postCycleMissionResult = null;
     if ((claimed > 0 || summary.claims.length > 0) && !hasActiveMcpCooldown()) {
       try {
-        postCycleMissionResult = await mcp.mcpToolCall("get_user_missions", {});
+        postCycleMissionResult = await getMissionResultShared({
+          forceFresh: true,
+          reason: "post_cycle_claim_refresh",
+        });
       } catch (error) {
         logDebug("watch", "post_cycle_missions_failed", {
           error: error.message,
@@ -2480,6 +2627,7 @@ function createWatchService(
         retryAfterMs: getMcpCooldownRemainingMs(),
       });
     } else {
+      claimFollowupRunning = true;
       const claimFollowup = await runClaimLifecycle({
         traceId,
         beforeSnapshot,
@@ -2493,6 +2641,9 @@ function createWatchService(
         initialMissionResult: postCycleMissionResult,
         allowStateFallback: true,
         finalTraceAction: "cycle_final_snapshot",
+        missionResultLoader: getMissionResultShared,
+      }).finally(() => {
+        claimFollowupRunning = false;
       });
       claimed = claimFollowup.claimed;
       postClaimAssigned = claimFollowup.assigned;
@@ -2613,7 +2764,7 @@ function createWatchService(
         assignReason: "manual",
         claimLogLabel: "Manual claimed",
         assignIntro: "[ASSIGN] ▶ Post-claim assign check (immediate)...",
-        initialMissionResult: null,
+        initialMissionResult: preManualMissionResult,
         allowStateFallback: true,
         finalTraceAction: "manual_final_snapshot",
       });
@@ -2737,7 +2888,7 @@ function createWatchService(
               assignReason: "startup_post_claim",
               claimLogLabel: "Startup claimed",
               assignIntro: "[ASSIGN] ▶ Startup post-claim assign check...",
-              initialMissionResult: null,
+              initialMissionResult: startupActionMissionResult,
               allowStateFallback: true,
               finalTraceAction: "startup_final_snapshot",
             });
