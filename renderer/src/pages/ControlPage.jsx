@@ -139,17 +139,24 @@ async function closeCompetitionNotificationModal({
   setModal(null);
 }
 
-function MissionSlotImage({ src }) {
+function MissionSlotImage({ src, hasAssignedNft = false, loading = false }) {
   const [activeSrc, setActiveSrc] = useState(src || null);
   const [outgoingSrc, setOutgoingSrc] = useState(null);
+  const [imageLoaded, setImageLoaded] = useState(src ? false : true);
+  const [imageFailed, setImageFailed] = useState(false);
 
   useEffect(() => {
     if (src === activeSrc) return;
     setOutgoingSrc(activeSrc);
     setActiveSrc(src || null);
+    setImageLoaded(src ? false : true);
+    setImageFailed(false);
     const timer = setTimeout(() => setOutgoingSrc(null), 320);
     return () => clearTimeout(timer);
   }, [src, activeSrc]);
+
+  const showSpinner = loading || (Boolean(activeSrc) && !imageLoaded && !imageFailed);
+  const placeholderLabel = hasAssignedNft ? "No image" : "No available NFTs";
 
   return (
     <>
@@ -167,10 +174,31 @@ function MissionSlotImage({ src }) {
           src={activeSrc}
           alt=""
           className="mission-image mission-image--in"
+          onLoad={() => {
+            setImageLoaded(true);
+            setImageFailed(false);
+          }}
+          onError={() => {
+            setImageLoaded(true);
+            setImageFailed(true);
+          }}
+          style={{
+            opacity: imageFailed ? 0 : imageLoaded ? 1 : 0,
+          }}
         />
+      ) : showSpinner ? (
+        <div className="mission-image-placeholder">
+          <span className="loading loading-spinner loading-md text-white/40" />
+        </div>
       ) : (
-        <div className="mission-image-placeholder">No available NFTs</div>
+        <div className="mission-image-placeholder">{placeholderLabel}</div>
       )}
+      {activeSrc && imageFailed ? (
+        <div className="mission-image-placeholder">No image</div>
+      ) : null}
+      {showSpinner && activeSrc ? (
+        <span className="loading loading-spinner loading-xs text-white/30 absolute top-2 right-2 z-20" />
+      ) : null}
     </>
   );
 }
@@ -4384,10 +4412,21 @@ function ControlView() {
                       : 0;
                     const imgSrc = pickSlotImage(entry);
                     const slotLocked = isMissionSlotLocked(slot);
+                    const hasAssignedNft = Boolean(
+                      String(
+                        entry?.assignedNftAccount ||
+                          entry?.assignedNft ||
+                          entry?.assigned_nft ||
+                          "",
+                      ).trim(),
+                    );
                     const slotImageLoading =
-                      status.startupMissionSlotsLoading === true &&
-                      !status.running &&
-                      (!entry || !imgSrc);
+                      (status.startupMissionSlotsLoading === true &&
+                        Boolean(status.running) &&
+                        (!entry || !imgSrc)) ||
+                      ((isStarting || status.watcherRunning === true) &&
+                        hasAssignedNft &&
+                        !imgSrc);
                     const slotAutomationEnabled =
                       missionActionEnabledBySlot[String(slot)] !== false;
                     const perSlotResetEnabled =
@@ -4420,12 +4459,11 @@ function ControlView() {
                           <div
                             className={`card-mission__header transition-all relative overflow-clip ${!slotAutomationEnabled ? "card-mission__header--disabled" : "cursor-pointer"} `}
                           >
-                            <MissionSlotImage src={imgSrc} />
-                            {isStarting || slotImageLoading ? (
-                              <span
-                                className={`loading loading-spinner loading-xs text-white/30 absolute top-2 right-2 z-20}  `}
-                              />
-                            ) : null}
+                            <MissionSlotImage
+                              src={imgSrc}
+                              hasAssignedNft={hasAssignedNft}
+                              loading={isStarting || slotImageLoading}
+                            />
                             {slotError ? (
                               <button
                                 type="button"

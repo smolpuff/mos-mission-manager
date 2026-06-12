@@ -1293,6 +1293,8 @@ function createChecksService(ctx, logger, mcp, services = {}) {
     );
   }
 
+  const ASSIGNED_NFT_METADATA_FETCH_DELAY_MS = 3000;
+
   async function loadOwnedMissionNfts({ forceFresh = false } = {}) {
     const cacheFresh =
       !forceFresh &&
@@ -4430,8 +4432,14 @@ function createChecksService(ctx, logger, mcp, services = {}) {
             .filter((account) => !assignedNftMetadataByAccount.has(account));
 
           const uniqueMissing = Array.from(new Set(missingAccounts)).slice(0, 6);
-          for (const account of uniqueMissing) {
+          for (let index = 0; index < uniqueMissing.length; index += 1) {
+            const account = uniqueMissing[index];
             try {
+              if (index > 0) {
+                await new Promise((resolve) =>
+                  setTimeout(resolve, ASSIGNED_NFT_METADATA_FETCH_DELAY_MS),
+                );
+              }
               const nftResult = await mcp.mcpToolCall("get_nft", {
                 mintAddress: account,
               });

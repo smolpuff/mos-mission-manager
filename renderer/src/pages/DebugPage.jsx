@@ -138,7 +138,9 @@ export default function DebugPage({
       <div className="card gap-2 p-3">
         <div className="flex items-start justify-between gap-3">
           <div>
-            <h2 className="text-lg font-normal leading-tight">Throttle Debug</h2>
+            <h2 className="text-lg font-normal leading-tight">
+              Throttle Debug
+            </h2>
           </div>
           <div className="flex items-center gap-3">
             <div className="text-right text-xs uppercase text-slate-400">
@@ -199,17 +201,7 @@ export default function DebugPage({
                 "Restart desktop process to enable log viewer"}
             </div>
           </div>
-          {!throttleLogAvailable ? (
-            <div className="mt-2 rounded-md border border-amber-500/30 bg-amber-500/10 p-2 text-[11px] text-amber-100">
-              Throttle log viewer becomes available after the Electron main
-              process restarts with the new IPC handler.
-            </div>
-          ) : null}
-          {throttleLogError ? (
-            <div className="mt-2 rounded-md border border-rose-500/30 bg-rose-500/10 p-2 text-[11px] text-rose-100">
-              {throttleLogError}
-            </div>
-          ) : null}
+
           <div
             ref={logViewportRef}
             onScroll={handleLogScroll}
