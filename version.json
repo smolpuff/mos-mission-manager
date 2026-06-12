@@ -2,7 +2,8 @@
   "version": "3.2.10",
   "downloadUrl": "https://github.com/smolpuff/mos-mission-manager/releases/latest",
   "notes": [
-    "New rentals flow to account for mcp changes. hope it works im too nft rich to try",
-    "Added level 20 colleciton reservation that probably doesn't work"
+    "added version check polling after 24hrs open",
+    "added dev gated throttle logging",
+    "got new dab rig, let's rage :D"
   ]
 }

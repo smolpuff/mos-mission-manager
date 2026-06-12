@@ -1,5 +1,5 @@
 import NavMain from "../components/nav/app";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import WindowChrome from "../components/WindowChrome/app";
 import HeaderUser from "../components/HeaderUser/app";
 import useBackendState from "../components/useBackendState/app";
@@ -33,6 +33,8 @@ const quickCommands = [
 ];
 
 const COMPETITION_NOTIFICATION_SEED = "20";
+const AUTO_UPDATE_BACKGROUND_THRESHOLD_MS = 24 * 60 * 60 * 1000;
+const AUTO_UPDATE_BACKGROUND_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
 function useDesktopBridge() {
   return window.missionsDesktop;
@@ -155,7 +157,8 @@ function MissionSlotImage({ src, hasAssignedNft = false, loading = false }) {
     return () => clearTimeout(timer);
   }, [src, activeSrc]);
 
-  const showSpinner = loading || (Boolean(activeSrc) && !imageLoaded && !imageFailed);
+  const showSpinner =
+    loading || (Boolean(activeSrc) && !imageLoaded && !imageFailed);
   const placeholderLabel = hasAssignedNft ? "No image" : "No available NFTs";
 
   return (
@@ -504,6 +507,8 @@ function ControlView() {
   const lowBalanceArmedRef = useRef({ pbp: false, sol: false });
   const bootstrapWalletSummaryRequestedRef = useRef(false);
   const startupUpdateCheckRequestedRef = useRef(false);
+  const lastUpdateCheckAtRef = useRef(null);
+  const updateCheckBusyRef = useRef(false);
   const startupCompetitionCheckRequestedRef = useRef(false);
   const dismissedCompetitionNotificationIdsRef = useRef(new Set());
   const lastThrottleModalKeyRef = useRef(null);
@@ -511,7 +516,7 @@ function ControlView() {
   const isNormalMode = !isMissionMode;
   const debugControlsVisible =
     debug === true || bridge?.desktopDevMode === true;
-  const debugPageVisible = bridge?.desktopDevMode === true && debug === true;
+  const debugPageVisible = debug === true;
   const competitionRangeLockDisabled = !debug || !isMissionMode;
   const competitionRangeLockInputsDisabled =
     competitionRangeLockDisabled || !competitionRangeLockEnabled;
@@ -1054,44 +1059,83 @@ function ControlView() {
       competitionRangeLockPollSeconds: Math.floor(next),
     });
   };
-  const runUpdateCheck = async ({ manual = false } = {}) => {
-    if (!bridge?.checkForUpdates) return null;
-    setUpdateCheckBusy(true);
-    if (manual) setUpdateCheckMessage(null);
-    try {
-      const result = await bridge.checkForUpdates({ manual });
-      if (result?.updateAvailable) {
-        setUpdateModal({
-          currentVersion: String(result.currentVersion || "").trim(),
-          latestVersion: String(result.latestVersion || "").trim(),
-          downloadUrl: String(result.downloadUrl || "").trim(),
-          notes: Array.isArray(result.notes)
-            ? result.notes
-            : String(result.notes || "")
-                .split(/\r?\n/)
-                .map((note) => note.trim())
-                .filter(Boolean),
-        });
-        if (manual) setUpdateCheckMessage("Update available.");
+  const runUpdateCheck = useCallback(
+    async ({ manual = false } = {}) => {
+      if (!bridge?.checkForUpdates || updateCheckBusyRef.current) return null;
+      updateCheckBusyRef.current = true;
+      setUpdateCheckBusy(true);
+      if (manual) setUpdateCheckMessage(null);
+      try {
+        const result = await bridge.checkForUpdates({ manual });
+        if (result?.skipped !== true) {
+          lastUpdateCheckAtRef.current = Date.now();
+        }
+        if (result?.updateAvailable) {
+          setUpdateModal({
+            currentVersion: String(result.currentVersion || "").trim(),
+            latestVersion: String(result.latestVersion || "").trim(),
+            downloadUrl: String(result.downloadUrl || "").trim(),
+            notes: Array.isArray(result.notes)
+              ? result.notes
+              : String(result.notes || "")
+                  .split(/\r?\n/)
+                  .map((note) => note.trim())
+                  .filter(Boolean),
+          });
+          if (manual) setUpdateCheckMessage("Update available.");
+          return result;
+        }
+        if (manual) {
+          setUpdateCheckMessage(
+            result?.ok
+              ? "You are up to date."
+              : "Unable to check for updates right now.",
+          );
+        }
         return result;
+      } catch {
+        if (manual) {
+          setUpdateCheckMessage("Unable to check for updates right now.");
+        }
+        return null;
+      } finally {
+        updateCheckBusyRef.current = false;
+        setUpdateCheckBusy(false);
       }
-      if (manual) {
-        setUpdateCheckMessage(
-          result?.ok
-            ? "You are up to date."
-            : "Unable to check for updates right now.",
-        );
-      }
-      return result;
-    } catch {
-      if (manual) {
-        setUpdateCheckMessage("Unable to check for updates right now.");
-      }
-      return null;
-    } finally {
-      setUpdateCheckBusy(false);
-    }
-  };
+    },
+    [bridge],
+  );
+
+  useEffect(() => {
+    if (autoUpdateCheckEnabled !== true) return;
+    if (!bridge?.checkForUpdates) return;
+    let cancelled = false;
+    let timer = null;
+
+    const scheduleNext = () => {
+      if (cancelled) return;
+      const now = Date.now();
+      const thresholdDueAt =
+        sessionStartedAtRef.current + AUTO_UPDATE_BACKGROUND_THRESHOLD_MS;
+      const intervalDueAt = Number.isFinite(lastUpdateCheckAtRef.current)
+        ? lastUpdateCheckAtRef.current + AUTO_UPDATE_BACKGROUND_INTERVAL_MS
+        : thresholdDueAt;
+      const nextDueAt = Math.max(thresholdDueAt, intervalDueAt);
+      const delay = Math.max(1000, nextDueAt - now);
+      timer = setTimeout(async () => {
+        timer = null;
+        if (cancelled) return;
+        await runUpdateCheck({ manual: false });
+        scheduleNext();
+      }, delay);
+    };
+
+    scheduleNext();
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [autoUpdateCheckEnabled, bridge, runUpdateCheck]);
   const activateNormalMode = async () => {
     const missionModeNftResetEnabled = isMissionMode
       ? nftResetEnabled
@@ -4278,7 +4322,7 @@ function ControlView() {
                                     )
                                   }
                                   disabled={nftResetInputsDisabled}
-                                  class="relative input bg-transparent text-xs w-17 p-1 pr-3 h-auto !text-white text-center !rounded-full outline-none"
+                                  class="relative input bg-transparent text-xs w-17 p-1 pr-3 h-auto !text-white text-center !rounded-full outline-none border-white/15 "
                                 />
                                 <img
                                   src={pbpIcon}
