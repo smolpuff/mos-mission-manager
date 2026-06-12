@@ -1,6 +1,9 @@
 import { useEffect, useState } from "react";
 import backImg from "../img/back.png";
-import { localCollectionImage } from "../collection-images";
+import {
+  canonicalCollectionLabel,
+  localCollectionImage,
+} from "../collection-images";
 
 const NFT_COOLDOWN_RING_MAX_SECONDS = 24 * 60 * 60;
 function formatAccount(value) {
@@ -408,16 +411,23 @@ export default function NftsPage({ bridge, signerMode = "" }) {
   const collectionOptions = [];
   const collectionSeen = new Set();
   for (const item of data.nfts) {
-    const key = String(item?.collection || "unknown").trim() || "unknown";
+    const rawCollection =
+      String(item?.collection || "unknown").trim() || "unknown";
+    const key = canonicalCollectionLabel(rawCollection);
     if (collectionSeen.has(key)) continue;
     collectionSeen.add(key);
     collectionOptions.push({
       key,
       label: key,
-      image: localCollectionImage(key) || null,
+      image:
+        localCollectionImage(rawCollection) ||
+        localCollectionImage(key) ||
+        null,
       count: data.nfts.filter(
         (entry) =>
-          (String(entry?.collection || "unknown").trim() || "unknown") === key,
+          canonicalCollectionLabel(
+            String(entry?.collection || "unknown").trim() || "unknown",
+          ) === key,
       ).length,
     });
   }
@@ -427,8 +437,9 @@ export default function NftsPage({ bridge, signerMode = "" }) {
     .filter((item) => {
       if (selectedCollection === "all") return true;
       return (
-        (String(item?.collection || "unknown").trim() || "unknown") ===
-        selectedCollection
+        canonicalCollectionLabel(
+          String(item?.collection || "unknown").trim() || "unknown",
+        ) === selectedCollection
       );
     })
     .sort((a, b) => {
@@ -452,10 +463,10 @@ export default function NftsPage({ bridge, signerMode = "" }) {
       <div className="grid grid-cols-1 md:grid-cols-[200px_auto] gap-4 shrink-0">
         <div className="card p-4 border border-white/10 bg-black/30 relative">
           <div className="text-sm uppercase text-slate-300 ">My NFTs</div>
-          <div className="text-2xl font-semibold text-slate-100 mt-1">
+          <div className="text-3xl font-semibold text-slate-100 mt-1">
             {Number(data.total || 0).toLocaleString()}
           </div>
-          <div className="text-xs text-success mt-1">
+          <div className="text-sm text-success mt-1">
             {readyNftCount.toLocaleString()} ready
           </div>
 
@@ -500,24 +511,26 @@ export default function NftsPage({ bridge, signerMode = "" }) {
           <div className="mt-3 flex flex-wrap gap-2">
             <button
               type="button"
-              className={`h-7 px-1 rounded-full border text-xs inline-flex items-center gap-2 ${
+              className={`h-7 px-1 rounded-full border text-xs inline-flex items-center gap-1 ${
                 selectedCollection === "all"
-                  ? "border-white/25 bg-white/10 text-white"
-                  : "border-white/10 bg-black/20 text-slate-300"
+                  ? "border-accent/80 bg-accent/30 text-white"
+                  : "border-black/10 bg-black/20 text-slate-300"
               }`}
               onClick={() => setSelectedCollection("all")}
             >
               <span>All</span>
-              <span className="text-slate-400">{data.nfts.length}</span>
+              <span className="text-slate-40 text-[10px]">
+                {data.nfts.length}
+              </span>
             </button>
             {collectionOptions.map((option) => (
               <button
                 key={option.key}
                 type="button"
-                className={`h-7 px-1 pr-3 rounded-full border text-xs inline-flex items-center gap-2 ${
+                className={`h-7 px-1 pr-3 rounded-full border text-xs inline-flex items-center gap-1 ${
                   selectedCollection === option.key
-                    ? "border-white/25 bg-white/10 text-white"
-                    : "border-white/10 bg-black/20 text-slate-300"
+                    ? "border-accent/80 bg-accent/30 text-white"
+                    : "border-black/10 bg-black/20 text-gray-300"
                 }`}
                 onClick={() => setSelectedCollection(option.key)}
                 title={option.label}
@@ -534,7 +547,9 @@ export default function NftsPage({ bridge, signerMode = "" }) {
                   <span className="w-5 h-5 rounded-full bg-white/10 border border-white/10" />
                 )}
                 <span className="max-w-20 truncate">{option.label}</span>
-                <span className="text-slate-400">{option.count}</span>
+                <span className="text-slate-400 text-[10px]">
+                  {option.count}
+                </span>
               </button>
             ))}
           </div>

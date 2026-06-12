@@ -48,6 +48,7 @@ function createWatchService(
   let walletRefreshPendingReason = null;
   let currentWalletSummaryRefreshTimer = null;
   let currentWalletSummaryRefreshPendingReason = null;
+  let nftCountWarmTimer = null;
 
   function createMissionResultCoordinator({
     ttlMs = 1200,
@@ -2156,6 +2157,67 @@ function createWatchService(
       : null;
   }
 
+  function getAutoAssignCooldownRemainingMs() {
+    const until = Number(ctx.autoAssignRateLimitedUntil || 0);
+    return until > Date.now() ? until - Date.now() : 0;
+  }
+
+  function scheduleNftCountWarmup({
+    reason = "watch",
+    missionsResult = null,
+    minDelayMs = 0,
+  } = {}) {
+    if (nftCountWarmTimer) return;
+    if (Number(ctx.currentMissionStats?.nftsTotal || 0) > 0) return;
+    const delayMs = Math.max(
+      8000,
+      Number(minDelayMs || 0),
+      getMcpCooldownRemainingMs(),
+      getAutoAssignCooldownRemainingMs(),
+    );
+    logDebug("watch", "nft_count_warmup_scheduled", {
+      reason,
+      delayMs,
+      hasMissionResult: Boolean(missionsResult),
+    });
+    nftCountWarmTimer = setTimeout(async () => {
+      nftCountWarmTimer = null;
+      if (!ctx.watchLoopEnabled || !ctx.watcherRunning) return;
+      if (Number(ctx.currentMissionStats?.nftsTotal || 0) > 0) return;
+      const retryDelayMs = Math.max(
+        getMcpCooldownRemainingMs(),
+        getAutoAssignCooldownRemainingMs(),
+      );
+      if (retryDelayMs > 0) {
+        scheduleNftCountWarmup({
+          reason: `${reason}_retry`,
+          missionsResult:
+            missionsResult || ctx.lastUserMissionsResult || startupMissionResult(),
+          minDelayMs: retryDelayMs,
+        });
+        return;
+      }
+      try {
+        await checks.refreshMissionHeaderStats({
+          missionsResult:
+            missionsResult || ctx.lastUserMissionsResult || startupMissionResult(),
+          refreshNftCount: true,
+          hydrateAssignedMetadata: false,
+        });
+        logDebug("watch", "nft_count_warmup_complete", {
+          reason,
+          nftsTotal: Number(ctx.currentMissionStats?.nftsTotal || 0),
+          nftsAvailable: Number(ctx.currentMissionStats?.nftsAvailable || 0),
+        });
+      } catch (error) {
+        logDebug("watch", "nft_count_warmup_failed", {
+          reason,
+          error: error.message,
+        });
+      }
+    }, delayMs);
+  }
+
   async function runWatchCycle() {
     const traceId = nextTraceId("cycle");
     const opts = watchConfig();
@@ -2960,6 +3022,10 @@ function createWatchService(
           reason: "no_startup_snapshot",
         });
       }
+      scheduleNftCountWarmup({
+        reason: "startup",
+        missionsResult: initialMissionResult || ctx.lastUserMissionsResult || null,
+      });
     } catch (error) {
       logDebug("watch", "startup_ui_refresh_failed", {
         error: error.message,
@@ -2984,6 +3050,12 @@ function createWatchService(
           logWithTimestamp(
             `[WATCH] ℹ️ Cycle complete: no claims (polls=${summary.polls}, eligible=${summary.eligible}). Next check continues automatically.`,
           );
+        }
+        if (Number(ctx.currentMissionStats?.nftsTotal || 0) <= 0) {
+          scheduleNftCountWarmup({
+            reason: "cycle_complete",
+            missionsResult: ctx.lastUserMissionsResult || null,
+          });
         }
         const cooldownMs = getMcpCooldownRemainingMs();
         if (cooldownMs > 0) {

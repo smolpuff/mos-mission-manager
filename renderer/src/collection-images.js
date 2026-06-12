@@ -24,6 +24,31 @@ export function normalizeCollectionKey(value) {
     .trim();
 }
 
+export function canonicalCollectionLabel(value) {
+  const key = normalizeCollectionKey(value);
+  if (
+    key === "iook" ||
+    key === "100k" ||
+    key === "100 k" ||
+    key === "100000" ||
+    key === "100 000" ||
+    key === "100k club"
+  ) {
+    return "100k";
+  }
+  if (
+    key === "sook" ||
+    key === "500k" ||
+    key === "500 k" ||
+    key === "500000" ||
+    key === "500 000" ||
+    key === "500k club"
+  ) {
+    return "500k";
+  }
+  return String(value || "").trim() || "unknown";
+}
+
 const COLLECTION_IMAGE_BY_KEY = new Map([
   ["iook", img100k],
   ["100k", img100k],
