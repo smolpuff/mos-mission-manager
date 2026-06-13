@@ -980,6 +980,21 @@ function readThrottleDebugLog() {
   }
 }
 
+function deleteThrottleDebugLog() {
+  const filePath = throttleDebugLogPath();
+  try {
+    if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+    return { ok: true, path: filePath, deleted: true };
+  } catch (error) {
+    return {
+      ok: false,
+      path: filePath,
+      deleted: false,
+      error: String(error?.message || error),
+    };
+  }
+}
+
 function safePositiveNumber(value) {
   const num = Number(value);
   return Number.isFinite(num) && num >= 0 ? num : 0;
@@ -4557,6 +4572,9 @@ app.whenReady().then(async () => {
     logs: logHistory,
   }));
   ipcMain.handle("debug:get-throttle-log", async () => readThrottleDebugLog());
+  ipcMain.handle("debug:delete-throttle-log", async () =>
+    deleteThrottleDebugLog(),
+  );
   ipcMain.handle("debug:get-resource-usage", async () =>
     readResourceUsageSnapshot(),
   );

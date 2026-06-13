@@ -998,11 +998,11 @@ button.btn.btn-gradient {
 }
 
 .mission-image--in {
-  animation: missionPixelIn 320ms steps(10, end) both;
+  animation: missionPixelIn 240ms ease-out both;
 }
 
 .mission-image--out {
-  animation: missionPixelOut 320ms steps(10, end) both;
+  animation: missionPixelOut 180ms ease-in both;
 }
 
 
@@ -1325,7 +1325,7 @@ button.btn.btn-gradient {
 @keyframes missionPixelIn {
   0% {
     opacity: 0;
-    transform: scale(1);
+    transform: scale(0.985);
   }
 
   100% {
@@ -1342,7 +1342,7 @@ button.btn.btn-gradient {
 
   100% {
     opacity: 0;
-    transform: scale(1);
+    transform: scale(1.015);
   }
 }
 

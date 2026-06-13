@@ -26,7 +26,7 @@ export default function CompetitionPage({
   return (
     <section className=" h-160 flex flex-col gap-3">
       <div className="competition__header grid gap-4 grid-cols-2 items-center">
-        <div className="-mt-6">
+        <div className="">
           <h1 className="text-2xl font-normal competition__h leading-tight">
             Competition
             <span>
@@ -35,53 +35,55 @@ export default function CompetitionPage({
                 : ""}
             </span>{" "}
           </h1>
-          {competitions.length > 1 ? (
-            <select
-              className="select select-sm  bg-black/50 focus-within:bg-black border-white/10 text-slate-100 w-auto"
-              value={String(selectedCompetitionNumber || "")}
-              onChange={(event) =>
-                setSelectedCompetitionNumber?.(event.target.value)
-              }
+          <div className="flex gap-4 items-center">
+            {competitions.length > 1 ? (
+              <select
+                className="select select-sm  bg-black/50 focus-within:bg-black border-white/10 text-slate-100 w-auto"
+                value={String(selectedCompetitionNumber || "")}
+                onChange={(event) =>
+                  setSelectedCompetitionNumber?.(event.target.value)
+                }
+                disabled={latestCompetitionBusy}
+              >
+                {competitions.map((competition, index) => {
+                  const value = String(
+                    competition?.competitionNumber ||
+                      competition?.scrapedAt ||
+                      index,
+                  );
+                  const label = competition?.competitionNumber
+                    ? `Competition ${competition.competitionNumber}`
+                    : `Competition ${index + 1}`;
+                  return (
+                    <option key={value} value={value}>
+                      {label}
+                    </option>
+                  );
+                })}
+              </select>
+            ) : null}{" "}
+            <button
+              type="button"
+              className="btn btn-xs btn-black z-10 rounded-sm font-normal px-2 inline-flex"
+              onClick={() => void refreshLatestCompetition()}
               disabled={latestCompetitionBusy}
+              title={
+                latestCompetition
+                  ? "Refresh competition data"
+                  : "Load competition data"
+              }
             >
-              {competitions.map((competition, index) => {
-                const value = String(
-                  competition?.competitionNumber ||
-                    competition?.scrapedAt ||
-                    index,
-                );
-                const label = competition?.competitionNumber
-                  ? `Competition ${competition.competitionNumber}`
-                  : `Competition ${index + 1}`;
-                return (
-                  <option key={value} value={value}>
-                    {label}
-                  </option>
-                );
-              })}
-            </select>
-          ) : null}
+              {latestCompetitionBusy
+                ? selectedCompetition
+                  ? "Refreshing..."
+                  : "Loading..."
+                : selectedCompetition
+                  ? "Refresh Results"
+                  : "Load"}
+            </button>
+          </div>
         </div>
-        <div className="gap-1 text-xs justify-self-end  flex flex-col flex-0 relative">
-          <button
-            type="button"
-            className="btn btn-xs btn-black z-10 rounded-sm font-normal px-2 inline-flex absolute -top-7 right-0"
-            onClick={() => void refreshLatestCompetition()}
-            disabled={latestCompetitionBusy}
-            title={
-              latestCompetition
-                ? "Refresh competition data"
-                : "Load competition data"
-            }
-          >
-            {latestCompetitionBusy
-              ? selectedCompetition
-                ? "Refreshing..."
-                : "Loading..."
-              : selectedCompetition
-                ? "Refresh Results"
-                : "Load"}
-          </button>
+        <div className="gap-1 text-xs justify-self-end flex flex-col flex-0">
           <div>
             Start{" "}
             {selectedCompetition?.start ||

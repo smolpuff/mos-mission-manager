@@ -192,6 +192,26 @@ export default function DebugPage({
     }
   };
 
+  const deleteThrottleLog = async () => {
+    if (!throttleLogAvailable) return;
+    if (!bridge?.deleteThrottleDebugLog) return;
+    setThrottleLogBusy(true);
+    setThrottleLogError("");
+    try {
+      const result = await bridge.deleteThrottleDebugLog();
+      setThrottleLogPath(String(result?.path || throttleDebug?.logPath || ""));
+      if (result?.ok === false) {
+        setThrottleLogError(String(result?.error || "Failed to delete log."));
+        return;
+      }
+      setThrottleLog("");
+    } catch (error) {
+      setThrottleLogError(String(error?.message || error));
+    } finally {
+      setThrottleLogBusy(false);
+    }
+  };
+
   const refreshResourceUsage = async () => {
     if (!bridge?.getResourceUsage) return;
     setResourceUsageBusy(true);
@@ -289,25 +309,39 @@ export default function DebugPage({
       </div>
 
       <div className="card gap-1.5 !p-3">
-        <div className="flex items-start justify-between gap-1.5">
-          {/* <div>
+        <div className="flex flex-wrap items-start justify-between gap-1.5">
+          <div>
             <h2 className="text-md font-normal leading-tight">
               Throttle Debug
             </h2>
-          </div> */}
-          {/* <div className="flex items-center gap-3">
-            <div className="text-right text-xs uppercase text-slate-400">
-              <div>{desktopDevMode ? ":dev active" : ":dev off"}</div>
+          </div>
+          <div className="flex flex-wrap items-center justify-end gap-1.5">
+            <div className="text-right text-[10px] uppercase text-slate-400">
+              <div>
+                {throttleLogPath ? (
+                  <div className="text-[10px] leading-snug text-slate-400">
+                    {throttleLogPath}
+                  </div>
+                ) : null}
+              </div>
             </div>
             <button
               type="button"
-              className="rounded-md border border-white/10 bg-white/5 px-2.5 py-1 text-[11px] text-slate-100 hover:border-white/20 hover:bg-white/10 disabled:opacity-50"
+              className="rounded-md border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] leading-tight text-slate-100 hover:border-white/20 hover:bg-white/10 disabled:opacity-50"
               disabled={throttleLogBusy || !throttleLogAvailable}
               onClick={() => void refreshThrottleLog()}
             >
               {throttleLogBusy ? "Refreshing..." : "Refresh Log"}
             </button>
-          </div> */}
+            <button
+              type="button"
+              className="rounded-md border border-rose-400/20 bg-rose-400/10 px-2 py-0.5 text-[10px] leading-tight text-rose-100 hover:border-rose-400/35 hover:bg-rose-400/15 disabled:opacity-50"
+              disabled={throttleLogBusy || !throttleLogAvailable}
+              onClick={() => void deleteThrottleLog()}
+            >
+              {throttleLogBusy ? "Working..." : "Delete Log"}
+            </button>
+          </div>
         </div>
 
         <div className="grid gap-2 md:grid-cols-3">
@@ -348,12 +382,17 @@ export default function DebugPage({
           onScroll={handleLogScroll}
           className="mt-2 overflow-x-hidden overflow-y-auto rounded-md border border-white/10 bg-black/30 p-2"
           style={{
-            height: "420px",
+            height: "400px",
             minHeight: "240px",
             overflowX: "hidden",
             overflowY: "auto",
           }}
         >
+          {throttleLogError ? (
+            <div className="mb-2 rounded-md border border-amber-400/20 bg-amber-400/5 px-2 py-1 text-[10px] text-amber-300">
+              {throttleLogError}
+            </div>
+          ) : null}
           <pre
             className="font-mono text-slate-100"
             style={{
