@@ -1500,6 +1500,13 @@ button.btn.btn-gradient {
 /* SVG FIRE */
 #mission-mode-mm_button {
   container-type: inline-size;
+  position: relative;
+
+  .mission-mode-copy {
+    position: relative;
+    z-index: 5;
+    transition: z-index 0s linear 180ms;
+  }
 
   .mo-fire {
     position: absolute;
@@ -1510,7 +1517,7 @@ button.btn.btn-gradient {
     z-index: 4;
     pointer-events: none;
 
-    opacity: 0;
+    opacity: 0.6;
     transform: translateX(-50%) translateY(18px) scaleY(0.85);
     transform-origin: 50% 100%;
     filter: drop-shadow(0 0 0 rgba(255, 80, 80, 0));
@@ -1593,7 +1600,10 @@ button.btn.btn-gradient {
   }
 
   &.active {
-    position: relative;
+    .mission-mode-copy {
+      z-index: 3;
+      transition-delay: 0s;
+    }
 
     .mo-fire {
       opacity: 1;
@@ -1699,9 +1709,15 @@ body[data-reduced-motion="true"] .mission-progress-mask {
 
 html[data-reduced-motion="true"] #mission-mode-mm_button .mo-fire,
 body[data-reduced-motion="true"] #mission-mode-mm_button .mo-fire {
+  opacity: 0.6 !important;
+  transform: translateX(-50%) translateY(18px) scaleY(0.85) !important;
+  filter: drop-shadow(0 0 10px rgba(255, 80, 80, 0.35)) !important;
+}
+
+html[data-reduced-motion="true"] #mission-mode-mm_button.active .mo-fire,
+body[data-reduced-motion="true"] #mission-mode-mm_button.active .mo-fire {
   opacity: 1 !important;
   transform: translateX(-50%) translateY(0) scaleY(1) !important;
-  filter: drop-shadow(0 0 10px rgba(255, 80, 80, 0.35)) !important;
 }
 
 html[data-reduced-motion="true"] #mission-mode-mm_button .flame,

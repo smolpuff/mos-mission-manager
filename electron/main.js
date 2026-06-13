@@ -980,6 +980,83 @@ function readThrottleDebugLog() {
   }
 }
 
+function safePositiveNumber(value) {
+  const num = Number(value);
+  return Number.isFinite(num) && num >= 0 ? num : 0;
+}
+
+function readResourceUsageSnapshot() {
+  try {
+    const metrics =
+      typeof app.getAppMetrics === "function" ? app.getAppMetrics() : [];
+    const byType = {};
+    let totalWorkingSetBytes = 0;
+    let totalPrivateBytes = 0;
+    let totalSharedBytes = 0;
+    let totalCpuPercent = 0;
+
+    for (const metric of Array.isArray(metrics) ? metrics : []) {
+      const type = String(metric?.type || "unknown").toLowerCase();
+      const workingSetBytes =
+        safePositiveNumber(metric?.memory?.workingSetSize) * 1024;
+      const privateBytes =
+        safePositiveNumber(metric?.memory?.privateBytes) * 1024;
+      const sharedBytes = safePositiveNumber(metric?.memory?.sharedBytes) * 1024;
+      const cpuPercent = safePositiveNumber(metric?.cpu?.percentCPUUsage);
+
+      totalWorkingSetBytes += workingSetBytes;
+      totalPrivateBytes += privateBytes;
+      totalSharedBytes += sharedBytes;
+      totalCpuPercent += cpuPercent;
+
+      if (!byType[type]) {
+        byType[type] = {
+          count: 0,
+          workingSetBytes: 0,
+          privateBytes: 0,
+          sharedBytes: 0,
+          cpuPercent: 0,
+        };
+      }
+      byType[type].count += 1;
+      byType[type].workingSetBytes += workingSetBytes;
+      byType[type].privateBytes += privateBytes;
+      byType[type].sharedBytes += sharedBytes;
+      byType[type].cpuPercent += cpuPercent;
+    }
+
+    return {
+      ok: true,
+      sampledAt: Date.now(),
+      app: {
+        processCount: Array.isArray(metrics) ? metrics.length : 0,
+        totalWorkingSetBytes,
+        totalPrivateBytes,
+        totalSharedBytes,
+        totalCpuPercent,
+        byType,
+      },
+      system: {
+        totalMemoryBytes: safePositiveNumber(os.totalmem()),
+        freeMemoryBytes: safePositiveNumber(os.freemem()),
+        loadAverage: Array.isArray(os.loadavg?.()) ? os.loadavg() : [],
+      },
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      sampledAt: Date.now(),
+      error: String(error?.message || error),
+      app: null,
+      system: {
+        totalMemoryBytes: safePositiveNumber(os.totalmem()),
+        freeMemoryBytes: safePositiveNumber(os.freemem()),
+        loadAverage: Array.isArray(os.loadavg?.()) ? os.loadavg() : [],
+      },
+    };
+  }
+}
+
 function parseRetrySecondsFromMessage(message) {
   const text = String(message || "").trim();
   if (!text) return null;
@@ -4480,6 +4557,9 @@ app.whenReady().then(async () => {
     logs: logHistory,
   }));
   ipcMain.handle("debug:get-throttle-log", async () => readThrottleDebugLog());
+  ipcMain.handle("debug:get-resource-usage", async () =>
+    readResourceUsageSnapshot(),
+  );
   ipcMain.handle("analytics:get-view", async (_event, rangeKey = "session") =>
     analyticsView(rangeKey),
   );

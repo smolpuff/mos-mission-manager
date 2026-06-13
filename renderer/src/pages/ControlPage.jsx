@@ -3952,9 +3952,8 @@ function ControlView() {
                       type="button"
                       id="mission-mode-mm_button"
                     >
-                      {" "}
-                      <div className="space-y-2">
-                        <div className="z-10 mode__name font-bold text-2xl leading-7">
+                      <div className="mission-mode-copy space-y-2">
+                        <div className="mode__name font-bold text-2xl leading-7">
                           Mission Mode
                         </div>
                         <div className="text-xs">
