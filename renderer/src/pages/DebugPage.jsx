@@ -36,6 +36,13 @@ function throttleLabel(throttleDebug) {
   );
 }
 
+function middleTruncate(value, max = 56) {
+  const text = String(value || "").trim();
+  if (!text || text.length <= max) return text;
+  const slice = Math.max(8, Math.floor((max - 1) / 2));
+  return `${text.slice(0, slice)}…${text.slice(-slice)}`;
+}
+
 export default function DebugPage({
   desktopDevMode,
   throttleDebug,
@@ -309,25 +316,22 @@ export default function DebugPage({
       </div>
 
       <div className="card gap-1.5 !p-3">
-        <div className="flex flex-wrap items-start justify-between gap-1.5">
-          <div>
-            <h2 className="text-md font-normal leading-tight">
+        <div className="flex min-w-0 items-center justify-between gap-1.5">
+          <div className="flex min-w-0 items-baseline gap-2">
+            <h2 className="shrink-0 text-md font-normal leading-tight">
               Throttle Debug
             </h2>
-          </div>
-          <div className="flex flex-wrap items-center justify-end gap-1.5">
-            <div className="text-right text-[10px] uppercase text-slate-400">
-              <div>
-                {throttleLogPath ? (
-                  <div className="text-[10px] leading-snug text-slate-400">
-                    {throttleLogPath}
-                  </div>
-                ) : null}
-              </div>
+            <div
+              className="min-w-0 flex-1 truncate text-[10px] uppercase leading-none text-slate-400"
+              title={throttleLogPath || ""}
+            >
+              {throttleLogPath ? middleTruncate(throttleLogPath) : ""}
             </div>
+          </div>
+          <div className="flex shrink-0 items-center gap-1.5">
             <button
               type="button"
-              className="rounded-md border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] leading-tight text-slate-100 hover:border-white/20 hover:bg-white/10 disabled:opacity-50"
+              className="shrink-0 rounded-md border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] leading-tight text-slate-100 hover:border-white/20 hover:bg-white/10 disabled:opacity-50"
               disabled={throttleLogBusy || !throttleLogAvailable}
               onClick={() => void refreshThrottleLog()}
             >
@@ -335,7 +339,7 @@ export default function DebugPage({
             </button>
             <button
               type="button"
-              className="rounded-md border border-rose-400/20 bg-rose-400/10 px-2 py-0.5 text-[10px] leading-tight text-rose-100 hover:border-rose-400/35 hover:bg-rose-400/15 disabled:opacity-50"
+              className="shrink-0 rounded-md border border-rose-400/20 bg-rose-400/10 px-2 py-0.5 text-[10px] leading-tight text-rose-100 hover:border-rose-400/35 hover:bg-rose-400/15 disabled:opacity-50"
               disabled={throttleLogBusy || !throttleLogAvailable}
               onClick={() => void deleteThrottleLog()}
             >
@@ -343,7 +347,6 @@ export default function DebugPage({
             </button>
           </div>
         </div>
-
         <div className="grid gap-2 md:grid-cols-3">
           <div className="rounded-xl border border-white/10 bg-black/20 p-2">
             <div className="text-[10px] uppercase tracking-wide text-slate-400">

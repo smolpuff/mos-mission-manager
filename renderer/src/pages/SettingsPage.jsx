@@ -1,6 +1,13 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import ToggleSwitch from "../components/ToggleSwitch/app";
 import solIcon from "../img/icon-sm__sol.svg";
+import pbpIcon from "../img/icon-sm__pbp.webp";
+
+function formatLastChecked(value) {
+  const ts = Number(value || 0);
+  if (!Number.isFinite(ts) || ts <= 0) return "Never";
+  return new Date(ts).toLocaleString();
+}
 
 export default function SettingsPage({
   fundingEnabled,
@@ -16,14 +23,41 @@ export default function SettingsPage({
   openSecretModal,
   openCreateWalletModal,
   autoUpdateCheckEnabled,
+  lastUpdateCheckAt,
   setAutoUpdateCheckEnabled,
+  clearUpdateCheckMessage,
+  missionCompetitionCheckEnabled,
+  setMissionCompetitionCheckEnabled,
   reducedMotionEnabled,
   setReducedMotionEnabled,
   onManualUpdateCheck,
   updateCheckBusy,
   updateCheckMessage,
 }) {
-  const [copyAddressLabel, setCopyAddressLabel] = useState("Copy Address");
+  const [copyAddressLabel, setCopyAddressLabel] = useState("Copy");
+  const [showUpToDateState, setShowUpToDateState] = useState(false);
+  const updateCheckIsUpToDate = updateCheckMessage === "You are up to date.";
+  const renderUpToDateState = updateCheckIsUpToDate && showUpToDateState;
+  const showInlineUpdateMessage =
+    Boolean(updateCheckMessage) && !updateCheckIsUpToDate;
+
+  const handleManualUpdateCheck = () => {
+    setShowUpToDateState(false);
+    void onManualUpdateCheck?.();
+  };
+
+  useEffect(() => {
+    if (!updateCheckIsUpToDate) {
+      setShowUpToDateState(false);
+      return;
+    }
+    setShowUpToDateState(true);
+    const timer = setTimeout(() => {
+      setShowUpToDateState(false);
+      clearUpdateCheckMessage?.();
+    }, 3500);
+    return () => clearTimeout(timer);
+  }, [clearUpdateCheckMessage, updateCheckIsUpToDate]);
 
   return (
     <section>
@@ -112,8 +146,15 @@ export default function SettingsPage({
 
         {fundingEnabled && fundingSource === "app_wallet" ? (
           <div className="space-y-3">
-            <h3 className="flex gap-4 sm border-b border-white/20 pb-1 justify-between">
-              App Wallet Details
+            <h3 className="flex gap-4 sm border-b border-white/20 pb-1 justify-between items-center">
+              <div>App Wallet Details</div>
+              <button
+                className="btn btn-xs bg-error font-normal border-error rounded-sm not-disabled:hover:bg-error-content transition-all opacity-70 hover:opacity-100 active:translate-y-0.5"
+                onClick={() => openCreateWalletModal()}
+                type="button"
+              >
+                Generate New Wallet
+              </button>
             </h3>
             <div className="flex items-center justify-between gap-3 leading-none">
               <label
@@ -124,7 +165,7 @@ export default function SettingsPage({
               </label>
               <button
                 type="button"
-                className="fill-white flex items-center gap-1 text-xs leading-none font-normal opacity-60 hover:cursor-pointer hover:fill-accent hover:text-accent hover:opacity-100 disabled:opacity-40"
+                className="fill-white flex items-center gap-1 text-xs leading-none font-normal opacity-60 hover:cursor-pointer hover:fill-accent hover:text-accent hover:opacity-100 disabled:opacity-40 | hidden "
                 disabled={!appWalletAddress}
                 onClick={() => {
                   if (!appWalletAddress) return;
@@ -143,30 +184,27 @@ export default function SettingsPage({
               </button>
             </div>
             <div className="user__wallet-addres text-lg -mt-1">
-              <div className="flex min-h-13 w-full items-center gap-3 rounded-lg border border-accent/50 bg-accent/10 p-2 px-3">
+              <div className="flex min-h-13 w-full items-center gap-3 rounded-lg border border-white/10 bg-black/10 hover:border-accent/50 hover:bg-accent/10 p-2 px-3 transition-all ">
                 <div className="min-w-0 flex-1 truncate">
                   {appWalletAddress || "—"}
                 </div>
                 <button
                   type="button"
-                  className="fill-white flex shrink-0 items-center gap-1 rounded-md border border-white/10 bg-white/5 px-2.5 py-1.5 font-normal text-xs hover:cursor-pointer hover:border-white/20 hover:bg-white/10 hover:fill-accent hover:text-accent disabled:opacity-50"
+                  className="fill-white flex shrink-0 items-center gap-1 rounded-md border border-white/10 bg-white/5 px-2.5 !px-2 !py-0.5 font-normal text-[11px] hover:cursor-pointer hover:border-white/20 hover:bg-white/10 hover:fill-accent hover:text-accent disabled:opacity-50"
                   disabled={!appWalletAddress}
                   onClick={() => {
                     const value = appWalletAddress;
                     if (!value) return;
                     void copyText(value).then((ok) => {
                       setCopyAddressLabel(ok ? "Copied!" : "Copy failed");
-                      setTimeout(
-                        () => setCopyAddressLabel("Copy Address"),
-                        1000,
-                      );
+                      setTimeout(() => setCopyAddressLabel("Copy"), 1000);
                     });
                   }}
                 >
                   <svg
                     xmlns="http://www.w3.org/2000/svg"
                     viewBox="0 0 640 640"
-                    className="h-4 w-4"
+                    className="h-3 w-3"
                   >
                     <path d="M352 544L128 544C110.3 544 96 529.7 96 512L96 288C96 270.3 110.3 256 128 256L176 256L176 224L128 224C92.7 224 64 252.7 64 288L64 512C64 547.3 92.7 576 128 576L352 576C387.3 576 416 547.3 416 512L416 464L384 464L384 512C384 529.7 369.7 544 352 544zM288 384C270.3 384 256 369.7 256 352L256 128C256 110.3 270.3 96 288 96L512 96C529.7 96 544 110.3 544 128L544 352C544 369.7 529.7 384 512 384L288 384zM224 352C224 387.3 252.7 416 288 416L512 416C547.3 416 576 387.3 576 352L576 128C576 92.7 547.3 64 512 64L288 64C252.7 64 224 92.7 224 128L224 352z" />
                   </svg>
@@ -175,15 +213,16 @@ export default function SettingsPage({
               </div>
             </div>
             <div className="flex items-center justify-between gap-8">
-              <div>
+              <div className="">
                 <label
                   htmlFor="user-wallet__lock-status"
                   className="text-xs uppercase text-slate-300"
                 >
                   Balances
                 </label>
-                <div className="flex gap-3 items-center user-wallet__balances">
+                <div className="mt-1 flex items-center user-wallet__balances gap-5 rounded-lg border border-white/10 bg-black/10 p-3">
                   <div className="flex gap-1 items-center user-wallet__balances-item">
+                    <img src={solIcon} className="w-4 h-4" alt="Solana logo" />
                     <div className="text-sm">
                       <SlideNumberFormatted
                         value={Number(fundingWalletSummary?.sol || 0)}
@@ -197,6 +236,11 @@ export default function SettingsPage({
                     </div>
                   </div>
                   <div className="flex gap-1 items-center user-wallet__balances-item">
+                    <img
+                      src={pbpIcon}
+                      className="w-4 h-4"
+                      alt="PBP token logo"
+                    />
                     <div className="text-sm">
                       <SlideNumberFormatted
                         value={Number(fundingWalletSummary?.pbp || 0)}
@@ -215,83 +259,98 @@ export default function SettingsPage({
                     Loading app wallet summary...
                   </div>
                 ) : null}
-              </div>{" "}
-            </div>{" "}
-            <div className="flex gal=2 justify-between items-center">
-              {" "}
+              </div>
               <button
                 type="button"
                 onClick={() => void openSecretModal()}
-                className="text-sm   px-3 py-1.5 bg-[#9661E2] max-w-max rounded-sm hover:bg-[#5F0DD5] transition-colors"
+                className="text-xs px-2.5 py-1 bg-[#9661E2] max-w-max rounded-sm hover:bg-[#5F0DD5] transition-colors active:translate-y-0.5 place-self-end"
               >
                 View Secret Keys
-              </button>{" "}
-              <button
-                className="btn btn-xs bg-error font-normal border-error rounded-sm not-disabled:hover:bg-error-content transition-all opacity-70 hover:opacity-100 "
-                onClick={() => openCreateWalletModal()}
-                type="button"
-              >
-                Generate New Wallet
               </button>
             </div>
           </div>
         ) : null}
       </div>
-      <div className="mt-4 grid gap-4 grid-cols-2">
-        <div className="card gap-4">
-          <div className="space-y-4">
-            <div className="flex items-center">
-              <ToggleSwitch
-                switchID="autoUpdateCheckEnabled"
-                checked={autoUpdateCheckEnabled === true}
-                onChange={(e) =>
-                  void setAutoUpdateCheckEnabled(e.target.checked === true)
-                }
-              />
-              <h1 className="text-[1.35rem] font-normal leading-tight">
-                App Updates
-              </h1>
-            </div>
-            <div className="text-xs text-slate-300">
-              Atomatically check for a newer version when the app launches.
-            </div>
-            <div className="flex items-center gap-3">
-              <button
-                type="button"
-                className="text-sm   px-3 py-1.5 bg-[#9661E2] max-w-max rounded-sm hover:bg-[#5F0DD5] transition-colors"
-                onClick={() => void onManualUpdateCheck?.()}
-                disabled={updateCheckBusy === true}
-              >
-                {updateCheckBusy === true ? "Checking..." : "Check Now"}
-              </button>
-              {updateCheckMessage ? (
-                <div className="text-xs text-slate-300">
+      <div className="mt-2">
+        <div className="card gap-5">
+          <div className=" divide-white/10 divide-y space-y-3 ">
+            <div className="flex flex-wrap items-start justify-between gap-3 pb-3 ">
+              <div className="space-y-1">
+                <ToggleSwitch
+                  switchID="autoUpdateCheckEnabled"
+                  checked={autoUpdateCheckEnabled === true}
+                  onChange={(e) =>
+                    void setAutoUpdateCheckEnabled(e.target.checked === true)
+                  }
+                  title={
+                    <span className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                      <span>Check for App Updates</span>
+                      <span className="text-[11px] font-normal text-slate-400">
+                        (Last checked: {formatLastChecked(lastUpdateCheckAt)})
+                      </span>
+                    </span>
+                  }
+                  helperText="Automatically checks for a new version at launch and periodically there-after"
+                  styling="text-base"
+                />
+              </div>
+              <div className="flex items-center gap-3 ">
+                <button
+                  type="button"
+                  className={`flex items-center gap-1 text-xs px-2.5 py-1 max-w-max rounded-sm transition-colors active:translate-y-0.5 ${
+                    renderUpToDateState
+                      ? "bg-success text-slate-900 hover:bg-success/90"
+                      : "bg-[#9661E2] hover:bg-[#5F0DD5]"
+                  }`}
+                  onClick={handleManualUpdateCheck}
+                  disabled={updateCheckBusy === true}
+                >
+                  {updateCheckBusy === true ? (
+                    "Checking..."
+                  ) : renderUpToDateState ? (
+                    <>
+                      <span aria-hidden="true">●</span>
+                      <span>Up to date</span>
+                    </>
+                  ) : (
+                    "Check Now"
+                  )}
+                </button>
+              </div>
+              {showInlineUpdateMessage ? (
+                <div className="w-full text-xs text-slate-300">
                   {updateCheckMessage}
                 </div>
               ) : null}
             </div>
-          </div>
-        </div>
-        <div className="card gap-4">
-          <div className="space-y-4">
-            <div className="flex items-center">
+
+            <div className=" pb-3">
+              <ToggleSwitch
+                switchID="missionCompetitionCheckEnabled"
+                checked={missionCompetitionCheckEnabled === true}
+                onChange={(e) =>
+                  void setMissionCompetitionCheckEnabled(
+                    e.target.checked === true,
+                  )
+                }
+                title="Check for Mission Competitions"
+                helperText="Periodically checks for new mission competitions"
+                styling="text-base"
+              />{" "}
+            </div>
+
+            <div>
+              {" "}
               <ToggleSwitch
                 switchID="reducedMotionEnabledSettings"
                 checked={reducedMotionEnabled === true}
                 onChange={(e) =>
                   void setReducedMotionEnabled(e.target.checked === true)
                 }
+                title="Reduced Motion"
+                helperText="Reduce CPU usage by disabling heavy motion effects like the mission fire animation"
+                styling="text-base"
               />
-              <h1 className="text-[1.35rem] font-normal leading-tight">
-                Reduced Motion
-              </h1>
-            </div>
-            <div className="text-xs text-slate-300">
-              Disable heavy motion effects like the mission fire animation to
-              reduce CPU usage.
-            </div>
-            <div className="text-xs text-slate-400">
-              Turning this off may cause higher resource usage.
             </div>
           </div>
         </div>

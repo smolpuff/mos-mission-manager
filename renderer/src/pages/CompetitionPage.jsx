@@ -22,12 +22,26 @@ export default function CompetitionPage({
     ) ||
     competitions[0] ||
     latestCompetition;
+  const hasCompetitionData = Boolean(selectedCompetition);
+  const showPageLoading =
+    latestCompetitionBusy || (!latestCompetitionError && !hasCompetitionData);
+
+  if (showPageLoading) {
+    return (
+      <section className="h-160 flex flex-col gap-3">
+        <div className="text-sm text-slate-400 mt-3 flex items-center gap-2">
+          <span className="loading loading-spinner loading-sm text-success" />
+          <span>Loading competition...</span>
+        </div>
+      </section>
+    );
+  }
 
   return (
-    <section className=" h-160 flex flex-col gap-3">
+    <section className="h-160 flex flex-col gap-3">
       <div className="competition__header grid gap-4 grid-cols-2 items-center">
-        <div className="">
-          <h1 className="text-2xl font-normal competition__h leading-tight">
+        <div className="-mt-6">
+          <h1 className="text-2xl font-normal competition__h leading-tight flex gap-2">
             Competition
             <span>
               {selectedCompetition?.competitionNumber
@@ -120,101 +134,92 @@ export default function CompetitionPage({
           {latestCompetitionError ? (
             <div className="text-sm text-red-300">{latestCompetitionError}</div>
           ) : null}
-
-          {!selectedCompetition ? (
-            <div className="text-sm text-slate-300">
-              {latestCompetitionBusy
-                ? "Loading competition..."
-                : "Press Load to fetch the latest competition."}
-            </div>
-          ) : (
-            <div className="h-full min-h-0 flex flex-col gap-3">
-              {selectedCompetition.debug?.challenge ? (
-                <div className="text-sm text-amber-200">
-                  Headless scrape looks blocked (
-                  {selectedCompetition.debug.challenge}
-                  ). Try again after opening the competitions page once in-app,
-                  or disable bot protection.
-                </div>
-              ) : null}
-
-              <div className="w-full flex-1 min-h-0 card flex flex-col">
-                <div className="text-sm text-slate-400 w-full | hidden">
-                  Results
-                </div>
-                {selectedCompetition.resultsStatus ? (
-                  <div className="text-sm text-slate-300">
-                    {selectedCompetition.resultsStatus}
-                  </div>
-                ) : Array.isArray(selectedCompetition.userRows) &&
-                  selectedCompetition.userRows.length ? (
-                  <div className=" overflow-hidden overflow-y-scroll w-full flex-1 min-h-0">
-                    <table className="results-table w-full text-xs border-collapse h-full ">
-                      <thead className="sticky top-1">
-                        <tr className="text-slate-400 border-b border-slate-700/70  p-0">
-                          <th className="text-left font-normal py-1 !pt-0 pr-2">
-                            Place
-                          </th>
-                          <th className="text-left   font-normal py-1 !pt-0 pr-2">
-                            Player
-                          </th>
-                          <th className="text-right font-normal py-1 !pt-0 pr-2">
-                            Completed
-                          </th>
-                          <th className="text-right font-normal py-1 !pt-0 ">
-                            Unique
-                          </th>
-                        </tr>
-                      </thead>
-                      <tbody className="w-full">
-                        {selectedCompetition.userRows.map((row, idx) => {
-                          const isCurrentUserRow = isCurrentCompetitionRow(
-                            row.player,
-                          );
-                          return (
-                            <tr
-                              key={`${idx}_${row.player}_${row.rank}`}
-                              className={`border-b border-slate-800/70 last:border-0 gap-2 ${
-                                isCurrentUserRow ? "results-row--current" : ""
-                              }`}
-                            >
-                              <td className="py-1 pr-2 rounded-l-md text-slate-200">
-                                {Number.isFinite(Number(row.rank))
-                                  ? Number(row.rank)
-                                  : "-"}
-                              </td>
-                              <td className="py-1 pr-2 text-slate-100">
-                                {row.player || "-"}
-                              </td>
-                              <td className="py-1 pr-2 text-right text-slate-200">
-                                {Number.isFinite(Number(row.completed))
-                                  ? Number(row.completed)
-                                  : "-"}
-                              </td>
-                              <td className="py-1 text-right text-slate-200 rounded-r-md">
-                                {Number.isFinite(Number(row.uniqueNFTs))
-                                  ? Number(row.uniqueNFTs)
-                                  : "-"}
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                ) : Array.isArray(selectedCompetition.users) &&
-                  selectedCompetition.users.length ? (
-                  <ul className="text-sm list-disc pl-5 space-y-0.5">
-                    {selectedCompetition.users.map((u, idx) => (
-                      <li key={`${idx}_${u}`}>{u}</li>
-                    ))}
-                  </ul>
-                ) : (
-                  <div className="text-sm text-slate-300">No users found.</div>
-                )}
+          <div className="h-full min-h-0 flex flex-col gap-3">
+            {selectedCompetition.debug?.challenge ? (
+              <div className="text-sm text-amber-200">
+                Headless scrape looks blocked (
+                {selectedCompetition.debug.challenge}
+                ). Try again after opening the competitions page once in-app,
+                or disable bot protection.
               </div>
+            ) : null}
+
+            <div className="w-full flex-1 min-h-0 card flex flex-col">
+              <div className="text-sm text-slate-400 w-full | hidden">
+                Results
+              </div>
+              {selectedCompetition.resultsStatus ? (
+                <div className="text-sm text-slate-300">
+                  {selectedCompetition.resultsStatus}
+                </div>
+              ) : Array.isArray(selectedCompetition.userRows) &&
+                selectedCompetition.userRows.length ? (
+                <div className=" overflow-hidden overflow-y-scroll w-full flex-1 min-h-0">
+                  <table className="results-table w-full text-xs border-collapse h-full ">
+                    <thead className="sticky top-1">
+                      <tr className="text-slate-400 border-b border-slate-700/70  p-0">
+                        <th className="text-left font-normal py-1 !pt-0 pr-2">
+                          Place
+                        </th>
+                        <th className="text-left   font-normal py-1 !pt-0 pr-2">
+                          Player
+                        </th>
+                        <th className="text-right font-normal py-1 !pt-0 pr-2">
+                          Completed
+                        </th>
+                        <th className="text-right font-normal py-1 !pt-0 ">
+                          Unique
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody className="w-full">
+                      {selectedCompetition.userRows.map((row, idx) => {
+                        const isCurrentUserRow = isCurrentCompetitionRow(
+                          row.player,
+                        );
+                        return (
+                          <tr
+                            key={`${idx}_${row.player}_${row.rank}`}
+                            className={`border-b border-slate-800/70 last:border-0 gap-2 ${
+                              isCurrentUserRow ? "results-row--current" : ""
+                            }`}
+                          >
+                            <td className="py-1 pr-2 rounded-l-md text-slate-200">
+                              {Number.isFinite(Number(row.rank))
+                                ? Number(row.rank)
+                                : "-"}
+                            </td>
+                            <td className="py-1 pr-2 text-slate-100">
+                              {row.player || "-"}
+                            </td>
+                            <td className="py-1 pr-2 text-right text-slate-200">
+                              {Number.isFinite(Number(row.completed))
+                                ? Number(row.completed)
+                                : "-"}
+                            </td>
+                            <td className="py-1 text-right text-slate-200 rounded-r-md">
+                              {Number.isFinite(Number(row.uniqueNFTs))
+                                ? Number(row.uniqueNFTs)
+                                : "-"}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              ) : Array.isArray(selectedCompetition.users) &&
+                selectedCompetition.users.length ? (
+                <ul className="text-sm list-disc pl-5 space-y-0.5">
+                  {selectedCompetition.users.map((u, idx) => (
+                    <li key={`${idx}_${u}`}>{u}</li>
+                  ))}
+                </ul>
+              ) : (
+                <div className="text-sm text-slate-300">No users found.</div>
+              )}
             </div>
-          )}
+          </div>
         </div>
         <div className="space-y-1 max-w-50 w-full">
           <div className="text-sm text-slate-400 mish-gradient !text-2xl">

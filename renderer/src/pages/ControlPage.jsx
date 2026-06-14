@@ -35,6 +35,9 @@ const quickCommands = [
 const COMPETITION_NOTIFICATION_SEED = "20";
 const AUTO_UPDATE_BACKGROUND_THRESHOLD_MS = 24 * 60 * 60 * 1000;
 const AUTO_UPDATE_BACKGROUND_INTERVAL_MS = 24 * 60 * 60 * 1000;
+const MISSION_COMPETITION_CHECK_THRESHOLD_MS = 24 * 60 * 60 * 1000;
+const MISSION_COMPETITION_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
+const MISSION_COMPETITION_END_BUFFER_MS = 15 * 60 * 1000;
 
 function useDesktopBridge() {
   return window.missionsDesktop;
@@ -115,6 +118,22 @@ function competitionStatusFrom(summary, isNewCompetition) {
     };
   }
   return { label: "Live!", className: "badge badge-success" };
+}
+
+function competitionLifecycleFromSummary(summary) {
+  const now = Date.now();
+  const startMs = competitionDateMs(summary?.start);
+  const endMs = competitionDateMs(summary?.end);
+  if (Number.isFinite(endMs) && now > endMs) {
+    return { state: "ended", startMs, endMs };
+  }
+  if (Number.isFinite(startMs) && now < startMs) {
+    return { state: "upcoming", startMs, endMs };
+  }
+  if (Number.isFinite(startMs) || Number.isFinite(endMs)) {
+    return { state: "active", startMs, endMs };
+  }
+  return { state: "unknown", startMs, endMs };
 }
 
 async function closeCompetitionNotificationModal({
@@ -442,6 +461,11 @@ function ControlView() {
   const [configuredTargetMissions, setConfiguredTargetMissions] = useState([]);
   const [autoUpdateCheckEnabled, setAutoUpdateCheckEnabledState] =
     useState(true);
+  const [lastUpdateCheckAt, setLastUpdateCheckAt] = useState(null);
+  const [
+    missionCompetitionCheckEnabled,
+    setMissionCompetitionCheckEnabledState,
+  ] = useState(true);
   const [updateCheckBusy, setUpdateCheckBusy] = useState(false);
   const [updateCheckMessage, setUpdateCheckMessage] = useState(null);
   const [updateModal, setUpdateModal] = useState(null);
@@ -510,6 +534,8 @@ function ControlView() {
   const lastUpdateCheckAtRef = useRef(null);
   const updateCheckBusyRef = useRef(false);
   const startupCompetitionCheckRequestedRef = useRef(false);
+  const lastMissionCompetitionCheckAtRef = useRef(null);
+  const nextMissionCompetitionCheckAtRef = useRef(null);
   const dismissedCompetitionNotificationIdsRef = useRef(new Set());
   const lastThrottleModalKeyRef = useRef(null);
   const isMissionMode = modeSelection === "mission";
@@ -744,6 +770,13 @@ function ControlView() {
       } else {
         setAutoUpdateCheckEnabledState(true);
       }
+      if (typeof config.missionCompetitionCheckEnabled === "boolean") {
+        setMissionCompetitionCheckEnabledState(
+          config.missionCompetitionCheckEnabled,
+        );
+      } else {
+        setMissionCompetitionCheckEnabledState(true);
+      }
       const cooldownMaxPbp = Number(config.nftCooldownResetMaxPbp);
       setNftResetMaxPbp(
         Number.isFinite(cooldownMaxPbp) && cooldownMaxPbp >= 0
@@ -845,6 +878,7 @@ function ControlView() {
     if (!bridge?.getLatestCompetition) return;
     setLatestCompetitionBusy(true);
     setLatestCompetitionError(null);
+    let deferredNextCheckAt = null;
     try {
       const res = await bridge.getLatestCompetition({});
       if (!res?.ok) throw new Error(res?.error || "Scrape failed.");
@@ -912,22 +946,83 @@ function ControlView() {
       await applyConfigPatch({
         lastSeenMissionCompetitionId: summary.competitionNumber,
       });
+      const lifecycle = competitionLifecycleFromSummary(summary);
+      if (
+        lifecycle.state === "active" &&
+        Number.isFinite(lifecycle.endMs) &&
+        lifecycle.endMs > Date.now()
+      ) {
+        deferredNextCheckAt =
+          lifecycle.endMs + MISSION_COMPETITION_END_BUFFER_MS;
+      }
     } catch (e) {
       setLatestCompetitionError(String(e?.message || e));
     } finally {
+      lastMissionCompetitionCheckAtRef.current = Date.now();
+      nextMissionCompetitionCheckAtRef.current = deferredNextCheckAt;
       setLatestCompetitionBusy(false);
     }
   };
 
   useEffect(() => {
     if (startupCompetitionCheckRequestedRef.current) return;
+    if (missionCompetitionCheckEnabled !== true) return;
     if (!bridge?.getLatestCompetition) return;
     const timer = setTimeout(() => {
       startupCompetitionCheckRequestedRef.current = true;
       void checkForNewMissionCompetition();
     }, 700);
     return () => clearTimeout(timer);
-  }, [bridge]);
+  }, [bridge, missionCompetitionCheckEnabled]);
+
+  useEffect(() => {
+    if (missionCompetitionCheckEnabled !== true) return;
+    if (!bridge?.getLatestCompetition) return;
+    let cancelled = false;
+    let timer = null;
+
+    const scheduleNext = () => {
+      if (cancelled) return;
+      const now = Date.now();
+      const deferredDueAt = Number.isFinite(
+        nextMissionCompetitionCheckAtRef.current,
+      )
+        ? nextMissionCompetitionCheckAtRef.current
+        : null;
+      if (deferredDueAt && deferredDueAt > now) {
+        const delay = Math.max(1000, deferredDueAt - now);
+        timer = setTimeout(async () => {
+          timer = null;
+          if (cancelled) return;
+          await checkForNewMissionCompetition();
+          scheduleNext();
+        }, delay);
+        return;
+      }
+      const thresholdDueAt =
+        sessionStartedAtRef.current + MISSION_COMPETITION_CHECK_THRESHOLD_MS;
+      const intervalDueAt = Number.isFinite(
+        lastMissionCompetitionCheckAtRef.current,
+      )
+        ? lastMissionCompetitionCheckAtRef.current +
+          MISSION_COMPETITION_CHECK_INTERVAL_MS
+        : thresholdDueAt;
+      const nextDueAt = Math.max(thresholdDueAt, intervalDueAt);
+      const delay = Math.max(1000, nextDueAt - now);
+      timer = setTimeout(async () => {
+        timer = null;
+        if (cancelled) return;
+        await checkForNewMissionCompetition();
+        scheduleNext();
+      }, delay);
+    };
+
+    scheduleNext();
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [bridge, missionCompetitionCheckEnabled]);
 
   useEffect(() => {
     if (currentPage !== "mish_tish") return;
@@ -1010,6 +1105,14 @@ function ControlView() {
     setAutoUpdateCheckEnabledState(next);
     await applyConfigPatch({ autoUpdateCheckEnabled: next });
   };
+  const clearUpdateCheckMessage = () => {
+    setUpdateCheckMessage(null);
+  };
+  const setMissionCompetitionCheckEnabled = async (enabled) => {
+    const next = enabled === true;
+    setMissionCompetitionCheckEnabledState(next);
+    await applyConfigPatch({ missionCompetitionCheckEnabled: next });
+  };
   const setDebugMode = async (enabled) => {
     const next = enabled === true;
     setDebugEnabled(next);
@@ -1068,7 +1171,9 @@ function ControlView() {
       try {
         const result = await bridge.checkForUpdates({ manual });
         if (result?.skipped !== true) {
-          lastUpdateCheckAtRef.current = Date.now();
+          const checkedAt = Date.now();
+          lastUpdateCheckAtRef.current = checkedAt;
+          setLastUpdateCheckAt(checkedAt);
         }
         if (result?.updateAvailable) {
           setUpdateModal({
@@ -2885,7 +2990,13 @@ function ControlView() {
               openSecretModal={openSecretModal}
               openCreateWalletModal={openCreateWalletModal}
               autoUpdateCheckEnabled={autoUpdateCheckEnabled}
+              lastUpdateCheckAt={lastUpdateCheckAt}
               setAutoUpdateCheckEnabled={setAutoUpdateCheckEnabled}
+              clearUpdateCheckMessage={clearUpdateCheckMessage}
+              missionCompetitionCheckEnabled={missionCompetitionCheckEnabled}
+              setMissionCompetitionCheckEnabled={
+                setMissionCompetitionCheckEnabled
+              }
               reducedMotionEnabled={reducedMotionEnabled}
               setReducedMotionEnabled={setReducedMotionEnabled}
               onManualUpdateCheck={() => runUpdateCheck({ manual: true })}
@@ -3868,7 +3979,7 @@ function ControlView() {
                     </div>
                     <div className="action-row flex w-full">
                       <button
-                        className={`active:scale-98  rounded-[10px] text-lg font-normal px-5 py-1 flex h-auto text-white btn btn-gradient w-full border-0 text-shadow-md text-shadow-black/30 shadow-md shadow-black/30 ${status.running ? "active" : ""}`}
+                        className={` active:translate-y-0.5 active:scale-98 rounded-[10px] text-lg font-normal px-5 py-1 flex h-auto text-white btn btn-gradient w-full border-0 text-shadow-md text-shadow-black/30 shadow-md shadow-black/30 ${status.running ? "active" : ""}`}
                         onClick={() =>
                           status.running
                             ? bridge.stopBackend()

@@ -486,12 +486,12 @@ export default function StatsPage({ status }) {
   return (
     <section className="h-full min-h-0 overflow-hidden">
       <div className="grid  grid-rows-[auto_200px_auto_auto] gap-3 overflow-hidden">
-        <section className="card grid grid-cols-[minmax(195px,0.28fr)_minmax(0,1fr)] items-center gap-4 ">
+        <section className="card grid grid-cols-[minmax(195px,0.28fr)_minmax(0,1fr)] items-center gap-y-2 gap-x-2">
           <div className=" col-span-full flex flex-row items-center gap-3 items-center w-full  justify-between">
             <div className="flex items-center gap-2">
               <button
                 type="button"
-                className="btn btn-xs btn-black z-10 rounded-sm font-normal px-2 inline-flex ml-0 "
+                className="btn btn-xs btn-black z-10 rounded-sm font-normal px-2 inline-flex ml-0 active:translate-y-0.5"
                 onClick={() => void handleExportCsv()}
                 disabled={actionBusy || loading}
                 title="Export stats to CSV"
@@ -500,7 +500,7 @@ export default function StatsPage({ status }) {
               </button>{" "}
               <button
                 type="button"
-                className="btn btn-xs bg-error font-normal border-error rounded-sm not-disabled:hover:bg-error-content transition-all opacity-70 hover:opacity-100 "
+                className="btn btn-xs bg-error font-normal border-error rounded-sm not-disabled:hover:bg-error-content transition-all opacity-70 hover:opacity-100 active:translate-y-0.5"
                 onClick={() => void handleResetSession()}
                 disabled={actionBusy || loading}
                 title={`Clear persisted stats for ${rangeLabel}`}
@@ -587,7 +587,7 @@ export default function StatsPage({ status }) {
                 </div>
               </div>
             </div>
-            <div className="mt-2 h-full rounded-md bg-black/20 px-2 pt-2 pb-1 overflow-hidden">
+            <div className="mt-2 h-full rounded-md bg-black/20 border-white/10 border px-2 pt-2 pb-1 overflow-hidden">
               {chartBuckets.length ? (
                 <div className="relative h-full min-w-0">
                   {/* <div className="absolute inset-x-0 top-0 border-t border-slate-400/10" /> */}

@@ -42,6 +42,7 @@ const SALVAGE_TOP_LEVEL_KEYS = [
   "lowBalanceSolThreshold",
   "signerSetupCompleted",
   "autoUpdateCheckEnabled",
+  "missionCompetitionCheckEnabled",
   "reducedMotionEnabled",
   "competitionRangeLockEnabled",
   "competitionRangeLockMinRank",
@@ -389,6 +390,9 @@ function loadConfig(ctx, logWithTimestamp) {
   }
   if (typeof ctx.config.competitionRangeLockEnabled !== "boolean") {
     ctx.config.competitionRangeLockEnabled = false;
+  }
+  if (typeof ctx.config.missionCompetitionCheckEnabled !== "boolean") {
+    ctx.config.missionCompetitionCheckEnabled = true;
   }
   const competitionRangeLockMinRank = Number(
     ctx.config.competitionRangeLockMinRank,

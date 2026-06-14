@@ -251,9 +251,8 @@
           0 2px 4px rgba(0, 0, 0, 0.2),
           inset 0 0 4px rgba(0, 0, 0, 0.4);
 
-
-
         &::after {
+          content: "";
           background: linear-gradient(110deg, var(--color-info),
               var(--color-primary),
               var(--color-secondary));
@@ -277,11 +276,11 @@
         box-shadow:
           inset 0 0 0 1.25px rgba(255, 255, 255, 0.28),
           0 3px 7px rgba(0, 0, 0, 0.24);
-
       }
 
       .switch-track {
         &::after {
+          content: "";
           transform: translateX(0.65rem);
           box-shadow:
             inset 0 0 0 1.25px rgba(255, 255, 255, 0.25),
@@ -348,7 +347,7 @@
     opacity: 0.7 !important;
   }
 
-  .card-mission__header--disabled .card-mission__progress > div,
+  .card-mission__header--disabled .card-mission__progress>div,
   .card-mission__header--disabled .card-mission__level,
   .card-mission__header--disabled .mission-image,
   .card-mission__header--disabled .mission-image-placeholder {
@@ -358,7 +357,7 @@
   .card-mission__header--disabled .mission-image-placeholder,
   .card-mission__header--disabled .card-mission__level,
   .card-mission__header--disabled .card-mission__progress,
-  .card-mission__header--disabled .card-mission__progress > div {
+  .card-mission__header--disabled .card-mission__progress>div {
     filter: grayscale(1) !important;
   }
 
@@ -728,7 +727,28 @@
   }
 
   nav#mainNav {
-    @apply px-3.5 w-full max-w-24 min-h-full flex flex-col items-center gap-3 border-r border-r-white/10;
+    @apply px-3.5 w-full max-w-24 min-h-full flex flex-col items-center gap-3 relative;
+
+    &::after {
+      content: "";
+      position: absolute;
+      top: 1.5rem;
+      bottom: 1.5rem;
+      right: 0;
+      width: 1px;
+      background: rgba(255, 255, 255, 0.12);
+      mask-image: linear-gradient(to bottom,
+          transparent 0%,
+          black 10%,
+          black 90%,
+          transparent 100%);
+      -webkit-mask-image: linear-gradient(to bottom,
+          transparent 0%,
+          black 10%,
+          black 90%,
+          transparent 100%);
+      pointer-events: none;
+    }
 
     .nav-shared-gradient {
       position: absolute;
@@ -743,9 +763,23 @@
 
       &::before {
         content: "";
-        @apply absolute inset-0 pointer-events-none z-1;
-        border-radius: inherit;
-        mix-blend-mode: overlay;
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        width: 80%;
+        height: 80%;
+        z-index: -1;
+        border-radius: 999px;
+        pointer-events: none;
+        z-index: 0;
+        opacity: 0;
+        transform: translate(-50%, -50%);
+        transition: opacity 160ms linear;
+        background: radial-gradient(circle,
+            rgba(160, 239, 239, 0.17) 0%,
+            rgba(152, 230, 246, 0.17) 42%,
+            rgba(246, 146, 190, 0) 78%);
+        filter: blur(14px);
       }
 
       &::after {
@@ -756,24 +790,18 @@
         -webkit-mask: linear-gradient(#fff 0 0) content-box,
           linear-gradient(#fff 0 0);
         mask-composite: exclude;
-        /* mix-blend-mode: overlay; */
-        backdrop-filter: blur(2rem);
-        -webkit-backdrop-filter: blur(2rem);
+        transition: background 160ms linear, border-color 160ms linear;
       }
 
       &:hover {
-        @apply border border-white/10;
-        box-shadow: 0 2px 2px rgba(0, 0, 0, 0.5);
-
         &::before {
-          background: rgb(255 255 255 / 0.6);
+          opacity: 1;
         }
 
         &::after {
-
           background: linear-gradient(30deg,
-              rgba(255, 255, 255, 0.06) 50%,
-              rgba(255, 255, 255, 0.03) 100%);
+              rgba(255, 210, 230, 0.1) 0%,
+              rgba(255, 182, 218, 0.04) 100%);
         }
 
         >* {
@@ -796,21 +824,23 @@
 
     a.nav-active,
     button.nav-active {
-      @apply border border-white/10;
-      box-shadow: 0 2px 2px rgba(0, 0, 0, 0.5);
-
       &::before {
-        background: rgb(255 255 255 / 0.6);
+        opacity: 1;
       }
 
       &::after {
         background: linear-gradient(30deg,
-            rgba(255, 255, 255, 0.06) 50%,
-            rgba(255, 255, 255, 0.03) 100%);
+            rgba(255, 210, 230, 0.1) 0%,
+            rgba(255, 182, 218, 0.04) 100%);
       }
 
       >* {
         @apply relative z-2;
+      }
+
+      .nav-icon {
+        filter: brightness(1.18) saturate(1.12)
+          drop-shadow(0 1px 4px rgba(0, 0, 0, 0.24));
       }
     }
   }
