@@ -263,7 +263,7 @@ export default function DebugPage({
         </div>
 
         <div className="flex min-w-0 gap-1.5">
-          <div className="min-w-0 flex-[1.25] rounded-xl border border-white/10 bg-black/20 px-1.5 py-1.5">
+          <div className="min-w-0 flex-[1.25] rounded-lg border border-white/10 bg-black/20 px-1.5 py-1.5">
             <div className="truncate text-[9px] uppercase tracking-wide text-slate-400">
               App Working Set
             </div>
@@ -274,7 +274,7 @@ export default function DebugPage({
               {Number(appUsage.processCount || 0)} processes
             </div>
           </div>
-          <div className="min-w-0 flex-[1.05] rounded-xl border border-white/10 bg-black/20 px-1.5 py-1.5">
+          <div className="min-w-0 flex-[1.05] rounded-lg border border-white/10 bg-black/20 px-1.5 py-1.5">
             <div className="truncate text-[9px] uppercase tracking-wide text-slate-400">
               App CPU
             </div>
@@ -289,7 +289,7 @@ export default function DebugPage({
             processBreakdown.map(([type, stats]) => (
               <div
                 key={type}
-                className="min-w-0 flex-1 rounded-xl border border-white/6 bg-white/[0.02] px-1.5 py-1.5 text-[10px] leading-snug text-slate-200"
+                className="min-w-0 flex-1 rounded-lg border border-white/6 bg-white/[0.02] px-1.5 py-1.5 text-[10px] leading-snug text-slate-200"
               >
                 <div className="truncate text-[9px] uppercase text-slate-400">
                   {type} x{Number(stats?.count || 0)}
@@ -303,12 +303,12 @@ export default function DebugPage({
               </div>
             ))
           ) : (
-            <div className="min-w-0 flex-1 rounded-xl border border-white/6 bg-white/[0.02] px-1.5 py-1.5 text-[8px] text-slate-400">
+            <div className="min-w-0 flex-1 rounded-lg border border-white/6 bg-white/[0.02] px-1.5 py-1.5 text-[8px] text-slate-400">
               No process metrics yet.
             </div>
           )}
           {resourceUsageError ? (
-            <div className="min-w-0 flex-1 rounded-xl border border-amber-400/20 bg-amber-400/5 px-1.5 py-1.5 text-[8px] text-amber-300">
+            <div className="min-w-0 flex-1 rounded-lg border border-amber-400/20 bg-amber-400/5 px-1.5 py-1.5 text-[8px] text-amber-300">
               {resourceUsageError}
             </div>
           ) : null}
@@ -348,7 +348,7 @@ export default function DebugPage({
           </div>
         </div>
         <div className="grid gap-2 md:grid-cols-3">
-          <div className="rounded-xl border border-white/10 bg-black/20 p-2">
+          <div className="rounded-lg border border-white/10 bg-black/20 p-2">
             <div className="text-[10px] uppercase tracking-wide text-slate-400">
               Throttle Count
             </div>
@@ -356,7 +356,7 @@ export default function DebugPage({
               {Number(throttleDebug?.count || 0)}
             </div>
           </div>
-          <div className="rounded-xl border border-white/10 bg-black/20 p-2">
+          <div className="rounded-lg border border-white/10 bg-black/20 p-2">
             <div className="text-[10px] uppercase tracking-wide text-slate-400">
               Last Tool
             </div>
@@ -364,7 +364,7 @@ export default function DebugPage({
               {throttleLabel(throttleDebug)}
             </div>
           </div>
-          <div className="rounded-xl border border-white/10 bg-black/20 p-2">
+          <div className="rounded-lg border border-white/10 bg-black/20 p-2">
             <div className="text-[10px] uppercase tracking-wide text-slate-400">
               Last Throttle
             </div>

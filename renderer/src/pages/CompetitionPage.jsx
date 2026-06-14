@@ -154,59 +154,75 @@ export default function CompetitionPage({
                 </div>
               ) : Array.isArray(selectedCompetition.userRows) &&
                 selectedCompetition.userRows.length ? (
-                <div className=" overflow-hidden overflow-y-scroll w-full flex-1 min-h-0">
-                  <table className="results-table w-full text-xs border-collapse h-full ">
-                    <thead className="sticky top-1">
-                      <tr className="text-slate-400 border-b border-slate-700/70  p-0">
+                <div className="w-full flex-1 min-h-0 flex flex-col">
+                  <table className="results-table results-table--header w-full text-xs border-collapse shrink-0">
+                    <colgroup>
+                      <col className="w-[12%]" />
+                      <col className="w-[46%]" />
+                      <col className="w-[21%]" />
+                      <col className="w-[21%]" />
+                    </colgroup>
+                    <thead>
+                      <tr className="text-slate-400 border-b border-slate-700/70 p-0">
                         <th className="text-left font-normal py-1 !pt-0 pr-2">
                           Place
                         </th>
-                        <th className="text-left   font-normal py-1 !pt-0 pr-2">
+                        <th className="text-left font-normal py-1 !pt-0 pr-2">
                           Player
                         </th>
                         <th className="text-right font-normal py-1 !pt-0 pr-2">
                           Completed
                         </th>
-                        <th className="text-right font-normal py-1 !pt-0 ">
+                        <th className="text-right font-normal py-1 !pt-0">
                           Unique
                         </th>
                       </tr>
                     </thead>
-                    <tbody className="w-full">
-                      {selectedCompetition.userRows.map((row, idx) => {
-                        const isCurrentUserRow = isCurrentCompetitionRow(
-                          row.player,
-                        );
-                        return (
-                          <tr
-                            key={`${idx}_${row.player}_${row.rank}`}
-                            className={`border-b border-slate-800/70 last:border-0 gap-2 ${
-                              isCurrentUserRow ? "results-row--current" : ""
-                            }`}
-                          >
-                            <td className="py-1 pr-2 rounded-l-md text-slate-200">
-                              {Number.isFinite(Number(row.rank))
-                                ? Number(row.rank)
-                                : "-"}
-                            </td>
-                            <td className="py-1 pr-2 text-slate-100">
-                              {row.player || "-"}
-                            </td>
-                            <td className="py-1 pr-2 text-right text-slate-200">
-                              {Number.isFinite(Number(row.completed))
-                                ? Number(row.completed)
-                                : "-"}
-                            </td>
-                            <td className="py-1 text-right text-slate-200 rounded-r-md">
-                              {Number.isFinite(Number(row.uniqueNFTs))
-                                ? Number(row.uniqueNFTs)
-                                : "-"}
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
                   </table>
+                  <div className="overflow-hidden overflow-y-scroll w-full flex-1 min-h-0">
+                    <table className="results-table results-table--body w-full text-xs border-collapse h-full">
+                      <colgroup>
+                        <col className="w-[12%]" />
+                        <col className="w-[46%]" />
+                        <col className="w-[21%]" />
+                        <col className="w-[21%]" />
+                      </colgroup>
+                      <tbody className="w-full">
+                        {selectedCompetition.userRows.map((row, idx) => {
+                          const isCurrentUserRow = isCurrentCompetitionRow(
+                            row.player,
+                          );
+                          return (
+                            <tr
+                              key={`${idx}_${row.player}_${row.rank}`}
+                              className={`border-b border-slate-800/70 last:border-0 gap-2 ${
+                                isCurrentUserRow ? "results-row--current" : ""
+                              }`}
+                            >
+                              <td className="py-1 pr-2 rounded-l-md text-slate-200">
+                                {Number.isFinite(Number(row.rank))
+                                  ? Number(row.rank)
+                                  : "-"}
+                              </td>
+                              <td className="py-1 pr-2 text-slate-100">
+                                {row.player || "-"}
+                              </td>
+                              <td className="py-1 pr-2 text-right text-slate-200">
+                                {Number.isFinite(Number(row.completed))
+                                  ? Number(row.completed)
+                                  : "-"}
+                              </td>
+                              <td className="py-1 text-right text-slate-200 rounded-r-md">
+                                {Number.isFinite(Number(row.uniqueNFTs))
+                                  ? Number(row.uniqueNFTs)
+                                  : "-"}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
               ) : Array.isArray(selectedCompetition.users) &&
                 selectedCompetition.users.length ? (

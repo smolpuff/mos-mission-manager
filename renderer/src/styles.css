@@ -104,7 +104,12 @@
     animation: btnGradientShift 8s linear infinite;
     background-color: transparent;
     border-color: transparent;
+    transition: filter 160ms linear, transform 120ms ease-out;
+  }
 
+  button.btn.btn-gradient:hover,
+  button.btn.btn-gradient:active {
+    filter: brightness(1.18) saturate(1.12) drop-shadow(0 1px 4px rgba(0, 0, 0, 0.24));
   }
 
   button.btn.btn-gradient::before {
@@ -1110,6 +1115,14 @@ button.btn.btn-gradient {
 .results-table {
   border-collapse: separate !important;
   border-spacing: 0 4px;
+}
+
+.results-table--header {
+  border-spacing: 0;
+}
+
+.results-table--body {
+  margin-top: -1px;
 }
 
 .results-table .results-row--current {
