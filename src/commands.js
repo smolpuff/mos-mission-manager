@@ -112,7 +112,7 @@ function createCommandHandler(ctx, logger, actions, configApi, services = {}) {
       ctx.currentMissionResetLevel ||
         ctx.config?.missionResetLevel ||
         ctx.runtimeDefaults?.missionResetLevel ||
-        "11",
+        "10",
     );
     const nftResetMaxPbp = Number(ctx.config?.nftCooldownResetMaxPbp);
     const normalizedNftResetMaxPbp =
@@ -859,7 +859,7 @@ function createCommandHandler(ctx, logger, actions, configApi, services = {}) {
           ctx.currentMissionResetLevel ||
             process.env.PBP_DEFAULT_MISSION_RESET_LEVEL ||
             ctx.runtimeDefaults?.missionResetLevel ||
-            "11",
+            "10",
         );
         ctx.config.level20ResetEnabled = ctx.level20ResetEnabled;
         ctx.currentMode = ctx.missionModeEnabled
@@ -915,7 +915,7 @@ function createCommandHandler(ctx, logger, actions, configApi, services = {}) {
             ctx.currentMissionResetLevel ||
               process.env.PBP_DEFAULT_MISSION_RESET_LEVEL ||
               ctx.runtimeDefaults?.missionResetLevel ||
-              11,
+              10,
           );
           ctx.config.missionResetPerSlotLevelBySlot = {
             1: fallbackLevel,

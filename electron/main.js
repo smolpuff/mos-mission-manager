@@ -1479,7 +1479,8 @@ function writeStartupSnapshotFile() {
 function readDesktopConfig() {
   try {
     const raw = fs.readFileSync(getConfigPath(), "utf8");
-    return JSON.parse(raw);
+    const parsed = JSON.parse(raw);
+    return normalizeDesktopCompetitionConfig(parsed);
   } catch {
     return {};
   }
@@ -1496,10 +1497,33 @@ function readDesktopConfigWithMeta() {
   const file = getConfigPath();
   try {
     const raw = fs.readFileSync(file, "utf8");
-    return { config: JSON.parse(raw), parseFailed: false };
+    return {
+      config: normalizeDesktopCompetitionConfig(JSON.parse(raw)),
+      parseFailed: false,
+    };
   } catch {
     return { config: {}, parseFailed: fs.existsSync(file) };
   }
+}
+
+function normalizeDesktopCompetitionConfig(config = {}) {
+  const next =
+    config && typeof config === "object" && !Array.isArray(config)
+      ? { ...config }
+      : {};
+  const popupSuppressedThroughNumber = Number(
+    next.missionCompetitionPopupSuppressedThroughNumber,
+  );
+  next.missionCompetitionPopupSuppressedThroughNumber =
+    Number.isFinite(popupSuppressedThroughNumber) &&
+    popupSuppressedThroughNumber > 0
+      ? Math.floor(popupSuppressedThroughNumber)
+      : 0;
+  delete next.missionCompetitionPopupHideUntilNumberV2;
+  delete next.missionCompetitionDismissedThroughNumber;
+  delete next.suppressedMissionCompetitionNotificationId;
+  delete next.lastSeenMissionCompetitionId;
+  return next;
 }
 
 function normalizeCompetitionRowKey(value) {
@@ -2441,28 +2465,34 @@ function applyDesktopConfigPatch(patch = {}) {
       "Refusing to overwrite config.json because it is not valid JSON. Fix syntax first.",
     );
   }
-  const next = {
-    ...current,
-    ...patch,
-  };
+  const next = { ...current };
+  for (const [key, value] of Object.entries(
+    patch && typeof patch === "object" ? patch : {},
+  )) {
+    if (value === undefined) delete next[key];
+    else next[key] = value;
+  }
+  const normalizedNext = normalizeDesktopCompetitionConfig(next);
   const file = getConfigPath();
-  const json = JSON.stringify(next, null, 2);
+  const json = JSON.stringify(normalizedNext, null, 2);
   try {
     if (fs.existsSync(file)) {
       const existing = fs.readFileSync(file, "utf8");
       if (existing === json) {
-        if (typeof next.competitionRangeLockEnabled === "boolean") {
-          competitionRangeLockLiveEnabled = next.competitionRangeLockEnabled;
+        if (typeof normalizedNext.competitionRangeLockEnabled === "boolean") {
+          competitionRangeLockLiveEnabled =
+            normalizedNext.competitionRangeLockEnabled;
         }
-        return next;
+        return normalizedNext;
       }
     }
   } catch {}
   fs.writeFileSync(file, json);
-  if (typeof next.competitionRangeLockEnabled === "boolean") {
-    competitionRangeLockLiveEnabled = next.competitionRangeLockEnabled;
+  if (typeof normalizedNext.competitionRangeLockEnabled === "boolean") {
+    competitionRangeLockLiveEnabled =
+      normalizedNext.competitionRangeLockEnabled;
   }
-  return next;
+  return normalizedNext;
 }
 
 function syncDesktopTargetMissionsFromAssignedMissions(
@@ -2567,7 +2597,7 @@ function hydrateBackendStatusFromConfig() {
   } else {
     const fallbackLevel =
       Number(config.missionResetLevel || defaultMissionResetLevelForConfig(config)) ||
-      11;
+      10;
     backendStatus.missionResetPerSlotLevelBySlot = {
       1: fallbackLevel,
       2: fallbackLevel,
@@ -3819,7 +3849,7 @@ function toggleSettingsSummaryLines(config = {}, runtimeStatus = {}) {
     runtimeStatus?.currentMissionResetLevel ||
       config?.missionResetLevel ||
       defaultMissionResetLevelForConfig(config) ||
-      "11",
+      "10",
   );
   const nftResetMaxPbp = Number(config?.nftCooldownResetMaxPbp);
   const normalizedNftResetMaxPbp =

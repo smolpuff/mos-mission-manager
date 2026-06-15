@@ -1,7 +1,7 @@
 "use strict";
 
 const NORMAL_DEFAULTS = {
-  missionResetLevel: "11",
+  missionResetLevel: "10",
   rentalFastRefreshTickMs: 7500,
   rentalBatchLimit: 1,
   watchMaxLimitSeconds: 60,
@@ -10,7 +10,7 @@ const NORMAL_DEFAULTS = {
 };
 
 const DEV_DEFAULTS = {
-  missionResetLevel: "6",
+  missionResetLevel: "5",
   rentalFastRefreshTickMs: 5250,
   rentalBatchLimit: 3,
   watchMaxLimitSeconds: 60,

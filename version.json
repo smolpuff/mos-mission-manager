@@ -2,8 +2,7 @@
   "version": "3.2.10",
   "downloadUrl": "https://github.com/smolpuff/mos-mission-manager/releases/latest",
   "notes": [
-    "added version check polling after 24hrs open",
-    "added dev gated throttle logging",
-    "got new dab rig, let's rage :D"
+    "Changed mission mode reset to level 10. no one wants tc.",
+    "Tiny giraffes are noteably better than narwhals"
   ]
 }

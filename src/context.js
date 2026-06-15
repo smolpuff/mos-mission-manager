@@ -77,10 +77,10 @@ function createContext() {
       4: false,
     },
     missionResetPerSlotLevelBySlot: {
-      1: Number(defaults.missionResetLevel) || 11,
-      2: Number(defaults.missionResetLevel) || 11,
-      3: Number(defaults.missionResetLevel) || 11,
-      4: Number(defaults.missionResetLevel) || 11,
+      1: Number(defaults.missionResetLevel) || 10,
+      2: Number(defaults.missionResetLevel) || 10,
+      3: Number(defaults.missionResetLevel) || 10,
+      4: Number(defaults.missionResetLevel) || 10,
     },
     nftCooldownResetEnabled: false,
     currentMissionResetLevel:

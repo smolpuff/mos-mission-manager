@@ -9,17 +9,17 @@ function normalizeMissionResetPerSlotEnabledBySlot(raw) {
   return out;
 }
 
-function normalizeMissionResetPerSlotLevel(value, fallback = 11) {
+function normalizeMissionResetPerSlotLevel(value, fallback = 10) {
   const next = Number(value);
   if (Number.isFinite(next) && next > 0) return Math.floor(next);
   const safeFallback = Number(fallback);
   if (Number.isFinite(safeFallback) && safeFallback > 0) {
     return Math.floor(safeFallback);
   }
-  return 11;
+  return 10;
 }
 
-function normalizeMissionResetPerSlotLevelBySlot(raw, fallback = 11) {
+function normalizeMissionResetPerSlotLevelBySlot(raw, fallback = 10) {
   const src = raw && typeof raw === "object" ? raw : {};
   const out = {};
   for (let slot = 1; slot <= 4; slot += 1) {
@@ -37,8 +37,8 @@ function defaultMissionModeThreshold(ctx = {}) {
       ctx?.config?.missionResetLevel ||
       process.env.PBP_DEFAULT_MISSION_RESET_LEVEL ||
       ctx?.runtimeDefaults?.missionResetLevel ||
-      11,
-    11,
+      10,
+    10,
   );
 }
 

@@ -14,6 +14,10 @@ const {
 const SAVE_DEBOUNCE_MS = 350;
 const pendingSaves = new WeakMap();
 const DEFAULT_TARGET_MISSIONS = ["Do it All!", "Race!"];
+const DESKTOP_MANAGED_KEYS = [
+  "missionCompetitionPopupSuppressedThroughNumber",
+  "missionCompetitionCheckEnabled",
+];
 const SALVAGE_TOP_LEVEL_KEYS = [
   "targetMissions",
   "level20ResetEnabled",
@@ -48,8 +52,7 @@ const SALVAGE_TOP_LEVEL_KEYS = [
   "competitionRangeLockMinRank",
   "competitionRangeLockMaxRank",
   "competitionRangeLockPollSeconds",
-  "lastSeenMissionCompetitionId",
-  "suppressedMissionCompetitionNotificationId",
+  "missionCompetitionPopupSuppressedThroughNumber",
 ];
 
 function configBackupPath(configPath) {
@@ -108,6 +111,17 @@ function tryReadJsonFile(filePath) {
   const file = String(filePath || "").trim();
   if (!file || !fs.existsSync(file)) return null;
   return JSON.parse(fs.readFileSync(file, "utf8"));
+}
+
+function preserveDesktopManagedConfig(ctx) {
+  if (!ctx || typeof ctx !== "object") return;
+  const diskConfig = tryReadJsonFile(ctx.configPath);
+  if (!diskConfig || typeof diskConfig !== "object") return;
+  for (const key of DESKTOP_MANAGED_KEYS) {
+    if (Object.prototype.hasOwnProperty.call(diskConfig, key)) {
+      ctx.config[key] = diskConfig[key];
+    }
+  }
 }
 
 function extractJsonValueText(rawText, key) {
@@ -325,7 +339,7 @@ function loadConfig(ctx, logWithTimestamp) {
     ctx.currentMissionResetLevel ||
     process.env.PBP_DEFAULT_MISSION_RESET_LEVEL ||
     ctx.runtimeDefaults?.missionResetLevel ||
-    "11";
+    "10";
   ctx.config.missionResetPerSlotEnabledBySlot =
     normalizeMissionResetPerSlotEnabledBySlot(
       ctx.config.missionResetPerSlotEnabledBySlot,
@@ -418,12 +432,18 @@ function loadConfig(ctx, logWithTimestamp) {
     competitionRangeLockPollSeconds >= 60
       ? Math.floor(competitionRangeLockPollSeconds)
       : 150;
-  ctx.config.lastSeenMissionCompetitionId = String(
-    ctx.config.lastSeenMissionCompetitionId || "",
-  ).trim();
-  ctx.config.suppressedMissionCompetitionNotificationId = String(
-    ctx.config.suppressedMissionCompetitionNotificationId || "",
-  ).trim();
+  const competitionPopupSuppressedThroughNumber = Number(
+    ctx.config.missionCompetitionPopupSuppressedThroughNumber,
+  );
+  ctx.config.missionCompetitionPopupSuppressedThroughNumber =
+    Number.isFinite(competitionPopupSuppressedThroughNumber) &&
+    competitionPopupSuppressedThroughNumber > 0
+      ? Math.floor(competitionPopupSuppressedThroughNumber)
+      : 0;
+  delete ctx.config.missionCompetitionPopupHideUntilNumberV2;
+  delete ctx.config.missionCompetitionDismissedThroughNumber;
+  delete ctx.config.lastSeenMissionCompetitionId;
+  delete ctx.config.suppressedMissionCompetitionNotificationId;
   if (ctx.config.watchLoopEnabled === true) {
     delete ctx.config.watchLoopEnabled;
   }
@@ -471,6 +491,7 @@ function saveConfig(ctx, logDebug) {
 
   const timer = setTimeout(() => {
     try {
+      preserveDesktopManagedConfig(ctx);
       writeConfigFileAtomic(ctx.configPath, ctx.config);
     } catch (err) {
       logDebug("config", "save_failed", { error: err.message });
@@ -497,6 +518,7 @@ function flushConfig(ctx, logDebug) {
     pendingSaves.delete(ctx);
   }
   try {
+    preserveDesktopManagedConfig(ctx);
     writeConfigFileAtomic(ctx.configPath, ctx.config);
   } catch (err) {
     logDebug("config", "save_failed", { error: err.message });

@@ -33,7 +33,6 @@ const quickCommands = [
   "c",
 ];
 
-const COMPETITION_NOTIFICATION_SEED = "20";
 const AUTO_UPDATE_BACKGROUND_THRESHOLD_MS = 24 * 60 * 60 * 1000;
 const AUTO_UPDATE_BACKGROUND_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const MISSION_COMPETITION_CHECK_THRESHOLD_MS = 24 * 60 * 60 * 1000;
@@ -64,6 +63,25 @@ function competitionSummaryFrom(raw) {
     prizes: Array.isArray(competition?.prizes) ? competition.prizes : [],
     resultsStatus: String(competition?.resultsStatus || "").trim() || null,
   };
+}
+
+function competitionNumberValue(raw) {
+  const competition = raw && typeof raw === "object" ? raw : {};
+  const value = Number(
+    String(competition?.competitionNumber || "")
+      .trim()
+      .replace(/[^\d]/g, ""),
+  );
+  return Number.isFinite(value) && value > 0 ? value : null;
+}
+
+function storedCompetitionNumberValue(storedId) {
+  const value = Number(
+    String(storedId || "")
+      .trim()
+      .replace(/[^\d]/g, ""),
+  );
+  return Number.isFinite(value) && value > 0 ? value : null;
 }
 
 function missionNameKey(value) {
@@ -137,19 +155,56 @@ function competitionLifecycleFromSummary(summary) {
   return { state: "unknown", startMs, endMs };
 }
 
+function latestCompetitionNotificationSummary(rawCompetition) {
+  const items = Array.isArray(rawCompetition?.competitions)
+    ? rawCompetition.competitions
+    : rawCompetition
+      ? [rawCompetition]
+      : [];
+  if (!items.length) return null;
+
+  const normalized = items
+    .map((item) => {
+      const summary = competitionSummaryFrom(item);
+      const competitionNumber = competitionNumberValue(summary);
+      return {
+        summary,
+        competitionNumber,
+      };
+    })
+    .filter((entry) => entry.competitionNumber !== null);
+
+  if (!normalized.length) return null;
+  return normalized.sort((a, b) => b.competitionNumber - a.competitionNumber)[0];
+}
+
+function shouldShowCompetitionNotification({
+  competitionNumber,
+  suppressedThroughNumber,
+}) {
+  if (!Number.isFinite(Number(competitionNumber))) return false;
+  const suppressed = Number(suppressedThroughNumber);
+  if (!Number.isFinite(suppressed) || suppressed <= 0) return true;
+  return Number(competitionNumber) > suppressed;
+}
+
 async function closeCompetitionNotificationModal({
-  modal,
-  suppressChecked,
+  competitionNumber,
+  suppressCheckedRef,
   setModal,
   updateConfig,
   onClosed,
 }) {
-  const competitionNumber = String(modal?.competitionNumber || "").trim();
-  if (typeof updateConfig === "function") {
+  const suppressChecked = suppressCheckedRef?.current === true;
+  if (
+    suppressChecked &&
+    typeof updateConfig === "function" &&
+    Number.isFinite(Number(competitionNumber))
+  ) {
     await updateConfig({
-      suppressedMissionCompetitionNotificationId: suppressChecked
-        ? competitionNumber
-        : "",
+      missionCompetitionPopupSuppressedThroughNumber: Math.floor(
+        Number(competitionNumber),
+      ),
     });
   }
   if (typeof onClosed === "function") {
@@ -424,13 +479,13 @@ function normalizeSlotBooleanMap(raw, fallback = false) {
   return out;
 }
 
-function normalizeSlotLevelMap(raw, fallback = 11) {
+function normalizeSlotLevelMap(raw, fallback = 10) {
   const src = raw && typeof raw === "object" ? raw : {};
   const nextFallback = Number(fallback);
   const safeFallback =
     Number.isFinite(nextFallback) && nextFallback > 0
       ? Math.floor(nextFallback)
-      : 11;
+      : 10;
   const out = {};
   for (let slot = 1; slot <= 4; slot += 1) {
     const level = Number(src[slot] ?? src[String(slot)]);
@@ -504,7 +559,7 @@ function ControlView() {
     useState(
       normalizeSlotLevelMap(
         status.missionResetPerSlotLevelBySlot,
-        status.currentMissionResetLevel ?? 11,
+        status.currentMissionResetLevel ?? 10,
       ),
     );
   const [latestCompetition, setLatestCompetition] = useState(null);
@@ -548,6 +603,8 @@ function ControlView() {
   const lastMissionCompetitionCheckAtRef = useRef(null);
   const nextMissionCompetitionCheckAtRef = useRef(null);
   const dismissedCompetitionNotificationIdsRef = useRef(new Set());
+  const competitionNotificationSuppressCheckedRef = useRef(false);
+  const competitionNotificationCeilingNumberRef = useRef(null);
   const lastThrottleModalKeyRef = useRef(null);
   const isMissionMode = modeSelection === "mission";
   const isNormalMode = !isMissionMode;
@@ -665,6 +722,18 @@ function ControlView() {
   }, [status.debugMode]);
 
   useEffect(() => {
+    competitionNotificationSuppressCheckedRef.current =
+      competitionNotificationSuppressChecked === true;
+  }, [competitionNotificationSuppressChecked]);
+
+  useEffect(() => {
+    if (missionCompetitionCheckEnabled === true) return;
+    setCompetitionNotificationModal(null);
+    setCompetitionNotificationSuppressChecked(false);
+    competitionNotificationSuppressCheckedRef.current = false;
+  }, [missionCompetitionCheckEnabled]);
+
+  useEffect(() => {
     const root = document.documentElement;
     const body = document.body;
     if (reducedMotionEnabled) {
@@ -705,7 +774,7 @@ function ControlView() {
       ...current,
       ...normalizeSlotLevelMap(
         status.missionResetPerSlotLevelBySlot,
-        status.currentMissionResetLevel ?? 11,
+        status.currentMissionResetLevel ?? 10,
       ),
     }));
   }, [status.missionResetPerSlotLevelBySlot, status.currentMissionResetLevel]);
@@ -767,7 +836,7 @@ function ControlView() {
       setMissionResetPerSlotLevelBySlot(
         normalizeSlotLevelMap(
           config.missionResetPerSlotLevelBySlot,
-          config.missionResetLevel ?? status.currentMissionResetLevel ?? 11,
+          config.missionResetLevel ?? status.currentMissionResetLevel ?? 10,
         ),
       );
       if (typeof config.nftCooldownResetEnabled === "boolean") {
@@ -886,6 +955,7 @@ function ControlView() {
   };
 
   const checkForNewMissionCompetition = async () => {
+    if (missionCompetitionCheckEnabled !== true) return;
     if (!bridge?.getLatestCompetition) return;
     setLatestCompetitionBusy(true);
     setLatestCompetitionError(null);
@@ -918,45 +988,28 @@ function ControlView() {
         return optionValue(competitions[0]);
       });
       if (!competition) return;
-      const summary = competitionSummaryFrom(competition);
-      if (!summary.competitionNumber) return;
+      const candidate = latestCompetitionNotificationSummary(competition);
+      if (!candidate) return;
+      const { summary, competitionNumber } = candidate;
+      competitionNotificationCeilingNumberRef.current = competitionNumber;
       const response = await bridge.getConfig();
       const config = response?.config || {};
-      const lastSeenCompetitionId =
-        String(config.lastSeenMissionCompetitionId || "").trim() ||
-        COMPETITION_NOTIFICATION_SEED;
-      const suppressedCompetitionId = String(
-        config.suppressedMissionCompetitionNotificationId || "",
-      ).trim();
-      const isNewCompetition =
-        summary.competitionNumber !== lastSeenCompetitionId;
-      const isSuppressedCompetition =
-        suppressedCompetitionId !== "" &&
-        suppressedCompetitionId === summary.competitionNumber;
+      const shouldShow = shouldShowCompetitionNotification({
+        competitionNumber,
+        suppressedThroughNumber:
+          config.missionCompetitionPopupSuppressedThroughNumber,
+      });
       const isDismissedThisSession =
-        dismissedCompetitionNotificationIdsRef.current.has(
-          summary.competitionNumber,
-        );
-      const statusBadge = competitionStatusFrom(summary, isNewCompetition);
-      if (isNewCompetition) {
-        await applyConfigPatch({
-          suppressedMissionCompetitionNotificationId: "",
-        });
-      }
-      if (
-        isNewCompetition &&
-        !isSuppressedCompetition &&
-        !isDismissedThisSession
-      ) {
+        dismissedCompetitionNotificationIdsRef.current.has(competitionNumber);
+      const statusBadge = competitionStatusFrom(summary, shouldShow);
+      if (shouldShow && !isDismissedThisSession) {
         setCompetitionNotificationSuppressChecked(false);
+        competitionNotificationSuppressCheckedRef.current = false;
         setCompetitionNotificationModal({
           ...summary,
           statusBadge,
         });
       }
-      await applyConfigPatch({
-        lastSeenMissionCompetitionId: summary.competitionNumber,
-      });
       const lifecycle = competitionLifecycleFromSummary(summary);
       if (
         lifecycle.state === "active" &&
@@ -1273,7 +1326,7 @@ function ControlView() {
     await runModeCommand(["mm off", "20r on"]);
   };
   const activateMissionMode = async () => {
-    const resetLevel = String(status.defaultMissionResetLevel || "11").trim();
+    const resetLevel = String(status.defaultMissionResetLevel || "10").trim();
     const cooldownMaxPbp = Number(nftResetMaxPbp);
     let restoredNftResetEnabled = false;
     try {
@@ -2125,13 +2178,13 @@ function ControlView() {
         const resetLevel = String(
           status.currentMissionResetLevel ||
             status.defaultMissionResetLevel ||
-            "11",
+            "10",
         ).trim();
         const levelNumber = Number(resetLevel);
         const safeLevel =
           Number.isFinite(levelNumber) && levelNumber > 0
             ? Math.floor(levelNumber)
-            : 11;
+            : 10;
         await bridge.sendCommand(`mm ${safeLevel}`);
         return;
       }
@@ -4089,7 +4142,7 @@ function ControlView() {
                           Mission Mode
                         </div>
                         <div className="text-xs">
-                          Resets level {debugEnabled ? "6" : "11"}
+                          Resets level {debugEnabled ? "5" : "10"}
                         </div>
                       </div>
                       <div class="mo-fire">
@@ -4641,7 +4694,7 @@ function ControlView() {
 
                       const perSlotResetLevel =
                         missionResetPerSlotLevelBySlot[String(slot)] ||
-                        String(status.currentMissionResetLevel ?? 11);
+                        String(status.currentMissionResetLevel ?? 10);
 
                       return (
                         <div key={slot} className="flex flex-col gap-1">
@@ -5432,14 +5485,16 @@ function ControlView() {
               onMouseDown={(e) => {
                 if (e.target === e.currentTarget) {
                   void closeCompetitionNotificationModal({
-                    modal: competitionNotificationModal,
-                    suppressChecked: competitionNotificationSuppressChecked,
+                    competitionNumber:
+                      competitionNotificationCeilingNumberRef.current,
+                    suppressCheckedRef:
+                      competitionNotificationSuppressCheckedRef,
                     setModal: setCompetitionNotificationModal,
                     updateConfig: applyConfigPatch,
                     onClosed: ({ competitionNumber }) => {
-                      if (!competitionNumber) return;
+                      if (!Number.isFinite(Number(competitionNumber))) return;
                       dismissedCompetitionNotificationIdsRef.current.add(
-                        competitionNumber,
+                        Number(competitionNumber),
                       );
                     },
                   });
@@ -5496,14 +5551,16 @@ function ControlView() {
                     className="btn btn-clear btn-sm absolute right-0 top-0"
                     onClick={() =>
                       void closeCompetitionNotificationModal({
-                        modal: competitionNotificationModal,
-                        suppressChecked: competitionNotificationSuppressChecked,
+                        competitionNumber:
+                          competitionNotificationCeilingNumberRef.current,
+                        suppressCheckedRef:
+                          competitionNotificationSuppressCheckedRef,
                         setModal: setCompetitionNotificationModal,
                         updateConfig: applyConfigPatch,
                         onClosed: ({ competitionNumber }) => {
-                          if (!competitionNumber) return;
+                          if (!Number.isFinite(Number(competitionNumber))) return;
                           dismissedCompetitionNotificationIdsRef.current.add(
-                            competitionNumber,
+                            Number(competitionNumber),
                           );
                         },
                       })
@@ -5585,11 +5642,12 @@ function ControlView() {
                       type="checkbox"
                       className="h-4 w-4 accent-[var(--color-accent)]"
                       checked={competitionNotificationSuppressChecked}
-                      onChange={(event) =>
-                        setCompetitionNotificationSuppressChecked(
-                          event.target.checked,
-                        )
-                      }
+                      onChange={(event) => {
+                        const checked = event.target.checked === true;
+                        setCompetitionNotificationSuppressChecked(checked);
+                        competitionNotificationSuppressCheckedRef.current =
+                          checked;
+                      }}
                     />
                     <span>
                       Do not show this again until the next competition
@@ -5601,14 +5659,16 @@ function ControlView() {
                     className="btn btn-gradient btn-sm text-shadow-sm text-shadow-black/40"
                     onClick={() =>
                       void closeCompetitionNotificationModal({
-                        modal: competitionNotificationModal,
-                        suppressChecked: competitionNotificationSuppressChecked,
+                        competitionNumber:
+                          competitionNotificationCeilingNumberRef.current,
+                        suppressCheckedRef:
+                          competitionNotificationSuppressCheckedRef,
                         setModal: setCompetitionNotificationModal,
                         updateConfig: applyConfigPatch,
                         onClosed: ({ competitionNumber }) => {
-                          if (!competitionNumber) return;
+                          if (!Number.isFinite(Number(competitionNumber))) return;
                           dismissedCompetitionNotificationIdsRef.current.add(
-                            competitionNumber,
+                            Number(competitionNumber),
                           );
                         },
                       })

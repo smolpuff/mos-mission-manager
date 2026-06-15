@@ -110,7 +110,7 @@ name, and the wallet id is sent alongside it when available.
 - Select your funding type you would like, app wallet is suggested for full automation
 - BE SURE TO WRITE DOWN YOUR RECOVERY KEYS SOMEWHERE SAFE IF YOU USE APP-WALLET. YOU NEED TO KEEP THESE IN A SAFE PLACE INCASE YOU EVER NEED TO IMPORT THE WALLET
 - next will pull your currently set up missions from the website as your targetMission. Confirm
-- Select your mission mode; normal with level 20 resets on by default, or mission mode with level 11 reset and use rentals both locked on
+- Select your mission mode; normal with level 20 resets on by default, or mission mode with level 10 reset and use rentals both locked on
 - Press the start button to start watching and claiming missions
 - If you chose app-wallet, fund it now to cover transations (0.1sol, whatever pbp)
 
