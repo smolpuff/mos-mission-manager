@@ -42,11 +42,11 @@ jobs:
             throw "Tag/version mismatch. tag=${{ github.ref_name }} package.json=$pkgVersion expected=$expectedTag"
           }
 
-      - name: Validate Windows icon asset
+      - name: Validate icon asset
         shell: pwsh
         run: |
-          if (-not (Test-Path "electron/icons/icon.ico")) {
-            throw "Missing Windows icon: electron/icons/icon.ico"
+          if (-not (Test-Path "electron/icons/icon.png")) {
+            throw "Missing icon: electron/icons/icon.png"
           }
 
       - name: Build Windows desktop app
@@ -96,9 +96,9 @@ jobs:
             exit 1
           fi
 
-      - name: Validate macOS icon asset
+      - name: Validate icon asset
         run: |
-          test -f electron/icons/icon.icns
+          test -f electron/icons/icon.png
 
       - name: Build macOS desktop app
         run: |
