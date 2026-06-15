@@ -133,7 +133,7 @@ export default function SettingsPage({
                   }
                 />
                 <div className="space-y-2">
-                  <h2 className="text-base text-white">Browser</h2>
+                  <h2 className="text-base text-white">Browser Wallet</h2>
                   <span className="signer-type_description text-xs  text-slate-300">
                     Transactions open in your browser wallet and must be
                     manually approved.
@@ -273,8 +273,8 @@ export default function SettingsPage({
       </div>
       <div className="mt-2">
         <div className="card gap-5">
-          <div className=" divide-white/10 divide-y space-y-3 ">
-            <div className="flex flex-wrap items-start justify-between gap-3 pb-3 ">
+          <div className=" divide-white/10 divide-y space-y-2 ">
+            <div className="flex flex-wrap items-start justify-between gap-3 pb-2 ">
               <div className="space-y-1">
                 <ToggleSwitch
                   switchID="autoUpdateCheckEnabled"
@@ -291,10 +291,10 @@ export default function SettingsPage({
                     </span>
                   }
                   helperText="Automatically checks for a new version at launch and periodically there-after"
-                  styling="text-base"
+                  styling="!text-base"
                 />
               </div>
-              <div className="flex items-center gap-3 ">
+              <div className="flex items-center gap-2 ">
                 <button
                   type="button"
                   className={`flex items-center gap-1 text-xs px-2.5 py-1 max-w-max rounded-sm transition-colors active:translate-y-0.5 ${
@@ -324,7 +324,7 @@ export default function SettingsPage({
               ) : null}
             </div>
 
-            <div className=" pb-3">
+            <div className=" pb-2">
               <ToggleSwitch
                 switchID="missionCompetitionCheckEnabled"
                 checked={missionCompetitionCheckEnabled === true}
@@ -335,7 +335,7 @@ export default function SettingsPage({
                 }
                 title="Check for Mission Competitions"
                 helperText="Periodically checks for new mission competitions"
-                styling="text-base"
+                styling="!text-base"
               />{" "}
             </div>
 
@@ -349,7 +349,7 @@ export default function SettingsPage({
                 }
                 title="Reduced Motion"
                 helperText="Reduce CPU usage by disabling heavy motion effects like the mission fire animation"
-                styling="text-base"
+                styling="!text-base"
               />
             </div>
           </div>

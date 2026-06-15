@@ -844,8 +844,7 @@
       }
 
       .nav-icon {
-        filter: brightness(1.18) saturate(1.12)
-          drop-shadow(0 1px 4px rgba(0, 0, 0, 0.24));
+        filter: brightness(1.18) saturate(1.12) drop-shadow(0 1px 4px rgba(0, 0, 0, 0.24));
       }
     }
   }
@@ -855,21 +854,31 @@
     @apply flex flex-col gap-1;
 
     .card-mission__header {
-      @apply flex flex-col p-3 rounded-md aspect-square justify-between relative;
-      box-shadow: 0 2px 3px rgba(0, 0, 0, 0.3) !important;
+      @apply flex flex-col p-3 rounded-lg aspect-square justify-between relative overflow-clip border-2 border-white/11 bg-white/3;
+      box-shadow: 0 4px 5px rgba(0, 0, 0, 0.35) !important;
+
+      &.card-mission__header--korea-art {
+        @apply border-2 border-white/11 border-dashed bg-white/5;
+        transition:
+          background-color 150ms linear,
+          border-color 150ms linear,
+          box-shadow 150ms linear;
+
+      }
+
       /* >* {
         @apply relative z-2;
       } */
 
-      &::before {
+      /* &::before {
         content: "";
         @apply absolute inset-px pointer-events-none z-1;
         border-radius: inherit;
         background: rgb(255 255 255 / 0.2);
         mix-blend-mode: overlay;
-      }
+      } */
 
-      &::after {
+      /* &::after {
         content: "";
         @apply absolute inset-0 p-0.5 pointer-events-none z-0;
         border-radius: inherit;
@@ -882,11 +891,48 @@
           linear-gradient(#fff 0 0);
         -webkit-mask-composite: xor;
         mask-composite: exclude;
-      }
+      } */
     }
 
     .card-mission__meta {
       @apply text-xs text-pretty text-center w-full;
+    }
+
+    .card-mission__header--korea-art::before {
+      background: transparent;
+    }
+
+    .card-mission__header--korea-art.card-mission__header--disabled .mission-image {
+      filter: none !important;
+      opacity: 1 !important;
+    }
+
+    .card-mission__header--korea-art .mission-image {
+      filter: none !important;
+      opacity: 1 !important;
+    }
+
+    .card-mission__header--korea-art.card-mission__header--disabled .mission-image-placeholder {
+      filter: none !important;
+      opacity: 1 !important;
+    }
+
+    .card-mission__header--unlock-slot .mission-image {
+      animation: none !important;
+      opacity: 0.65 !important;
+      transition: all 150ms linear;
+    }
+
+    .card-mission__header--unlock-slot:hover,
+    .card-mission__header--unlock-slot:focus-within {
+      background-color: rgb(255 255 255 / 0.1) !important;
+      border-color: rgb(255 255 255 / 0.22) !important;
+      box-shadow: 0 4px 5px rgba(0, 0, 0, 0.35) !important;
+    }
+
+    .card-mission__header--unlock-slot:hover .mission-image,
+    .card-mission__header--unlock-slot:focus-within .mission-image {
+      opacity: 1 !important;
     }
 
     &.ready-to-claim {

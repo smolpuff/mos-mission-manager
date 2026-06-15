@@ -16,6 +16,7 @@ import solIcon from "../img/icon-sm__sol.svg";
 import ccIcon from "../img/icon_cc.webp";
 import tcIcon from "../img/icon_tc.webp";
 import backImg from "../img/back.png";
+import koreaTakeitImg from "../img/korea-takeit.webp";
 import {
   localCollectionImage,
   normalizeCollectionKey,
@@ -160,7 +161,13 @@ async function closeCompetitionNotificationModal({
   setModal(null);
 }
 
-function MissionSlotImage({ src, hasAssignedNft = false, loading = false }) {
+function MissionSlotImage({
+  src,
+  hasAssignedNft = false,
+  loading = false,
+  padded = false,
+  contain = false,
+}) {
   const [activeSrc, setActiveSrc] = useState(src || null);
   const [outgoingSrc, setOutgoingSrc] = useState(null);
   const [imageLoaded, setImageLoaded] = useState(src ? false : true);
@@ -187,7 +194,9 @@ function MissionSlotImage({ src, hasAssignedNft = false, loading = false }) {
           key={`out-${outgoingSrc}`}
           src={outgoingSrc}
           alt=""
-          className="mission-image mission-image--out"
+          className={`mission-image mission-image--out ${
+            padded ? "p-3" : ""
+          } ${contain ? "object-contain" : ""}`}
         />
       ) : null}
       {activeSrc ? (
@@ -195,7 +204,9 @@ function MissionSlotImage({ src, hasAssignedNft = false, loading = false }) {
           key={`in-${activeSrc}`}
           src={activeSrc}
           alt=""
-          className="mission-image mission-image--in"
+          className={`mission-image mission-image--in   ${
+            padded ? "p-3" : ""
+          } ${contain ? "object-contain" : ""}`}
           onLoad={() => {
             setImageLoaded(true);
             setImageFailed(false);
@@ -1518,6 +1529,16 @@ function ControlView() {
       Number(slot) >= nextUnlockSlot
     );
   };
+  const missionSlotCards = useMemo(
+    () => [
+      { slot: 1, previewUnlocked: false },
+      { slot: 2, previewUnlocked: false },
+      { slot: 3, previewUnlocked: false },
+      { slot: 4, previewUnlocked: false },
+      { slot: 5, previewUnlocked: true },
+    ],
+    [],
+  );
   const missionStats = status.currentMissionStats || {};
   const fundingWalletSummary =
     status.fundingWalletSummary?.status === "ok"
@@ -4536,126 +4557,166 @@ function ControlView() {
 
               <section className="">
                 <div className="grid grid-cols-4 gap-2 missions__parent">
-                  {[1, 2, 3, 4].map((slot) => {
-                    const entry =
-                      slots.find((s) => Number(s?.slot) === slot) || null;
-                    const slotError = slotResetErrors[String(slot)] || null;
-                    const title = entry?.missionName || `slot ${slot}`;
-                    const missionLevel =
-                      entry?.missionLevel === null ||
-                      entry?.missionLevel === undefined
-                        ? null
-                        : `${entry.missionLevel}`;
-                    const progress =
-                      Number.isFinite(Number(entry?.progress)) &&
-                      Number.isFinite(Number(entry?.goal)) &&
-                      Number(entry.goal) > 0
-                        ? `${Number(entry.progress)}/${Number(entry.goal)}`
-                        : `${slot}/4`;
-                    const progressCurrent = Number(entry?.progress);
-                    const progressGoal = Number(entry?.goal);
-                    const hasProgress =
-                      Number.isFinite(progressCurrent) &&
-                      Number.isFinite(progressGoal) &&
-                      progressGoal > 0;
-                    const progressPercent = hasProgress
-                      ? Math.max(
-                          0,
-                          Math.min(100, (progressCurrent / progressGoal) * 100),
-                        )
-                      : 0;
-                    const imgSrc = pickSlotImage(entry);
-                    const slotLocked = isMissionSlotLocked(slot);
-                    const hasAssignedNft = Boolean(
-                      String(
-                        entry?.assignedNftAccount ||
-                          entry?.assignedNft ||
-                          entry?.assigned_nft ||
-                          "",
-                      ).trim(),
-                    );
-                    const slotImageLoading =
-                      (status.startupMissionSlotsLoading === true &&
-                        Boolean(status.running) &&
-                        (!entry || !imgSrc)) ||
-                      ((isStarting || status.watcherRunning === true) &&
-                        hasAssignedNft &&
-                        !imgSrc);
-                    const slotAutomationEnabled =
-                      missionActionEnabledBySlot[String(slot)] !== false;
-                    const perSlotResetEnabled =
-                      missionResetPerSlotEnabledBySlot[String(slot)] === true;
-                    const perSlotResetLevel =
-                      missionResetPerSlotLevelBySlot[String(slot)] ||
-                      String(status.currentMissionResetLevel ?? 11);
-                    return (
-                      <div key={slot} className="flex flex-col gap-1">
-                        <div
-                          className={`card-mission ${slotError ? "card-mission--error" : ""} ${slotLocked ? "opacity-70" : "cursor-pointer"} `}
-                          role={slotLocked ? undefined : "button"}
-                          tabIndex={slotLocked ? undefined : 0}
-                          title={
-                            slotLocked
-                              ? "Slot locked"
-                              : "Click to change mission"
-                          }
-                          onClick={() => {
-                            if (!slotLocked) void openMissionPicker(slot);
-                          }}
-                          onKeyDown={(event) => {
-                            if (slotLocked) return;
-                            if (event.key === "Enter" || event.key === " ") {
-                              event.preventDefault();
-                              void openMissionPicker(slot);
-                            }
-                          }}
-                        >
-                          <div
-                            className={`card-mission__header transition-all relative overflow-clip ${!slotAutomationEnabled ? "card-mission__header--disabled" : "cursor-pointer"} `}
-                          >
-                            <MissionSlotImage
-                              src={imgSrc}
-                              hasAssignedNft={hasAssignedNft}
-                              loading={isStarting || slotImageLoading}
-                            />
-                            {slotError ? (
-                              <button
-                                type="button"
-                                className="mission-error-badge"
-                                title="Reset error details"
-                                onClick={(event) => {
-                                  event.stopPropagation();
-                                  setResetErrorModal(slotError);
-                                }}
-                              >
-                                i
-                              </button>
-                            ) : null}
-                            <div className="flex items-start justify-between gap-2">
-                              <div
-                                className="relative z-20"
-                                onClick={(event) => event.stopPropagation()}
-                                onMouseDown={(event) => event.stopPropagation()}
-                                onKeyDown={(event) => event.stopPropagation()}
-                              >
-                                <ToggleSwitch
-                                  switchID={`slot-action-enabled-${slot}`}
-                                  checked={slotAutomationEnabled}
-                                  title=""
-                                  styling="hidden"
-                                  size="tiny"
-                                  switchWrapClassName="slot-card-toggle-muted"
-                                  onChange={(event) =>
-                                    void setMissionActionEnabled(
-                                      slot,
-                                      event.target.checked,
-                                    )
-                                  }
-                                />
+                  {missionSlotCards
+                    .filter(({ previewUnlocked }) => !previewUnlocked)
+                    .map(({ slot }) => {
+                      const entry =
+                        slots.find((s) => Number(s?.slot) === slot) || null;
 
-                                {perSlotMissionResetControlsVisible ? (
+                      const slotError = slotResetErrors[String(slot)] || null;
+                      const title = entry?.missionName || `slot ${slot}`;
+
+                      const missionLevel =
+                        entry?.missionLevel === null ||
+                        entry?.missionLevel === undefined
+                          ? null
+                          : `${entry.missionLevel}`;
+
+                      const progress =
+                        Number.isFinite(Number(entry?.progress)) &&
+                        Number.isFinite(Number(entry?.goal)) &&
+                        Number(entry.goal) > 0
+                          ? `${Number(entry.progress)}/${Number(entry.goal)}`
+                          : `${slot}/4`;
+
+                      const progressCurrent = Number(entry?.progress);
+                      const progressGoal = Number(entry?.goal);
+
+                      const hasProgress =
+                        Number.isFinite(progressCurrent) &&
+                        Number.isFinite(progressGoal) &&
+                        progressGoal > 0;
+
+                      const progressPercent = hasProgress
+                        ? Math.max(
+                            0,
+                            Math.min(
+                              100,
+                              (progressCurrent / progressGoal) * 100,
+                            ),
+                          )
+                        : 0;
+
+                      const slotLocked = isMissionSlotLocked(slot);
+
+                      const showRealLockedSlot4 =
+                        slotLocked && slot === 4 && canUnlockSlot4;
+
+                      const imgSrc =
+                        slotLocked && slot === 4
+                          ? koreaTakeitImg
+                          : pickSlotImage(entry);
+
+                      const usesKoreaTakeitArt = slotLocked && slot === 4;
+
+                      const hasAssignedNft = Boolean(
+                        String(
+                          entry?.assignedNftAccount ||
+                            entry?.assignedNft ||
+                            entry?.assigned_nft ||
+                            "",
+                        ).trim(),
+                      );
+                      const hasSlotInfo = Boolean(
+                        entry &&
+                        (String(entry?.missionName || "").trim() ||
+                          missionLevel ||
+                          hasProgress ||
+                          hasAssignedNft),
+                      );
+
+                      const slotImageLoading =
+                        (status.startupMissionSlotsLoading === true &&
+                          Boolean(status.running) &&
+                          (!entry || !imgSrc)) ||
+                        ((isStarting || status.watcherRunning === true) &&
+                          hasAssignedNft &&
+                          !imgSrc);
+
+                      const slotAutomationEnabled =
+                        missionActionEnabledBySlot[String(slot)] !== false;
+
+                      const perSlotResetEnabled =
+                        missionResetPerSlotEnabledBySlot[String(slot)] === true;
+
+                      const perSlotResetLevel =
+                        missionResetPerSlotLevelBySlot[String(slot)] ||
+                        String(status.currentMissionResetLevel ?? 11);
+
+                      return (
+                        <div key={slot} className="flex flex-col gap-1">
+                          <div
+                            className={`card-mission ${slotError ? "card-mission--error" : ""} ${
+                              showRealLockedSlot4
+                                ? "cursor-pointer"
+                                : slotLocked
+                                  ? usesKoreaTakeitArt
+                                    ? ""
+                                    : "opacity-70"
+                                  : "cursor-pointer"
+                            } `}
+                            role={slotLocked ? undefined : "button"}
+                            tabIndex={slotLocked ? undefined : 0}
+                            title={
+                              showRealLockedSlot4
+                                ? "Click to unlock slot 4"
+                                : slotLocked
+                                  ? "Slot locked"
+                                  : "Click to change mission"
+                            }
+                            onClick={() => {
+                              if (!slotLocked) void openMissionPicker(slot);
+                            }}
+                            onKeyDown={(event) => {
+                              if (slotLocked) return;
+
+                              if (event.key === "Enter" || event.key === " ") {
+                                event.preventDefault();
+                                void openMissionPicker(slot);
+                              }
+                            }}
+                          >
+                            <div
+                              className={`card-mission__header transition-all relative overflow-clip  ${
+                                !slotAutomationEnabled
+                                  ? "card-mission__header--disabled"
+                                  : "cursor-pointer"
+                              } ${usesKoreaTakeitArt ? "card-mission__header--korea-art" : ""} ${
+                                showRealLockedSlot4
+                                  ? "card-mission__header--unlock-slot cursor-pointer"
+                                  : ""
+                              } `}
+                            >
+                              <MissionSlotImage
+                                src={imgSrc}
+                                hasAssignedNft={hasAssignedNft}
+                                loading={isStarting || slotImageLoading}
+                                padded={usesKoreaTakeitArt}
+                                contain={usesKoreaTakeitArt}
+                              />
+
+                              {slotError ? (
+                                <button
+                                  type="button"
+                                  className="mission-error-badge"
+                                  title="Reset error details"
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    setResetErrorModal(slotError);
+                                  }}
+                                >
+                                  i
+                                </button>
+                              ) : null}
+
+                              <div
+                                className={`flex items-start justify-between gap-2 ${
+                                  usesKoreaTakeitArt ? "grayscale" : ""
+                                }`}
+                              >
+                                {!showRealLockedSlot4 && hasSlotInfo ? (
                                   <div
-                                    className={`relative z-20 ${perSlotMissionResetControlsDisabled ? "grayscale opacity-60" : ""}`}
+                                    className="relative z-20"
                                     onClick={(event) => event.stopPropagation()}
                                     onMouseDown={(event) =>
                                       event.stopPropagation()
@@ -4664,106 +4725,165 @@ function ControlView() {
                                       event.stopPropagation()
                                     }
                                   >
-                                    <div className="flex flex-col items-end gap-1">
-                                      <ToggleSwitch
-                                        switchID={`slot-reset-override-${slot}`}
-                                        checked={perSlotResetEnabled}
-                                        title=""
-                                        styling="hidden"
-                                        size="tiny"
-                                        disabled={
+                                    <ToggleSwitch
+                                      switchID={`slot-action-enabled-${slot}`}
+                                      checked={slotAutomationEnabled}
+                                      title=""
+                                      styling="hidden"
+                                      size="tiny"
+                                      switchWrapClassName="slot-card-toggle-muted"
+                                      onChange={(event) =>
+                                        void setMissionActionEnabled(
+                                          slot,
+                                          event.target.checked,
+                                        )
+                                      }
+                                    />
+
+                                    {perSlotMissionResetControlsVisible ? (
+                                      <div
+                                        className={`relative z-20 ${
                                           perSlotMissionResetControlsDisabled
+                                            ? "grayscale opacity-60"
+                                            : ""
+                                        }`}
+                                        onClick={(event) =>
+                                          event.stopPropagation()
                                         }
-                                        onChange={(event) =>
-                                          void setPerSlotMissionResetEnabled(
-                                            slot,
-                                            event.target.checked,
-                                          )
+                                        onMouseDown={(event) =>
+                                          event.stopPropagation()
                                         }
-                                      />
-                                      {perSlotResetEnabled ? (
-                                        <label
-                                          className="flex items-center gap-1 text-xs text-white/80"
-                                          onClick={(event) =>
-                                            event.stopPropagation()
-                                          }
-                                          onMouseDown={(event) =>
-                                            event.stopPropagation()
-                                          }
-                                        >
-                                          <input
-                                            type="number"
-                                            min="1"
-                                            step="1"
-                                            value={perSlotResetLevel}
-                                            onChange={(event) =>
-                                              void setPerSlotMissionResetLevel(
-                                                slot,
-                                                event.target.value,
-                                              )
-                                            }
+                                        onKeyDown={(event) =>
+                                          event.stopPropagation()
+                                        }
+                                      >
+                                        <div className="flex flex-col items-end gap-1">
+                                          <ToggleSwitch
+                                            switchID={`slot-reset-override-${slot}`}
+                                            checked={perSlotResetEnabled}
+                                            title=""
+                                            styling="hidden"
+                                            size="tiny"
                                             disabled={
                                               perSlotMissionResetControlsDisabled
                                             }
-                                            className="input-no-spinner slot-level-input h-min"
+                                            onChange={(event) =>
+                                              void setPerSlotMissionResetEnabled(
+                                                slot,
+                                                event.target.checked,
+                                              )
+                                            }
                                           />
-                                        </label>
-                                      ) : null}
-                                    </div>
-                                  </div>
-                                ) : null}
-                              </div>
 
-                              <div className="flex flex-col items-end gap-1">
-                                {missionLevel ? (
-                                  <div className="card-mission__level z-10 text-sm flex items-center rounded-[5px] justify-center w-7 h-7 opacity-100 self-end shadow-md shadow-black/20 font-semibold bg-amber-500 border-orange-200 border-2">
-                                    {missionLevel}
+                                          {perSlotResetEnabled ? (
+                                            <label
+                                              className="flex items-center gap-1 text-xs text-white/80"
+                                              onClick={(event) =>
+                                                event.stopPropagation()
+                                              }
+                                              onMouseDown={(event) =>
+                                                event.stopPropagation()
+                                              }
+                                            >
+                                              <input
+                                                type="number"
+                                                min="1"
+                                                step="1"
+                                                value={perSlotResetLevel}
+                                                onChange={(event) =>
+                                                  void setPerSlotMissionResetLevel(
+                                                    slot,
+                                                    event.target.value,
+                                                  )
+                                                }
+                                                disabled={
+                                                  perSlotMissionResetControlsDisabled
+                                                }
+                                                className="input-no-spinner slot-level-input h-min"
+                                              />
+                                            </label>
+                                          ) : null}
+                                        </div>
+                                      </div>
+                                    ) : null}
                                   </div>
-                                ) : null}
-                              </div>
-                            </div>
-                            {!slotError & hasProgress ? (
-                              <div className="card-mission__progress relative w-full h-4 rounded-full overflow-hidden bg-zinc-800 opacity-90 shadow-md shadow-black/20 after:hidden ">
-                                <div className="absolute rounded-full inset-0 z-0 bg-linear-to-r from-violet-500 via-fuchsia-500 to-pink-500 after:hidden transition-all"></div>
-                                <div
-                                  className="absolute rounded-r-full rounded-l-none top-0 right-0 z-10 h-full bg-zinc-800 after:hidden transition-all"
-                                  style={{ width: `${100 - progressPercent}%` }}
-                                ></div>
-                                <div className="absolute inset-0 z-20 flex items-center rounded-full justify-center text-[10px] font-semibold text-white">
-                                  {progress}
+                                ) : (
+                                  <div />
+                                )}
+
+                                <div className="flex flex-col items-end gap-1">
+                                  {missionLevel &&
+                                  !showRealLockedSlot4 &&
+                                  hasSlotInfo ? (
+                                    <div className="card-mission__level z-10 text-sm flex items-center rounded-[5px] justify-center w-7 h-7 opacity-100 self-end shadow-md shadow-black/20 font-semibold bg-amber-500 border-orange-200 border-2">
+                                      {missionLevel}
+                                    </div>
+                                  ) : null}
                                 </div>
                               </div>
-                            ) : (
-                              ""
-                            )}
-                            {slot === 4 && canUnlockSlot4 ? (
-                              <button
-                                type="button"
-                                className="absolute inset-0 z-30 grid place-items-center bg-black/55 text-white font-semibold tracking-wide uppercase text-xs"
-                                onClick={(event) => {
-                                  event.stopPropagation();
-                                  setSlotUnlockModalOpen(true);
-                                  setSlotUnlockBusy(false);
-                                  setSlotUnlockError(null);
-                                  setSlotUnlockResult(null);
-                                }}
-                              >
-                                Click to unlock
-                              </button>
-                            ) : null}
-                          </div>
-                          <div className="card-mission__meta">
-                            <div className="card-mission__title">
-                              {title ? title : "Assign NFT to start"}
+
+                              {!slotError &&
+                              hasProgress &&
+                              hasSlotInfo &&
+                              !showRealLockedSlot4 ? (
+                                <div
+                                  className={`card-mission__progress relative w-full h-4 rounded-full overflow-hidden bg-zinc-800 opacity-90 shadow-md shadow-black/20 after:hidden ${
+                                    usesKoreaTakeitArt ? "grayscale" : ""
+                                  } `}
+                                >
+                                  <div className="absolute rounded-full inset-0 z-0 bg-linear-to-r from-violet-500 via-fuchsia-500 to-pink-500 after:hidden transition-all"></div>
+
+                                  <div
+                                    className="absolute rounded-r-full rounded-l-none top-0 right-0 z-10 h-full bg-zinc-800 after:hidden transition-all"
+                                    style={{
+                                      width: `${100 - progressPercent}%`,
+                                    }}
+                                  ></div>
+
+                                  <div className="absolute inset-0 z-20 flex items-center rounded-full justify-center text-[10px] font-semibold text-white">
+                                    {progress}
+                                  </div>
+                                </div>
+                              ) : null}
+
+                              {slot === 4 && canUnlockSlot4 ? (
+                                <button
+                                  type="button"
+                                  className="absolute inset-0 z-30 grid cursor-pointer place-items-center text-white font-semibold uppercase text-xs"
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    setSlotUnlockModalOpen(true);
+                                    setSlotUnlockBusy(false);
+                                    setSlotUnlockError(null);
+                                    setSlotUnlockResult(null);
+                                  }}
+                                >
+                                  {/* Click to unlock */}
+                                </button>
+                              ) : null}
                             </div>
-                            <div className="card-mission__slot text-gray-400">
-                              Slot {slot}
+
+                            <div
+                              className={`card-mission__meta ${
+                                usesKoreaTakeitArt ? "grayscale" : ""
+                              }`}
+                            >
+                              <div className="card-mission__title">
+                                {showRealLockedSlot4
+                                  ? "Unlock Slot 4"
+                                  : title
+                                    ? title
+                                    : "Assign NFT to start"}
+                              </div>
+
+                              <div className="card-mission__slot text-gray-400">
+                                {showRealLockedSlot4 ? "" : `Slot ${slot}`}
+                              </div>
                             </div>
                           </div>
                         </div>
-                      </div>
-                    );
-                  })}
+                      );
+                    })}
                 </div>
               </section>
             </>
