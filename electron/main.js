@@ -51,6 +51,15 @@ function isDesktopDevMode() {
   return lifecycle === "desktop:dev";
 }
 
+function isStandaloneCliMode() {
+  if (process.env.PBP_STANDALONE_CLI === "1") return true;
+  return process.argv.some((arg) =>
+    ["--cli", "--cli-only", "--standalone-cli"].includes(
+      String(arg || "").trim().toLowerCase(),
+    ),
+  );
+}
+
 // Force Chromium cache/session storage to a stable, writable per-user location
 // on Windows to avoid "Unable to move/create cache (0x5)" startup errors.
 if (process.platform === "win32") {
@@ -3529,6 +3538,7 @@ function startBackend() {
       PBP_CONFIG_DIR: getBackendWorkingDirectory(),
       PBP_DEFAULT_MISSION_RESET_LEVEL:
         defaultMissionResetLevelForConfig(currentConfig),
+      ...(isStandaloneCliMode() ? { PBP_DISABLE_STARTUP_FX: "1" } : {}),
       ...(startPausedForCompLock
         ? { PBP_START_PAUSED_FOR_COMP_LOCK: "1" }
         : {}),
@@ -4456,6 +4466,13 @@ function createSplashWindow() {
       break;
     } catch {}
   }
+  const splashGiraffeAscii = String.raw`
+    /)/)
+   ( ..\
+   /'-._)
+  /#/
+ /#/
+`;
 
   const splashHtml = `<!doctype html>
 <html>
@@ -4481,8 +4498,34 @@ function createSplashWindow() {
         height: 100%;
         display: grid;
         place-items: center;
+        position: relative;
+        isolation: isolate;
+      }
+      .giraffe {
+        position: absolute;
+        inset: 0;
+        display: grid;
+        place-items: center;
+        pointer-events: none;
+        z-index: 0;
+        opacity: 0.14;
+        color: rgba(207, 230, 245, 0.9);
+        text-shadow: 0 6px 24px rgba(0, 0, 0, 0.45);
+        transform: translateY(-14px);
+      }
+      .giraffe pre {
+        margin: 0;
+        white-space: pre;
+        line-height: 0.9;
+        font-size: 64px;
+        font-weight: 700;
+        font-family: "IBM Plex Mono", "SFMono-Regular", Menlo, Consolas, monospace;
+        transform: scale(1.8);
+        transform-origin: center;
       }
       .stack {
+        position: relative;
+        z-index: 1;
         display: flex;
         flex-direction: column;
         gap: 10px;
@@ -4549,6 +4592,7 @@ function createSplashWindow() {
   </head>
   <body>
     <div class="wrap">
+      <div class="giraffe" aria-hidden="true"><pre>${splashGiraffeAscii}</pre></div>
       <div class="stack">
         <div class="row">
           <div class="message">Draining pixel's wallets...</div>
@@ -5726,11 +5770,15 @@ app.whenReady().then(async () => {
     }
   });
 
-  createSplashWindow();
   hydrateBackendStatusFromConfig();
   publishStatus();
-  await createControlWindow();
-  await bootstrapStartupMissionSlots();
+  if (isStandaloneCliMode()) {
+    await createCliWindow();
+  } else {
+    createSplashWindow();
+    await createControlWindow();
+    await bootstrapStartupMissionSlots();
+  }
   try {
     const launchConfig = readDesktopConfig();
     const walletAddress =
@@ -5759,23 +5807,26 @@ app.whenReady().then(async () => {
     }
     publishStatus();
   } catch {}
-  const closeSplash = () => {
-    splashProgressCurrent = 100;
-    splashProgressTarget = 100;
-    sendSplashProgressToWindow(100);
-    stopSplashProgressTimer();
-    if (splashWindow && !splashWindow.isDestroyed()) splashWindow.close();
-    splashWindow = null;
-    if (controlWindow && !controlWindow.isDestroyed()) controlWindow.show();
-  };
-  if (controlWindow && !controlWindow.isDestroyed()) {
-    controlWindow.once("ready-to-show", closeSplash);
-    setTimeout(closeSplash, 1800);
+  if (!isStandaloneCliMode()) {
+    const closeSplash = () => {
+      splashProgressCurrent = 100;
+      splashProgressTarget = 100;
+      sendSplashProgressToWindow(100);
+      stopSplashProgressTimer();
+      if (splashWindow && !splashWindow.isDestroyed()) splashWindow.close();
+      splashWindow = null;
+      if (controlWindow && !controlWindow.isDestroyed()) controlWindow.show();
+    };
+    if (controlWindow && !controlWindow.isDestroyed()) {
+      controlWindow.once("ready-to-show", closeSplash);
+      setTimeout(closeSplash, 1800);
+    }
   }
 
   app.on("activate", async () => {
     if (BrowserWindow.getAllWindows().length === 0) {
-      await createControlWindow();
+      if (isStandaloneCliMode()) await createCliWindow();
+      else await createControlWindow();
     }
   });
 });
