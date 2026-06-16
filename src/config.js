@@ -324,6 +324,9 @@ function loadConfig(ctx, logWithTimestamp) {
   if (typeof ctx.config.missionModeEnabled === "boolean") {
     ctx.missionModeEnabled = ctx.config.missionModeEnabled;
   }
+  if (typeof ctx.config.missionModeResetLevel === "string") {
+    ctx.missionModeResetLevel = ctx.config.missionModeResetLevel;
+  }
   ctx.config.missionActionEnabledBySlot = normalizeMissionActionEnabledBySlot(
     ctx.config.missionActionEnabledBySlot,
   );
@@ -473,6 +476,13 @@ function loadConfig(ctx, logWithTimestamp) {
   ) {
     ctx.currentMissionResetLevel =
       ctx.runtimeDefaults?.missionResetLevel || ctx.currentMissionResetLevel;
+  }
+  if (
+    typeof ctx.config.missionModeResetLevel !== "string" ||
+    !ctx.config.missionModeResetLevel.trim()
+  ) {
+    ctx.missionModeResetLevel =
+      ctx.runtimeDefaults?.missionResetLevel || ctx.missionModeResetLevel;
   }
   ctx.config.signerMode = ctx.signerMode;
 }

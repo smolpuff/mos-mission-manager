@@ -684,6 +684,10 @@
     &.system {
       @apply text-[#86efac];
     }
+
+    &.debug {
+      @apply text-sky-300;
+    }
   }
 }
 
@@ -854,7 +858,7 @@
     @apply flex flex-col gap-1;
 
     .card-mission__header {
-      @apply flex flex-col p-3 rounded-lg aspect-square justify-between relative overflow-clip border-2 border-white/11 bg-white/3;
+      @apply flex flex-col p-3 rounded-lg aspect-square justify-between relative overflow-clip border-2 border-white/6 bg-white/3;
       box-shadow: 0 4px 5px rgba(0, 0, 0, 0.35) !important;
 
       &.card-mission__header--korea-art {
@@ -1593,8 +1597,9 @@ button.btn.btn-gradient {
 
   .mission-mode-copy {
     position: relative;
-    z-index: 5;
+    z-index: 2;
     transition: z-index 0s linear 180ms;
+    @apply text-shadow-md text-shadow-black/15;
   }
 
   .mo-fire {
@@ -1603,7 +1608,7 @@ button.btn.btn-gradient {
     bottom: -1rem;
     width: 240%;
     height: auto;
-    z-index: 4;
+    z-index: 1;
     pointer-events: none;
 
     opacity: 0.6;

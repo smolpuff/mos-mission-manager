@@ -16,11 +16,15 @@ function createMcpClient(ctx, logger) {
   const MCP_REQUEST_TIMEOUT_MS = 30000;
   const REFRESH_RETRY_ATTEMPTS = 3;
   const REFRESH_RETRY_DELAY_MS = 1000;
+  const USER_MISSIONS_CACHE_TTL_MS = 4000;
   const THROTTLE_DEBUG_WINDOW_MS = 5000;
   const THROTTLE_DEBUG_MAX_EVENTS = 200;
   const THROTTLE_DEBUG_BEFORE_COUNT = 5;
   let throttleDebugSequence = 0;
   const recentToolCalls = [];
+  let userMissionsInflight = null;
+  let userMissionsInflightForceFresh = false;
+  let userMissionsGeneration = 0;
 
   function throttleDebugEnabled() {
     return ctx.debugMode === true;
@@ -329,6 +333,51 @@ function createMcpClient(ctx, logger) {
     }
   }
 
+  function hasFreshUserMissionsSnapshot() {
+    return (
+      ctx.lastUserMissionsResult &&
+      typeof ctx.lastUserMissionsResult === "object" &&
+      Number.isFinite(Number(ctx.lastUserMissionsFetchedAt || 0)) &&
+      Date.now() - Number(ctx.lastUserMissionsFetchedAt || 0) <=
+        USER_MISSIONS_CACHE_TTL_MS
+    );
+  }
+
+  function userMissionsSnapshotAgeMs() {
+    const fetchedAt = Number(ctx.lastUserMissionsFetchedAt || 0);
+    if (!Number.isFinite(fetchedAt) || fetchedAt <= 0) return null;
+    return Math.max(0, Date.now() - fetchedAt);
+  }
+
+  function invalidateUserMissionsSnapshot(reason = "unknown") {
+    userMissionsGeneration += 1;
+    ctx.lastUserMissionsResult = null;
+    ctx.lastUserMissionsFetchedAt = 0;
+    if (userMissionsInflight && !userMissionsInflightForceFresh) {
+      userMissionsInflight = null;
+    }
+    logDebug("mcp", "user_missions_snapshot_invalidated", { reason });
+  }
+
+  function shouldInvalidateUserMissionsSnapshot(toolName) {
+    return new Set([
+      "assign_nft_to_mission",
+      "claim_mission_reward",
+      "submit_signed_mission_reroll",
+      "submit_signed_mission_slot_unlock",
+      "submit_signed_mission_swap",
+      "submit_signed_nft_cooldown_reset",
+    ]).has(String(toolName || "").trim());
+  }
+
+  function shouldUseUserMissionsSnapshot(toolName, args) {
+    if (String(toolName || "").trim() !== "get_user_missions") return false;
+    if (args && typeof args === "object" && Object.keys(args).length > 0) {
+      return false;
+    }
+    return true;
+  }
+
   function parseRetryAfterSeconds(value) {
     const text = String(value || "").trim();
     if (!text) return null;
@@ -579,6 +628,64 @@ function createMcpClient(ctx, logger) {
   }
 
   async function mcpToolCall(toolName, args = {}, opts = {}) {
+    const missionSnapshotEligible = shouldUseUserMissionsSnapshot(toolName, args);
+    const userMissionsAgeMs = missionSnapshotEligible
+      ? userMissionsSnapshotAgeMs()
+      : null;
+    const hasFreshUserMissions =
+      missionSnapshotEligible && hasFreshUserMissionsSnapshot();
+
+    if (
+      missionSnapshotEligible &&
+      opts?.forceFresh !== true &&
+      hasFreshUserMissions
+    ) {
+      logDebug("tool", "call_cached", {
+        toolName,
+        ttlMs: USER_MISSIONS_CACHE_TTL_MS,
+        ageMs: userMissionsAgeMs,
+        reason: String(opts?.reason || "").trim() || null,
+      });
+      return ctx.lastUserMissionsResult;
+    }
+    if (
+      missionSnapshotEligible &&
+      opts?.forceFresh !== true &&
+      !hasFreshUserMissions
+    ) {
+      logDebug("tool", "call_cache_expired", {
+        toolName,
+        ttlMs: USER_MISSIONS_CACHE_TTL_MS,
+        ageMs: userMissionsAgeMs,
+        reason: String(opts?.reason || "").trim() || null,
+      });
+    }
+    if (missionSnapshotEligible && opts?.forceFresh === true) {
+      logDebug("tool", "call_force_fresh", {
+        toolName,
+        ttlMs: USER_MISSIONS_CACHE_TTL_MS,
+        ageMs: userMissionsAgeMs,
+        reason: String(opts?.reason || "").trim() || null,
+      });
+    }
+    if (missionSnapshotEligible && userMissionsInflight) {
+      if (opts?.forceFresh !== true || userMissionsInflightForceFresh) {
+        logDebug("tool", "call_inflight_reused", {
+          toolName,
+          forceFresh: opts?.forceFresh === true,
+          inflightForceFresh: userMissionsInflightForceFresh,
+          reason: String(opts?.reason || "").trim() || null,
+        });
+        return userMissionsInflight;
+      }
+      logDebug("tool", "call_inflight_bypassed_for_force_fresh", {
+        toolName,
+        ttlMs: USER_MISSIONS_CACHE_TTL_MS,
+        ageMs: userMissionsAgeMs,
+        reason: String(opts?.reason || "").trim() || null,
+      });
+    }
+
     logDebug("tool", "call_start", { toolName, args });
     const toolCallEntry = recordToolCallStart(toolName, args);
     const record = tokenRecord();
@@ -638,110 +745,181 @@ function createMcpClient(ctx, logger) {
       return call.json?.result || {};
     };
 
-    try {
-      const result = await runOnce();
-      if (toolName === "get_user_missions" && result && typeof result === "object") {
-        try {
-          updateMissionLookupCache(result);
-        } catch (cacheError) {
-          logDebug("mcp", "mission_cache_update_failed", {
-            error: cacheError.message,
-          });
-        }
-      }
-      finalizeToolCallEntry(toolCallEntry, "ok");
-      logDebug("tool", "call_ok", { toolName });
-      ctx.mcpRateLimitReason = null;
-      setMcpConnection("connected");
-      return result;
-    } catch (error) {
-      if (error?.rateLimited) {
-        finalizeToolCallEntry(
-          toolCallEntry,
-          error.cooldownActive === true ? "cooldown_blocked" : "rate_limited",
-          error,
-        );
-        setMcpConnection("disconnected", { error: error.message });
-        if (error.cooldownActive === true) {
-          logDebug("tool", "call_rate_limited_active", {
-            toolName,
-            retryAfterSeconds: error.retryAfterSeconds,
-            retryAt: error.retryAt,
-          });
-          writeThrottleDebugLog({
-            type: "active_cooldown",
-            requestedTool: toolName,
-            triggerTool: error.toolName || toolName,
-            waitSeconds: error.retryAfterSeconds,
-            retryAt: error.retryAt,
-            reason: error.reason || "pre_call",
-            detail: "Call skipped because an MCP cooldown was already active.",
-            stack: captureStack(3),
-          });
-          emitThrottleNotice({
-            trigger: error.toolName || toolName,
-            message: error.message,
-            waitSeconds: Number(error.retryAfterSeconds || 0) || null,
-            retryAt: Number(error.retryAt || 0) || null,
-            detail: `Triggered by: ${String(error.reason || "pre_call")}`,
-          });
-        } else {
-          logWithTimestamp(
-            `[MCP] ⏳ ${toolName} rate limited. Retry after ${error.retryAfterSeconds}s.`,
-          );
-          logDebug("tool", "call_rate_limited", {
-            toolName,
-            retryAfterSeconds: error.retryAfterSeconds,
-            retryAt: error.retryAt,
-          });
-          writeThrottleDebugLog({
-            type: "http_429",
-            requestedTool: toolName,
-            triggerTool: error.toolName || toolName,
-            waitSeconds: error.retryAfterSeconds,
-            retryAt: error.retryAt,
-            reason: "server_429",
-            detail:
-              error?.bodyError && typeof error.bodyError === "object"
-                ? safeJson(error.bodyError, 2000)
-                : trimText(error?.bodyError || "", 2000) || "n/a",
-            stack: captureStack(3),
-          });
-          emitThrottleNotice({
-            trigger: toolName,
-            message: error.message,
-            waitSeconds: Number(error.retryAfterSeconds || 0) || null,
-            retryAt: Number(error.retryAt || 0) || null,
-            detail:
-              error?.bodyError && typeof error.bodyError === "object"
-                ? JSON.stringify(error.bodyError)
-                : null,
-          });
-        }
-        throw error;
-      }
-      finalizeToolCallEntry(toolCallEntry, "error", error);
-      if (!isAuthHttpError(error?.message || "")) {
-        setMcpConnection("disconnected", { error: error.message });
-        throw error;
-      }
-      const refreshed = await recoverAuthAfterRefreshFailure("auth_failure");
-      if (!refreshed) throw error;
-      const result = await runOnce();
-      if (toolName === "get_user_missions" && result && typeof result === "object") {
-        try {
-          updateMissionLookupCache(result);
-        } catch (cacheError) {
-          logDebug("mcp", "mission_cache_update_failed", {
-            error: cacheError.message,
-          });
-        }
-      }
-      finalizeToolCallEntry(toolCallEntry, "ok_after_refresh");
-      logDebug("tool", "call_ok_after_refresh", { toolName });
-      setMcpConnection("connected");
-      return result;
+    const userMissionsGenerationAtStart = missionSnapshotEligible
+      ? userMissionsGeneration
+      : 0;
+
+    if (missionSnapshotEligible) {
+      logDebug("tool", "call_snapshot_fetch_start", {
+        toolName,
+        ttlMs: USER_MISSIONS_CACHE_TTL_MS,
+        ageMs: userMissionsAgeMs,
+        forceFresh: opts?.forceFresh === true,
+        reason: String(opts?.reason || "").trim() || null,
+      });
     }
+
+    const executeToolCall = async () => {
+      try {
+        const result = await runOnce();
+        if (
+          toolName === "get_user_missions" &&
+          result &&
+          typeof result === "object"
+        ) {
+          if (userMissionsGenerationAtStart === userMissionsGeneration) {
+            try {
+              updateMissionLookupCache(result);
+            } catch (cacheError) {
+              logDebug("mcp", "mission_cache_update_failed", {
+                error: cacheError.message,
+              });
+            }
+          } else {
+            logDebug("mcp", "mission_cache_update_skipped_stale", {
+              toolName,
+              generationAtStart: userMissionsGenerationAtStart,
+              generationNow: userMissionsGeneration,
+            });
+          }
+          logDebug("tool", "call_snapshot_stored", {
+            toolName,
+            ttlMs: USER_MISSIONS_CACHE_TTL_MS,
+            ageMs: userMissionsSnapshotAgeMs(),
+            reason: String(opts?.reason || "").trim() || null,
+          });
+        } else if (shouldInvalidateUserMissionsSnapshot(toolName)) {
+          invalidateUserMissionsSnapshot(toolName);
+        }
+        finalizeToolCallEntry(toolCallEntry, "ok");
+        logDebug("tool", "call_ok", { toolName });
+        ctx.mcpRateLimitReason = null;
+        setMcpConnection("connected");
+        return result;
+      } catch (error) {
+        if (error?.rateLimited) {
+          finalizeToolCallEntry(
+            toolCallEntry,
+            error.cooldownActive === true ? "cooldown_blocked" : "rate_limited",
+            error,
+          );
+          setMcpConnection("disconnected", { error: error.message });
+          if (error.cooldownActive === true) {
+            logDebug("tool", "call_rate_limited_active", {
+              toolName,
+              retryAfterSeconds: error.retryAfterSeconds,
+              retryAt: error.retryAt,
+            });
+            writeThrottleDebugLog({
+              type: "active_cooldown",
+              requestedTool: toolName,
+              triggerTool: error.toolName || toolName,
+              waitSeconds: error.retryAfterSeconds,
+              retryAt: error.retryAt,
+              reason: error.reason || "pre_call",
+              detail: "Call skipped because an MCP cooldown was already active.",
+              stack: captureStack(3),
+            });
+            emitThrottleNotice({
+              trigger: error.toolName || toolName,
+              message: error.message,
+              waitSeconds: Number(error.retryAfterSeconds || 0) || null,
+              retryAt: Number(error.retryAt || 0) || null,
+              detail: `Triggered by: ${String(error.reason || "pre_call")}`,
+            });
+          } else {
+            logWithTimestamp(
+              `[MCP] ⏳ ${toolName} rate limited. Retry after ${error.retryAfterSeconds}s.`,
+            );
+            logDebug("tool", "call_rate_limited", {
+              toolName,
+              retryAfterSeconds: error.retryAfterSeconds,
+              retryAt: error.retryAt,
+            });
+            writeThrottleDebugLog({
+              type: "http_429",
+              requestedTool: toolName,
+              triggerTool: error.toolName || toolName,
+              waitSeconds: error.retryAfterSeconds,
+              retryAt: error.retryAt,
+              reason: "server_429",
+              detail:
+                error?.bodyError && typeof error.bodyError === "object"
+                  ? safeJson(error.bodyError, 2000)
+                  : trimText(error?.bodyError || "", 2000) || "n/a",
+              stack: captureStack(3),
+            });
+            emitThrottleNotice({
+              trigger: toolName,
+              message: error.message,
+              waitSeconds: Number(error.retryAfterSeconds || 0) || null,
+              retryAt: Number(error.retryAt || 0) || null,
+              detail:
+                error?.bodyError && typeof error.bodyError === "object"
+                  ? JSON.stringify(error.bodyError)
+                  : null,
+            });
+          }
+          throw error;
+        }
+        finalizeToolCallEntry(toolCallEntry, "error", error);
+        if (!isAuthHttpError(error?.message || "")) {
+          setMcpConnection("disconnected", { error: error.message });
+          throw error;
+        }
+        const refreshed = await recoverAuthAfterRefreshFailure("auth_failure");
+        if (!refreshed) throw error;
+        const result = await runOnce();
+        if (
+          toolName === "get_user_missions" &&
+          result &&
+          typeof result === "object"
+        ) {
+          if (userMissionsGenerationAtStart === userMissionsGeneration) {
+            try {
+              updateMissionLookupCache(result);
+            } catch (cacheError) {
+              logDebug("mcp", "mission_cache_update_failed", {
+                error: cacheError.message,
+              });
+            }
+          } else {
+            logDebug("mcp", "mission_cache_update_skipped_stale", {
+              toolName,
+              generationAtStart: userMissionsGenerationAtStart,
+              generationNow: userMissionsGeneration,
+            });
+          }
+        } else if (shouldInvalidateUserMissionsSnapshot(toolName)) {
+          invalidateUserMissionsSnapshot(`${toolName}:auth_refresh`);
+        }
+        finalizeToolCallEntry(toolCallEntry, "ok_after_refresh");
+        logDebug("tool", "call_ok_after_refresh", { toolName });
+        setMcpConnection("connected");
+        return result;
+      }
+    };
+
+    try {
+      if (shouldUseUserMissionsSnapshot(toolName, args)) {
+        const request = executeToolCall().finally(() => {
+          if (userMissionsInflight === request) {
+            userMissionsInflight = null;
+            userMissionsInflightForceFresh = false;
+          }
+        });
+        userMissionsInflight = request;
+        userMissionsInflightForceFresh = opts?.forceFresh === true;
+        return await request;
+      }
+      return await executeToolCall();
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  async function getUserMissions(opts = {}) {
+    return mcpToolCall("get_user_missions", {}, opts);
   }
 
   async function runLoginFlow(opts = {}) {
@@ -796,6 +974,7 @@ function createMcpClient(ctx, logger) {
 
   function logout() {
     clearTokenFile(ctx.tokenFilePath);
+    invalidateUserMissionsSnapshot("logout");
     ctx.isAuthenticated = false;
     ctx.authRefreshSignal = 0;
     ctx.currentUserDisplayName = "unknown";
@@ -806,6 +985,8 @@ function createMcpClient(ctx, logger) {
 
   return {
     bearerToken,
+    getUserMissions,
+    invalidateUserMissionsSnapshot,
     mcpToolCall,
     runLoginFlow,
     logout,

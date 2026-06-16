@@ -28,7 +28,8 @@ function createWatchService(
   configApi,
   services = {},
 ) {
-  const { logWithTimestamp, logDebug, redrawHeaderAndLog } = logger;
+  const { logWithTimestamp, logDebug, redrawHeaderAndLog, formatTaggedLog } =
+    logger;
   const { saveConfig } = configApi;
   const { signer = null } = services;
   const { executePreparedMissionAction } = createMissionActionExecutor(
@@ -49,6 +50,17 @@ function createWatchService(
   let currentWalletSummaryRefreshTimer = null;
   let currentWalletSummaryRefreshPendingReason = null;
   let nftCountWarmTimer = null;
+
+  function summarizeNamesForUser(items = [], limit = 2) {
+    const list = Array.isArray(items)
+      ? items
+          .map((value) => String(value || "").trim())
+          .filter(Boolean)
+      : [];
+    if (list.length === 0) return "(none)";
+    if (list.length <= limit) return list.join(", ");
+    return `${list.slice(0, limit).join(", ")} +${list.length - limit} more`;
+  }
 
   function createMissionResultCoordinator({
     ttlMs = 1200,
@@ -91,7 +103,7 @@ function createWatchService(
       }
       inflightForceFresh = Boolean(forceFresh);
       const request = mcp
-        .mcpToolCall("get_user_missions", {})
+        .getUserMissions({ reason })
         .then((result) => seed(result))
         .finally(() => {
           if (inflight === request) {
@@ -408,7 +420,10 @@ function createWatchService(
     const deadline = Date.now() + timeoutMs;
     while (Date.now() <= deadline) {
       try {
-        const missionsResult = await mcp.mcpToolCall("get_user_missions", {});
+        const missionsResult = await mcp.getUserMissions({
+          forceFresh: true,
+          reason: "dapp_reroll_settlement_poll",
+        });
         const missions = normalizeMissionList(missionsResult);
         const mission = missions.find((entry) => {
           const id = String(
@@ -925,7 +940,7 @@ function createWatchService(
         ? await missionResultLoader({
             reason: `poll_state_${reason}`,
           })
-        : await mcp.mcpToolCall("get_user_missions", {}));
+        : await mcp.getUserMissions({ reason: `poll_state_${reason}` }));
     const currentState = buildMissionStateMap(result);
     if (logInitial) {
       for (const entry of currentState.values()) {
@@ -1000,7 +1015,7 @@ function createWatchService(
       missionResult ||
       (missionResultLoader
         ? await missionResultLoader({ reason: "assigned_mission_lookup" })
-        : await mcp.mcpToolCall("get_user_missions", {}));
+        : await mcp.getUserMissions({ reason: "assigned_mission_lookup" }));
     const missions = normalizeMissionList(result);
     const byAssignedMissionId = new Map();
     for (const m of missions) {
@@ -1048,7 +1063,7 @@ function createWatchService(
       missionResult ||
       (missionResultLoader
         ? await missionResultLoader({ reason: "mission_snapshot" })
-        : await mcp.mcpToolCall("get_user_missions", {}));
+        : await mcp.getUserMissions({ reason: "mission_snapshot" }));
     const allMissions = normalizeMissionList(result);
     const missions = selectedOnly
       ? checks.filterSelectedMissions(allMissions)
@@ -1269,6 +1284,112 @@ function createWatchService(
     return claimed;
   }
 
+  function applyOptimisticClaimSlotRefresh(
+    claims,
+    lookupByAssignedMissionId = null,
+  ) {
+    const claimedSlots = new Set();
+    const claimSummaries = [];
+    for (const claim of Array.isArray(claims) ? claims : []) {
+      const d = compactClaimDetails(claim, lookupByAssignedMissionId);
+      claimSummaries.push(d);
+      const slot = Number(d.slot);
+      if (Number.isFinite(slot) && slot > 0) claimedSlots.add(slot);
+    }
+    if (claimedSlots.size === 0) return 0;
+    const existing = Array.isArray(ctx.guiMissionSlots)
+      ? ctx.guiMissionSlots
+      : [];
+    let changed = false;
+    const next = existing.map((entry) => {
+      const slot = Number(entry?.slot);
+      if (!Number.isFinite(slot) || !claimedSlots.has(slot)) return entry;
+      changed = true;
+      const summary = claimSummaries.find(
+        (item) => Number(item?.slot) === slot && item?.slot !== null,
+      );
+      return {
+        ...entry,
+        missionId: null,
+        missionName: null,
+        missionLevel: null,
+        progress: null,
+        goal: null,
+        missionImage: null,
+        image: null,
+        assignedNft: null,
+        assignedNftAccount: null,
+        assignedNftImage: null,
+        nftLevel: null,
+        nftImage: null,
+        pendingHydration: true,
+        slotHydrationState: "loading",
+        slotHydrationReason: "claim_refresh",
+        slotHydrationLabel: summary?.name || `slot ${slot}`,
+      };
+    });
+    if (!changed) return 0;
+    ctx.guiMissionSlots = next;
+    if (ctx.guiBridge && typeof ctx.guiBridge.emitNow === "function") {
+      ctx.guiBridge.emitNow();
+    }
+    return claimedSlots.size;
+  }
+
+  function applyPendingClaimSlotRefresh({
+    reason = "claim_refresh",
+    slots = [],
+  } = {}) {
+    const existing = Array.isArray(ctx.guiMissionSlots)
+      ? ctx.guiMissionSlots
+      : [];
+    if (existing.length === 0) return 0;
+    const targetSlots = new Set(
+      (Array.isArray(slots) ? slots : [])
+        .map((slot) => Number(slot))
+        .filter((slot) => Number.isFinite(slot) && slot > 0),
+    );
+    if (targetSlots.size === 0) {
+      logDebug("watch", "pending_claim_slot_refresh_skipped", {
+        reason,
+        because: "no_target_slots",
+      });
+      return 0;
+    }
+    let changed = false;
+    const next = existing.map((entry) => {
+      if (!entry || typeof entry !== "object") return entry;
+      const slot = Number(entry.slot);
+      if (!Number.isFinite(slot) || !targetSlots.has(slot)) return entry;
+      changed = true;
+      return {
+        ...entry,
+        missionId: null,
+        missionName: null,
+        missionLevel: null,
+        progress: null,
+        goal: null,
+        missionImage: null,
+        image: null,
+        assignedNft: null,
+        assignedNftAccount: null,
+        assignedNftImage: null,
+        nftLevel: null,
+        nftImage: null,
+        pendingHydration: true,
+        slotHydrationState: "loading",
+        slotHydrationReason: reason,
+        slotHydrationLabel: `slot ${slot || "?"}`,
+      };
+    });
+    if (!changed) return 0;
+    ctx.guiMissionSlots = next;
+    if (ctx.guiBridge && typeof ctx.guiBridge.emitNow === "function") {
+      ctx.guiBridge.emitNow();
+    }
+    return targetSlots.size;
+  }
+
   function logAssignCheckResult(assignResult) {
     if (!ctx.debugMode) return;
     const attempted = Number(assignResult?.attempted || 0);
@@ -1290,7 +1411,7 @@ function createWatchService(
       missionResult ||
       (missionResultLoader
         ? await missionResultLoader({ reason: "selected_snapshot" })
-        : await mcp.mcpToolCall("get_user_missions", {}));
+        : await mcp.getUserMissions({ reason: "selected_snapshot" }));
     const snapshot = await loadSelectedMissionSnapshot(result, missionResultLoader);
     return { result, snapshot };
   }
@@ -1347,9 +1468,22 @@ function createWatchService(
       logWithTimestamp(aggregateClaimLogLine);
     }
 
+    if (currentClaimed > 0) {
+      const optimisticRefreshCount = applyOptimisticClaimSlotRefresh(
+        claims,
+        claimLookupByAssignedMissionId,
+      );
+      if (optimisticRefreshCount === 0) {
+        applyPendingClaimSlotRefresh({
+          reason: `${assignReason || "claim_followup"}_pending_refresh`,
+        });
+      }
+    }
+
     const followup = await runSharedClaimFollowup({
       claimed: currentClaimed,
       beforeSnapshot,
+      claimLookupByAssignedMissionId,
       assignReason,
       claimLogLabel,
       assignIntro,
@@ -1409,6 +1543,7 @@ function createWatchService(
   async function runSharedClaimFollowup({
     claimed = 0,
     beforeSnapshot = new Map(),
+    claimLookupByAssignedMissionId = null,
     assignReason,
     claimLogLabel = "Claimed",
     assignIntro = "[ASSIGN] ▶ Post-claim assign check (immediate)...",
@@ -1444,7 +1579,10 @@ function createWatchService(
               forceFresh: true,
               reason: `${assignReason || "claim_followup"}_initial_load`,
             })
-          : await mcp.mcpToolCall("get_user_missions", {});
+          : await mcp.getUserMissions({
+              forceFresh: true,
+              reason: `${assignReason || "claim_followup"}_initial_load`,
+            });
         trace("watch", "claim_followup_loaded_missions", {
           traceId,
           assignReason,
@@ -1469,98 +1607,105 @@ function createWatchService(
           claimed: currentClaimed,
         });
       }
-      try {
-        if (claimWorkPaused()) {
-          trace("watch", "claim_followup_skipped_before_refetch_paused", {
-            traceId,
-            assignReason,
-            claimed: currentClaimed,
-          });
-          return { claimed: currentClaimed, assigned, missionResult };
-        }
-        missionResult = missionResultLoader
-          ? await missionResultLoader({
-              forceFresh: true,
-              reason: `${assignReason || "claim_followup"}_after_claim`,
-            })
-          : await mcp.mcpToolCall("get_user_missions", {});
-        trace("watch", "claim_followup_refetched_after_claim", {
-          traceId,
-          assignReason,
-        });
-      } catch (error) {
-        logDebug("watch", "post_claim_missions_refresh_failed", {
-          error: error.message,
-        });
-      }
+    }
+
+    try {
       if (claimWorkPaused()) {
-        trace("watch", "claim_followup_skipped_before_assign_paused", {
+        trace("watch", "claim_followup_skipped_before_refetch_paused", {
           traceId,
           assignReason,
           claimed: currentClaimed,
         });
         return { claimed: currentClaimed, assigned, missionResult };
       }
-      logWithTimestamp(assignIntro);
-      try {
-        if (claimWorkPaused()) {
-          trace("watch", "claim_followup_assign_aborted_paused", {
-            traceId,
-            assignReason,
-            claimed: currentClaimed,
+      missionResult = missionResultLoader
+        ? await missionResultLoader({
+            forceFresh: true,
+            reason: `${assignReason || "claim_followup"}_after_claim`,
+          })
+        : await mcp.getUserMissions({
+            forceFresh: true,
+            reason: `${assignReason || "claim_followup"}_after_claim`,
           });
-          return { claimed: currentClaimed, assigned, missionResult };
-        }
-        logDebug("watch", "assign_check_start", { reason: assignReason });
-        const assignResult = await checks.autoAssignConfiguredMissions({
-          reason: assignReason,
-          missionsResult: missionResult,
-        });
-        logDebug("watch", "assign_check_done", {
-          reason: assignReason,
-          attempted: Number(assignResult?.attempted || 0),
-          assigned: Number(assignResult?.assigned || 0),
-          skipped: assignResult?.skipped === true,
-        });
-        logAssignCheckResult(assignResult);
-        assigned = Number(assignResult?.assigned || 0);
-        trace("watch", "claim_followup_assign_done", {
+      trace("watch", "claim_followup_refetched_after_claim", {
+        traceId,
+        assignReason,
+      });
+    } catch (error) {
+      logDebug("watch", "post_claim_missions_refresh_failed", {
+        error: error.message,
+      });
+    }
+    if (claimWorkPaused()) {
+      trace("watch", "claim_followup_skipped_before_assign_paused", {
+        traceId,
+        assignReason,
+        claimed: currentClaimed,
+      });
+      return { claimed: currentClaimed, assigned, missionResult };
+    }
+    logWithTimestamp(assignIntro);
+    try {
+      if (claimWorkPaused()) {
+        trace("watch", "claim_followup_assign_aborted_paused", {
           traceId,
           assignReason,
-          attempted: Number(assignResult?.attempted || 0),
-          assigned,
-          skipped: assignResult?.skipped === true,
+          claimed: currentClaimed,
         });
-        if (assigned > 0) {
-          if (claimWorkPaused()) {
-            trace("watch", "claim_followup_skipped_before_assign_refetch_paused", {
-              traceId,
-              assignReason,
-              assigned,
-            });
-            return { claimed: currentClaimed, assigned, missionResult };
-          }
-          missionResult = missionResultLoader
-            ? await missionResultLoader({
-                forceFresh: true,
-                reason: `${assignReason || "claim_followup"}_after_assign`,
-              })
-            : await mcp.mcpToolCall("get_user_missions", {});
-          trace("watch", "claim_followup_refetched_after_assign", {
+        return { claimed: currentClaimed, assigned, missionResult };
+      }
+      logDebug("watch", "assign_check_start", { reason: assignReason });
+      const assignResult = await checks.autoAssignConfiguredMissions({
+        reason: assignReason,
+        missionsResult: missionResult,
+      });
+      logDebug("watch", "assign_check_done", {
+        reason: assignReason,
+        attempted: Number(assignResult?.attempted || 0),
+        assigned: Number(assignResult?.assigned || 0),
+        skipped: assignResult?.skipped === true,
+      });
+      logAssignCheckResult(assignResult);
+      assigned = Number(assignResult?.assigned || 0);
+      trace("watch", "claim_followup_assign_done", {
+        traceId,
+        assignReason,
+        attempted: Number(assignResult?.attempted || 0),
+        assigned,
+        skipped: assignResult?.skipped === true,
+      });
+      if (assigned > 0) {
+        if (claimWorkPaused()) {
+          trace("watch", "claim_followup_skipped_before_assign_refetch_paused", {
             traceId,
             assignReason,
             assigned,
           });
+          return { claimed: currentClaimed, assigned, missionResult };
         }
-      } catch (error) {
-        logWithTimestamp(
-          `[ASSIGN] ❌ Post-claim assign error: ${error.message}`,
-        );
-        logDebug("watch", "post_claim_assign_error", {
-          error: error.message,
-          stack: error.stack,
+        missionResult = missionResultLoader
+          ? await missionResultLoader({
+              forceFresh: true,
+              reason: `${assignReason || "claim_followup"}_after_assign`,
+            })
+          : await mcp.getUserMissions({
+              forceFresh: true,
+              reason: `${assignReason || "claim_followup"}_after_assign`,
+            });
+        trace("watch", "claim_followup_refetched_after_assign", {
+          traceId,
+          assignReason,
+          assigned,
         });
       }
+    } catch (error) {
+      logWithTimestamp(
+        `[ASSIGN] ❌ Post-claim assign error: ${error.message}`,
+      );
+      logDebug("watch", "post_claim_assign_error", {
+        error: error.message,
+        stack: error.stack,
+      });
     }
 
     if (allowStateFallback && currentClaimed === 0 && beforeSnapshot.size > 0) {
@@ -1602,6 +1747,10 @@ function createWatchService(
           );
           logWithTimestamp(
             `[WATCH] ✅ Claim detected from mission state: ${currentClaimed}`,
+          );
+          applyOptimisticClaimSlotRefresh(
+            transitions.claimed,
+            claimLookupByAssignedMissionId,
           );
           applyClaimCountUpdate(currentClaimed, { logLabel: claimLogLabel });
           if (assigned === 0) {
@@ -1650,7 +1799,10 @@ function createWatchService(
                 );
                 return { claimed: currentClaimed, assigned, missionResult };
               }
-              missionResult = await mcp.mcpToolCall("get_user_missions", {});
+              missionResult = await mcp.getUserMissions({
+                forceFresh: true,
+                reason: `${assignReason || "claim_followup"}_after_fallback_assign`,
+              });
               trace("watch", "claim_followup_refetched_after_fallback_assign", {
                 traceId,
               });
@@ -1855,14 +2007,23 @@ function createWatchService(
     // the source payload still reports stale active/completed flags.
     const resetHits = enabledThresholdHits;
     if (enabledBlockedHits.length > 0) {
-      const blockedNames = enabledBlockedHits
-        .map(
+      const blockedNames = summarizeNamesForUser(
+        enabledBlockedHits.map(
           (m) => `${m.name} lvl=${Number(m.level || 0)} slot=${m.slot ?? "?"}`,
-        )
-        .join(", ");
+        ),
+      );
       logWithTimestamp(
         `[RESET] ⏸️ ${label} threshold reached but NFT still assigned (${reason}): ${blockedNames}`,
       );
+      logDebug("watch", "blocked_threshold_hits", {
+        reason,
+        label,
+        missions: enabledBlockedHits.map((m) => ({
+          name: m.name,
+          level: Number(m.level || 0),
+          slot: m.slot ?? "?",
+        })),
+      });
       logWithTimestamp(
         "[RESET] ℹ️ Waiting for the mission NFT to clear before opening manual reset.",
       );
@@ -1918,10 +2079,19 @@ function createWatchService(
       });
       return true;
     }
-    const names = resetHits
-      .map((m) => `${m.name} lvl=${Number(m.level || 0)}`)
-      .join(", ");
+    const names = summarizeNamesForUser(
+      resetHits.map((m) => `${m.name} lvl=${Number(m.level || 0)}`),
+    );
     logWithTimestamp(`[RESET] ⚠️ ${label} threshold hit (${reason}): ${names}`);
+    logDebug("watch", "reset_threshold_hits", {
+      reason,
+      label,
+      missions: resetHits.map((m) => ({
+        name: m.name,
+        level: Number(m.level || 0),
+        slot: m.slot ?? null,
+      })),
+    });
     ctx.lastResetPromptKey = resetPromptKey;
     ctx.lastResetPromptAt = now;
     if (ctx.signerMode === "manual") {
@@ -2006,10 +2176,10 @@ function createWatchService(
         `[ASSIGN] ▶ Post-reset assign check (rerolled=${rerolledCount})...`,
       );
       try {
-        let latestMissionResult = await mcp.mcpToolCall(
-          "get_user_missions",
-          {},
-        );
+        let latestMissionResult = await mcp.getUserMissions({
+          forceFresh: true,
+          reason: `post_reset_${reason}_initial`,
+        });
         let assignResult = await checks.autoAssignConfiguredMissions({
           reason: `post_reset_${reason}`,
           missionsResult: latestMissionResult,
@@ -2017,10 +2187,10 @@ function createWatchService(
         logAssignCheckResult(assignResult);
         if (Number(assignResult?.assigned || 0) === 0) {
           await sleep(1200);
-          latestMissionResult = await mcp.mcpToolCall(
-            "get_user_missions",
-            {},
-          );
+          latestMissionResult = await mcp.getUserMissions({
+            forceFresh: true,
+            reason: `post_reset_${reason}_retry_after_wait`,
+          });
           assignResult = await checks.autoAssignConfiguredMissions({
             reason: `post_reset_${reason}_retry`,
             missionsResult: latestMissionResult,
@@ -2028,7 +2198,10 @@ function createWatchService(
           logAssignCheckResult(assignResult);
         }
         if (Number(assignResult?.assigned || 0) > 0) {
-          latestMissionResult = await mcp.mcpToolCall("get_user_missions", {});
+          latestMissionResult = await mcp.getUserMissions({
+            forceFresh: true,
+            reason: `post_reset_${reason}_after_assign`,
+          });
         }
         await checks.refreshMissionHeaderStats({
           missionsResult: latestMissionResult,
@@ -2053,7 +2226,8 @@ function createWatchService(
     const resetPolicy = getResetPolicy();
     if (!resetPolicy.enabled) return false;
     const resolvedMissionResult =
-      missionResult || (await mcp.mcpToolCall("get_user_missions", {}));
+      missionResult ||
+      (await mcp.getUserMissions({ reason: `reset_check_${reason}` }));
     const snapshot = await loadMissionSnapshot(resolvedMissionResult, {
       selectedOnly: false,
     });
@@ -2224,7 +2398,7 @@ function createWatchService(
     const watchSafeLocalMode = hasDisabledMissionSlots();
     logDebug("watch", "cycle_start", opts);
     trace("watch", "cycle_start", { traceId, opts, watchSafeLocalMode });
-    logWithTimestamp("[WATCH] Watching missions...");
+    logWithTimestamp(formatTaggedLog("WATCH", "👀", "Watching missions..."));
 
     let beforeSnapshot = new Map();
     let preCycleMissionResult = null;
@@ -2730,7 +2904,9 @@ function createWatchService(
           });
         } else {
           if (ctx.debugMode)
-            logWithTimestamp("[ASSIGN] ▶ Cycle-end assign check...");
+            logWithTimestamp(
+              formatTaggedLog("ASSIGN", "🛠️", "Cycle-end assign check..."),
+            );
           try {
             const assignResult = await checks.autoAssignConfiguredMissions({
               reason: "cycle_end_unassigned_check",
@@ -2783,12 +2959,21 @@ function createWatchService(
     const traceId = nextTraceId("manual");
     if (waitForCycle && cycleInFlight) await cycleInFlight.catch(() => {});
     if (!ctx.isAuthenticated) throw new Error("Not authenticated");
-    logWithTimestamp("[WATCH] ▶ Manual immediate process (claim+assign)...");
+    logWithTimestamp(
+      formatTaggedLog(
+        "WATCH",
+        "👀",
+        "Manual immediate process (claim+assign)...",
+      ),
+    );
     let beforeSnapshot = new Map();
     let preManualMissionResult = null;
     let manualResetOpened = false;
     try {
-      preManualMissionResult = await mcp.mcpToolCall("get_user_missions", {});
+      preManualMissionResult = await mcp.getUserMissions({
+        forceFresh: true,
+        reason: "manual_process_start",
+      });
       beforeSnapshot = await loadSelectedMissionSnapshot(
         preManualMissionResult,
       );
@@ -2851,7 +3036,10 @@ function createWatchService(
   async function runManualResetCheck({ waitForCycle = true } = {}) {
     if (waitForCycle && cycleInFlight) await cycleInFlight.catch(() => {});
     if (!ctx.isAuthenticated) throw new Error("Not authenticated");
-    const missionResult = await mcp.mcpToolCall("get_user_missions", {});
+    const missionResult = await mcp.getUserMissions({
+      forceFresh: true,
+      reason: "manual_reset_check",
+    });
     const triggered = await runResetCheckSafely(
       "manual",
       missionResult,
@@ -2879,7 +3067,7 @@ function createWatchService(
     logWithTimestamp(
       `[WATCH] 👀 Started: poll=${opts.pollIntervalSeconds}s refresh=${opts.watchSeconds}s`,
     );
-    logWithTimestamp("[WATCH] ▶ Watch loop armed.");
+    logWithTimestamp(formatTaggedLog("WATCH", "👀", "Watch loop armed."));
     try {
       let initialMissionResult = startupMissionResult();
       let startupDidClaimOrAssign = false;
@@ -2902,10 +3090,9 @@ function createWatchService(
         let startupActionMissionResult = initialMissionResult;
         if (!hasActiveMcpCooldown()) {
           try {
-            startupActionMissionResult = await mcp.mcpToolCall(
-              "get_user_missions",
-              {},
-            );
+            startupActionMissionResult = await mcp.getUserMissions({
+              reason: "startup_action_refresh",
+            });
             initialMissionResult =
               startupActionMissionResult || initialMissionResult;
             const freshStartupStatsResult =
@@ -2931,7 +3118,9 @@ function createWatchService(
               startupActionMissionResult,
             );
           } catch {}
-          logWithTimestamp("[WATCH] ▶ Startup claim check...");
+          logWithTimestamp(
+            formatTaggedLog("WATCH", "👀", "Startup claim check..."),
+          );
           const claimResult = await checks.claimClaimableMissions({
             maxClaims: WATCH_MAX_CLAIMS,
             reason: "startup",
@@ -2963,7 +3152,9 @@ function createWatchService(
           !hasActiveMcpCooldown() &&
           startupAvailable > 0
         ) {
-          logWithTimestamp("[ASSIGN] ▶ Startup assign check...");
+          logWithTimestamp(
+            formatTaggedLog("ASSIGN", "🛠️", "Startup assign check..."),
+          );
           const assignResult = await checks.autoAssignConfiguredMissions({
             reason: "startup_unassigned_check",
             missionsResult: startupActionMissionResult,
@@ -2980,10 +3171,10 @@ function createWatchService(
           !hasActiveMcpCooldown()
         ) {
           try {
-            const settledMissionResult = await mcp.mcpToolCall(
-              "get_user_missions",
-              {},
-            );
+            const settledMissionResult = await mcp.getUserMissions({
+              forceFresh: true,
+              reason: "startup_settle_refresh",
+            });
             initialMissionResult = settledMissionResult || initialMissionResult;
             const settledStatsResult = await checks.refreshMissionHeaderStats({
               missionsResult: initialMissionResult,
@@ -2993,7 +3184,13 @@ function createWatchService(
               settledStatsResult?.stats || ctx.currentMissionStats || {};
             const settledAvailable = Number(settledStats.available || 0);
             if (settledAvailable > 0) {
-              logWithTimestamp("[ASSIGN] ▶ Startup settle assign check...");
+              logWithTimestamp(
+                formatTaggedLog(
+                  "ASSIGN",
+                  "🛠️",
+                  "Startup settle assign check...",
+                ),
+              );
               const secondAssignResult =
                 await checks.autoAssignConfiguredMissions({
                   reason: "startup_settle_assign_check",
@@ -3001,10 +3198,10 @@ function createWatchService(
                 });
               logAssignCheckResult(secondAssignResult);
               if (Number(secondAssignResult?.assigned || 0) > 0) {
-                initialMissionResult = await mcp.mcpToolCall(
-                  "get_user_missions",
-                  {},
-                );
+                initialMissionResult = await mcp.getUserMissions({
+                  forceFresh: true,
+                  reason: "startup_post_assign_refresh",
+                });
                 await checks.refreshMissionHeaderStats({
                   missionsResult: initialMissionResult,
                   refreshNftCount: false,

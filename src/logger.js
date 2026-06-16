@@ -34,6 +34,15 @@ function createLogger(ctx) {
       .join(" ");
   }
 
+  function formatTaggedLog(tag, icon, message) {
+    const safeTag = String(tag || "").trim();
+    const safeIcon = String(icon || "").trim();
+    const safeMessage = String(message || "").trim();
+    return safeIcon
+      ? `[${safeTag}] ${safeIcon} ${safeMessage}`
+      : `[${safeTag}] ${safeMessage}`;
+  }
+
   function getDisplayWidth(str) {
     let width = 0;
     for (const char of String(str || "")) {
@@ -277,6 +286,7 @@ function createLogger(ctx) {
     logDebug,
     clearLogBuffer,
     setInputRenderer,
+    formatTaggedLog,
   };
 }
 

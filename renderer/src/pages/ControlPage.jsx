@@ -39,6 +39,22 @@ const MISSION_COMPETITION_CHECK_THRESHOLD_MS = 24 * 60 * 60 * 1000;
 const MISSION_COMPETITION_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const MISSION_COMPETITION_END_BUFFER_MS = 15 * 60 * 1000;
 
+function renderLogText(text) {
+  const value = String(text || "");
+  const marker = "[DEBUG]";
+  const index = value.indexOf(marker);
+  if (index < 0) return value;
+  const before = value.slice(0, index);
+  const after = value.slice(index + marker.length);
+  return (
+    <>
+      {before}
+      <span style={{ color: "#7dd3fc" }}>{marker}</span>
+      {after}
+    </>
+  );
+}
+
 function useDesktopBridge() {
   return window.missionsDesktop;
 }
@@ -175,7 +191,9 @@ function latestCompetitionNotificationSummary(rawCompetition) {
     .filter((entry) => entry.competitionNumber !== null);
 
   if (!normalized.length) return null;
-  return normalized.sort((a, b) => b.competitionNumber - a.competitionNumber)[0];
+  return normalized.sort(
+    (a, b) => b.competitionNumber - a.competitionNumber,
+  )[0];
 }
 
 function shouldShowCompetitionNotification({
@@ -216,6 +234,18 @@ async function closeCompetitionNotificationModal({
   setModal(null);
 }
 
+function MissionSlotFallback({ label, loading = false }) {
+  return (
+    <div className="mission-image-placeholder">
+      {loading ? (
+        <span className="loading loading-spinner loading-md text-white/40" />
+      ) : (
+        label
+      )}
+    </div>
+  );
+}
+
 function MissionSlotImage({
   src,
   hasAssignedNft = false,
@@ -229,6 +259,13 @@ function MissionSlotImage({
   const [imageFailed, setImageFailed] = useState(false);
 
   useEffect(() => {
+    if (loading && !src) {
+      setOutgoingSrc(null);
+      setActiveSrc(null);
+      setImageLoaded(true);
+      setImageFailed(false);
+      return;
+    }
     if (src === activeSrc) return;
     setOutgoingSrc(activeSrc);
     setActiveSrc(src || null);
@@ -236,7 +273,7 @@ function MissionSlotImage({
     setImageFailed(false);
     const timer = setTimeout(() => setOutgoingSrc(null), 320);
     return () => clearTimeout(timer);
-  }, [src, activeSrc]);
+  }, [src, activeSrc, loading]);
 
   const showSpinner =
     loading || (Boolean(activeSrc) && !imageLoaded && !imageFailed);
@@ -275,11 +312,9 @@ function MissionSlotImage({
           }}
         />
       ) : showSpinner ? (
-        <div className="mission-image-placeholder">
-          <span className="loading loading-spinner loading-md text-white/40" />
-        </div>
+        <MissionSlotFallback label={placeholderLabel} loading />
       ) : (
-        <div className="mission-image-placeholder">{placeholderLabel}</div>
+        <MissionSlotFallback label={placeholderLabel} />
       )}
       {activeSrc && imageFailed ? (
         <div className="mission-image-placeholder">No image</div>
@@ -544,6 +579,13 @@ function ControlView() {
   const [modeSelection, setModeSelection] = useState(
     status.missionModeEnabled === true ? "mission" : "normal",
   );
+  const [missionModeButtonLevel, setMissionModeButtonLevel] = useState(
+    String(
+      status.missionModeResetLevel ||
+        status.defaultMissionResetLevel ||
+        (debugEnabled ? "5" : "10"),
+    ).trim(),
+  );
   const [missionActionEnabledBySlot, setMissionActionEnabledBySlot] = useState(
     normalizeSlotBooleanMap(status.missionActionEnabledBySlot, true),
   );
@@ -714,6 +756,19 @@ function ControlView() {
       setModeSelection(status.missionModeEnabled ? "mission" : "normal");
     }
   }, [status.missionModeEnabled]);
+
+  useEffect(() => {
+    const nextLevel = String(
+      status.missionModeResetLevel ||
+        status.defaultMissionResetLevel ||
+        (debugEnabled ? "5" : "10"),
+    ).trim();
+    if (nextLevel) setMissionModeButtonLevel(nextLevel);
+  }, [
+    status.missionModeResetLevel,
+    status.defaultMissionResetLevel,
+    debugEnabled,
+  ]);
 
   useEffect(() => {
     if (typeof status.debugMode === "boolean") {
@@ -1309,12 +1364,17 @@ function ControlView() {
     const missionModeNftResetEnabled = isMissionMode
       ? nftResetEnabled
       : undefined;
+    const missionModeDefaultResetLevel = String(
+      status.defaultMissionResetLevel || "10",
+    ).trim();
+    setMissionModeButtonLevel(missionModeDefaultResetLevel);
     setModeSelection("normal");
     setResetEnabled(true);
     setRentalsEnabled(true);
     setNftResetEnabled(false);
     await applyConfigPatch({
       missionModeEnabled: false,
+      missionModeResetLevel: missionModeDefaultResetLevel,
       enableRentals: true,
       missionResetLevel: "20",
       level20ResetEnabled: true,
@@ -1326,7 +1386,10 @@ function ControlView() {
     await runModeCommand(["mm off", "20r on"]);
   };
   const activateMissionMode = async () => {
-    const resetLevel = String(status.defaultMissionResetLevel || "10").trim();
+    const resetLevel = String(
+      status.defaultMissionResetLevel || status.missionModeResetLevel || "10",
+    ).trim();
+    setMissionModeButtonLevel(resetLevel);
     const cooldownMaxPbp = Number(nftResetMaxPbp);
     let restoredNftResetEnabled = false;
     try {
@@ -1342,6 +1405,7 @@ function ControlView() {
     await applyConfigPatch({
       missionModeEnabled: true,
       missionResetLevel: resetLevel,
+      missionModeResetLevel: resetLevel,
       level20ResetEnabled: false,
       nftCooldownResetEnabled: restoredNftResetEnabled,
       nftCooldownResetMissionModeEnabled: restoredNftResetEnabled,
@@ -1403,6 +1467,25 @@ function ControlView() {
     }
     return null;
   }, [logs]);
+  useEffect(() => {
+    const text = String(latestLog?.text || "").trim();
+    const match = text.match(/^>\s*mm(?:\s+(.+))?$/i);
+    if (!match) return;
+    const arg = String(match[1] || "")
+      .trim()
+      .toLowerCase();
+    if (!arg || arg === "off" || arg === "on") {
+      setMissionModeButtonLevel(
+        String(
+          status.defaultMissionResetLevel || (debugEnabled ? "5" : "10"),
+        ).trim(),
+      );
+      return;
+    }
+    const next = Number(arg);
+    if (!Number.isFinite(next) || next <= 0) return;
+    setMissionModeButtonLevel(String(Math.floor(next)));
+  }, [latestLog, status.defaultMissionResetLevel, debugEnabled]);
   const walletTiles = useMemo(() => {
     const balances = Array.isArray(status.currentUserWalletSummary?.balances)
       ? status.currentUserWalletSummary.balances
@@ -1640,7 +1723,7 @@ function ControlView() {
     useState(null);
   const [onboardingAppWalletAddress, setOnboardingAppWalletAddress] =
     useState("");
-  const [onboardingWhoami, setOnboardingWhoami] = useState(null);
+  const [onboardingWalletSummary, setOnboardingWalletSummary] = useState(null);
   const [onboardingMissions, setOnboardingMissions] = useState([]);
   const [onboardingMissionCatalog, setOnboardingMissionCatalog] = useState([]);
   const [onboardingOwnedCollections, setOnboardingOwnedCollections] = useState(
@@ -2176,7 +2259,7 @@ function ControlView() {
       if (!bridge?.sendCommand) return;
       if (isMissionMode) {
         const resetLevel = String(
-          status.currentMissionResetLevel ||
+          status.missionModeResetLevel ||
             status.defaultMissionResetLevel ||
             "10",
         ).trim();
@@ -2811,7 +2894,7 @@ function ControlView() {
     }
     if (onboardingPreviewOnly) {
       if (onboardingStep === 1) {
-        setOnboardingWhoami(null);
+        setOnboardingWalletSummary(null);
         setOnboardingMissions([]);
         setOnboardingMissionCatalog([]);
         setOnboardingOwnedCollections(new Set());
@@ -2848,7 +2931,7 @@ function ControlView() {
           const catalog = Array.isArray(response.missionCatalog)
             ? response.missionCatalog
             : [];
-          setOnboardingWhoami(response.whoami || null);
+          setOnboardingWalletSummary(response.walletSummary || null);
           setOnboardingMissions(missions);
           setOnboardingMissionCatalog(catalog);
           setOnboardingOwnedCollections(
@@ -2879,7 +2962,7 @@ function ControlView() {
       setOnboardingError("Onboarding fetch is not available in this build.");
       return;
     }
-    setOnboardingWhoami(null);
+    setOnboardingWalletSummary(null);
     setOnboardingMissions([]);
     setOnboardingMissionCatalog([]);
     setOnboardingOwnedCollections(new Set());
@@ -2908,7 +2991,7 @@ function ControlView() {
       const catalog = Array.isArray(response.missionCatalog)
         ? response.missionCatalog
         : [];
-      setOnboardingWhoami(response.whoami || null);
+      setOnboardingWalletSummary(response.walletSummary || null);
       setOnboardingMissions(missions);
       setOnboardingMissionCatalog(catalog);
       setOnboardingOwnedCollections(
@@ -3331,7 +3414,7 @@ function ControlView() {
                               <button
                                 type="button"
                                 key={`onboarding-slot-${slot}`}
-                                className="rounded-md border-1 border-white/10 bg-black/20 p-3 h-full flex flex-col gap-2 aspect-square"
+                                className="rounded-md border border-white/10 bg-black/20 p-3 h-full flex flex-col gap-2 aspect-square"
                                 onClick={() =>
                                   setOnboardingMissionPickerSlot(slot)
                                 }
@@ -3774,43 +3857,6 @@ function ControlView() {
                     )}
                   </div>
                 </div>
-                <div className="space-y-2">
-                  <div className="text-xs uppercase text-slate-300">
-                    Address
-                  </div>
-                  <div className="flex items-center justify-between gap-3 rounded-md border border-white/10 bg-black/20 px-3 py-2 text-sm">
-                    <span className="truncate">
-                      {secretModalBackup?.walletAddress || "—"}
-                    </span>
-                    <button
-                      type="button"
-                      className="fill-white flex items-center gap-1 text-xs btn btn-clear hover:fill-accent hover:text-accent hover:cursor-pointer"
-                      onClick={() =>
-                        void copyText(
-                          secretModalBackup?.walletAddress || "",
-                        ).then((ok) => {
-                          setSecretCopiedAddrLabel(
-                            ok ? "Copied" : "Copy failed",
-                          );
-                          setTimeout(
-                            () => setSecretCopiedAddrLabel(null),
-                            1200,
-                          );
-                        })
-                      }
-                      disabled={!secretModalBackup?.walletAddress}
-                    >
-                      <svg
-                        xmlns="http://www.w3.org/2000/svg"
-                        viewBox="0 0 640 640"
-                        className="w-4 h-4"
-                      >
-                        <path d="M352 512L128 512L128 288L176 288L176 224L128 224C92.7 224 64 252.7 64 288L64 512C64 547.3 92.7 576 128 576L352 576C387.3 576 416 547.3 416 512L416 464L352 464L352 512zM288 416L512 416C547.3 416 576 387.3 576 352L576 128C576 92.7 547.3 64 512 64L288 64C252.7 64 224 92.7 224 128L224 352C224 387.3 252.7 416 288 416z" />
-                      </svg>
-                      {secretCopiedAddrLabel || "Copy"}
-                    </button>
-                  </div>
-                </div>
               </div>
             </div>
           ) : null}
@@ -4103,13 +4149,14 @@ function ControlView() {
 
                 <section className="card grid grid-cols-[auto_min-content] gap-2 items-center !py-3">
                   <div
-                    className={`text-xs w-full truncate ${
+                    className={`text-xs w-full overflow-hidden whitespace-nowrap text-ellipsis ${
                       latestLog?.stream === "stderr"
                         ? "text-red-300"
                         : latestLog?.stream === "stdin"
                           ? "text-sky-300"
                           : "text-slate-300"
                     }`}
+                    title={latestLog ? latestLog.text : "No backend output yet."}
                   >
                     {latestLog ? latestLog.text : "No backend output yet."}
                   </div>
@@ -4124,7 +4171,7 @@ function ControlView() {
                       onClick={() => void activateNormalMode()}
                       type="button"
                     >
-                      <div className="space-y-2">
+                      <div className="space-y-2 text-shadow-md text-shadow-black/15">
                         <div className="z-10 mode__name font-bold text-2xl leading-7">
                           Normal Mode
                         </div>
@@ -4142,7 +4189,7 @@ function ControlView() {
                           Mission Mode
                         </div>
                         <div className="text-xs">
-                          Resets level {debugEnabled ? "5" : "10"}
+                          Resets level {missionModeButtonLevel}
                         </div>
                       </div>
                       <div class="mo-fire">
@@ -4679,12 +4726,15 @@ function ControlView() {
                       );
 
                       const slotImageLoading =
+                        entry?.pendingHydration === true ||
+                        entry?.slotHydrationState === "loading" ||
                         (status.startupMissionSlotsLoading === true &&
                           Boolean(status.running) &&
                           (!entry || !imgSrc)) ||
                         ((isStarting || status.watcherRunning === true) &&
                           hasAssignedNft &&
                           !imgSrc);
+                      const slotImageSrc = slotImageLoading ? null : imgSrc;
 
                       const slotAutomationEnabled =
                         missionActionEnabledBySlot[String(slot)] !== false;
@@ -4741,7 +4791,7 @@ function ControlView() {
                               } `}
                             >
                               <MissionSlotImage
-                                src={imgSrc}
+                                src={slotImageSrc}
                                 hasAssignedNft={hasAssignedNft}
                                 loading={isStarting || slotImageLoading}
                                 padded={usesKoreaTakeitArt}
@@ -5527,7 +5577,7 @@ function ControlView() {
                           : ""}
                       </span>
                     </div>
-                    <div className="space-y-1 text-xs text-slate-200 -mt-6 flex justify-between max-w-[270px] w-full">
+                    <div className="space-y-1 text-xs text-slate-200 -mt-6 flex justify-between max-w-67.5 w-full">
                       <div className="text-xs text-slate-300">
                         {stripYearFromCompetitionDate(
                           competitionNotificationModal.start || "Unknown",
@@ -5558,7 +5608,8 @@ function ControlView() {
                         setModal: setCompetitionNotificationModal,
                         updateConfig: applyConfigPatch,
                         onClosed: ({ competitionNumber }) => {
-                          if (!Number.isFinite(Number(competitionNumber))) return;
+                          if (!Number.isFinite(Number(competitionNumber)))
+                            return;
                           dismissedCompetitionNotificationIdsRef.current.add(
                             Number(competitionNumber),
                           );
@@ -5666,7 +5717,8 @@ function ControlView() {
                         setModal: setCompetitionNotificationModal,
                         updateConfig: applyConfigPatch,
                         onClosed: ({ competitionNumber }) => {
-                          if (!Number.isFinite(Number(competitionNumber))) return;
+                          if (!Number.isFinite(Number(competitionNumber)))
+                            return;
                           dismissedCompetitionNotificationIdsRef.current.add(
                             Number(competitionNumber),
                           );
@@ -6057,7 +6109,7 @@ function CliView() {
                   className={`log-line ${entry.stream}`}
                   key={`${entry.at}-${index}`}
                 >
-                  {entry.text}
+                  {renderLogText(entry?.text)}
                 </pre>
               ))
             )}

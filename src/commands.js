@@ -10,7 +10,7 @@ const {
 } = require("./runtime-defaults");
 
 function createCommandHandler(ctx, logger, actions, configApi, services = {}) {
-  const { logWithTimestamp, clearLogBuffer } = logger;
+  const { logWithTimestamp, clearLogBuffer, formatTaggedLog } = logger;
   const {
     runLoginFlow,
     logout,
@@ -36,7 +36,9 @@ function createCommandHandler(ctx, logger, actions, configApi, services = {}) {
   }
 
   async function quitWholeApp({ reason = "user" } = {}) {
-    logWithTimestamp("[KILL -9] 🦒 Korea loves you! Goodbye! 👋");
+    logWithTimestamp(
+      formatTaggedLog("KILL -9", "🦒", "Korea loves you! Goodbye! 👋"),
+    );
     try {
       ctx.watchLoopEnabled = false;
       ctx.config.watchLoopEnabled = false;
@@ -62,22 +64,40 @@ function createCommandHandler(ctx, logger, actions, configApi, services = {}) {
 
   function showHelp() {
     logWithTimestamp(
-      "[HELP] h/help, clear, status, i, login, logout, check, c, r, reset20, 20r [on|off], mm [off|on|<level>], debug [on|off], pause, resume, q",
+      formatTaggedLog(
+        "HELP",
+        "💡",
+        "h/help, clear, status, i, login, logout, check, c, r, reset20, 20r [on|off], mm [off|on|<level>], debug [on|off], pause, resume, q",
+      ),
     );
     logWithTimestamp(
-      "[HELP] signer [status|doctor|setup|create|reveal|app_wallet|manual|dapp|import [path-or-key]|remove|unlock|lock]",
+      formatTaggedLog(
+        "HELP",
+        "💡",
+        "signer [status|doctor|setup|create|reveal|app_wallet|manual|dapp|import [path-or-key]|remove|unlock|lock]",
+      ),
     );
     logWithTimestamp(
-      `[HELP] auth mode: ${ctx.interactiveAuth ? "interactive headless URL" : "token-only"}`,
+      formatTaggedLog(
+        "HELP",
+        "💡",
+        `auth mode: ${ctx.interactiveAuth ? "interactive headless URL" : "token-only"}`,
+      ),
     );
   }
 
   function showStatus() {
     logWithTimestamp(
-      `[INFO] idle=${ctx.isIdle} auth=${ctx.isAuthenticated} debug=${ctx.debugMode} interactiveAuth=${ctx.interactiveAuth} watch=${ctx.watchLoopEnabled}`,
+      formatTaggedLog(
+        "INFO",
+        "ℹ️",
+        `idle=${ctx.isIdle} auth=${ctx.isAuthenticated} debug=${ctx.debugMode} interactiveAuth=${ctx.interactiveAuth} watch=${ctx.watchLoopEnabled}`,
+      ),
     );
     if (signer) {
-      logWithTimestamp(`[INFO] signer ${signer.modeSummary()}`);
+      logWithTimestamp(
+        formatTaggedLog("INFO", "🔑", `signer ${signer.modeSummary()}`),
+      );
     }
   }
 
@@ -174,7 +194,9 @@ function createCommandHandler(ctx, logger, actions, configApi, services = {}) {
   async function startWatchLoopWithDelay({ reason = "start" } = {}) {
     if (ctx.watcherRunning || ctx.watchStartPending) return;
     ctx.watchStartPending = true;
-    logWithTimestamp(`[WATCH] ▶ Starting now (${reason}).`);
+    logWithTimestamp(
+      formatTaggedLog("WATCH", "▶️", `Starting now (${reason}).`),
+    );
     ctx.watchStartPending = false;
     void startWatchLoop();
   }
@@ -247,7 +269,11 @@ function createCommandHandler(ctx, logger, actions, configApi, services = {}) {
       }
       if (looksLikeSignerImportValue(normalized)) {
         logWithTimestamp(
-          "[SIGNER] Detected signer import data pasted into a yes/no prompt. Continuing import flow.",
+          formatTaggedLog(
+            "SIGNER",
+            "🔑",
+            "Detected signer import data pasted into a yes/no prompt. Continuing import flow.",
+          ),
         );
         return { ok: true, capturedImportValue: normalized };
       }
@@ -257,7 +283,11 @@ function createCommandHandler(ctx, logger, actions, configApi, services = {}) {
     async function runAppWalletOnboardingPrompt() {
       if (!signer || ctx.signerConfig?.walletRef) return;
       logWithTimestamp(
-        "[SIGNER] No app_wallet is set up yet. Default is to create a new burner funding wallet.",
+        formatTaggedLog(
+          "SIGNER",
+          "🔑",
+          "No app_wallet is set up yet. Default is to create a new burner funding wallet.",
+        ),
       );
       const action = (
         await askQuestion(
@@ -272,14 +302,20 @@ function createCommandHandler(ctx, logger, actions, configApi, services = {}) {
         return;
       }
       if (action === "skip") {
-        logWithTimestamp("[SIGNER] Setup skipped.");
+        logWithTimestamp(formatTaggedLog("SIGNER", "↩️", "Setup skipped."));
         return;
       }
       if (action === "import") {
         await runSignerImportPrompt();
         return;
       }
-      logWithTimestamp("[SIGNER] Invalid choice. Use create, import, or skip.");
+      logWithTimestamp(
+        formatTaggedLog(
+          "SIGNER",
+          "❌",
+          "Invalid choice. Use create, import, or skip.",
+        ),
+      );
     }
 
     async function runSignerCreatePrompt() {
@@ -288,7 +324,9 @@ function createCommandHandler(ctx, logger, actions, configApi, services = {}) {
         "Create a new burner app wallet now? yes/no ",
       );
       if (!riskOk) {
-        logWithTimestamp("[SIGNER] Wallet creation cancelled.");
+        logWithTimestamp(
+          formatTaggedLog("SIGNER", "↩️", "Wallet creation cancelled."),
+        );
         return;
       }
       const replaceOk =
@@ -298,7 +336,9 @@ function createCommandHandler(ctx, logger, actions, configApi, services = {}) {
           "Replace the existing imported signer vault if one exists? yes/no ",
         ));
       if (!replaceOk) {
-        logWithTimestamp("[SIGNER] Wallet creation cancelled.");
+        logWithTimestamp(
+          formatTaggedLog("SIGNER", "↩️", "Wallet creation cancelled."),
+        );
         return;
       }
       try {
@@ -306,13 +346,23 @@ function createCommandHandler(ctx, logger, actions, configApi, services = {}) {
         const created = await signer.createGeneratedWallet();
         flushConfig(ctx, logger.logDebug);
         await refreshFundingWalletHeader();
-        logWithTimestamp(`[SIGNER] Address: ${created.walletAddress}`);
-        logWithTimestamp(`[SIGNER] Recovery phrase: ${created.mnemonic}`);
         logWithTimestamp(
-          "[SIGNER] Save that recovery phrase securely. You can show it again later with 'signer reveal'.",
+          formatTaggedLog("SIGNER", "🔑", `Address: ${created.walletAddress}`),
+        );
+        logWithTimestamp(
+          formatTaggedLog("SIGNER", "🔑", `Recovery phrase: ${created.mnemonic}`),
+        );
+        logWithTimestamp(
+          formatTaggedLog(
+            "SIGNER",
+            "⚠️",
+            "Save that recovery phrase securely. You can show it again later with 'signer reveal'.",
+          ),
         );
       } catch (error) {
-        logWithTimestamp(`[SIGNER] ❌ Wallet creation failed: ${error.message}`);
+        logWithTimestamp(
+          formatTaggedLog("SIGNER", "❌", `Wallet creation failed: ${error.message}`),
+        );
       }
     }
 
@@ -321,7 +371,7 @@ function createCommandHandler(ctx, logger, actions, configApi, services = {}) {
         "app_wallet mode is for a dedicated burner wallet only. Continue with key import? This will replace the current imported app wallet if one exists. yes/no ",
       );
       if (!riskResult.ok) {
-        logWithTimestamp("[SIGNER] Import cancelled.");
+        logWithTimestamp(formatTaggedLog("SIGNER", "↩️", "Import cancelled."));
         return;
       }
       const replaceOk =
@@ -331,7 +381,7 @@ function createCommandHandler(ctx, logger, actions, configApi, services = {}) {
           "Replace the existing imported signer vault + OS-stored vault key if one exists? yes/no ",
         ));
       if (!replaceOk) {
-        logWithTimestamp("[SIGNER] Import cancelled.");
+        logWithTimestamp(formatTaggedLog("SIGNER", "↩️", "Import cancelled."));
         return;
       }
       const pasted =
@@ -341,7 +391,7 @@ function createCommandHandler(ctx, logger, actions, configApi, services = {}) {
           "Paste your private key, recovery phrase, keypair text, or key array, then press enter: ",
         ));
       if (!pasted) {
-        logWithTimestamp("[SIGNER] Import cancelled.");
+        logWithTimestamp(formatTaggedLog("SIGNER", "↩️", "Import cancelled."));
         return;
       }
       try {
@@ -350,7 +400,9 @@ function createCommandHandler(ctx, logger, actions, configApi, services = {}) {
         flushConfig(ctx, logger.logDebug);
         await refreshFundingWalletHeader();
       } catch (error) {
-        logWithTimestamp(`[SIGNER] ❌ Import failed: ${error.message}`);
+        logWithTimestamp(
+          formatTaggedLog("SIGNER", "❌", `Import failed: ${error.message}`),
+        );
       }
     }
     async function runFirstTimeSignerSetup({ force = false } = {}) {
@@ -372,7 +424,11 @@ function createCommandHandler(ctx, logger, actions, configApi, services = {}) {
         return;
       }
       logWithTimestamp(
-        "[SIGNER] First run setup: choose app_wallet, manual, or dapp.",
+        formatTaggedLog(
+          "SIGNER",
+          "🔑",
+          "First run setup: choose app_wallet, manual, or dapp.",
+        ),
       );
       const choice = (
         await askQuestion(
@@ -385,7 +441,11 @@ function createCommandHandler(ctx, logger, actions, configApi, services = {}) {
       const selected = choice || "app_wallet";
       if (!["app_wallet", "manual", "dapp"].includes(selected)) {
         logWithTimestamp(
-          "[SIGNER] Invalid mode. Use app_wallet, manual, or dapp.",
+          formatTaggedLog(
+            "SIGNER",
+            "❌",
+            "Invalid mode. Use app_wallet, manual, or dapp.",
+          ),
         );
         return;
       }
@@ -400,13 +460,21 @@ function createCommandHandler(ctx, logger, actions, configApi, services = {}) {
       }
       if (selected === "manual") {
         logWithTimestamp(
-          "[SIGNER] Manual mode selected. When a tx/reset needs approval, the missions page will open for you to handle it yourself.",
+          formatTaggedLog(
+            "SIGNER",
+            "🖐️",
+            "Manual mode selected. When a tx/reset needs approval, the missions page will open for you to handle it yourself.",
+          ),
         );
         return;
       }
       if (selected === "dapp") {
         logWithTimestamp(
-          "[SIGNER] dapp mode selected. Prepared actions will open the bridge signing URL in your browser wallet.",
+          formatTaggedLog(
+            "SIGNER",
+            "🌐",
+            "dapp mode selected. Prepared actions will open the bridge signing URL in your browser wallet.",
+          ),
         );
       }
     }
@@ -415,7 +483,7 @@ function createCommandHandler(ctx, logger, actions, configApi, services = {}) {
     const handlers = {
       clear: async () => {
         clearLogBuffer();
-        logWithTimestamp("[INFO] Log buffer cleared.");
+        logWithTimestamp(formatTaggedLog("INFO", "🧹", "Log buffer cleared."));
       },
       h: async () => showHelp(),
       help: async () => showHelp(),
@@ -439,65 +507,137 @@ function createCommandHandler(ctx, logger, actions, configApi, services = {}) {
         if (typeof logout === "function") {
           logout();
         }
-        logWithTimestamp("[AUTH] Logged out. Saved token cleared.");
+        logWithTimestamp(
+          formatTaggedLog("AUTH", "🔐", "Logged out. Saved token cleared."),
+        );
       },
       check: async () => {
         await runInitialChecks();
       },
       c: async () => {
         if (manualOverrideInFlight) {
-          logWithTimestamp("[WATCH] ℹ️ Manual override already running; ignoring duplicate 'c'.");
+          logWithTimestamp(
+            formatTaggedLog(
+              "WATCH",
+              "ℹ️",
+              "Manual override already running; ignoring duplicate 'c'.",
+            ),
+          );
           return;
         }
         if (!ctx.isAuthenticated) {
-          logWithTimestamp("[WATCH] ❌ Not authenticated. Run 'login' or 'check' first.");
+          logWithTimestamp(
+            formatTaggedLog(
+              "WATCH",
+              "❌",
+              "Not authenticated. Run 'login' or 'check' first.",
+            ),
+          );
           return;
         }
         manualOverrideInFlight = true;
         if (ctx.watcherRunning) {
           try {
-            logWithTimestamp("[WATCH] ⏸️ Manual override: pausing watcher and waiting for current cycle...");
+            logWithTimestamp(
+              formatTaggedLog(
+                "WATCH",
+                "⏸️",
+                "Manual override: pausing watcher and waiting for current cycle...",
+              ),
+            );
             await stopWatchLoop({ persist: false, waitForCycle: true });
             const { claimed, assigned } = await runManualProcess({ waitForCycle: false });
-            logWithTimestamp(`[WATCH] ✅ Manual process complete: claimed=${claimed} assigned=${assigned}.`);
+            logWithTimestamp(
+              formatTaggedLog(
+                "WATCH",
+                "✅",
+                `Manual process complete: claimed=${claimed} assigned=${assigned}.`,
+              ),
+            );
           } catch (error) {
-            logWithTimestamp(`[WATCH] ❌ Manual process failed: ${error.message}`);
+            logWithTimestamp(
+              formatTaggedLog(
+                "WATCH",
+                "❌",
+                `Manual process failed: ${error.message}`,
+              ),
+            );
           } finally {
             ctx.watchLoopEnabled = true;
             manualOverrideInFlight = false;
-            logWithTimestamp("[WATCH] ▶️ Resuming watcher after manual override...");
+            logWithTimestamp(
+              formatTaggedLog(
+                "WATCH",
+                "▶️",
+                "Resuming watcher after manual override...",
+              ),
+            );
             void startWatchLoop();
           }
           return;
         }
         try {
           const { claimed, assigned } = await runManualProcess();
-          logWithTimestamp(`[WATCH] ✅ Manual process complete: claimed=${claimed} assigned=${assigned}.`);
+          logWithTimestamp(
+            formatTaggedLog(
+              "WATCH",
+              "✅",
+              `Manual process complete: claimed=${claimed} assigned=${assigned}.`,
+            ),
+          );
         } catch (error) {
-          logWithTimestamp(`[WATCH] ❌ Manual process failed: ${error.message}`);
+          logWithTimestamp(
+            formatTaggedLog(
+              "WATCH",
+              "❌",
+              `Manual process failed: ${error.message}`,
+            ),
+          );
         } finally {
           manualOverrideInFlight = false;
         }
       },
       r: async () => {
         if (!ctx.isAuthenticated) {
-          logWithTimestamp("[RESET] ❌ Not authenticated. Run 'login' or 'check' first.");
+          logWithTimestamp(
+            formatTaggedLog(
+              "RESET",
+              "❌",
+              "Not authenticated. Run 'login' or 'check' first.",
+            ),
+          );
           return;
         }
         try {
           const { triggered } = await runManualResetCheck();
           logWithTimestamp(
             triggered
-              ? "[RESET] ✅ Manual reset check completed."
-              : "[RESET] ℹ️ Manual reset check found nothing to do.",
+              ? formatTaggedLog("RESET", "✅", "Manual reset check completed.")
+              : formatTaggedLog(
+                  "RESET",
+                  "ℹ️",
+                  "Manual reset check found nothing to do.",
+                ),
           );
         } catch (error) {
-          logWithTimestamp(`[RESET] ❌ Manual reset check failed: ${error.message}`);
+          logWithTimestamp(
+            formatTaggedLog(
+              "RESET",
+              "❌",
+              `Manual reset check failed: ${error.message}`,
+            ),
+          );
         }
       },
       reset20: async () => {
         if (!ctx.isAuthenticated) {
-          logWithTimestamp("[RESET] ❌ Not authenticated. Run 'login' or 'check' first.");
+          logWithTimestamp(
+            formatTaggedLog(
+              "RESET",
+              "❌",
+              "Not authenticated. Run 'login' or 'check' first.",
+            ),
+          );
           return;
         }
         const previousLevel20 = ctx.level20ResetEnabled;
@@ -511,11 +651,21 @@ function createCommandHandler(ctx, logger, actions, configApi, services = {}) {
           const { triggered } = await runManualResetCheck();
           logWithTimestamp(
             triggered
-              ? "[RESET] ✅ reset20 check completed."
-              : "[RESET] ℹ️ reset20 found nothing to do.",
+              ? formatTaggedLog("RESET", "✅", "reset20 check completed.")
+              : formatTaggedLog(
+                  "RESET",
+                  "ℹ️",
+                  "reset20 found nothing to do.",
+                ),
           );
         } catch (error) {
-          logWithTimestamp(`[RESET] ❌ reset20 failed: ${error.message}`);
+          logWithTimestamp(
+            formatTaggedLog(
+              "RESET",
+              "❌",
+              `reset20 failed: ${error.message}`,
+            ),
+          );
         } finally {
           ctx.level20ResetEnabled = previousLevel20;
           ctx.missionModeEnabled = previousMissionMode;
@@ -538,14 +688,14 @@ function createCommandHandler(ctx, logger, actions, configApi, services = {}) {
         ctx.config.watchLoopEnabled = false;
         flushConfig(ctx, logger.logDebug);
         if (ctx.guiBridge?.emitNow) ctx.guiBridge.emitNow();
-        logWithTimestamp("[WATCH] ⏸️ Paused.");
+        logWithTimestamp(formatTaggedLog("WATCH", "⏸️", "Paused."));
       },
       resume: async () => {
         ctx.watchLoopEnabled = true;
         delete ctx.config.watchLoopEnabled;
         flushConfig(ctx, logger.logDebug);
         if (ctx.guiBridge?.emitNow) ctx.guiBridge.emitNow();
-        logWithTimestamp("[WATCH] ▶️ Resumed.");
+        logWithTimestamp(formatTaggedLog("WATCH", "▶️", "Resumed."));
         await startWatchLoopWithDelay({ reason: "resume" });
       },
       status: async () => showStatus(),
@@ -585,7 +735,9 @@ function createCommandHandler(ctx, logger, actions, configApi, services = {}) {
       },
       signer: async (raw) => {
         if (!signer) {
-          logWithTimestamp("[SIGNER] ❌ Signer service unavailable.");
+          logWithTimestamp(
+            formatTaggedLog("SIGNER", "❌", "Signer service unavailable."),
+          );
           return;
         }
         const parts = String(raw || "")
@@ -593,18 +745,24 @@ function createCommandHandler(ctx, logger, actions, configApi, services = {}) {
           .split(/\s+/);
         const arg = parts[1];
         if (!arg) {
-          logWithTimestamp(`[SIGNER] ${signer.modeSummary()}`);
+          logWithTimestamp(
+            formatTaggedLog("SIGNER", "🔑", signer.modeSummary()),
+          );
           return;
         }
         if (arg === "status") {
-          logWithTimestamp(`[SIGNER] ${signer.modeSummary()}`);
+          logWithTimestamp(
+            formatTaggedLog("SIGNER", "🔑", signer.modeSummary()),
+          );
           return;
         }
         if (arg === "doctor") {
           try {
             await signer.doctor();
           } catch (error) {
-            logWithTimestamp(`[SIGNER] ❌ Doctor failed: ${error.message}`);
+            logWithTimestamp(
+              formatTaggedLog("SIGNER", "❌", `Doctor failed: ${error.message}`),
+            );
           }
           return;
         }
@@ -622,26 +780,48 @@ function createCommandHandler(ctx, logger, actions, configApi, services = {}) {
             "Reveal the app wallet recovery details in this terminal? yes/no ",
           );
           if (!ok) {
-            logWithTimestamp("[SIGNER] Reveal cancelled.");
+            logWithTimestamp(formatTaggedLog("SIGNER", "↩️", "Reveal cancelled."));
             return;
           }
           try {
             const backup = await signer.revealWalletBackup();
-            logWithTimestamp(`[SIGNER] Address: ${backup.walletAddress || "unknown"}`);
+            logWithTimestamp(
+              formatTaggedLog(
+                "SIGNER",
+                "🔑",
+                `Address: ${backup.walletAddress || "unknown"}`,
+              ),
+            );
             if (backup.derivationPath) {
               logWithTimestamp(
-                `[SIGNER] Derivation path: ${backup.derivationPath}`,
+                formatTaggedLog(
+                  "SIGNER",
+                  "🔑",
+                  `Derivation path: ${backup.derivationPath}`,
+                ),
               );
             }
             if (backup.mnemonic) {
-              logWithTimestamp(`[SIGNER] Recovery phrase: ${backup.mnemonic}`);
+              logWithTimestamp(
+                formatTaggedLog(
+                  "SIGNER",
+                  "🔑",
+                  `Recovery phrase: ${backup.mnemonic}`,
+                ),
+              );
             } else {
               logWithTimestamp(
-                "[SIGNER] Recovery phrase backup is not available for this wallet.",
+                formatTaggedLog(
+                  "SIGNER",
+                  "ℹ️",
+                  "Recovery phrase backup is not available for this wallet.",
+                ),
               );
             }
           } catch (error) {
-            logWithTimestamp(`[SIGNER] ❌ Reveal failed: ${error.message}`);
+            logWithTimestamp(
+              formatTaggedLog("SIGNER", "❌", `Reveal failed: ${error.message}`),
+            );
           }
           return;
         }
@@ -651,14 +831,16 @@ function createCommandHandler(ctx, logger, actions, configApi, services = {}) {
             "Remove the imported app wallet vault and OS-stored vault key? yes/no ",
           );
           if (!ok) {
-            logWithTimestamp("[SIGNER] Remove cancelled.");
+            logWithTimestamp(formatTaggedLog("SIGNER", "↩️", "Remove cancelled."));
             return;
           }
           try {
             await signer.removeImportedWallet();
             flushConfig(ctx, logger.logDebug);
           } catch (error) {
-            logWithTimestamp(`[SIGNER] ❌ Remove failed: ${error.message}`);
+            logWithTimestamp(
+              formatTaggedLog("SIGNER", "❌", `Remove failed: ${error.message}`),
+            );
           }
           return;
         }
@@ -672,7 +854,7 @@ function createCommandHandler(ctx, logger, actions, configApi, services = {}) {
             "app_wallet mode is for a dedicated burner wallet only. Continue with import? This will replace the current imported app wallet if one exists. yes/no ",
           );
           if (!riskResult.ok) {
-            logWithTimestamp("[SIGNER] Import cancelled.");
+            logWithTimestamp(formatTaggedLog("SIGNER", "↩️", "Import cancelled."));
             return;
           }
           const replaceOk =
@@ -682,7 +864,7 @@ function createCommandHandler(ctx, logger, actions, configApi, services = {}) {
               "Replace the existing imported signer vault + OS-stored vault key if one exists? yes/no ",
             ));
           if (!replaceOk) {
-            logWithTimestamp("[SIGNER] Import cancelled.");
+            logWithTimestamp(formatTaggedLog("SIGNER", "↩️", "Import cancelled."));
             return;
           }
           const effectiveImportValue =
@@ -698,7 +880,9 @@ function createCommandHandler(ctx, logger, actions, configApi, services = {}) {
               flushConfig(ctx, logger.logDebug);
               await refreshFundingWalletHeader();
             } catch (error) {
-              logWithTimestamp(`[SIGNER] ❌ Import failed: ${error.message}`);
+              logWithTimestamp(
+                formatTaggedLog("SIGNER", "❌", `Import failed: ${error.message}`),
+              );
             }
             return;
           }
@@ -707,7 +891,7 @@ function createCommandHandler(ctx, logger, actions, configApi, services = {}) {
             "app_wallet mode is for a dedicated burner wallet only. Continue with file import? This will replace the current imported app wallet if one exists. yes/no ",
           );
           if (!fileRiskOk) {
-            logWithTimestamp("[SIGNER] Import cancelled.");
+            logWithTimestamp(formatTaggedLog("SIGNER", "↩️", "Import cancelled."));
             return;
           }
           const fileReplaceOk =
@@ -717,7 +901,7 @@ function createCommandHandler(ctx, logger, actions, configApi, services = {}) {
               "Replace the existing imported signer vault + OS-stored vault key if one exists? yes/no ",
             ));
           if (!fileReplaceOk) {
-            logWithTimestamp("[SIGNER] Import cancelled.");
+            logWithTimestamp(formatTaggedLog("SIGNER", "↩️", "Import cancelled."));
             return;
           }
           try {
@@ -726,7 +910,9 @@ function createCommandHandler(ctx, logger, actions, configApi, services = {}) {
             flushConfig(ctx, logger.logDebug);
             await refreshFundingWalletHeader();
           } catch (error) {
-            logWithTimestamp(`[SIGNER] ❌ Import failed: ${error.message}`);
+            logWithTimestamp(
+              formatTaggedLog("SIGNER", "❌", `Import failed: ${error.message}`),
+            );
           }
           return;
         }
@@ -734,7 +920,9 @@ function createCommandHandler(ctx, logger, actions, configApi, services = {}) {
           try {
             await signer.unlock();
           } catch (error) {
-            logWithTimestamp(`[SIGNER] ❌ Unlock failed: ${error.message}`);
+            logWithTimestamp(
+              formatTaggedLog("SIGNER", "❌", `Unlock failed: ${error.message}`),
+            );
           }
           return;
         }
@@ -750,7 +938,11 @@ function createCommandHandler(ctx, logger, actions, configApi, services = {}) {
           arg !== "dapp"
         ) {
           logWithTimestamp(
-            "[SIGNER] ❌ Usage: signer [status|doctor|setup|create|reveal|app_wallet|manual|dapp|import [path-or-key]|remove|unlock|lock]",
+            formatTaggedLog(
+              "SIGNER",
+              "❌",
+              "Usage: signer [status|doctor|setup|create|reveal|app_wallet|manual|dapp|import [path-or-key]|remove|unlock|lock]",
+            ),
           );
           return;
         }
@@ -824,33 +1016,43 @@ function createCommandHandler(ctx, logger, actions, configApi, services = {}) {
           ? `mission-${ctx.currentMissionResetLevel}`
           : "normal";
         flushConfig(ctx, logger.logDebug);
+        if (ctx.guiBridge?.emitNow) ctx.guiBridge.emitNow();
         logWithTimestamp(
-          `[MODE] Mission level resets ${ctx.level20ResetEnabled ? "enabled" : "disabled"}.`,
+          formatTaggedLog(
+            "MODE",
+            "🎛️",
+            `Mission level resets ${ctx.level20ResetEnabled ? "enabled" : "disabled"}.`,
+          ),
         );
         logWithTimestamp(
-          ctx.level20ResetEnabled
-            ? `[MODE] Normal mode enabled (mission resets at level 20).`
-            : `[MODE] Normal mode disabled.`,
+          formatTaggedLog(
+            "MODE",
+            "🎛️",
+            ctx.level20ResetEnabled
+              ? "Normal mode enabled (mission resets at level 20)."
+              : "Normal mode disabled.",
+          ),
         );
         return;
       }
       if (cmd === "mm" || cmd.startsWith("mm ")) {
         const arg = cmd.slice(2).trim();
-        if (!arg) {
-          ctx.missionModeEnabled = !ctx.missionModeEnabled;
-        } else if (arg === "on") {
-          ctx.missionModeEnabled = true;
-        } else if (arg === "off") {
+      if (!arg) {
+        ctx.missionModeEnabled = !ctx.missionModeEnabled;
+      } else if (arg === "on") {
+        ctx.missionModeEnabled = true;
+      } else if (arg === "off") {
           ctx.missionModeEnabled = false;
         } else {
           const n = Number(arg);
           if (!Number.isFinite(n) || n <= 0) {
-            logWithTimestamp("Usage: mm [off|on|<level>]");
-            return;
-          }
-          ctx.currentMissionResetLevel = String(Math.floor(n));
-          ctx.missionModeEnabled = true;
+          logWithTimestamp("Usage: mm [off|on|<level>]");
+          return;
         }
+        ctx.currentMissionResetLevel = String(Math.floor(n));
+        ctx.missionModeResetLevel = String(Math.floor(n));
+        ctx.missionModeEnabled = true;
+      }
         if (ctx.missionModeEnabled) {
           ctx.level20ResetEnabled = false;
         }
@@ -861,15 +1063,28 @@ function createCommandHandler(ctx, logger, actions, configApi, services = {}) {
             ctx.runtimeDefaults?.missionResetLevel ||
             "10",
         );
+        ctx.config.missionModeResetLevel = String(
+          ctx.missionModeResetLevel ||
+            ctx.config.missionModeResetLevel ||
+            ctx.currentMissionResetLevel ||
+            process.env.PBP_DEFAULT_MISSION_RESET_LEVEL ||
+            ctx.runtimeDefaults?.missionResetLevel ||
+            "10",
+        );
         ctx.config.level20ResetEnabled = ctx.level20ResetEnabled;
         ctx.currentMode = ctx.missionModeEnabled
           ? `mission-${ctx.currentMissionResetLevel}`
           : "normal";
         flushConfig(ctx, logger.logDebug);
+        if (ctx.guiBridge?.emitNow) ctx.guiBridge.emitNow();
         logWithTimestamp(
-          ctx.missionModeEnabled
-            ? `[MODE] Mission mode enabled (mission resets at level ${ctx.currentMissionResetLevel}).`
-            : `[MODE] Mission mode disabled.`,
+          formatTaggedLog(
+            "MODE",
+            "🎛️",
+            ctx.missionModeEnabled
+              ? `Mission mode enabled (mission resets at level ${ctx.currentMissionResetLevel}).`
+              : "Mission mode disabled.",
+          ),
         );
         return;
       }
@@ -877,7 +1092,13 @@ function createCommandHandler(ctx, logger, actions, configApi, services = {}) {
         const arg = cmd.slice(2).trim();
         if (!arg) {
           if (ctx.debugMode !== true) {
-            logWithTimestamp("[MODE] Per-slot mission reset overrides require debug mode.");
+            logWithTimestamp(
+              formatTaggedLog(
+                "MODE",
+                "🎛️",
+                "Per-slot mission reset overrides require debug mode.",
+              ),
+            );
             return;
           }
           ctx.missionResetPerSlotModeEnabled =
@@ -886,7 +1107,13 @@ function createCommandHandler(ctx, logger, actions, configApi, services = {}) {
           ctx.missionResetPerSlotModeEnabled = false;
         } else if (arg === "on") {
           if (ctx.debugMode !== true) {
-            logWithTimestamp("[MODE] Per-slot mission reset overrides require debug mode.");
+            logWithTimestamp(
+              formatTaggedLog(
+                "MODE",
+                "🎛️",
+                "Per-slot mission reset overrides require debug mode.",
+              ),
+            );
             return;
           }
           ctx.missionResetPerSlotModeEnabled = true;
@@ -932,9 +1159,13 @@ function createCommandHandler(ctx, logger, actions, configApi, services = {}) {
         };
         flushConfig(ctx, logger.logDebug);
         logWithTimestamp(
-          ctx.missionResetPerSlotModeEnabled
-            ? "[MODE] Per-slot mission reset overrides enabled."
-            : "[MODE] Per-slot mission reset overrides disabled.",
+          formatTaggedLog(
+            "MODE",
+            "🎛️",
+            ctx.missionResetPerSlotModeEnabled
+              ? "Per-slot mission reset overrides enabled."
+              : "Per-slot mission reset overrides disabled.",
+          ),
         );
         return;
       }

@@ -102,7 +102,7 @@ The app sends:
 - `feature_used` events for claims, resets, spend, rentals, and reset-backed assignments
 - `crash` events for uncaught Electron main-process failures
 
-The nickname is taken from the current user's MCP wallet summary / whoami display
+The nickname is taken from the current user's MCP wallet summary display
 name, and the wallet id is sent alongside it when available.
 
 ## First Run Wizard

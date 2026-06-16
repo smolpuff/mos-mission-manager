@@ -58,10 +58,15 @@ export default function DebugPage({
   const [throttleLogError, setThrottleLogError] = useState("");
   const logViewportRef = useRef(null);
   const pinnedToBottomRef = useRef(true);
-  const throttleLogAvailable =
-    throttleDebug &&
-    typeof throttleDebug === "object" &&
-    String(throttleDebug.logPath || "").trim().length > 0;
+  const canAccessThrottleLog = Boolean(bridge?.getThrottleDebugLog);
+
+  const applyThrottleLogResult = (result, fallbackPath = "") => {
+    setThrottleLogPath(String(result?.path || fallbackPath || ""));
+    setThrottleLog(String(result?.text || ""));
+    setThrottleLogError(
+      result?.ok === false ? String(result?.error || "Failed to read log.") : "",
+    );
+  };
 
   const handleLogScroll = () => {
     const node = logViewportRef.current;
@@ -121,20 +126,13 @@ export default function DebugPage({
   useEffect(() => {
     let cancelled = false;
     const loadThrottleLog = async () => {
-      if (!throttleLogAvailable) return;
-      if (!bridge?.getThrottleDebugLog) return;
+      if (!canAccessThrottleLog) return;
       setThrottleLogBusy(true);
       setThrottleLogError("");
       try {
         const result = await bridge.getThrottleDebugLog();
         if (cancelled) return;
-        setThrottleLogPath(String(result?.path || ""));
-        setThrottleLog(String(result?.text || ""));
-        setThrottleLogError(
-          result?.ok === false
-            ? String(result?.error || "Failed to read log.")
-            : "",
-        );
+        applyThrottleLogResult(result, throttleLogPath);
       } catch (error) {
         if (cancelled) return;
         setThrottleLogError(String(error?.message || error));
@@ -146,25 +144,18 @@ export default function DebugPage({
     return () => {
       cancelled = true;
     };
-  }, [bridge, throttleLogAvailable]);
+  }, [bridge, canAccessThrottleLog]);
 
   useEffect(() => {
     if (lastEvent?.type !== "throttle_notice") return;
-    if (!throttleLogAvailable) return;
-    if (!bridge?.getThrottleDebugLog) return;
+    if (!canAccessThrottleLog) return;
     let cancelled = false;
     const reloadThrottleLog = async () => {
       setThrottleLogBusy(true);
       try {
         const result = await bridge.getThrottleDebugLog();
         if (cancelled) return;
-        setThrottleLogPath(String(result?.path || ""));
-        setThrottleLog(String(result?.text || ""));
-        setThrottleLogError(
-          result?.ok === false
-            ? String(result?.error || "Failed to read log.")
-            : "",
-        );
+        applyThrottleLogResult(result, throttleLogPath);
       } catch (error) {
         if (cancelled) return;
         setThrottleLogError(String(error?.message || error));
@@ -176,22 +167,15 @@ export default function DebugPage({
     return () => {
       cancelled = true;
     };
-  }, [bridge, lastEvent, throttleLogAvailable]);
+  }, [bridge, lastEvent, canAccessThrottleLog]);
 
   const refreshThrottleLog = async () => {
-    if (!throttleLogAvailable) return;
-    if (!bridge?.getThrottleDebugLog) return;
+    if (!canAccessThrottleLog) return;
     setThrottleLogBusy(true);
     setThrottleLogError("");
     try {
       const result = await bridge.getThrottleDebugLog();
-      setThrottleLogPath(String(result?.path || ""));
-      setThrottleLog(String(result?.text || ""));
-      setThrottleLogError(
-        result?.ok === false
-          ? String(result?.error || "Failed to read log.")
-          : "",
-      );
+      applyThrottleLogResult(result, throttleLogPath);
     } catch (error) {
       setThrottleLogError(String(error?.message || error));
     } finally {
@@ -200,7 +184,7 @@ export default function DebugPage({
   };
 
   const deleteThrottleLog = async () => {
-    if (!throttleLogAvailable) return;
+    if (!canAccessThrottleLog) return;
     if (!bridge?.deleteThrottleDebugLog) return;
     setThrottleLogBusy(true);
     setThrottleLogError("");
@@ -332,7 +316,7 @@ export default function DebugPage({
             <button
               type="button"
               className="shrink-0 rounded-md border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] leading-tight text-slate-100 hover:border-white/20 hover:bg-white/10 disabled:opacity-50"
-              disabled={throttleLogBusy || !throttleLogAvailable}
+              disabled={throttleLogBusy || !canAccessThrottleLog}
               onClick={() => void refreshThrottleLog()}
             >
               {throttleLogBusy ? "Refreshing..." : "Refresh Log"}
@@ -340,7 +324,7 @@ export default function DebugPage({
             <button
               type="button"
               className="shrink-0 rounded-md border border-rose-400/20 bg-rose-400/10 px-2 py-0.5 text-[10px] leading-tight text-rose-100 hover:border-rose-400/35 hover:bg-rose-400/15 disabled:opacity-50"
-              disabled={throttleLogBusy || !throttleLogAvailable}
+              disabled={throttleLogBusy || !canAccessThrottleLog}
               onClick={() => void deleteThrottleLog()}
             >
               {throttleLogBusy ? "Working..." : "Delete Log"}

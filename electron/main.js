@@ -170,6 +170,7 @@ const backendStatus = {
   defaultMissionResetLevel: null,
   level20ResetEnabled: null,
   missionModeEnabled: null,
+  missionModeResetLevel: null,
   missionActionEnabledBySlot: null,
   missionResetPerSlotModeEnabled: null,
   missionResetPerSlotEnabledBySlot: null,
@@ -821,11 +822,10 @@ async function bootstrapStartupMissionSlots() {
 
       pushSystemLog("Startup mission sync: fetching user missions.");
       try {
-        const missionsResult = await mcpCallTool(
-          "get_user_missions",
-          {},
-          { url: "https://pixelbypixel.studio/mcp" },
-        );
+        const missionsResult = await desktopMcp.getUserMissions({
+          url: "https://pixelbypixel.studio/mcp",
+          reason: "startup_mission_sync",
+        });
         const hydratedMissions = hydrateMissionListWithCachedCatalog(
           normalizeMissionList(missionsResult || {}),
         );
@@ -1436,10 +1436,23 @@ function walletSummaryResultFromBackendStatus() {
       walletId: summary.walletId || backendStatus.currentUserWalletId || null,
       displayName:
         summary.displayName || backendStatus.currentUserDisplayName || null,
+      userId: summary.userId || null,
+      preferredPlatform: summary.preferredPlatform || null,
       balances: Array.isArray(summary.balances) ? summary.balances : [],
       walletBalanceSummary: Array.isArray(summary.walletBalanceSummary)
         ? summary.walletBalanceSummary
         : [],
+      nftCount: Number.isFinite(Number(summary.nftCount))
+        ? Number(summary.nftCount)
+        : null,
+      virtualCurrencies: Array.isArray(summary.virtualCurrencies)
+        ? summary.virtualCurrencies
+        : [],
+      inventoryItemTypeCount: Number.isFinite(
+        Number(summary.inventoryItemTypeCount),
+      )
+        ? Number(summary.inventoryItemTypeCount)
+        : null,
     },
   };
 }
@@ -1696,11 +1709,10 @@ async function getAccountSnapshotCached({ includeNfts = false } = {}) {
         {},
         { url: "https://pixelbypixel.studio/mcp" },
       ),
-      missionsResult: await mcpCallTool(
-        "get_user_missions",
-        {},
-        { url: "https://pixelbypixel.studio/mcp" },
-      ),
+      missionsResult: await desktopMcp.getUserMissions({
+        url: "https://pixelbypixel.studio/mcp",
+        reason: "account_snapshot",
+      }),
       ...(includeNfts
         ? {
             nftResult: await mcpCallTool(
@@ -2551,6 +2563,12 @@ function hydrateBackendStatusFromConfig() {
   if (typeof config.missionModeEnabled === "boolean") {
     backendStatus.missionModeEnabled = config.missionModeEnabled;
   }
+  if (typeof config.missionModeResetLevel === "string") {
+    backendStatus.missionModeResetLevel = config.missionModeResetLevel;
+  } else if (!backendStatus.missionModeResetLevel) {
+    backendStatus.missionModeResetLevel =
+      defaultMissionResetLevelForConfig(config);
+  }
   if (
     config.missionActionEnabledBySlot &&
     typeof config.missionActionEnabledBySlot === "object"
@@ -2848,10 +2866,18 @@ function summarizeWalletPayload(payload) {
   const sc = payload?.structuredContent || {};
   const walletId = sc.walletId || sc.wallet_id || null;
   const displayName = sc.displayName || sc.display_name || null;
+  const userId = sc.userId || sc.user_id || null;
+  const preferredPlatform =
+    sc.preferredPlatform || sc.preferred_platform || null;
   const baseBalances = normalizeWalletBalanceEntries(
     sc.balances || sc.walletBalances || sc.wallet_balances || [],
   );
   const virtualCurrencies = sc.virtualCurrencies || sc.virtual_currencies || {};
+  const virtualCurrencyList = Array.isArray(sc.virtualCurrencies)
+    ? sc.virtualCurrencies
+    : Array.isArray(sc.virtual_currencies)
+      ? sc.virtual_currencies
+      : [];
   const virtualCurrencyBalances =
     normalizeWalletBalanceEntries(virtualCurrencies);
   let mergedBalances = [...baseBalances, ...virtualCurrencyBalances];
@@ -2893,12 +2919,19 @@ function summarizeWalletPayload(payload) {
     currentUserWalletSummary: {
       walletId,
       displayName,
+      userId,
+      preferredPlatform,
       balances: mergedBalances,
       walletBalanceSummary: Array.isArray(sc.walletBalanceSummary)
         ? sc.walletBalanceSummary
         : Array.isArray(sc.wallet_balance_summary)
           ? sc.wallet_balance_summary
           : [],
+      nftCount: Number.isFinite(Number(sc.nftCount)) ? Number(sc.nftCount) : null,
+      virtualCurrencies: virtualCurrencyList,
+      inventoryItemTypeCount: Number.isFinite(Number(sc.inventoryItemTypeCount))
+        ? Number(sc.inventoryItemTypeCount)
+        : null,
     },
     fundingWalletSummary: {
       address: sc.walletAddress || sc.wallet_address || null,
@@ -3784,6 +3817,9 @@ function applyStoppedModeConfig(parsed) {
   if (typeof next.missionModeEnabled === "boolean") {
     backendStatus.missionModeEnabled = next.missionModeEnabled;
   }
+  if (typeof next.missionModeResetLevel === "string") {
+    backendStatus.missionModeResetLevel = next.missionModeResetLevel;
+  }
   if (typeof next.missionResetPerSlotModeEnabled === "boolean") {
     backendStatus.missionResetPerSlotModeEnabled =
       next.missionResetPerSlotModeEnabled;
@@ -4205,7 +4241,7 @@ async function runCompetitionRangeLockCycle() {
     ].filter(Boolean);
     if (!userKeys.length) {
       pushSystemLog(
-        "[COMP LOCK] Missing current user identity; waiting for whoami.",
+        "[COMP LOCK] Missing current user identity; waiting for wallet summary.",
       );
       return;
     }
@@ -4641,8 +4677,11 @@ app.whenReady().then(async () => {
     if (typeof next.level20ResetEnabled === "boolean") {
       backendStatus.level20ResetEnabled = next.level20ResetEnabled;
     }
-    if (typeof next.missionModeEnabled === "boolean") {
+  if (typeof next.missionModeEnabled === "boolean") {
       backendStatus.missionModeEnabled = next.missionModeEnabled;
+  }
+    if (typeof next.missionModeResetLevel === "string") {
+      backendStatus.missionModeResetLevel = next.missionModeResetLevel;
     }
     if (
       next.missionActionEnabledBySlot &&
@@ -5126,7 +5165,31 @@ app.whenReady().then(async () => {
     pushSystemLog("Onboarding account sync complete.");
     return {
       ok: true,
-      whoami: { displayName, walletId },
+      walletSummary: {
+        displayName,
+        walletId,
+        userId: walletSummary?.userId || null,
+        preferredPlatform: walletSummary?.preferredPlatform || null,
+        balances: Array.isArray(walletSummary?.balances)
+          ? walletSummary.balances
+          : [],
+        walletBalanceSummary: Array.isArray(
+          walletSummary?.walletBalanceSummary,
+        )
+          ? walletSummary.walletBalanceSummary
+          : [],
+        nftCount: Number.isFinite(Number(walletSummary?.nftCount))
+          ? Number(walletSummary.nftCount)
+          : null,
+        virtualCurrencies: Array.isArray(walletSummary?.virtualCurrencies)
+          ? walletSummary.virtualCurrencies
+          : [],
+        inventoryItemTypeCount: Number.isFinite(
+          Number(walletSummary?.inventoryItemTypeCount),
+        )
+          ? Number(walletSummary.inventoryItemTypeCount)
+          : null,
+      },
       missions,
       missionCatalog,
       ownedCollections: Array.from(ownedCollectionKeys),
@@ -5210,11 +5273,10 @@ app.whenReady().then(async () => {
         { url: "https://pixelbypixel.studio/mcp" },
       );
       pushSystemLog("Rentals refresh: fetching get_user_missions.");
-      const missionsResult = await mcpCallTool(
-        "get_user_missions",
-        {},
-        { url: "https://pixelbypixel.studio/mcp" },
-      );
+      const missionsResult = await desktopMcp.getUserMissions({
+        url: "https://pixelbypixel.studio/mcp",
+        reason: "rentals_preview",
+      });
 
       const rentableRaw = Array.isArray(rentableResult?.structuredContent?.data)
         ? rentableResult.structuredContent.data

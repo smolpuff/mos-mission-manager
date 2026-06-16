@@ -87,6 +87,7 @@ function createGuiStateEmitter(ctx) {
       currentMode: ctx.currentMode,
       level20ResetEnabled: ctx.level20ResetEnabled,
       missionModeEnabled: ctx.missionModeEnabled,
+      missionModeResetLevel: ctx.missionModeResetLevel,
       missionActionEnabledBySlot: ctx.missionActionEnabledBySlot,
       missionResetPerSlotModeEnabled: ctx.missionResetPerSlotModeEnabled,
       missionResetPerSlotEnabledBySlot: ctx.missionResetPerSlotEnabledBySlot,
@@ -345,8 +346,15 @@ if (process.env.PBP_GUI_BRIDGE === "1" && typeof process.send === "function") {
         }
         flushConfig(ctx, logger.logDebug);
         logger.logWithTimestamp(
-          `[CONFIG] Runtime config updated: debug=${ctx.debugMode}, slot automation=${JSON.stringify(ctx.missionActionEnabledBySlot)}, per-slot mission resets=${ctx.missionResetPerSlotModeEnabled ? "enabled" : "disabled"}, auto NFT resets=${ctx.nftCooldownResetEnabled ? "enabled" : "disabled"} (max ${Number(ctx.config.nftCooldownResetMaxPbp ?? 20)} PBP).`,
+          `[CONFIG] Runtime config updated: debug=${ctx.debugMode ? "on" : "off"}, slot automation saved, per-slot mission resets=${ctx.missionResetPerSlotModeEnabled ? "enabled" : "disabled"}, auto NFT resets=${ctx.nftCooldownResetEnabled ? "enabled" : "disabled"} (max ${Number(ctx.config.nftCooldownResetMaxPbp ?? 20)} PBP).`,
         );
+        logger.logDebug("config", "runtime_config_updated", {
+          debugMode: ctx.debugMode,
+          missionActionEnabledBySlot: ctx.missionActionEnabledBySlot,
+          missionResetPerSlotModeEnabled: ctx.missionResetPerSlotModeEnabled,
+          nftCooldownResetEnabled: ctx.nftCooldownResetEnabled,
+          nftCooldownResetMaxPbp: Number(ctx.config.nftCooldownResetMaxPbp ?? 20),
+        });
         sendGuiResponse(requestId, {
           ok: true,
           config: {
@@ -436,14 +444,20 @@ async function runStartupSequence() {
   ctx.isIdle = false;
   logger.redrawHeaderAndLog(ctx.currentMissionStats);
 
-  logger.logWithTimestamp("[STARTUP] Booting MCP base app...");
+  logger.logWithTimestamp(
+    logger.formatTaggedLog("STARTUP", "🚀", "Booting MCP base app..."),
+  );
   ctx.startupFxProgress = 5;
 
   loadConfig(ctx, logger.logWithTimestamp);
   if (START_PAUSED_FOR_COMP_LOCK) {
     ctx.watchLoopEnabled = false;
     logger.logWithTimestamp(
-      "[COMP LOCK] Startup watch auto-start held until initial finish target check completes.",
+      logger.formatTaggedLog(
+        "COMP LOCK",
+        "🔒",
+        "Startup watch auto-start held until initial finish target check completes.",
+      ),
     );
   }
   signer.updateSignerState();
@@ -474,7 +488,11 @@ async function runStartupSequence() {
 
     if (ctx.debugMode && !hasSavedToken) {
       logger.logWithTimestamp(
-        "[STARTUP] Debug mode: running interactive login (URL mode)...",
+        logger.formatTaggedLog(
+          "STARTUP",
+          "🔐",
+          "Debug mode: running interactive login (URL mode)...",
+        ),
       );
       ctx.startupFxProgress = 35;
       loginOk = await runWithProgressPulse(
@@ -484,7 +502,9 @@ async function runStartupSequence() {
       );
       if (loginOk) ctx.startupFxProgress = 55;
     } else if (ctx.interactiveAuth && !hasSavedToken) {
-      logger.logWithTimestamp("[STARTUP] Running required login...");
+      logger.logWithTimestamp(
+        logger.formatTaggedLog("STARTUP", "🔐", "Running required login..."),
+      );
       ctx.startupFxProgress = 35;
       loginOk = await runWithProgressPulse(() => mcp.runLoginFlow(), ctx, {
         floor: 35,
@@ -497,7 +517,13 @@ async function runStartupSequence() {
     if (!ctx.interactiveAuth && !ctx.debugMode) {
       logger.logDebug("startup", "token_mode", { hasToken: hasSavedToken });
       if (!hasSavedToken) {
-        logger.logWithTimestamp("[STARTUP] Missing token: running login...");
+        logger.logWithTimestamp(
+          logger.formatTaggedLog(
+            "STARTUP",
+            "🔐",
+            "Missing token: running login...",
+          ),
+        );
         ctx.startupFxProgress = 35;
         loginOk = await runWithProgressPulse(
           () => mcp.runLoginFlow({ forceInteractive: true }),
@@ -517,14 +543,24 @@ async function runStartupSequence() {
     ctx.startupFxProgress = 88;
 
     if (!ctx.isAuthenticated) {
-      logger.logWithTimestamp("[STARTUP] Auth unavailable.");
+      logger.logWithTimestamp(
+        logger.formatTaggedLog("STARTUP", "⚠️", "Auth unavailable."),
+      );
       if (mcp.bearerToken()) {
         logger.logWithTimestamp(
-          "[STARTUP] Saved token exists; skipping interactive login fallback.",
+          logger.formatTaggedLog(
+            "STARTUP",
+            "ℹ️",
+            "Saved token exists; skipping interactive login fallback.",
+          ),
         );
       } else {
         logger.logWithTimestamp(
-          "[STARTUP] Attempting interactive login fallback...",
+          logger.formatTaggedLog(
+            "STARTUP",
+            "🔐",
+            "Attempting interactive login fallback...",
+          ),
         );
         ctx.startupFxProgress = 90;
         const fallbackOk = await runWithProgressPulse(
@@ -547,21 +583,31 @@ async function runStartupSequence() {
     ctx.currentMode = ctx.missionModeEnabled
       ? `mission-${ctx.currentMissionResetLevel}`
       : "normal";
-    logger.logWithTimestamp("[READY] Startup complete.");
+    logger.logWithTimestamp(
+      logger.formatTaggedLog("READY", "✅", "Startup complete."),
+    );
     ctx.startupComplete = true;
     ctx.startupFxProgress = 100;
 
     if (ctx.isAuthenticated) {
       if (ctx.watchLoopEnabled) {
-        logger.logWithTimestamp("[READY] Watcher running.");
+        logger.logWithTimestamp(
+          logger.formatTaggedLog("READY", "👀", "Watcher running."),
+        );
         shouldStartWatch = true;
       } else {
         logger.logWithTimestamp(
-          "[READY] Ready. Click Start Missions to begin.",
+          logger.formatTaggedLog(
+            "READY",
+            "💡",
+            "Ready. Click Start Missions to begin.",
+          ),
         );
       }
     } else {
-      logger.logWithTimestamp("[READY] Type 'login' then 'check'.");
+      logger.logWithTimestamp(
+        logger.formatTaggedLog("READY", "💡", "Type 'login' then 'check'."),
+      );
     }
   } finally {
     await stopFx({ transitionMs: 220, fullyVisibleMs: 120, finalRampMs: 220 });
@@ -571,7 +617,9 @@ async function runStartupSequence() {
   if (shouldStartWatch) {
     if (ctx.watcherRunning || ctx.watchStartPending) return;
     ctx.watchStartPending = true;
-    logger.logWithTimestamp("[WATCH] ▶ Starting now (startup).");
+    logger.logWithTimestamp(
+      logger.formatTaggedLog("WATCH", "▶️", "Starting now (startup)."),
+    );
     ctx.watchStartPending = false;
     await watch.startWatchLoop();
   }
@@ -588,7 +636,9 @@ process.on("SIGINT", () => {
   ctx.watchLoopEnabled = false;
   signer.shutdown();
   flushConfig(ctx, logger.logDebug);
-  logger.logWithTimestamp("[INFO] Caught SIGINT, exiting...");
+  logger.logWithTimestamp(
+    logger.formatTaggedLog("INFO", "🛑", "Caught SIGINT, exiting..."),
+  );
   process.exit(0);
 });
 
@@ -602,7 +652,11 @@ process.on("SIGTERM", () => {
 main().catch((err) => {
   signer.shutdown();
   logger.logWithTimestamp(
-    `[ERROR] Fatal startup error: ${err?.message || err}`,
+    logger.formatTaggedLog(
+      "ERROR",
+      "💥",
+      `Fatal startup error: ${err?.message || err}`,
+    ),
   );
   logger.logDebug("startup", "fatal", {
     error: err?.message || String(err),

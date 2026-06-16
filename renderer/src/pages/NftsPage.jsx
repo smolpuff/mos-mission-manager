@@ -511,10 +511,10 @@ export default function NftsPage({ bridge, signerMode = "" }) {
           <div className="mt-3 flex flex-wrap gap-2">
             <button
               type="button"
-              className={`h-7 px-1 rounded-full border text-xs inline-flex items-center gap-1 ${
+              className={`h-6 px-1 rounded-md border text-xs inline-flex items-center gap-1 ${
                 selectedCollection === "all"
                   ? "border-accent/80 bg-accent/30 text-white"
-                  : "border-black/10 bg-black/20 text-slate-300"
+                  : "border-black/20 bg-black/30 text-slate-300"
               }`}
               onClick={() => setSelectedCollection("all")}
             >
@@ -527,10 +527,10 @@ export default function NftsPage({ bridge, signerMode = "" }) {
               <button
                 key={option.key}
                 type="button"
-                className={`h-7 px-1 pr-3 rounded-full border text-xs inline-flex items-center gap-1 ${
+                className={`h-6 px-0.5 rounded-md border text-xs inline-flex items-center gap-1 ${
                   selectedCollection === option.key
                     ? "border-accent/80 bg-accent/30 text-white"
-                    : "border-black/10 bg-black/20 text-gray-300"
+                    : "border-black/20 bg-black/30 text-gray-300"
                 }`}
                 onClick={() => setSelectedCollection(option.key)}
                 title={option.label}
@@ -539,7 +539,7 @@ export default function NftsPage({ bridge, signerMode = "" }) {
                   <img
                     src={option.image}
                     alt={option.label}
-                    className="w-5 h-5 rounded-full object-cover border border-white/10"
+                    className="w-5 h-5 rounded-md object-cover border border-white/10"
                     loading="lazy"
                     decoding="async"
                   />

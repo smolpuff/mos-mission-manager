@@ -34,7 +34,8 @@ const {
 const { flushConfig } = require("../config");
 
 function createChecksService(ctx, logger, mcp, services = {}) {
-  const { logWithTimestamp, logDebug, redrawHeaderAndLog } = logger;
+  const { logWithTimestamp, logDebug, redrawHeaderAndLog, formatTaggedLog } =
+    logger;
   const { signer = null } = services;
   const { executePreparedMissionAction } = createMissionActionExecutor(
     logger,
@@ -85,7 +86,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
     }
   }
 
-  function whoAmIFromSnapshot(snapshot) {
+  function walletSummaryFromSnapshot(snapshot) {
     const walletSummarySnapshot =
       snapshot?.walletSummaryResult && typeof snapshot.walletSummaryResult === "object"
         ? snapshot.walletSummaryResult
@@ -94,42 +95,58 @@ function createChecksService(ctx, logger, mcp, services = {}) {
       ? parseWalletSummary(walletSummarySnapshot)
       : null;
     const walletSummaryContent = walletSummarySnapshot?.structuredContent || {};
-    const info = snapshot?.who?.structuredContent || {};
     const displayName =
       walletSummaryContent.displayName ||
       walletSummaryContent.display_name ||
-      info.display_name ||
-      info.displayName ||
-      info.username ||
       "unknown";
     const walletId =
       walletSummaryContent.walletId ||
       walletSummaryContent.wallet_id ||
       parsedWalletSummary?.address ||
-      info.wallet_id ||
-      info.walletId ||
       "unknown";
     if (displayName === "unknown" && walletId === "unknown") return null;
-    const fallbackBalances = parseTokenBalancesArray(
-      info.walletBalances || info.wallet_balances || [],
-    );
-    const fallbackWalletBalanceSummary = Array.isArray(info.walletBalanceSummary)
-      ? info.walletBalanceSummary.slice()
-      : Array.isArray(info.wallet_balance_summary)
-        ? info.wallet_balance_summary.slice()
-        : [];
     const walletSummary = {
       walletId,
       displayName,
-      balances: mergeTokenBalanceEntries(
-        parsedWalletSummary?.balances || [],
-        fallbackBalances,
-      ),
-      walletBalanceSummary: parsedWalletSummary?.walletBalanceSummary?.length
-        ? parsedWalletSummary.walletBalanceSummary
-        : fallbackWalletBalanceSummary,
+      userId:
+        walletSummaryContent.userId ||
+        walletSummaryContent.user_id ||
+        parsedWalletSummary?.userId ||
+        null,
+      preferredPlatform:
+        walletSummaryContent.preferredPlatform ||
+        walletSummaryContent.preferred_platform ||
+        parsedWalletSummary?.preferredPlatform ||
+        null,
+      balances: parsedWalletSummary?.balances || [],
+      walletBalanceSummary: parsedWalletSummary?.walletBalanceSummary || [],
+      nftCount:
+        Number.isFinite(Number(walletSummaryContent.nftCount)) &&
+        Number(walletSummaryContent.nftCount) >= 0
+          ? Number(walletSummaryContent.nftCount)
+          : Number.isFinite(Number(parsedWalletSummary?.nftCount))
+            ? Number(parsedWalletSummary.nftCount)
+            : null,
+      virtualCurrencies: Array.isArray(walletSummaryContent.virtualCurrencies)
+        ? walletSummaryContent.virtualCurrencies
+        : Array.isArray(parsedWalletSummary?.virtualCurrencies)
+          ? parsedWalletSummary.virtualCurrencies
+          : [],
+      inventoryItemTypeCount:
+        Number.isFinite(Number(walletSummaryContent.inventoryItemTypeCount)) &&
+        Number(walletSummaryContent.inventoryItemTypeCount) >= 0
+          ? Number(walletSummaryContent.inventoryItemTypeCount)
+          : Number.isFinite(Number(parsedWalletSummary?.inventoryItemTypeCount))
+            ? Number(parsedWalletSummary.inventoryItemTypeCount)
+            : null,
     };
-    return { ok: true, displayName, walletId, walletSummary, fromSnapshot: true };
+    return {
+      ok: true,
+      displayName,
+      walletId,
+      walletSummary,
+      fromSnapshot: true,
+    };
   }
 
   function missionPageCooldownMs() {
@@ -336,6 +353,17 @@ function createChecksService(ctx, logger, mcp, services = {}) {
       slot: Number.isFinite(Number(entry?.slot)) ? Number(entry.slot) : null,
       level: Number.isFinite(Number(entry?.level)) ? Number(entry.level) : null,
     }));
+  }
+
+  function summarizeNamesForUser(items = [], limit = 2) {
+    const list = Array.isArray(items)
+      ? items
+          .map((value) => String(value || "").trim())
+          .filter(Boolean)
+      : [];
+    if (list.length === 0) return "(none)";
+    if (list.length <= limit) return list.join(", ");
+    return `${list.slice(0, limit).join(", ")} +${list.length - limit} more`;
   }
 
   async function getRentableNftsSerialized(args = {}, meta = {}) {
@@ -989,6 +1017,10 @@ function createChecksService(ctx, logger, mcp, services = {}) {
         nft?.collection ||
         "unknown nft",
     ).trim();
+  }
+
+  function compareNftAccountOrder(a, b) {
+    return nftAccountId(a?.nft || a).localeCompare(nftAccountId(b?.nft || b));
   }
 
   function nftCollectionText(nft) {
@@ -1649,7 +1681,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
     const sc = result?.structuredContent || {};
     const summary =
       sc.walletSummary || sc.summary || sc.wallet || sc.data || sc;
-    const balances =
+    const balancesRaw =
       summary?.tokenBalances ||
       summary?.balances ||
       summary?.tokens ||
@@ -1657,6 +1689,15 @@ function createChecksService(ctx, logger, mcp, services = {}) {
       sc?.tokenBalances ||
       sc?.balances ||
       [];
+    const balances = Array.isArray(balancesRaw)
+      ? balancesRaw
+      : balancesRaw && typeof balancesRaw === "object"
+        ? Object.entries(balancesRaw).map(([symbol, amount]) => ({
+            symbol,
+            name: symbol,
+            balance: amount,
+          }))
+        : [];
     const virtualCurrencies =
       summary?.virtualCurrencies ||
       summary?.virtual_currencies ||
@@ -1683,14 +1724,43 @@ function createChecksService(ctx, logger, mcp, services = {}) {
       balances,
       ({ symbol, name }) => symbol === "PBP" || name === "PBP",
     );
+    const virtualCurrencyList = Array.isArray(summary?.virtualCurrencies)
+      ? summary.virtualCurrencies
+      : Array.isArray(sc?.virtualCurrencies)
+        ? sc.virtualCurrencies
+        : [];
     return {
       address: walletAddress,
+      walletId: summary?.walletId || summary?.wallet_id || walletAddress || null,
+      userId: summary?.userId || summary?.user_id || sc?.userId || sc?.user_id || null,
+      displayName:
+        summary?.displayName ||
+        summary?.display_name ||
+        sc?.displayName ||
+        sc?.display_name ||
+        null,
+      preferredPlatform:
+        summary?.preferredPlatform ||
+        summary?.preferred_platform ||
+        sc?.preferredPlatform ||
+        sc?.preferred_platform ||
+        null,
       sol,
       pbp,
       balances: mergeTokenBalanceEntries(
         parseTokenBalancesArray(balances),
         parseVirtualCurrencyBalances(virtualCurrencies),
       ),
+      nftCount:
+        Number.isFinite(Number(summary?.nftCount)) || Number.isFinite(Number(sc?.nftCount))
+          ? Number(summary?.nftCount ?? sc?.nftCount)
+          : null,
+      virtualCurrencies: virtualCurrencyList,
+      inventoryItemTypeCount:
+        Number.isFinite(Number(summary?.inventoryItemTypeCount)) ||
+        Number.isFinite(Number(sc?.inventoryItemTypeCount))
+          ? Number(summary?.inventoryItemTypeCount ?? sc?.inventoryItemTypeCount)
+          : null,
       walletBalanceSummary: Array.isArray(summary?.walletBalanceSummary)
         ? summary.walletBalanceSummary.slice()
         : Array.isArray(summary?.wallet_balance_summary)
@@ -1823,34 +1893,6 @@ function createChecksService(ctx, logger, mcp, services = {}) {
     for (const entry of Array.isArray(fallback) ? fallback : []) upsert(entry);
     for (const entry of Array.isArray(primary) ? primary : []) upsert(entry);
     return Array.from(merged.values());
-  }
-
-  async function fetchCurrentWalletSummary(walletAddress = "") {
-    const attempts = [
-      {},
-      walletAddress ? { walletAddress } : null,
-      walletAddress ? { wallet: walletAddress } : null,
-    ].filter(Boolean);
-    let lastError = null;
-    for (const args of attempts) {
-      try {
-        return await mcp.mcpToolCall("get_wallet_summary", args);
-      } catch (error) {
-        lastError = error;
-        logDebug("check", "current_wallet_summary_attempt_failed", {
-          walletAddress,
-          argsKeys: Object.keys(args),
-          error: error.message,
-        });
-      }
-    }
-    if (lastError) {
-      logDebug("check", "current_wallet_summary_failed", {
-        walletAddress,
-        error: lastError.message,
-      });
-    }
-    return null;
   }
 
   async function fetchOnchainWalletSummary(walletAddress) {
@@ -2547,7 +2589,10 @@ function createChecksService(ctx, logger, mcp, services = {}) {
   }
 
   async function prepareUnlockSlot4({ reason = "ui_manual_unlock" } = {}) {
-    const missionsResult = await mcp.mcpToolCall("get_user_missions", {});
+    const missionsResult = await mcp.getUserMissions({
+      forceFresh: true,
+      reason,
+    });
     if (ctx.signerMode === "manual") {
       const summary = extractSlotUnlockSummary(missionsResult);
       const canUnlockMore = summary?.canUnlockMore === true;
@@ -2646,8 +2691,9 @@ function createChecksService(ctx, logger, mcp, services = {}) {
     ctx.config.targetMissions = uniqueTargets;
     flushConfig(ctx, logDebug);
     logWithTimestamp(
-      `[CONFIG] Synced target missions from assigned slots${reason ? ` (${reason})` : ""}: ${uniqueTargets.join(", ")}`,
+      `[CONFIG] Synced ${uniqueTargets.length} target mission(s) from assigned slots${reason ? ` (${reason})` : ""}: ${summarizeNamesForUser(uniqueTargets)}`,
     );
+    logDebug("config", "target_missions_synced", { reason, targets: uniqueTargets });
     if (ctx.guiBridge?.emitNow) ctx.guiBridge.emitNow();
     return uniqueTargets;
   }
@@ -2657,8 +2703,11 @@ function createChecksService(ctx, logger, mcp, services = {}) {
     ctx.config.targetMissions = Array.from(new Set(cleaned));
     flushConfig(ctx, logDebug);
     logWithTimestamp(
-      `[CONFIG] Mission targets updated: ${ctx.config.targetMissions.join(", ") || "(none)"}`,
+      `[CONFIG] Mission targets updated: ${summarizeNamesForUser(ctx.config.targetMissions)}`,
     );
+    logDebug("config", "target_missions_updated", {
+      targets: ctx.config.targetMissions,
+    });
     if (ctx.guiBridge?.emitNow) ctx.guiBridge.emitNow();
     return ctx.config.targetMissions;
   }
@@ -2680,7 +2729,10 @@ function createChecksService(ctx, logger, mcp, services = {}) {
       await refreshMissionCatalog();
     }
 
-    const missionsResult = await mcp.mcpToolCall("get_user_missions", {});
+    const missionsResult = await mcp.getUserMissions({
+      forceFresh: true,
+      reason: `apply_selection_slot_${slotNumber}`,
+    });
     const summary = normalizeSlotUnlockSummary(missionsResult);
     ctx.slotUnlockSummary = summary;
     if (missionBlockedByLockedSlot({ slot: slotNumber }, summary)) {
@@ -2949,7 +3001,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
     initialMissionResult = null,
   ) {
     let result =
-      initialMissionResult || (await mcp.mcpToolCall("get_user_missions", {}));
+      initialMissionResult || (await mcp.getUserMissions({ reason }));
     let missions = normalizeMissionList(result);
     const slotUnlockSummary = extractSlotUnlockSummary(result);
     let candidates = buildAssignCandidates(
@@ -3034,28 +3086,35 @@ function createChecksService(ctx, logger, mcp, services = {}) {
       })),
     });
     if (resetBlocked.length > 0) {
-      const names = resetBlocked
-        .map((m) => `${m.name} lvl=${m.level ?? "?"}`)
-        .join(", ");
+      const names = summarizeNamesForUser(
+        resetBlocked.map((m) => `${m.name} lvl=${m.level ?? "?"}`),
+      );
       logWithTimestamp(
         `[ASSIGN] ⏸️ Holding mission(s) for reset threshold; not assigning NFT: ${names}`,
       );
+      logDebug("assign", "reset_blocked_missions", { missions: resetBlocked });
     }
     if (disabledSlotBlocked.length > 0) {
-      const names = disabledSlotBlocked
-        .map((m) => `${m.name} slot=${m.slot ?? "?"}`)
-        .join(", ");
+      const names = summarizeNamesForUser(
+        disabledSlotBlocked.map((m) => `${m.name} slot=${m.slot ?? "?"}`),
+      );
       logWithTimestamp(
         `[ASSIGN] ⏸️ Holding disabled slot(s); not assigning NFT: ${names}`,
       );
+      logDebug("assign", "disabled_slot_blocked_missions", {
+        missions: disabledSlotBlocked,
+      });
     }
     if (lockedSlotBlocked.length > 0) {
-      const names = lockedSlotBlocked
-        .map((m) => `${m.name} slot=${m.slot ?? "?"}`)
-        .join(", ");
+      const names = summarizeNamesForUser(
+        lockedSlotBlocked.map((m) => `${m.name} slot=${m.slot ?? "?"}`),
+      );
       logWithTimestamp(
         `[ASSIGN] ⏸️ Holding mission(s) in locked slot(s); not assigning NFT: ${names}`,
       );
+      logDebug("assign", "locked_slot_blocked_missions", {
+        missions: lockedSlotBlocked,
+      });
     }
     return { result, missions, candidates };
   }
@@ -3182,14 +3241,18 @@ function createChecksService(ctx, logger, mcp, services = {}) {
     if (resolved.configured.length === 0) return resolved;
     if (resolved.invalid.length > 0) {
       logWithTimestamp(
-        `[CONFIG] ⚠️ targetMissions not found in catalog: ${resolved.invalid.join(", ")}`,
+        `[CONFIG] ⚠️ ${resolved.invalid.length} target mission(s) not found in catalog: ${summarizeNamesForUser(resolved.invalid)}`,
       );
+      logDebug("config", "target_missions_invalid", {
+        invalid: resolved.invalid,
+      });
     }
     const validNames = Array.from(resolved.targetNames);
     if (validNames.length > 0) {
       logWithTimestamp(
-        `[CONFIG] ✅ targetMissions resolved: ${validNames.join(", ")}`,
+        `[CONFIG] ✅ targetMissions resolved: ${summarizeNamesForUser(validNames)}`,
       );
+      logDebug("config", "target_missions_resolved", { validNames });
     }
     return resolved;
   }
@@ -3222,11 +3285,13 @@ function createChecksService(ctx, logger, mcp, services = {}) {
     const resolved = resolveConfiguredTargets();
     const selected = selectedTargetsForDisplay(resolved);
     if (selected.length === 0) {
-      logWithTimestamp("[WATCH] selected targets: (none configured)");
+      logWithTimestamp(
+        formatTaggedLog("WATCH", "🎯", "selected targets: (none configured)"),
+      );
       return;
     }
     for (const name of selected) {
-      logWithTimestamp(`[WATCH] - ${name}`);
+      logWithTimestamp(formatTaggedLog("WATCH", "🎯", `- ${name}`));
     }
   }
 
@@ -3436,9 +3501,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
           .filter((entry) => !alreadyAssignedNftAccounts.has(entry.account))
           .filter((entry) => nftIsAvailable(entry.nft))
           .filter((entry) => entry.account)
-          .sort((a, b) =>
-            nftDisplayName(a.nft).localeCompare(nftDisplayName(b.nft)),
-          );
+          .sort(compareNftAccountOrder);
         const prioritizedReadyOwnedCandidates = prioritizeOwnedCandidatesForMission(
           readyOwnedCandidates,
           mission,
@@ -3463,7 +3526,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
               .sort(
                 (a, b) =>
                   nftCooldownSeconds(a.nft) - nftCooldownSeconds(b.nft) ||
-                  nftDisplayName(a.nft).localeCompare(nftDisplayName(b.nft)),
+                  compareNftAccountOrder(a, b),
               ),
             mission,
           )
@@ -4156,7 +4219,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
         return { ok: true, claimed: 0, skipped: true, paused: true };
       }
       const result =
-        missionsResult || (await mcp.mcpToolCall("get_user_missions", {}));
+        missionsResult || (await mcp.getUserMissions({ reason }));
       const missionsAll = normalizeMissionList(result);
       const missions = onlySelected
         ? filterSelectedMissions(missionsAll)
@@ -4306,7 +4369,17 @@ function createChecksService(ctx, logger, mcp, services = {}) {
           }
         }
       }
-      if (claimed > 0) scheduleFundingWalletRefresh("claim_fallback");
+      if (claimed > 0) {
+        try {
+          await runWalletSummaryCheck();
+        } catch (error) {
+          logDebug("check", "current_wallet_summary_refresh_failed", {
+            reason: "claim_fallback",
+            error: error.message,
+          });
+        }
+        scheduleFundingWalletRefresh("claim_fallback");
+      }
       if (ctx.guiBridge?.sendEvent) {
         ctx.guiBridge.sendEvent("claiming", {
           state: "done",
@@ -4333,40 +4406,36 @@ function createChecksService(ctx, logger, mcp, services = {}) {
     }
   }
 
-  async function runWhoAmICheck({ includeWalletSummary = true } = {}) {
+  async function runWalletSummaryCheck({ includeWalletSummary = true } = {}) {
     try {
-      const json = await mcp.mcpToolCall("who_am_i", {});
+      const json = await mcp.mcpToolCall("get_wallet_summary", {});
       const info = json?.structuredContent || {};
+      const parsedWalletSummary = parseWalletSummary(json, info.walletId || info.wallet_id || "");
       const displayName =
-        info.display_name || info.displayName || info.username || "unknown";
-      const walletId = info.wallet_id || info.walletId || "unknown";
-      const walletSummaryResult =
-        includeWalletSummary && walletId && walletId !== "unknown"
-          ? await fetchCurrentWalletSummary(walletId)
-          : null;
-      const parsedWalletSummary = walletSummaryResult
-        ? parseWalletSummary(walletSummaryResult, walletId)
-        : null;
-      const fallbackBalances = parseTokenBalancesArray(
-        info.walletBalances || info.wallet_balances || [],
-      );
-      const fallbackWalletBalanceSummary = Array.isArray(
-        info.walletBalanceSummary,
-      )
-        ? info.walletBalanceSummary.slice()
-        : Array.isArray(info.wallet_balance_summary)
-          ? info.wallet_balance_summary.slice()
-          : [];
+        parsedWalletSummary?.displayName ||
+        info.display_name ||
+        info.displayName ||
+        "unknown";
+      const walletId =
+        parsedWalletSummary?.walletId ||
+        info.wallet_id ||
+        info.walletId ||
+        "unknown";
       const walletSummary = {
         walletId,
         displayName,
-        balances: mergeTokenBalanceEntries(
-          parsedWalletSummary?.balances || [],
-          fallbackBalances,
-        ),
-        walletBalanceSummary: parsedWalletSummary?.walletBalanceSummary?.length
-          ? parsedWalletSummary.walletBalanceSummary
-          : fallbackWalletBalanceSummary,
+        userId: parsedWalletSummary?.userId || info.user_id || info.userId || null,
+        preferredPlatform:
+          parsedWalletSummary?.preferredPlatform ||
+          info.preferred_platform ||
+          info.preferredPlatform ||
+          null,
+        balances: parsedWalletSummary?.balances || [],
+        walletBalanceSummary: parsedWalletSummary?.walletBalanceSummary || [],
+        nftCount: parsedWalletSummary?.nftCount ?? null,
+        virtualCurrencies: parsedWalletSummary?.virtualCurrencies || [],
+        inventoryItemTypeCount:
+          parsedWalletSummary?.inventoryItemTypeCount ?? null,
       };
       ctx.isAuthenticated = true;
       ctx.currentUserDisplayName = displayName || "unknown";
@@ -4374,12 +4443,12 @@ function createChecksService(ctx, logger, mcp, services = {}) {
       if (includeWalletSummary) {
         ctx.currentUserWalletSummary = walletSummary;
       }
-      logDebug("check", "whoami_ok", { displayName, walletId });
+      logDebug("check", "wallet_summary_ok", { displayName, walletId });
       return { ok: true, displayName, walletId, walletSummary };
     } catch (error) {
-      logDebug("check", "whoami_failed", { error: error.message });
+      logDebug("check", "wallet_summary_failed", { error: error.message });
       // Keep the last known wallet summary to avoid UI balance flicker when
-      // who_am_i or wallet summary calls fail transiently.
+      // wallet summary calls fail transiently.
       return { ok: false, displayName: "unknown", walletId: "unknown" };
     }
   }
@@ -4393,7 +4462,10 @@ function createChecksService(ctx, logger, mcp, services = {}) {
   } = {}) {
     try {
       const result =
-        missionsResult || (await mcp.mcpToolCall("get_user_missions", {}));
+        missionsResult ||
+        (await mcp.getUserMissions({
+          reason: syncReason || "refresh_mission_header_stats",
+        }));
       const missions = normalizeMissionList(result);
       updateMissionLookupCache(result, missions);
       if (syncTargetsFromAssigned) {
@@ -4526,18 +4598,18 @@ function createChecksService(ctx, logger, mcp, services = {}) {
     }
 
     let stepStartedAt = Date.now();
-    const whoami =
-      whoAmIFromSnapshot(startupSnapshot) ||
-      (await runWhoAmICheck({ includeWalletSummary: false }));
-    markStep("who_am_i", stepStartedAt);
-    if (!whoami.ok) {
+    const walletIdentity =
+      walletSummaryFromSnapshot(startupSnapshot) ||
+      (await runWalletSummaryCheck({ includeWalletSummary: false }));
+    markStep("wallet_summary", stepStartedAt);
+    if (!walletIdentity.ok) {
       logWithTimestamp("[CHECK] ❌ Loading data failed (not authenticated).");
       return false;
     }
 
     ctx.isAuthenticated = true;
-    ctx.currentUserDisplayName = whoami.displayName || "unknown";
-    ctx.currentUserWalletId = whoami.walletId || "unknown";
+    ctx.currentUserDisplayName = walletIdentity.displayName || "unknown";
+    ctx.currentUserWalletId = walletIdentity.walletId || "unknown";
 
     stepStartedAt = Date.now();
     validateConfiguredTargets();
@@ -4558,7 +4630,8 @@ function createChecksService(ctx, logger, mcp, services = {}) {
   }
 
   return {
-    runWhoAmICheck,
+    runWhoAmICheck: runWalletSummaryCheck,
+    runWalletSummaryCheck,
     refreshMissionCatalog,
     validateConfiguredTargets,
     refreshFundingWalletSummary,

@@ -2,6 +2,22 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import WindowChrome from "../components/WindowChrome/app";
 import useBackendState from "../components/useBackendState/app";
 
+function renderLogText(text) {
+  const value = String(text || "");
+  const marker = "[DEBUG]";
+  const index = value.indexOf(marker);
+  if (index < 0) return value;
+  const before = value.slice(0, index);
+  const after = value.slice(index + marker.length);
+  return (
+    <>
+      {before}
+      <span style={{ color: "#7dd3fc" }}>{marker}</span>
+      {after}
+    </>
+  );
+}
+
 export default function CliPage() {
   const { bridge, status, logs } = useBackendState();
   const [command, setCommand] = useState("");
@@ -170,7 +186,7 @@ export default function CliPage() {
                   className={`log-line ${entry.stream}`}
                   key={`${entry.at}-${index}`}
                 >
-                  {entry.text}
+                  {renderLogText(entry?.text)}
                 </pre>
               ))
             )}

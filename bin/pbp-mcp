@@ -20,7 +20,8 @@ function usage() {
 Commands:
   tools [--json]
   call <tool_name> [--args <json_object>]
-  whoami
+  wallet
+  whoami (alias for wallet)
   login [--no-browser] [--login-timeout <sec>]
   logout
   token-set <access_token> [--scope <scope>] [--expires-in <sec>]
@@ -102,9 +103,9 @@ function parseJsonObject(raw, flagName = "--args") {
       return;
     }
 
-    if (cmd === "whoami") {
+    if (cmd === "wallet" || cmd === "whoami") {
       const result = await callTool(
-        "who_am_i",
+        "get_wallet_summary",
         {},
         { url, tokenFile, timeoutMs },
       );
