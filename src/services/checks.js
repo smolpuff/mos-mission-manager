@@ -1080,20 +1080,27 @@ function createChecksService(ctx, logger, mcp, services = {}) {
     return values.map((value) => normalizeCollectionKey(value)).filter(Boolean);
   }
 
+  const LEVEL20_RESERVED_COLLECTION_KEYS = new Set([
+    "iook",
+    "100k",
+    "100 k",
+    "100000",
+    "100 000",
+    "100k club",
+    "sook",
+    "500k",
+    "500 k",
+    "500000",
+    "500 000",
+    "500k club",
+  ]);
+
   function isLevel20ReservedCollectionNft(nft) {
-    const reservedCollectionKeys = new Set([
-      "100k",
-      "100 k",
-      "100000",
-      "100 000",
-      "100k club",
-      "500k",
-      "500 k",
-      "500000",
-      "500 000",
-      "500k club",
-    ]);
-    if (nftCollectionKeys(nft).some((key) => reservedCollectionKeys.has(key))) {
+    if (
+      nftCollectionKeys(nft).some((key) =>
+        LEVEL20_RESERVED_COLLECTION_KEYS.has(key),
+      )
+    ) {
       return true;
     }
     const fallbackKeys = [
@@ -1105,7 +1112,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
     return fallbackKeys
       .map((value) => normalizeCollectionKey(value))
       .filter(Boolean)
-      .some((key) => reservedCollectionKeys.has(key));
+      .some((key) => LEVEL20_RESERVED_COLLECTION_KEYS.has(key));
   }
 
   function isLevel20Mission(mission) {

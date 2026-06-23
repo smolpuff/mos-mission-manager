@@ -14,6 +14,7 @@ async function scrapeLatestCompetition(opts = {}) {
   const competitionPick = ["first", "second", "last", "active"].includes(opts?.competitionPick)
     ? opts.competitionPick
     : "first";
+  const maxCompetitions = 2;
   return withHeadlessWindow(
     COMPETITIONS_URL,
     // Allow styles; some sites hide/replace content until CSS/JS finishes loading.
@@ -214,8 +215,40 @@ async function scrapeLatestCompetition(opts = {}) {
       .slice(0, 10);
   };
 
+  const competitionCardNumber = (card) => {
+    const directHeader = Array.from(card?.querySelectorAll?.("*") || []).find((el) =>
+      /^competition\\s*#?\\s*\\d{1,6}\\b/i.test(coerceText(el?.innerText || "")),
+    );
+    const directMatch = coerceText(directHeader?.innerText || "").match(
+      /^competition\\s*#?\\s*(\\d{1,6})\\b/i,
+    );
+    if (directMatch) return Number(directMatch[1]);
+    const cardMatch = coerceText(card?.innerText || "").match(
+      /competition\\s*#?\\s*(\\d{1,6})\\b/i,
+    );
+    return cardMatch ? Number(cardMatch[1]) : null;
+  };
+
+  const latestCompetitionCards = (cards) => {
+    return (Array.isArray(cards) ? cards.slice() : [])
+      .map((card, index) => ({
+        card,
+        index,
+        number: competitionCardNumber(card),
+      }))
+      .sort((a, b) => {
+        const aHas = Number.isFinite(a.number);
+        const bHas = Number.isFinite(b.number);
+        if (aHas && bHas && a.number !== b.number) return b.number - a.number;
+        if (aHas !== bHas) return aHas ? -1 : 1;
+        return a.index - b.index;
+      })
+      .slice(0, ${maxCompetitions})
+      .map((entry) => entry.card);
+  };
+
   const pickCompetitionCard = (pick) => {
-    const cards = findCompetitionCards();
+    const cards = latestCompetitionCards(findCompetitionCards());
     if (!cards.length) return null;
     if (pick === "active") {
       const activeCard =
@@ -1072,21 +1105,21 @@ async function scrapeLatestCompetition(opts = {}) {
     };
 
     await waitForContent();
-    let cards = findCompetitionCards();
+    let cards = latestCompetitionCards(findCompetitionCards());
     const initialPickedCard = pickCompetitionCard(${JSON.stringify(competitionPick)});
     const rootsToExpand = [];
     if (initialPickedCard) rootsToExpand.push(initialPickedCard);
-    for (const card of cards.slice(0, 5)) {
+    for (const card of cards) {
       if (!card || rootsToExpand.includes(card)) continue;
       rootsToExpand.push(card);
     }
     await bruteForceExpandCompetitionScopes(rootsToExpand);
-    cards = findCompetitionCards();
+    cards = latestCompetitionCards(findCompetitionCards());
     const pickedCard = pickCompetitionCard(${JSON.stringify(competitionPick)});
     const fallbackRoot = findFallbackCompetitionRoot();
     const orderedRoots = [];
     if (pickedCard) orderedRoots.push(pickedCard);
-    for (const card of cards.slice(0, 5)) {
+    for (const card of cards) {
       if (!card || orderedRoots.includes(card)) continue;
       orderedRoots.push(card);
     }
@@ -1204,6 +1237,7 @@ async function scrapeLatestCompetition(opts = {}) {
                   competition.prizes.length ||
                   competition.userRows.length,
               )
+              .slice(0, maxCompetitions)
           : [],
         sourceUrl: coerceText(result?.sourceUrl) || COMPETITIONS_URL,
         scrapedAt: coerceText(result?.scrapedAt),

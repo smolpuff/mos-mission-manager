@@ -64,7 +64,9 @@ export default function DebugPage({
     setThrottleLogPath(String(result?.path || fallbackPath || ""));
     setThrottleLog(String(result?.text || ""));
     setThrottleLogError(
-      result?.ok === false ? String(result?.error || "Failed to read log.") : "",
+      result?.ok === false
+        ? String(result?.error || "Failed to read log.")
+        : "",
     );
   };
 
@@ -273,7 +275,7 @@ export default function DebugPage({
             processBreakdown.map(([type, stats]) => (
               <div
                 key={type}
-                className="min-w-0 flex-1 rounded-lg border border-white/6 bg-white/[0.02] px-1.5 py-1.5 text-[10px] leading-snug text-slate-200"
+                className="min-w-0 flex-1 rounded-lg border border-white/6 bg-white/2 px-1.5 py-1.5 text-[10px] leading-snug text-slate-200"
               >
                 <div className="truncate text-[9px] uppercase text-slate-400">
                   {type} x{Number(stats?.count || 0)}
@@ -287,7 +289,7 @@ export default function DebugPage({
               </div>
             ))
           ) : (
-            <div className="min-w-0 flex-1 rounded-lg border border-white/6 bg-white/[0.02] px-1.5 py-1.5 text-[8px] text-slate-400">
+            <div className="min-w-0 flex-1 rounded-lg border border-white/6 bg-white/2 px-1.5 py-1.5 text-[8px] text-slate-400">
               No process metrics yet.
             </div>
           )}
@@ -344,7 +346,7 @@ export default function DebugPage({
             <div className="text-[10px] uppercase tracking-wide text-slate-400">
               Last Tool
             </div>
-            <div className="mt-1 break-words font-mono text-[11px] leading-snug text-white">
+            <div className="mt-1 wrap-break-word font-mono text-[11px] leading-snug text-white">
               {throttleLabel(throttleDebug)}
             </div>
           </div>

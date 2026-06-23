@@ -2,7 +2,8 @@
   "version": "3.2.10",
   "downloadUrl": "https://github.com/smolpuff/mos-mission-manager/releases/latest",
   "notes": [
-    "Changed mission mode reset to level 10. no one wants tc.",
-    "Tiny giraffes are noteably better than narwhals"
+    "Updated for season 70",
+    "Optimized more mcp calls",
+    "made user stats dashboard bc i got bored"
   ]
 }
