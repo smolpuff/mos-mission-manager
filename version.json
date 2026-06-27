@@ -3,7 +3,9 @@
   "downloadUrl": "https://github.com/smolpuff/mos-mission-manager/releases/latest",
   "notes": [
     "Updated for season 70",
-    "Optimized more mcp calls",
-    "made user stats dashboard bc i got bored"
+    "Optimized startup mcp calls",
+    "Fixed level 20 NFT reservation",
+    "Added user website dashboard link to settings page",
+    "Send korea any ideas/suggestions you'd like to see added <3"
   ]
 }

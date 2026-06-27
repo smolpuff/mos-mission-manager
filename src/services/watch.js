@@ -741,8 +741,22 @@ function createWatchService(
       missionId,
       name:
         missionName(claim) || missionName(fromLookup) || fromLookup?.name || null,
-      level: claim?.level ?? claim?.current_level ?? fromLookup?.level ?? null,
+      level:
+        claim?.level ??
+        claim?.missionLevel ??
+        claim?.mission_level ??
+        claim?.currentLevel ??
+        claim?.current_level ??
+        fromLookup?.level ??
+        null,
       slot: claim?.slot ?? fromLookup?.slot ?? null,
+      startTime:
+        claim?.missionStartTimestamp ??
+        claim?.mission_start_timestamp ??
+        claim?.startTime ??
+        claim?.start_time ??
+        fromLookup?.startTime ??
+        null,
       reward:
         claim?.rewardAmount ??
         claim?.reward_amount ??
@@ -786,6 +800,8 @@ function createWatchService(
             missionName: label || null,
             slot: d.slot ?? null,
             level: d.level ?? null,
+            missionLevel: d.level ?? null,
+            missionStartTimestamp: d.startTime || null,
             rewardAmount: d.reward ?? null,
             rewardToken: d.prize ?? null,
           });
@@ -1147,6 +1163,8 @@ function createWatchService(
           name: after.name,
           slot: after.slot,
           nft: after.assignedNft,
+          level: after.level ?? null,
+          missionStartTimestamp: after.startTime || null,
           assignedMissionId:
             after.assignedMissionId || before.assignedMissionId || null,
         });
@@ -1178,6 +1196,7 @@ function createWatchService(
           slot: before.slot ?? after.slot ?? null,
           fromLevel: before.level ?? null,
           toLevel: after.level ?? null,
+          missionStartTimestamp: before.startTime || null,
           assignedMissionId: beforeId || afterId || null,
           reason: "completed_to_incomplete",
         });
@@ -1188,6 +1207,7 @@ function createWatchService(
           slot: before.slot ?? after.slot ?? null,
           fromLevel: before.level ?? null,
           toLevel: after.level ?? null,
+          missionStartTimestamp: before.startTime || null,
           assignedMissionId: beforeId || afterId || null,
           reason: "level_up",
         });
@@ -1199,6 +1219,7 @@ function createWatchService(
           slot: before.slot ?? after.slot ?? null,
           fromLevel: before.level ?? null,
           toLevel: after.level ?? null,
+          missionStartTimestamp: before.startTime || null,
           assignedMissionId: beforeId || afterId || null,
           reason: "id_changed_unassigned",
         });
@@ -1241,6 +1262,8 @@ function createWatchService(
           missionName: label || null,
           slot: d.slot ?? entry?.slot ?? null,
           level: entry?.fromLevel ?? null,
+          missionLevel: entry?.fromLevel ?? null,
+          missionStartTimestamp: entry?.missionStartTimestamp || null,
           rewardAmount: d.reward ?? null,
           rewardToken: d.prize ?? null,
         });
@@ -2831,6 +2854,7 @@ function createWatchService(
         const d = compactClaimDetails(c);
         return (
           d.name === null ||
+          d.level === null ||
           d.slot === null ||
           d.reward === null ||
           d.prize === null

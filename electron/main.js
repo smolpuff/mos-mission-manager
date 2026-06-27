@@ -326,14 +326,55 @@ function normalizeCounterObject(raw) {
   return out;
 }
 
+function normalizeAnalyticsTimestampMs(value) {
+  if (typeof value === "number") {
+    return Number.isFinite(value) && value > 0 ? Math.floor(value) : null;
+  }
+  const text = String(value || "").trim();
+  if (!text) return null;
+  const numeric = Number(text);
+  if (Number.isFinite(numeric) && numeric > 0) return Math.floor(numeric);
+  const parsed = Date.parse(text);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+function analyticsTimestampIso(value) {
+  const ms = normalizeAnalyticsTimestampMs(value);
+  return ms ? new Date(ms).toISOString() : undefined;
+}
+
+function missionLevelFromPayload(payload = {}) {
+  const level = Number(
+    payload?.missionLevel ??
+      payload?.level ??
+      payload?.mission_level ??
+      payload?.currentLevel ??
+      payload?.current_level ??
+      null,
+  );
+  return Number.isFinite(level) ? level : null;
+}
+
 function normalizeClaimHistory(raw) {
   if (!Array.isArray(raw)) return [];
   return raw
     .map((entry) => {
-      const at = Number(entry?.at);
+      const at = normalizeAnalyticsTimestampMs(entry?.at);
       const claims = Number(entry?.claims);
       const assignedMissionId = String(entry?.assignedMissionId || "").trim();
       const slot = Number(entry?.slot);
+      const level = Number(entry?.level ?? entry?.missionLevel ?? null);
+      const missionStartedAt = normalizeAnalyticsTimestampMs(
+        entry?.missionStartedAt ??
+          entry?.missionStartTimestamp ??
+          entry?.mission_start_timestamp,
+      );
+      const missionCompletedAt = normalizeAnalyticsTimestampMs(
+        entry?.missionCompletedAt ??
+          entry?.missionCompletionTimestamp ??
+          entry?.mission_completion_timestamp ??
+          entry?.at,
+      );
       const rewardAmount = Number(entry?.rewardAmount);
       const rewardToken = normalizeRewardToken(entry?.rewardToken);
       return {
@@ -342,6 +383,9 @@ function normalizeClaimHistory(raw) {
         mission: String(entry?.mission || "").trim(),
         assignedMissionId: assignedMissionId || null,
         slot: Number.isFinite(slot) ? slot : null,
+        level: Number.isFinite(level) ? level : null,
+        missionStartedAt,
+        missionCompletedAt,
         rewardAmount:
           Number.isFinite(rewardAmount) && rewardAmount > 0
             ? rewardAmount
@@ -412,14 +456,34 @@ function normalizeAssignmentHistory(raw) {
   if (!Array.isArray(raw)) return [];
   return raw
     .map((entry) => {
-      const at = Number(entry?.at);
+      const at = normalizeAnalyticsTimestampMs(entry?.at);
       const source = String(entry?.source || "")
         .trim()
         .toLowerCase();
+      const mission = String(entry?.mission || entry?.missionName || "").trim();
+      const missionId = String(
+        entry?.missionId || entry?.assignedMissionId || "",
+      ).trim();
+      const slot = Number(entry?.slot);
+      const level = Number(entry?.level ?? entry?.missionLevel ?? null);
+      const missionStartedAt = normalizeAnalyticsTimestampMs(
+        entry?.missionStartedAt ??
+          entry?.missionStartTimestamp ??
+          entry?.mission_start_timestamp ??
+          entry?.timestamp ??
+          entry?.at,
+      );
+      const usedReset = entry?.usedReset === true;
       const nft = String(entry?.nft || "").trim() || null;
       return {
         at: Number.isFinite(at) ? at : null,
         source: source === "rental" ? "rental" : "owned",
+        mission: mission || null,
+        missionId: missionId || null,
+        slot: Number.isFinite(slot) ? slot : null,
+        level: Number.isFinite(level) ? level : null,
+        missionStartedAt,
+        usedReset,
         nft,
       };
     })
@@ -1886,7 +1950,25 @@ function applyAnalyticsClaimEvent(payload = {}) {
     backendStatus.analytics || loadAnalytics(),
   );
   const mission = resolveMissionLabelFromPayload(payload);
-  const at = Number(payload?.at || Date.now());
+  const telemetryMissionName =
+    mission && mission !== "unknown mission" ? mission : undefined;
+  const at =
+    normalizeAnalyticsTimestampMs(payload?.at || payload?.timestamp) ||
+    Date.now();
+  const missionLevel = missionLevelFromPayload(payload);
+  const missionStartedAt = normalizeAnalyticsTimestampMs(
+    payload?.missionStartTimestamp ??
+      payload?.mission_start_timestamp ??
+      payload?.startTime ??
+      payload?.start_time,
+  );
+  const missionCompletedAt =
+    normalizeAnalyticsTimestampMs(
+      payload?.missionCompletionTimestamp ??
+        payload?.mission_completion_timestamp ??
+        payload?.completedAt ??
+        payload?.completed_at,
+    ) || at;
   const reward = rewardFromStatsPayload(payload);
 
   current.lifetime.totalClaims += 1;
@@ -1906,6 +1988,9 @@ function applyAnalyticsClaimEvent(payload = {}) {
       slot: Number.isFinite(Number(payload?.slot))
         ? Number(payload.slot)
         : null,
+      level: missionLevel,
+      missionStartedAt,
+      missionCompletedAt,
       rewardAmount:
         reward.amount > 0 && Number.isFinite(reward.amount)
           ? reward.amount
@@ -1924,6 +2009,9 @@ function applyAnalyticsClaimEvent(payload = {}) {
       slot: Number.isFinite(Number(payload?.slot))
         ? Number(payload.slot)
         : null,
+      level: missionLevel,
+      missionStartedAt,
+      missionCompletedAt,
       rewardAmount:
         reward.amount > 0 && Number.isFinite(reward.amount)
           ? reward.amount
@@ -1937,9 +2025,13 @@ function applyAnalyticsClaimEvent(payload = {}) {
   }
   saveAnalytics(current);
   trackFeatureUsage("mission_claim", {
-    mission_name: mission,
+    mission_name: telemetryMissionName,
+    mission_level: missionLevel ?? undefined,
     reward_token: reward.token || undefined,
     reward_amount: reward.amount > 0 ? reward.amount : undefined,
+    timestamp: analyticsTimestampIso(at),
+    mission_start_timestamp: analyticsTimestampIso(missionStartedAt),
+    mission_completion_timestamp: analyticsTimestampIso(missionCompletedAt),
   });
   publishStatus();
   return true;
@@ -2047,36 +2139,85 @@ function applyAnalyticsRentalEvent() {
 }
 
 function applyAnalyticsAssignmentEvent(payload = {}) {
-  if (payload?.usedReset !== true) return false;
   const source = String(payload?.source || "")
     .trim()
     .toLowerCase();
   const usageBucket = source === "rental" ? "rental" : "owned";
+  const mission = resolveMissionLabelFromPayload(payload);
+  const telemetryMissionName =
+    mission && mission !== "unknown mission" ? mission : undefined;
+  const at =
+    normalizeAnalyticsTimestampMs(payload?.at || payload?.timestamp) ||
+    Date.now();
+  const missionLevel = missionLevelFromPayload(payload);
+  const missionStartedAt =
+    normalizeAnalyticsTimestampMs(
+      payload?.missionStartTimestamp ??
+        payload?.mission_start_timestamp ??
+        payload?.timestamp ??
+        payload?.at,
+    ) || at;
+  const usedReset = payload?.usedReset === true;
   const current = normalizeAnalytics(
     backendStatus.analytics || loadAnalytics(),
   );
-  current.lifetime.nftResetUsage[usageBucket].assigned += 1;
-  current.session.nftResetUsage[usageBucket].assigned += 1;
+  if (usedReset) {
+    current.lifetime.nftResetUsage[usageBucket].assigned += 1;
+    current.session.nftResetUsage[usageBucket].assigned += 1;
+  }
   current.lifetime.assignmentHistory = normalizeAssignmentHistory([
     ...(current.lifetime.assignmentHistory || []),
     {
-      at: Date.now(),
+      at,
       source: usageBucket,
+      mission,
+      missionId:
+        String(payload?.assignedMissionId || payload?.missionId || "").trim() ||
+        null,
+      slot: Number.isFinite(Number(payload?.slot))
+        ? Number(payload.slot)
+        : null,
+      level: missionLevel,
+      missionStartedAt,
+      usedReset,
       nft: payload?.nft || payload?.nftName,
     },
   ]);
   current.session.assignmentHistory = normalizeAssignmentHistory([
     ...(current.session.assignmentHistory || []),
     {
-      at: Date.now(),
+      at,
       source: usageBucket,
+      mission,
+      missionId:
+        String(payload?.assignedMissionId || payload?.missionId || "").trim() ||
+        null,
+      slot: Number.isFinite(Number(payload?.slot))
+        ? Number(payload.slot)
+        : null,
+      level: missionLevel,
+      missionStartedAt,
+      usedReset,
       nft: payload?.nft || payload?.nftName,
     },
   ]);
   saveAnalytics(current);
-  trackFeatureUsage("nft_reset_assignment", {
+  trackFeatureUsage("mission_assignment", {
+    mission_name: telemetryMissionName,
+    mission_level: missionLevel ?? undefined,
     source: usageBucket,
+    timestamp: analyticsTimestampIso(at),
+    mission_start_timestamp: analyticsTimestampIso(missionStartedAt),
   });
+  if (usedReset) {
+    trackFeatureUsage("nft_reset_assignment", {
+      source: usageBucket,
+      mission_name: telemetryMissionName,
+      mission_level: missionLevel ?? undefined,
+      timestamp: analyticsTimestampIso(at),
+      mission_start_timestamp: analyticsTimestampIso(missionStartedAt),
+    });
+  }
   publishStatus();
   return true;
 }
@@ -2157,7 +2298,9 @@ function analyticsBucketFromRange(bucket = {}, rangeKey = "session") {
     }
   }
   for (const entry of assignmentHistory) {
-    nftResetUsage[entry.source === "rental" ? "rental" : "owned"].assigned += 1;
+    if (entry.usedReset === true) {
+      nftResetUsage[entry.source === "rental" ? "rental" : "owned"].assigned += 1;
+    }
   }
   const nftsUsed = Array.from(
     new Set(
@@ -2227,7 +2370,9 @@ function rebuildAnalyticsBucketFromHistories(bucket = {}) {
     }
   }
   for (const entry of assignmentHistory) {
-    nftResetUsage[entry.source === "rental" ? "rental" : "owned"].assigned += 1;
+    if (entry.usedReset === true) {
+      nftResetUsage[entry.source === "rental" ? "rental" : "owned"].assigned += 1;
+    }
   }
   return {
     ...bucket,
@@ -2384,6 +2529,9 @@ function buildAnalyticsCsv(rangeKey = "session") {
       "Mission",
       "Assigned Mission ID",
       "Slot",
+      "Level",
+      "Mission Started At",
+      "Mission Completed At",
       "Reward Amount",
       "Reward Token",
     ],
@@ -2392,6 +2540,13 @@ function buildAnalyticsCsv(rangeKey = "session") {
       entry.mission,
       entry.assignedMissionId || "",
       entry.slot ?? "",
+      entry.level ?? "",
+      entry.missionStartedAt
+        ? new Date(entry.missionStartedAt).toISOString()
+        : "",
+      entry.missionCompletedAt
+        ? new Date(entry.missionCompletedAt).toISOString()
+        : "",
       entry.rewardAmount ?? "",
       entry.rewardToken || "",
     ]),

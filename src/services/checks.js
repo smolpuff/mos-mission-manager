@@ -3997,6 +3997,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
                     assignedNftImageFromMission({ nft }) ||
                     assignedNftImageFromMission({ assignedNft: nft }) ||
                     null;
+                  const missionStartTimestamp = new Date().toISOString();
                   next[slotNumber - 1] = {
                     ...next[slotNumber - 1],
                     slot: slotNumber,
@@ -4010,7 +4011,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
                     total: null,
                     completed: false,
                     statusText: null,
-                    startTime: new Date().toISOString(),
+                    startTime: missionStartTimestamp,
                   };
                   ctx.guiMissionSlots = next;
                 }
@@ -4020,20 +4021,42 @@ function createChecksService(ctx, logger, mcp, services = {}) {
               ctx.guiBridge &&
               typeof ctx.guiBridge.sendEvent === "function"
             ) {
+              const missionStartTimestamp =
+                Array.isArray(ctx.guiMissionSlots) &&
+                Number.isFinite(Number(slot)) &&
+                Number(slot) >= 1 &&
+                Number(slot) <= ctx.guiMissionSlots.length
+                  ? String(
+                      ctx.guiMissionSlots[Math.floor(Number(slot)) - 1]
+                        ?.startTime || "",
+                    ).trim() || new Date().toISOString()
+                  : new Date().toISOString();
               const usedReset =
                 option.source === "owned_cooldown" ||
                 (option.source === "rental" && option.rentalResetUsed === true);
-              if (usedReset) {
-                ctx.guiBridge.sendEvent("stats_assignment", {
-                  at: Date.now(),
-                  missionId: id,
-                  missionName: name,
-                  slot,
-                  nftAccount: account,
-                  source: option.source === "rental" ? "rental" : "owned",
-                  usedReset: true,
-                });
-              }
+              const normalizedSource =
+                option.source === "rental" ? "rental" : "owned";
+              const nftLevel = Number.isFinite(Number(nft?.level))
+                ? Number(nft.level)
+                : null;
+              const nftName = nftDisplayName(nft) || null;
+              ctx.guiBridge.sendEvent("stats_assignment", {
+                at: Date.now(),
+                timestamp: missionStartTimestamp,
+                missionStartTimestamp,
+                assignedMissionId: id,
+                missionId: id,
+                missionName: name,
+                slot,
+                missionLevel: level ?? null,
+                level: level ?? null,
+                nftAccount: account,
+                nftName,
+                nftLevel,
+                source: normalizedSource,
+                usedReset,
+                reason,
+              });
               ctx.guiBridge.sendEvent("assigned", {
                 missionId: id,
                 missionName: name,
@@ -4319,6 +4342,9 @@ function createChecksService(ctx, logger, mcp, services = {}) {
               missionName: mission.name || "unknown mission",
               slot: mission.slot ?? null,
               level: mission.level ?? null,
+              missionLevel: mission.level ?? null,
+              missionStartTimestamp:
+                mission.startTime || mission.start_time || null,
               rewardAmount:
                 Number.isFinite(rewardAmount) && rewardAmount > 0
                   ? rewardAmount

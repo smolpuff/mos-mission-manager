@@ -158,3 +158,4 @@ release/
 
 # Standalone local analytics admin/tooling
 missions-analytics/
+PAYLOAD_NOTES.md

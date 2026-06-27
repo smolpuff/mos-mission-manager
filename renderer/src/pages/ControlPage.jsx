@@ -4156,7 +4156,9 @@ function ControlView() {
                           ? "text-sky-300"
                           : "text-slate-300"
                     }`}
-                    title={latestLog ? latestLog.text : "No backend output yet."}
+                    title={
+                      latestLog ? latestLog.text : "No backend output yet."
+                    }
                   >
                     {latestLog ? latestLog.text : "No backend output yet."}
                   </div>
@@ -4973,14 +4975,16 @@ function ControlView() {
                             >
                               <div className="card-mission__title">
                                 {showRealLockedSlot4
-                                  ? "Unlock Slot 4"
+                                  ? "Click to Unlock Slot 4"
                                   : title
                                     ? title
                                     : "Assign NFT to start"}
                               </div>
 
                               <div className="card-mission__slot text-gray-400">
-                                {showRealLockedSlot4 ? "" : `Slot ${slot}`}
+                                {showRealLockedSlot4
+                                  ? "2500 PBP"
+                                  : `Slot ${slot}`}
                               </div>
                             </div>
                           </div>
