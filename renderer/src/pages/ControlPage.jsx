@@ -123,11 +123,54 @@ function stripYearFromCompetitionDate(value) {
     .trim();
 }
 
+function parseTimeValue(value) {
+  if (value === null || value === undefined) return null;
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim()) {
+    const asNumber = Number(value.trim());
+    if (Number.isFinite(asNumber)) return asNumber;
+    const parsed = Date.parse(value.trim());
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return null;
+}
+
+function formatRemainingMs(ms) {
+  const seconds = Math.max(0, Math.ceil(ms / 1000));
+  if (seconds <= 0) return null;
+  if (seconds < 60) return `${seconds}s remaining`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) {
+    const secs = seconds % 60;
+    return secs > 0
+      ? `${minutes}m ${secs}s remaining`
+      : `${minutes}m remaining`;
+  }
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) {
+    const mins = minutes % 60;
+    return mins > 0 ? `${hours}h ${mins}m remaining` : `${hours}h remaining`;
+  }
+  const days = Math.floor(hours / 24);
+  const hrs = hours % 24;
+  return hrs > 0 ? `${days}d ${hrs}h remaining` : `${days}d remaining`;
+}
+
 function competitionDateMs(value) {
   const text = String(value || "").trim();
   if (!text || /^unknown$/i.test(text)) return null;
   const parsed = Date.parse(text);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function getSlotUnlockExpiresAtLabel(slotUnlockSummary) {
+  if (!slotUnlockSummary || typeof slotUnlockSummary !== "object") return null;
+  const raw = slotUnlockSummary.raw || slotUnlockSummary;
+  const expiresAt = parseTimeValue(
+    raw?.unlockExpiresAt ?? raw?.unlock_expires_at,
+  );
+  if (!expiresAt || expiresAt <= Date.now()) return null;
+  return formatRemainingMs(expiresAt - Date.now());
 }
 
 function competitionStatusFrom(summary, isNewCompetition) {
@@ -1654,6 +1697,8 @@ function ControlView() {
     Number.isFinite(slotUnlockCost) && slotUnlockCost > 0
       ? Math.floor(slotUnlockCost)
       : 2500;
+  const slotUnlockExpiresAtLabel =
+    getSlotUnlockExpiresAtLabel(slotUnlockSummary);
   const canUnlockSlot4 =
     slotUnlockSummary?.canUnlockMore === true &&
     Number(slotUnlockSummary?.nextUnlockSlot) === 4;
@@ -4975,16 +5020,22 @@ function ControlView() {
                             >
                               <div className="card-mission__title">
                                 {showRealLockedSlot4
-                                  ? "Click to Unlock Slot 4"
+                                  ? "Click to unlock slot 4"
                                   : title
                                     ? title
                                     : "Assign NFT to start"}
                               </div>
 
                               <div className="card-mission__slot text-gray-400">
-                                {showRealLockedSlot4
-                                  ? "2500 PBP"
-                                  : `Slot ${slot}`}
+                                {slot === 4 && showRealLockedSlot4
+                                  ? "2,500 PBP"
+                                  : slot === 4 &&
+                                      !slotLocked &&
+                                      slotUnlockExpiresAtLabel
+                                    ? slotUnlockExpiresAtLabel
+                                    : slot !== 4
+                                      ? `Slot ${slot}`
+                                      : null}
                               </div>
                             </div>
                           </div>
