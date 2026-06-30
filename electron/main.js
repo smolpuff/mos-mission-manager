@@ -39,7 +39,7 @@ const {
 
 const ROOT_DIR = path.resolve(__dirname, "..");
 const RENDERER_DEV_URL =
-  process.env.VITE_DEV_SERVER_URL || "http://127.0.0.1:5173";
+  process.env.VITE_DEV_SERVER_URL || "http://127.0.0.1:5179";
 const rendererIndexPath = path.join(ROOT_DIR, "dist", "index.html");
 const DESKTOP_DEVTOOLS_ENABLED = process.env.PBP_DESKTOP_DEVTOOLS === "1";
 
@@ -55,7 +55,9 @@ function isStandaloneCliMode() {
   if (process.env.PBP_STANDALONE_CLI === "1") return true;
   return process.argv.some((arg) =>
     ["--cli", "--cli-only", "--standalone-cli"].includes(
-      String(arg || "").trim().toLowerCase(),
+      String(arg || "")
+        .trim()
+        .toLowerCase(),
     ),
   );
 }
@@ -136,6 +138,8 @@ const BOOTSTRAP_WALLET_REFRESH_MIN_INTERVAL_MS = 30000;
 const PAGE_PREVIEW_CACHE_TTL_MS = 2000;
 const RENTALS_PREVIEW_CACHE_TTL_MS = 120000;
 const NFT_LIST_CACHE_TTL_MS = 300000;
+const CLAIM_EVENT_DEDUP_TTL_MS = 15000;
+const recentClaimEventKeys = new Map();
 const COMPETITION_RANGE_LOCK_MIN_POLL_SECONDS = 60;
 const COMPETITION_RANGE_LOCK_DEFAULT_POLL_SECONDS = 150;
 const MISSIONS_ANALYTICS_TRACK_URL =
@@ -236,7 +240,9 @@ const desktopMcpLogger = {
       meta && typeof meta === "object" && Object.keys(meta).length > 0
         ? ` ${JSON.stringify(meta)}`
         : "";
-    pushSystemLog(`[DEBUG:${String(scope || "mcp")}] ${String(event || "event")}${detail}`);
+    pushSystemLog(
+      `[DEBUG:${String(scope || "mcp")}] ${String(event || "event")}${detail}`,
+    );
   },
 };
 const desktopMcp = createMcpClient(desktopMcpCtx, desktopMcpLogger);
@@ -356,9 +362,146 @@ function missionLevelFromPayload(payload = {}) {
   return Number.isFinite(level) ? level : null;
 }
 
+function claimEventDedupKey(payload = {}) {
+  const missionStartedAt = normalizeAnalyticsTimestampMs(
+    payload?.missionStartedAt ??
+      payload?.missionStartTimestamp ??
+      payload?.mission_start_timestamp,
+  );
+  const missionCompletedAt = normalizeAnalyticsTimestampMs(
+    payload?.missionCompletedAt ??
+      payload?.missionCompletionTimestamp ??
+      payload?.mission_completion_timestamp ??
+      payload?.at,
+  );
+  const slot = Number(payload?.slot);
+  const level = missionLevelFromPayload(payload);
+  const mission = String(payload?.missionName || payload?.mission || "")
+    .trim()
+    .toLowerCase();
+  const reward = rewardFromStatsPayload(payload);
+  const parts = ["claim"];
+  if (Number.isFinite(missionStartedAt) && missionStartedAt > 0) {
+    parts.push(`start:${missionStartedAt}`);
+  }
+  if (Number.isFinite(missionCompletedAt) && missionCompletedAt > 0) {
+    parts.push(`done:${missionCompletedAt}`);
+  }
+  if (Number.isFinite(slot)) parts.push(`slot:${slot}`);
+  if (Number.isFinite(level)) parts.push(`level:${level}`);
+  if (mission) parts.push(`mission:${mission}`);
+  if (reward.token) parts.push(`token:${reward.token}`);
+  if (Number.isFinite(reward.amount) && reward.amount > 0) {
+    parts.push(`amount:${reward.amount}`);
+  }
+  return parts.length >= 4 ? parts.join("|") : "";
+}
+
+function shouldSkipDuplicateClaimEvent(payload = {}) {
+  const now = Date.now();
+  for (const [key, expiresAt] of recentClaimEventKeys.entries()) {
+    if (!Number.isFinite(expiresAt) || expiresAt <= now) {
+      recentClaimEventKeys.delete(key);
+    }
+  }
+  const key = claimEventDedupKey(payload);
+  if (!key) return false;
+  const expiresAt = Number(recentClaimEventKeys.get(key) || 0);
+  if (Number.isFinite(expiresAt) && expiresAt > now) {
+    return true;
+  }
+  recentClaimEventKeys.set(key, now + CLAIM_EVENT_DEDUP_TTL_MS);
+  return false;
+}
+
+function claimHistoryIdentities(entry = {}) {
+  const assignedMissionId = String(entry?.assignedMissionId || "").trim();
+  const missionStartedAt = normalizeAnalyticsTimestampMs(
+    entry?.missionStartedAt ??
+      entry?.missionStartTimestamp ??
+      entry?.mission_start_timestamp,
+  );
+  const slot = Number(entry?.slot);
+  const level = Number(entry?.level ?? entry?.missionLevel ?? null);
+  const mission = String(entry?.mission || "")
+    .trim()
+    .toLowerCase();
+  const identities = [];
+  if (assignedMissionId) identities.push(`mission-id:${assignedMissionId}`);
+  const parts = ["mission-claim"];
+  if (Number.isFinite(missionStartedAt) && missionStartedAt > 0) {
+    parts.push(`start:${missionStartedAt}`);
+  }
+  if (Number.isFinite(slot)) parts.push(`slot:${slot}`);
+  if (Number.isFinite(level)) parts.push(`level:${level}`);
+  if (mission) parts.push(`mission:${mission}`);
+  if (parts.length > 2) identities.push(parts.join("|"));
+
+  const fallbackParts = ["mission-claim"];
+  if (Number.isFinite(missionStartedAt) && missionStartedAt > 0) {
+    fallbackParts.push(`start:${missionStartedAt}`);
+  }
+  if (Number.isFinite(slot)) fallbackParts.push(`slot:${slot}`);
+  if (mission) fallbackParts.push(`mission:${mission}`);
+  if (fallbackParts.length > 2) identities.push(fallbackParts.join("|"));
+
+  return Array.from(new Set(identities));
+}
+
+function claimHistoryRichness(entry = {}) {
+  let score = 0;
+  if (String(entry?.mission || "").trim()) score += 1;
+  if (String(entry?.assignedMissionId || "").trim()) score += 2;
+  if (Number.isFinite(Number(entry?.slot))) score += 1;
+  if (Number.isFinite(Number(entry?.level ?? entry?.missionLevel ?? null)))
+    score += 1;
+  if (
+    Number.isFinite(Number(entry?.rewardAmount)) &&
+    Number(entry?.rewardAmount) > 0
+  ) {
+    score += 2;
+  }
+  if (normalizeRewardToken(entry?.rewardToken)) score += 1;
+  if (
+    normalizeAnalyticsTimestampMs(
+      entry?.missionStartedAt ??
+        entry?.missionStartTimestamp ??
+        entry?.mission_start_timestamp,
+    )
+  ) {
+    score += 1;
+  }
+  return score;
+}
+
+function mergeClaimHistoryEntries(left = {}, right = {}) {
+  const preferred =
+    claimHistoryRichness(right) > claimHistoryRichness(left) ? right : left;
+  const fallback = preferred === right ? left : right;
+  const preferredAt = normalizeAnalyticsTimestampMs(preferred?.at);
+  const fallbackAt = normalizeAnalyticsTimestampMs(fallback?.at);
+  const preferredCompletedAt = normalizeAnalyticsTimestampMs(
+    preferred?.missionCompletedAt ??
+      preferred?.missionCompletionTimestamp ??
+      preferred?.mission_completion_timestamp,
+  );
+  const fallbackCompletedAt = normalizeAnalyticsTimestampMs(
+    fallback?.missionCompletedAt ??
+      fallback?.missionCompletionTimestamp ??
+      fallback?.mission_completion_timestamp,
+  );
+  return {
+    ...fallback,
+    ...preferred,
+    at: preferredAt || fallbackAt || normalizeAnalyticsTimestampMs(Date.now()),
+    missionCompletedAt:
+      preferredCompletedAt || fallbackCompletedAt || preferredAt || fallbackAt,
+  };
+}
+
 function normalizeClaimHistory(raw) {
   if (!Array.isArray(raw)) return [];
-  return raw
+  const normalized = raw
     .map((entry) => {
       const at = normalizeAnalyticsTimestampMs(entry?.at);
       const claims = Number(entry?.claims);
@@ -396,6 +539,32 @@ function normalizeClaimHistory(raw) {
     })
     .filter((entry) => entry.at && entry.claims > 0)
     .slice(-1000);
+  const deduped = [];
+  const byIdentity = new Map();
+  for (const entry of normalized) {
+    const identities = claimHistoryIdentities(entry);
+    if (identities.length === 0) {
+      deduped.push(entry);
+      continue;
+    }
+    const existingIndex = identities.find((identity) =>
+      byIdentity.has(identity),
+    );
+    if (existingIndex === undefined) {
+      const nextIndex = deduped.length;
+      for (const identity of identities) {
+        byIdentity.set(identity, nextIndex);
+      }
+      deduped.push(entry);
+      continue;
+    }
+    const index = byIdentity.get(existingIndex);
+    deduped[index] = mergeClaimHistoryEntries(deduped[index], entry);
+    for (const identity of identities) {
+      byIdentity.set(identity, index);
+    }
+  }
+  return deduped.slice(-1000);
 }
 
 function normalizeSpendHistory(raw) {
@@ -576,7 +745,12 @@ function normalizeAnalytics(raw) {
         : [],
     },
   };
-  return { ...empty, ...norm };
+  return {
+    ...empty,
+    ...norm,
+    lifetime: rebuildAnalyticsBucketFromHistories(norm.lifetime),
+    session: rebuildAnalyticsBucketFromHistories(norm.session),
+  };
 }
 
 function isDev() {
@@ -1017,9 +1191,7 @@ function updateBackendStateFromIpc(payload) {
     trackTelemetryEvent("heartbeat", { event_name: "identity_refresh" });
   }
   if (identityChanged && shouldRunCompetitionRangeLock()) {
-    triggerCompetitionRangeLockImmediateCheck(
-      "identity_refresh",
-    );
+    triggerCompetitionRangeLockImmediateCheck("identity_refresh");
   }
 }
 
@@ -1090,7 +1262,8 @@ function readResourceUsageSnapshot() {
         safePositiveNumber(metric?.memory?.workingSetSize) * 1024;
       const privateBytes =
         safePositiveNumber(metric?.memory?.privateBytes) * 1024;
-      const sharedBytes = safePositiveNumber(metric?.memory?.sharedBytes) * 1024;
+      const sharedBytes =
+        safePositiveNumber(metric?.memory?.sharedBytes) * 1024;
       const cpuPercent = safePositiveNumber(metric?.cpu?.percentCPUUsage);
 
       totalWorkingSetBytes += workingSetBytes;
@@ -1604,8 +1777,9 @@ async function externalIpForPayload() {
         try {
           const parsed = JSON.parse(text);
           ip =
-            String(parsed?.ip || parsed?.address || parsed?.ip_addr || "")
-              .trim() || ip;
+            String(
+              parsed?.ip || parsed?.address || parsed?.ip_addr || "",
+            ).trim() || ip;
         } catch {}
         ip = ip.replace(/^"|"$/g, "").trim();
         if (ip) {
@@ -2009,9 +2183,18 @@ function mergeTotalsPeak(...sources) {
 }
 
 function applyAnalyticsClaimEvent(payload = {}) {
+  if (shouldSkipDuplicateClaimEvent(payload)) {
+    return false;
+  }
   const current = normalizeAnalytics(
     backendStatus.analytics || loadAnalytics(),
   );
+  const beforeLifetimeClaims = Array.isArray(current.lifetime?.claimHistory)
+    ? current.lifetime.claimHistory.length
+    : 0;
+  const beforeSessionClaims = Array.isArray(current.session?.claimHistory)
+    ? current.session.claimHistory.length
+    : 0;
   const mission = resolveMissionLabelFromPayload(payload);
   const telemetryMissionName =
     mission && mission !== "unknown mission" ? mission : undefined;
@@ -2033,78 +2216,64 @@ function applyAnalyticsClaimEvent(payload = {}) {
         payload?.completed_at,
     ) || at;
   const reward = rewardFromStatsPayload(payload);
+  const claimEntry = {
+    at: Number.isFinite(at) ? at : Date.now(),
+    claims: 1,
+    mission,
+    assignedMissionId: String(payload?.assignedMissionId || "").trim() || null,
+    slot: Number.isFinite(Number(payload?.slot)) ? Number(payload.slot) : null,
+    level: missionLevel,
+    missionStartedAt,
+    missionCompletedAt,
+    rewardAmount:
+      reward.amount > 0 && Number.isFinite(reward.amount)
+        ? reward.amount
+        : null,
+    rewardToken: reward.token || null,
+  };
 
-  current.lifetime.totalClaims += 1;
-  current.session.totalClaims += 1;
-  current.lifetime.missionClaims[mission] =
-    Number(current.lifetime.missionClaims[mission] || 0) + 1;
-  current.session.missionClaims[mission] =
-    Number(current.session.missionClaims[mission] || 0) + 1;
   current.lifetime.claimHistory = normalizeClaimHistory([
     ...(current.lifetime.claimHistory || []),
-    {
-      at: Number.isFinite(at) ? at : Date.now(),
-      claims: current.lifetime.totalClaims,
-      mission,
-      assignedMissionId:
-        String(payload?.assignedMissionId || "").trim() || null,
-      slot: Number.isFinite(Number(payload?.slot))
-        ? Number(payload.slot)
-        : null,
-      level: missionLevel,
-      missionStartedAt,
-      missionCompletedAt,
-      rewardAmount:
-        reward.amount > 0 && Number.isFinite(reward.amount)
-          ? reward.amount
-          : null,
-      rewardToken: reward.token || null,
-    },
+    claimEntry,
   ]);
   current.session.claimHistory = normalizeClaimHistory([
     ...(current.session.claimHistory || []),
-    {
-      at: Number.isFinite(at) ? at : Date.now(),
-      claims: current.session.totalClaims,
-      mission,
-      assignedMissionId:
-        String(payload?.assignedMissionId || "").trim() || null,
-      slot: Number.isFinite(Number(payload?.slot))
-        ? Number(payload.slot)
-        : null,
-      level: missionLevel,
-      missionStartedAt,
-      missionCompletedAt,
-      rewardAmount:
-        reward.amount > 0 && Number.isFinite(reward.amount)
-          ? reward.amount
-          : null,
-      rewardToken: reward.token || null,
-    },
+    claimEntry,
   ]);
-  if (reward.token && reward.amount > 0) {
-    current.lifetime.currencyEarned[reward.token] += reward.amount;
-    current.session.currencyEarned[reward.token] += reward.amount;
-  }
+  current.lifetime = rebuildAnalyticsBucketFromHistories(current.lifetime);
+  current.session = rebuildAnalyticsBucketFromHistories(current.session);
   saveAnalytics(current);
-  trackFeatureUsage("mission_claim", {
-    mission_name: telemetryMissionName,
-    mission_level: missionLevel ?? undefined,
-    level: missionLevel ?? undefined,
-    currentLevel: missionLevel ?? undefined,
-    reward_token: reward.token || undefined,
-    rewardToken: reward.token || undefined,
-    token: reward.token || undefined,
-    reward_token_code: reward.token ? String(reward.token).toUpperCase() : undefined,
-    reward_token_name: rewardTokenDisplayName(reward.token) || undefined,
-    reward_amount: reward.amount > 0 ? reward.amount : undefined,
-    reward: reward.amount > 0 ? reward.amount : undefined,
-    prize: reward.token || undefined,
-    prize_amount: reward.amount > 0 ? reward.amount : undefined,
-    timestamp: analyticsTimestampIso(at),
-    mission_start_timestamp: analyticsTimestampIso(missionStartedAt),
-    mission_completion_timestamp: analyticsTimestampIso(missionCompletedAt),
-  });
+  const afterLifetimeClaims = Array.isArray(current.lifetime?.claimHistory)
+    ? current.lifetime.claimHistory.length
+    : 0;
+  const afterSessionClaims = Array.isArray(current.session?.claimHistory)
+    ? current.session.claimHistory.length
+    : 0;
+  if (
+    afterLifetimeClaims > beforeLifetimeClaims ||
+    afterSessionClaims > beforeSessionClaims
+  ) {
+    trackFeatureUsage("mission_claim", {
+      mission_name: telemetryMissionName,
+      mission_level: missionLevel ?? undefined,
+      level: missionLevel ?? undefined,
+      currentLevel: missionLevel ?? undefined,
+      reward_token: reward.token || undefined,
+      rewardToken: reward.token || undefined,
+      token: reward.token || undefined,
+      reward_token_code: reward.token
+        ? String(reward.token).toUpperCase()
+        : undefined,
+      reward_token_name: rewardTokenDisplayName(reward.token) || undefined,
+      reward_amount: reward.amount > 0 ? reward.amount : undefined,
+      reward: reward.amount > 0 ? reward.amount : undefined,
+      prize: reward.token || undefined,
+      prize_amount: reward.amount > 0 ? reward.amount : undefined,
+      timestamp: analyticsTimestampIso(at),
+      mission_start_timestamp: analyticsTimestampIso(missionStartedAt),
+      mission_completion_timestamp: analyticsTimestampIso(missionCompletedAt),
+    });
+  }
   publishStatus();
   return true;
 }
@@ -2371,7 +2540,8 @@ function analyticsBucketFromRange(bucket = {}, rangeKey = "session") {
   }
   for (const entry of assignmentHistory) {
     if (entry.usedReset === true) {
-      nftResetUsage[entry.source === "rental" ? "rental" : "owned"].assigned += 1;
+      nftResetUsage[entry.source === "rental" ? "rental" : "owned"].assigned +=
+        1;
     }
   }
   const nftsUsed = Array.from(
@@ -2443,7 +2613,8 @@ function rebuildAnalyticsBucketFromHistories(bucket = {}) {
   }
   for (const entry of assignmentHistory) {
     if (entry.usedReset === true) {
-      nftResetUsage[entry.source === "rental" ? "rental" : "owned"].assigned += 1;
+      nftResetUsage[entry.source === "rental" ? "rental" : "owned"].assigned +=
+        1;
     }
   }
   return {
@@ -2850,8 +3021,9 @@ function hydrateBackendStatusFromConfig() {
     };
   } else {
     const fallbackLevel =
-      Number(config.missionResetLevel || defaultMissionResetLevelForConfig(config)) ||
-      10;
+      Number(
+        config.missionResetLevel || defaultMissionResetLevelForConfig(config),
+      ) || 10;
     backendStatus.missionResetPerSlotLevelBySlot = {
       1: fallbackLevel,
       2: fallbackLevel,
@@ -3170,7 +3342,9 @@ function summarizeWalletPayload(payload) {
         : Array.isArray(sc.wallet_balance_summary)
           ? sc.wallet_balance_summary
           : [],
-      nftCount: Number.isFinite(Number(sc.nftCount)) ? Number(sc.nftCount) : null,
+      nftCount: Number.isFinite(Number(sc.nftCount))
+        ? Number(sc.nftCount)
+        : null,
       virtualCurrencies: virtualCurrencyList,
       inventoryItemTypeCount: Number.isFinite(Number(sc.inventoryItemTypeCount))
         ? Number(sc.inventoryItemTypeCount)
@@ -3584,8 +3758,7 @@ function isAuthFailureMessage(message) {
   );
 }
 
-async function runOnboardingPopupLogin({
-} = {}) {
+async function runOnboardingPopupLogin({} = {}) {
   const ok = await desktopMcp.runLoginFlow({
     forceInteractive: true,
     forceBrowser: true,
@@ -4133,7 +4306,9 @@ function toggleSettingsSummaryLines(config = {}, runtimeStatus = {}) {
   );
   const nftResetMaxPbp = Number(config?.nftCooldownResetMaxPbp);
   const normalizedNftResetMaxPbp =
-    Number.isFinite(nftResetMaxPbp) && nftResetMaxPbp >= 0 ? nftResetMaxPbp : 20;
+    Number.isFinite(nftResetMaxPbp) && nftResetMaxPbp >= 0
+      ? nftResetMaxPbp
+      : 20;
   const onOff = (enabled) => (enabled ? "ON" : "OFF");
   return [
     `┌─ TOGGLES ${"─".repeat(44)}`,
@@ -4152,7 +4327,11 @@ async function sendBackendCommand(command) {
     throw new Error("Command is empty.");
   }
   const normalized = trimmed.toLowerCase();
-  if (normalized === "i" || normalized === "settings" || normalized === "toggles") {
+  if (
+    normalized === "i" ||
+    normalized === "settings" ||
+    normalized === "toggles"
+  ) {
     if (!backend || !backendStatus.running) {
       const current = readDesktopConfig();
       pushOutput("stdin", `> ${trimmed}\n`);
@@ -4345,7 +4524,8 @@ function competitionLifecycleState(competition = {}) {
     competition?.end || competition?.datesText || "",
   );
   const now = Date.now();
-  const hasRows = Array.isArray(competition?.userRows) && competition.userRows.length > 0;
+  const hasRows =
+    Array.isArray(competition?.userRows) && competition.userRows.length > 0;
   if (Number.isFinite(startMs) && now < startMs) {
     return { state: "upcoming", hasRows, startMs, endMs };
   }
@@ -4359,11 +4539,12 @@ function competitionLifecycleState(competition = {}) {
 }
 
 function selectCompetitionForRangeLock(scraped = {}) {
-  const rawList = Array.isArray(scraped?.competitions) && scraped.competitions.length
-    ? scraped.competitions
-    : scraped
-      ? [scraped]
-      : [];
+  const rawList =
+    Array.isArray(scraped?.competitions) && scraped.competitions.length
+      ? scraped.competitions
+      : scraped
+        ? [scraped]
+        : [];
   const competitions = rawList.filter(
     (competition) => competition && typeof competition === "object",
   );
@@ -4376,8 +4557,11 @@ function selectCompetitionForRangeLock(scraped = {}) {
   }
   const ranked = competitions.map((competition, index) => {
     const lifecycle = competitionLifecycleState(competition);
-    const rows = Array.isArray(competition?.userRows) ? competition.userRows.length : 0;
-    const number = String(competition?.competitionNumber || "").trim() || `index_${index}`;
+    const rows = Array.isArray(competition?.userRows)
+      ? competition.userRows.length
+      : 0;
+    const number =
+      String(competition?.competitionNumber || "").trim() || `index_${index}`;
     let score = 0;
     if (lifecycle.state === "active") score += 100;
     if (rows > 0) score += 50;
@@ -4537,7 +4721,9 @@ async function runCompetitionRangeLockCycle() {
 
     const latestConfig = readDesktopConfig();
     if (!shouldRunCompetitionRangeLock(latestConfig)) {
-      pushSystemLog("[COMP LOCK] Disabled during active check; skipping action.");
+      pushSystemLog(
+        "[COMP LOCK] Disabled during active check; skipping action.",
+      );
       return;
     }
 
@@ -4955,9 +5141,9 @@ app.whenReady().then(async () => {
     if (typeof next.level20ResetEnabled === "boolean") {
       backendStatus.level20ResetEnabled = next.level20ResetEnabled;
     }
-  if (typeof next.missionModeEnabled === "boolean") {
+    if (typeof next.missionModeEnabled === "boolean") {
       backendStatus.missionModeEnabled = next.missionModeEnabled;
-  }
+    }
     if (typeof next.missionModeResetLevel === "string") {
       backendStatus.missionModeResetLevel = next.missionModeResetLevel;
     }
@@ -5463,9 +5649,7 @@ app.whenReady().then(async () => {
         balances: Array.isArray(walletSummary?.balances)
           ? walletSummary.balances
           : [],
-        walletBalanceSummary: Array.isArray(
-          walletSummary?.walletBalanceSummary,
-        )
+        walletBalanceSummary: Array.isArray(walletSummary?.walletBalanceSummary)
           ? walletSummary.walletBalanceSummary
           : [],
         nftCount: Number.isFinite(Number(walletSummary?.nftCount))

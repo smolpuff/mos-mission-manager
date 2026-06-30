@@ -19,6 +19,10 @@ const {
   MISSION_PAGE_OPEN_COOLDOWN_MS_DEFAULT,
 } = require("../mission-page");
 const { createMissionActionExecutor } = require("../mission-actions");
+const {
+  emitClaimAnalyticsEvent,
+  registerClaimEvent,
+} = require("../claim-analytics");
 
 function createWatchService(
   ctx,
@@ -39,6 +43,8 @@ function createWatchService(
   );
   const WATCH_MAX_CLAIMS = 4;
   const WATCH_FALLBACK_CLAIMS = true;
+  const POST_CLAIM_SETTLE_DELAY_MS_DEFAULT = 3000;
+  const RECENT_CLAIM_OVERRIDE_TTL_MS_DEFAULT = 45_000;
   const RESET_PROMPT_REOPEN_COOLDOWN_MS = 60_000;
   const DEFAULT_SESSION_REWARD_TOTALS = { pbp: 0, tc: 0, cc: 0 };
   const DEFAULT_SESSION_SPEND_TOTALS = { pbp: 0, tc: 0, cc: 0 };
@@ -103,7 +109,7 @@ function createWatchService(
       }
       inflightForceFresh = Boolean(forceFresh);
       const request = mcp
-        .getUserMissions({ reason })
+        .getUserMissions({ reason, forceFresh })
         .then((result) => seed(result))
         .finally(() => {
           if (inflight === request) {
@@ -130,6 +136,164 @@ function createWatchService(
 
   function watchMinCycleSeconds() {
     return ctx.runtimeDefaults?.watchMinCycleSeconds || 30;
+  }
+
+  function postClaimSettleDelayMs() {
+    const configuredMs = Number(ctx.config?.postClaimSettleDelayMs);
+    if (Number.isFinite(configuredMs) && configuredMs >= 0) {
+      return Math.min(15_000, Math.floor(configuredMs));
+    }
+    const configuredSeconds = Number(ctx.config?.postClaimSettleSeconds);
+    if (Number.isFinite(configuredSeconds) && configuredSeconds >= 0) {
+      return Math.min(15_000, Math.floor(configuredSeconds * 1000));
+    }
+    return POST_CLAIM_SETTLE_DELAY_MS_DEFAULT;
+  }
+
+  function recentClaimOverrideTtlMs() {
+    const configuredMs = Number(ctx.config?.recentClaimOverrideTtlMs);
+    if (Number.isFinite(configuredMs) && configuredMs >= 0) {
+      return Math.min(120_000, Math.floor(configuredMs));
+    }
+    const configuredSeconds = Number(ctx.config?.recentClaimOverrideTtlSeconds);
+    if (Number.isFinite(configuredSeconds) && configuredSeconds >= 0) {
+      return Math.min(120_000, Math.floor(configuredSeconds * 1000));
+    }
+    return RECENT_CLAIM_OVERRIDE_TTL_MS_DEFAULT;
+  }
+
+  function noteRecentClaimedMissionOverrides(
+    claims,
+    lookupByAssignedMissionId = null,
+  ) {
+    const entries =
+      ctx.recentClaimedMissionOverrides &&
+      typeof ctx.recentClaimedMissionOverrides === "object"
+        ? ctx.recentClaimedMissionOverrides
+        : {};
+    const now = Date.now();
+    const ttlMs = recentClaimOverrideTtlMs();
+    let changed = false;
+
+    for (const [assignedMissionId, entry] of Object.entries(entries)) {
+      const expiresAt = Number(entry?.expiresAt || 0);
+      if (!Number.isFinite(expiresAt) || expiresAt <= now) {
+        delete entries[assignedMissionId];
+        changed = true;
+      }
+    }
+
+    for (const claim of Array.isArray(claims) ? claims : []) {
+      const details = compactClaimDetails(claim, lookupByAssignedMissionId);
+      const assignedMissionId = String(details?.missionId || "").trim();
+      if (!assignedMissionId) continue;
+      const cachedLookup =
+        lookupByAssignedMissionId instanceof Map
+          ? lookupByAssignedMissionId.get(assignedMissionId) || null
+          : ctx.lastAssignedMissionLookup &&
+              typeof ctx.lastAssignedMissionLookup === "object"
+            ? ctx.lastAssignedMissionLookup[assignedMissionId] || null
+            : null;
+      const resolvedSlot = Number.isFinite(Number(details?.slot))
+        ? Number(details.slot)
+        : Number.isFinite(Number(cachedLookup?.slot))
+          ? Number(cachedLookup.slot)
+          : null;
+      const resolvedMissionName =
+        String(details?.name || "").trim() ||
+        String(cachedLookup?.name || "").trim() ||
+        null;
+      entries[assignedMissionId] = {
+        assignedMissionId,
+        slot: resolvedSlot,
+        missionName: resolvedMissionName,
+        recordedAt: now,
+        expiresAt: now + ttlMs,
+      };
+      changed = true;
+    }
+
+    if (changed || !ctx.recentClaimedMissionOverrides) {
+      ctx.recentClaimedMissionOverrides = entries;
+    }
+  }
+
+  function applyLocalClaimMissionResultMutations(
+    missionResult,
+    claims,
+    lookupByAssignedMissionId = null,
+  ) {
+    const missions = normalizeMissionList(missionResult);
+    if (!Array.isArray(missions) || missions.length === 0) return 0;
+    let patched = 0;
+    for (const claim of Array.isArray(claims) ? claims : []) {
+      const details = compactClaimDetails(claim, lookupByAssignedMissionId);
+      const wantedId = String(details?.missionId || "").trim();
+      const wantedName = String(details?.name || "")
+        .trim()
+        .toLowerCase();
+      const wantedSlot = Number(details?.slot);
+      const mission =
+        missions.find((entry) => {
+          const entryId = String(
+            entry?.assignedMissionId || entry?.assigned_mission_id || "",
+          ).trim();
+          if (wantedId && entryId && entryId === wantedId) return true;
+          const entrySlot = Number(entry?.slot);
+          const slotMatches =
+            Number.isFinite(wantedSlot) &&
+            Number.isFinite(entrySlot) &&
+            wantedSlot > 0 &&
+            entrySlot === wantedSlot;
+          if (!slotMatches) return false;
+          if (!wantedName) return true;
+          return missionName(entry).toLowerCase() === wantedName;
+        }) || null;
+      if (!mission) continue;
+
+      mission.assigned_nft = null;
+      mission.assignedNft = null;
+      mission.assigned_nft_account = null;
+      mission.assignedNftAccount = null;
+      mission.currentAssignedNft = null;
+      mission.current_assigned_nft = null;
+      mission.currentAssignedNftAccount = null;
+      mission.current_assigned_nft_account = null;
+      mission.nftAccount = null;
+      mission.nft_account = null;
+      mission.nft = null;
+      mission.assigned_nft_active = false;
+      mission.assignedMissionActive = false;
+      mission.active = false;
+      mission.isActive = false;
+      mission.inProgress = false;
+      mission.completed = false;
+      mission.claimable = false;
+      mission.isClaimable = false;
+      mission.status = "available";
+      mission.state = "available";
+      mission.progress = 0;
+      mission.currentProgress = 0;
+      mission.current_progress = 0;
+      mission.startTime = null;
+      mission.start_time = null;
+      mission.missionStartTimestamp = null;
+      mission.mission_start_timestamp = null;
+
+      const claimedLevel = Number(details?.level);
+      const currentLevel = Number(mission?.current_level ?? mission?.level);
+      const nextLevel = Number.isFinite(claimedLevel)
+        ? claimedLevel + 1
+        : Number.isFinite(currentLevel)
+          ? currentLevel
+          : null;
+      if (Number.isFinite(nextLevel)) {
+        mission.current_level = nextLevel;
+        mission.level = nextLevel;
+      }
+      patched += 1;
+    }
+    return patched;
   }
 
   function claimWorkPaused() {
@@ -738,10 +902,17 @@ function createWatchService(
       claim?.missionId ||
       claim?.id ||
       null;
-    const fromLookup =
+    const fromLookupMap =
       missionId && lookupByAssignedMissionId instanceof Map
         ? lookupByAssignedMissionId.get(missionId) || null
         : null;
+    const fromCachedLookup =
+      missionId &&
+      ctx.lastAssignedMissionLookup &&
+      typeof ctx.lastAssignedMissionLookup === "object"
+        ? ctx.lastAssignedMissionLookup[missionId] || null
+        : null;
+    const fromLookup = fromLookupMap || fromCachedLookup || null;
     return {
       missionId,
       name:
@@ -792,25 +963,23 @@ function createWatchService(
         );
       } else {
         successCount += 1;
-        if (ctx.guiBridge && typeof ctx.guiBridge.sendEvent === "function") {
-          const label = resolveClaimDisplayName({
-            missionName: d.name,
-            assignedMissionId: d.missionId,
-            slot: d.slot,
-          });
-          ctx.guiBridge.sendEvent("stats_claim", {
-            source: "watch_claims",
-            at: Date.now(),
-            assignedMissionId: d.missionId || null,
-            missionName: label || null,
-            slot: d.slot ?? null,
-            level: d.level ?? null,
-            missionLevel: d.level ?? null,
-            missionStartTimestamp: d.startTime || null,
-            rewardAmount: d.reward ?? null,
-            rewardToken: d.prize ?? null,
-          });
-        }
+        const label = resolveClaimDisplayName({
+          missionName: d.name,
+          assignedMissionId: d.missionId,
+          slot: d.slot,
+        });
+        emitClaimAnalyticsEvent(ctx, {
+          source: "watch_claims",
+          at: Date.now(),
+          assignedMissionId: d.missionId || null,
+          missionName: label || null,
+          slot: d.slot ?? null,
+          level: d.level ?? null,
+          missionLevel: d.level ?? null,
+          missionStartTimestamp: d.startTime || null,
+          rewardAmount: d.reward ?? null,
+          rewardToken: d.prize ?? null,
+        });
         logWithTimestamp(
           `[WATCH] ✅ Claimed: ${missionText}${slotText}${levelText}${rewardText}${messageText}`.trim(),
         );
@@ -823,29 +992,22 @@ function createWatchService(
     const totals = { ...DEFAULT_SESSION_REWARD_TOTALS };
     for (const c of Array.isArray(claims) ? claims : []) {
       if (c?.success === false) continue;
-      const missionId =
-        c?.assignedMissionId ||
-        c?.assigned_mission_id ||
-        c?.missionId ||
-        c?.id ||
-        null;
-      const lookup =
-        missionId && lookupByAssignedMissionId instanceof Map
-          ? lookupByAssignedMissionId.get(missionId) || null
-          : null;
-      const bucket = normalizeRewardBucket(
-        c?.prize || c?.rewardToken || lookup?.prize,
-      );
-      const amountRaw =
-        c?.prizeAmount ??
-        c?.prize_amount ??
-        c?.rewardAmount ??
-        c?.reward_amount ??
-        c?.amount ??
-        c?.reward ??
-        lookup?.reward ??
-        lookup?.prizeAmount ??
-        null;
+      const d = compactClaimDetails(c, lookupByAssignedMissionId);
+      const analyticsPayload = {
+        assignedMissionId: d.missionId || null,
+        missionName: d.name || null,
+        slot: d.slot ?? null,
+        level: d.level ?? null,
+        missionLevel: d.level ?? null,
+        missionStartTimestamp: d.startTime || null,
+        rewardAmount: d.reward ?? null,
+        rewardToken: d.prize ?? null,
+      };
+      if (!registerClaimEvent(ctx, analyticsPayload, { scope: "reward_totals" })) {
+        continue;
+      }
+      const bucket = normalizeRewardBucket(d.prize);
+      const amountRaw = d.reward;
       let amount = Number(amountRaw);
       if (!Number.isFinite(amount) && typeof amountRaw === "string") {
         const match = amountRaw.match(/([0-9]+(?:\.[0-9]+)?)/);
@@ -1254,25 +1416,24 @@ function createWatchService(
         entry?.toLevel === null || entry?.toLevel === entry?.fromLevel
           ? ""
           : ` -> lvl=${Number(entry.toLevel || 0)}`;
-      if (ctx.guiBridge && typeof ctx.guiBridge.sendEvent === "function") {
-        const label = resolveClaimDisplayName({
-          missionName: d.name || entry?.name,
-          assignedMissionId: d.missionId || entry?.assignedMissionId || entry?.id,
-          slot: d.slot ?? entry?.slot ?? null,
-        });
-        ctx.guiBridge.sendEvent("stats_claim", {
-          source: String(prefix || "").replace(/^\[WATCH\]\s+✅\s+/, ""),
-          at: Date.now(),
-          assignedMissionId: d.missionId || entry?.assignedMissionId || entry?.id || null,
-          missionName: label || null,
-          slot: d.slot ?? entry?.slot ?? null,
-          level: entry?.fromLevel ?? null,
-          missionLevel: entry?.fromLevel ?? null,
-          missionStartTimestamp: entry?.missionStartTimestamp || null,
-          rewardAmount: d.reward ?? null,
-          rewardToken: d.prize ?? null,
-        });
-      }
+      const label = resolveClaimDisplayName({
+        missionName: d.name || entry?.name,
+        assignedMissionId: d.missionId || entry?.assignedMissionId || entry?.id,
+        slot: d.slot ?? entry?.slot ?? null,
+      });
+      emitClaimAnalyticsEvent(ctx, {
+        source: String(prefix || "").replace(/^\[WATCH\]\s+✅\s+/, ""),
+        at: Date.now(),
+        assignedMissionId:
+          d.missionId || entry?.assignedMissionId || entry?.id || null,
+        missionName: label || null,
+        slot: d.slot ?? entry?.slot ?? null,
+        level: entry?.fromLevel ?? null,
+        missionLevel: entry?.fromLevel ?? null,
+        missionStartTimestamp: entry?.missionStartTimestamp || null,
+        rewardAmount: d.reward ?? null,
+        rewardToken: d.prize ?? null,
+      });
       logWithTimestamp(
         `${prefix}: ${missionText}${slotText}${fromText}${toText}`,
       );
@@ -1317,24 +1478,34 @@ function createWatchService(
     lookupByAssignedMissionId = null,
   ) {
     const claimedSlots = new Set();
+    const claimedMissionIds = new Set();
     const claimSummaries = [];
     for (const claim of Array.isArray(claims) ? claims : []) {
       const d = compactClaimDetails(claim, lookupByAssignedMissionId);
       claimSummaries.push(d);
       const slot = Number(d.slot);
       if (Number.isFinite(slot) && slot > 0) claimedSlots.add(slot);
+      const missionId = String(d.missionId || "").trim();
+      if (missionId) claimedMissionIds.add(missionId);
     }
-    if (claimedSlots.size === 0) return 0;
+    if (claimedSlots.size === 0 && claimedMissionIds.size === 0) return 0;
     const existing = Array.isArray(ctx.guiMissionSlots)
       ? ctx.guiMissionSlots
       : [];
     let changed = false;
     const next = existing.map((entry) => {
       const slot = Number(entry?.slot);
-      if (!Number.isFinite(slot) || !claimedSlots.has(slot)) return entry;
+      const entryMissionId = String(
+        entry?.missionId || entry?.assignedMissionId || "",
+      ).trim();
+      const matchesSlot = Number.isFinite(slot) && claimedSlots.has(slot);
+      const matchesMissionId = entryMissionId && claimedMissionIds.has(entryMissionId);
+      if (!matchesSlot && !matchesMissionId) return entry;
       changed = true;
       const summary = claimSummaries.find(
-        (item) => Number(item?.slot) === slot && item?.slot !== null,
+        (item) =>
+          (Number(item?.slot) === slot && item?.slot !== null) ||
+          String(item?.missionId || "").trim() === entryMissionId,
       );
       return {
         ...entry,
@@ -1361,7 +1532,7 @@ function createWatchService(
     if (ctx.guiBridge && typeof ctx.guiBridge.emitNow === "function") {
       ctx.guiBridge.emitNow();
     }
-    return claimedSlots.size;
+    return next.filter((entry, index) => entry !== existing[index]).length;
   }
 
   function applyPendingClaimSlotRefresh({
@@ -1497,6 +1668,12 @@ function createWatchService(
     }
 
     if (currentClaimed > 0) {
+      noteRecentClaimedMissionOverrides(claims, claimLookupByAssignedMissionId);
+      applyLocalClaimMissionResultMutations(
+        initialMissionResult,
+        claims,
+        claimLookupByAssignedMissionId,
+      );
       const optimisticRefreshCount = applyOptimisticClaimSlotRefresh(
         claims,
         claimLookupByAssignedMissionId,
@@ -1531,9 +1708,21 @@ function createWatchService(
       return followup;
     }
 
-    await checks.refreshMissionHeaderStats({
-      missionsResult: followup.missionResult,
-    });
+    const shouldSkipPostClaimStatsRefresh =
+      followup.claimed > 0 && Number(followup.assigned || 0) === 0;
+    if (shouldSkipPostClaimStatsRefresh) {
+      logDebug("watch", "post_claim_stats_refresh_skipped", {
+        traceId,
+        assignReason,
+        claimed: followup.claimed,
+        assigned: followup.assigned,
+        reasonSkipped: "preserve_optimistic_claim_ui_until_fresh_snapshot",
+      });
+    } else {
+      await checks.refreshMissionHeaderStats({
+        missionsResult: followup.missionResult,
+      });
+    }
 
     if (claimWorkPaused()) {
       trace("watch", "claim_lifecycle_after_stats_paused", {
@@ -1637,7 +1826,24 @@ function createWatchService(
       }
     }
 
-    try {
+    if (currentClaimed > 0) {
+      const settleDelayMs = postClaimSettleDelayMs();
+      const cooldownMs = getMcpCooldownRemainingMs();
+      const waitMs = Math.max(settleDelayMs, cooldownMs);
+      if (waitMs > 0) {
+        logDebug("watch", "post_claim_settle_wait", {
+          traceId,
+          assignReason,
+          claimed: currentClaimed,
+          settleDelayMs,
+          cooldownMs,
+          waitMs,
+        });
+        logWithTimestamp(
+          `[ASSIGN] ⏳ Waiting ${Math.ceil(waitMs / 1000)}s for post-claim settlement${cooldownMs > settleDelayMs ? " / MCP cooldown" : ""}...`,
+        );
+        await sleep(waitMs);
+      }
       if (claimWorkPaused()) {
         trace("watch", "claim_followup_skipped_before_refetch_paused", {
           traceId,
@@ -1646,23 +1852,41 @@ function createWatchService(
         });
         return { claimed: currentClaimed, assigned, missionResult };
       }
-      missionResult = missionResultLoader
-        ? await missionResultLoader({
-            forceFresh: true,
-            reason: `${assignReason || "claim_followup"}_after_claim`,
-          })
-        : await mcp.getUserMissions({
-            forceFresh: true,
-            reason: `${assignReason || "claim_followup"}_after_claim`,
-          });
-      trace("watch", "claim_followup_refetched_after_claim", {
+      trace("watch", "claim_followup_settled_after_claim", {
         traceId,
         assignReason,
+        settleDelayMs,
+        cooldownMs,
+        waitMs,
       });
-    } catch (error) {
-      logDebug("watch", "post_claim_missions_refresh_failed", {
-        error: error.message,
-      });
+    } else {
+      try {
+        if (claimWorkPaused()) {
+          trace("watch", "claim_followup_skipped_before_refetch_paused", {
+            traceId,
+            assignReason,
+            claimed: currentClaimed,
+          });
+          return { claimed: currentClaimed, assigned, missionResult };
+        }
+        missionResult = missionResultLoader
+          ? await missionResultLoader({
+              forceFresh: true,
+              reason: `${assignReason || "claim_followup"}_after_claim`,
+            })
+          : await mcp.getUserMissions({
+              forceFresh: true,
+              reason: `${assignReason || "claim_followup"}_after_claim`,
+            });
+        trace("watch", "claim_followup_refetched_after_claim", {
+          traceId,
+          assignReason,
+        });
+      } catch (error) {
+        logDebug("watch", "post_claim_missions_refresh_failed", {
+          error: error.message,
+        });
+      }
     }
     if (claimWorkPaused()) {
       trace("watch", "claim_followup_skipped_before_assign_paused", {
@@ -1764,6 +1988,10 @@ function createWatchService(
           logClaimTransitionDetails(
             transitions.claimed,
             "[WATCH] ✅ Claimed (state fallback)",
+            claimLookupByAssignedMissionId,
+          );
+          noteRecentClaimedMissionOverrides(
+            transitions.claimed,
             claimLookupByAssignedMissionId,
           );
           addSessionRewardTotals(
@@ -2795,6 +3023,7 @@ function createWatchService(
         afterAdjustment: claimed,
       });
     }
+    let fallbackClaims = [];
     if (claimed === 0 && opts.fallbackClaims && !hasActiveMcpCooldown()) {
       logDebug("watch", "fallback_claim_start", {
         reason: "watch_reported_zero",
@@ -2809,6 +3038,7 @@ function createWatchService(
         ok: fallback?.ok,
       });
       claimed += Number(fallback?.claimed || 0);
+      fallbackClaims = Array.isArray(fallback?.claims) ? fallback.claims : [];
     }
     if (claimWorkPaused()) {
       logDebug("watch", "cycle_followup_skipped_paused", { claimed });
@@ -2838,23 +3068,7 @@ function createWatchService(
       rawSummary: compactStructuredSummary(result?.structuredContent || result),
     });
     let postCycleMissionResult = null;
-    if ((claimed > 0 || summary.claims.length > 0) && !hasActiveMcpCooldown()) {
-      try {
-        postCycleMissionResult = await getMissionResultShared({
-          forceFresh: true,
-          reason: "post_cycle_claim_refresh",
-        });
-      } catch (error) {
-        logDebug("watch", "post_cycle_missions_failed", {
-          error: error.message,
-        });
-      }
-    }
-    if ((claimed > 0 || summary.claims.length > 0) && hasActiveMcpCooldown()) {
-      logDebug("watch", "post_cycle_missions_skipped_rate_limited", {
-        retryAfterMs: getMcpCooldownRemainingMs(),
-      });
-    }
+    const hasClaimActivity = claimed > 0 || summary.claims.length > 0;
 
     let claimLookupByAssignedMissionId = null;
     if (summary.claims.length > 0) {
@@ -2892,7 +3106,7 @@ function createWatchService(
       }
     }
 
-    if (hasActiveMcpCooldown()) {
+    if (!hasClaimActivity && hasActiveMcpCooldown()) {
       logDebug("watch", "⏳ cycle_followup_skipped_rate_limited", {
         retryAfterMs: getMcpCooldownRemainingMs(),
       });
@@ -2902,7 +3116,7 @@ function createWatchService(
         traceId,
         beforeSnapshot,
         claimed,
-        claims: summary.claims,
+        claims: summary.claims.concat(fallbackClaims),
         claimLookupByAssignedMissionId,
         aggregateClaimLogLine: `[WATCH] ✅ Claimed ${claimed} mission reward(s).`,
         assignReason: "post_claim",
@@ -3041,7 +3255,7 @@ function createWatchService(
         traceId,
         beforeSnapshot,
         claimed: Number(claimResult?.claimed || 0),
-        claims: [],
+        claims: Array.isArray(claimResult?.claims) ? claimResult.claims : [],
         assignReason: "manual",
         claimLogLabel: "Manual claimed",
         assignIntro: "[ASSIGN] ▶ Post-claim assign check (immediate)...",
@@ -3168,7 +3382,7 @@ function createWatchService(
               traceId,
               beforeSnapshot,
               claimed: Number(claimResult?.claimed || 0),
-              claims: [],
+              claims: Array.isArray(claimResult?.claims) ? claimResult.claims : [],
               aggregateClaimLogLine: `[WATCH] ✅ Claimed ${Number(claimResult?.claimed || 0)} mission reward(s).`,
               assignReason: "startup_post_claim",
               claimLogLabel: "Startup claimed",

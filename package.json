@@ -8,7 +8,7 @@
     "start": "node app.js",
     "start:debug": "node app.js --debug",
     "desktop": "electron .",
-    "desktop:dev": "concurrently -k \"vite\" \"wait-on tcp:5173 && electron .\"",
+    "desktop:dev": "concurrently -k \"vite\" \"wait-on tcp:5179 && electron .\"",
     "desktop:build": "vite build",
     "desktop:dist": "npm run desktop:build && electron-builder",
     "desktop:dist:mac": "npm run desktop:build && electron-builder --mac dir zip",

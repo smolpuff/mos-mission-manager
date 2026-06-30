@@ -2,9 +2,10 @@
   "version": "3.2.10",
   "downloadUrl": "https://github.com/smolpuff/mos-mission-manager/releases/latest",
   "notes": [
-    "Updated for season 70",
+    "Updated fashionably late for season 70",
     "Optimized startup mcp calls",
-    "Fixed level 20 NFT reservation.. i hope?",
+    "Fixed mission card state-mismatch & sync",
+    "Fixed level 20 NFT reservation.. I hope?",
     "Added time remaining to unlockedSlot 4",
     "Added user website dashboard link to settings page"
   ]

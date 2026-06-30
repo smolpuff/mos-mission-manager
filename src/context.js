@@ -57,6 +57,7 @@ function createContext() {
     lastUserMissionsResult: null,
     lastUserMissionsFetchedAt: 0,
     lastAssignedMissionLookup: {},
+    recentClaimedMissionOverrides: {},
     transientMissionAssignmentCache: {
       byAssignedMissionId: {},
       byStableKey: {},
