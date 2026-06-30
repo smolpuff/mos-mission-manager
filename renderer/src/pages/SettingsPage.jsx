@@ -30,6 +30,9 @@ export default function SettingsPage({
   setMissionCompetitionCheckEnabled,
   reducedMotionEnabled,
   setReducedMotionEnabled,
+  nftAssignmentOrder,
+  setNftAssignmentOrder,
+  debugEnabled = false,
   onManualUpdateCheck,
   updateCheckBusy,
   updateCheckMessage,
@@ -359,6 +362,50 @@ export default function SettingsPage({
                 styling="!text-base"
               />
             </div>
+
+            {debugEnabled ? (
+              <div className="pt-2">
+                <div className="flex flex-col gap-2">
+                  <span className="text-base text-white">
+                    NFT Assignment Order
+                  </span>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-w-2xl">
+                    <button
+                      type="button"
+                      className={`rounded-lg border p-3 text-left transition-colors ${
+                        nftAssignmentOrder === "normal"
+                          ? "border-accent/70 bg-accent/15 text-white"
+                          : "border-white/10 bg-black/30 text-slate-300 hover:border-white/20 hover:bg-black/40"
+                      }`}
+                      onClick={() => void setNftAssignmentOrder?.("normal")}
+                    >
+                      <div className="text-sm font-semibold">Normal order</div>
+                      <div className="mt-1 text-xs text-slate-400">
+                        Keeps the current assignment ordering.
+                      </div>
+                    </button>
+                    <button
+                      type="button"
+                      className={`rounded-lg border p-3 text-left transition-colors ${
+                        nftAssignmentOrder === "highest_level_first"
+                          ? "border-accent/70 bg-accent/15 text-white"
+                          : "border-white/10 bg-black/30 text-slate-300 hover:border-white/20 hover:bg-black/40"
+                      }`}
+                      onClick={() =>
+                        void setNftAssignmentOrder?.("highest_level_first")
+                      }
+                    >
+                      <div className="text-sm font-semibold">
+                        Highest level first
+                      </div>
+                      <div className="mt-1 text-xs text-slate-400">
+                        Tries to use the highest-level eligible NFT first.
+                      </div>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ) : null}
           </div>
         </div>
       </div>

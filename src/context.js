@@ -57,6 +57,10 @@ function createContext() {
     lastUserMissionsResult: null,
     lastUserMissionsFetchedAt: 0,
     lastAssignedMissionLookup: {},
+    transientMissionAssignmentCache: {
+      byAssignedMissionId: {},
+      byStableKey: {},
+    },
     currentUserDisplayName: "unknown",
     currentUserWalletId: "unknown",
     currentUserWalletSummary: null,
@@ -84,6 +88,7 @@ function createContext() {
       4: Number(defaults.missionResetLevel) || 10,
     },
     nftCooldownResetEnabled: false,
+    nftAssignmentOrder: "normal",
     currentMissionResetLevel:
       String(process.env.PBP_DEFAULT_MISSION_RESET_LEVEL || "").trim() ||
       defaults.missionResetLevel,

@@ -4,6 +4,10 @@ const fs = require("fs");
 const path = require("path");
 const { normalizeMissionList } = require("../missions/normalize");
 const {
+  stabilizeMissionAssignments,
+  TRANSIENT_ASSIGNMENT_TTL_MS,
+} = require("../missions/transient-assignment");
+const {
   login: mcpLogin,
   refreshAccessToken,
   clearTokenFile,
@@ -20,6 +24,11 @@ function createMcpClient(ctx, logger) {
   const THROTTLE_DEBUG_WINDOW_MS = 5000;
   const THROTTLE_DEBUG_MAX_EVENTS = 200;
   const THROTTLE_DEBUG_BEFORE_COUNT = 5;
+  const RAW_DEBUG_TOOL_NAMES = new Set([
+    "get_user_missions",
+    "watch_and_claim",
+    "claim_mission_reward",
+  ]);
   let throttleDebugSequence = 0;
   const recentToolCalls = [];
   let userMissionsInflight = null;
@@ -33,6 +42,15 @@ function createMcpClient(ctx, logger) {
   function throttleDebugLogPath() {
     const configDir = path.dirname(String(ctx.configPath || process.cwd()));
     return path.join(configDir, "mcp-throttle-debug.log");
+  }
+
+  function rawPayloadDebugEnabled() {
+    return ctx.debugMode === true || ctx.config?.mcpRawDebug === true;
+  }
+
+  function rawPayloadDebugLogPath() {
+    const configDir = path.dirname(String(ctx.configPath || process.cwd()));
+    return path.join(configDir, "mcp-raw-debug.log");
   }
 
   function trimText(value, maxLen = 320) {
@@ -49,6 +67,96 @@ function createMcpClient(ctx, logger) {
     } catch {
       return trimText(String(value), maxLen);
     }
+  }
+
+  function hasOwn(obj, key) {
+    return Boolean(
+      obj &&
+        typeof obj === "object" &&
+        Object.prototype.hasOwnProperty.call(obj, key),
+    );
+  }
+
+  function summarizeShape(value) {
+    if (value === null) return "null";
+    if (Array.isArray(value)) return `array(len=${value.length})`;
+    if (value === undefined) return "undefined";
+    if (typeof value !== "object") return typeof value;
+    const keys = Object.keys(value);
+    return `object(keys=${keys.slice(0, 12).join(",")}${keys.length > 12 ? ",..." : ""})`;
+  }
+
+  function shouldLogRawPayload(toolName) {
+    return rawPayloadDebugEnabled() && RAW_DEBUG_TOOL_NAMES.has(String(toolName || ""));
+  }
+
+  function writeRawPayloadDebugLog(event = {}) {
+    if (!shouldLogRawPayload(event.toolName)) return;
+    const now = Date.now();
+    const lines = [
+      "",
+      "=".repeat(88),
+      `timestamp: ${new Date(now).toISOString()}`,
+      `tool: ${event.toolName || "unknown"}`,
+      `phase: ${event.phase || "unknown"}`,
+      `status: ${event.status ?? "n/a"}`,
+      `contentType: ${event.contentType || "n/a"}`,
+      `hasResultKey: ${event.hasResultKey === true ? "true" : event.hasResultKey === false ? "false" : "n/a"}`,
+      `resultSource: ${event.resultSource || "n/a"}`,
+      `jsonShape: ${event.jsonShape || "n/a"}`,
+      `resultShape: ${event.resultShape || "n/a"}`,
+      `args: ${safeJson(event.args, 2000) || "{}"}`,
+      `reason: ${event.reason || "n/a"}`,
+      `rawText: ${trimText(event.rawText, 12000) || "(empty)"}`,
+      `parsedJson: ${safeJson(event.parsedJson, 12000) || "(empty)"}`,
+      `extractedResult: ${safeJson(event.extractedResult, 12000) || "(empty)"}`,
+      "=".repeat(88),
+      "",
+    ];
+    try {
+      fs.appendFileSync(rawPayloadDebugLogPath(), `${lines.join("\n")}\n`);
+    } catch (error) {
+      logDebug("mcp", "raw_debug_write_failed", {
+        error: error.message,
+        file: rawPayloadDebugLogPath(),
+      });
+    }
+  }
+
+  function extractToolResultPayload(callJson) {
+    if (!callJson || typeof callJson !== "object") {
+      return {
+        result: {},
+        hasResultKey: false,
+        source: "missing_json",
+      };
+    }
+    if (hasOwn(callJson, "result")) {
+      const result = callJson.result;
+      if (result !== null && result !== undefined) {
+        return {
+          result,
+          hasResultKey: true,
+          source: "json.result",
+        };
+      }
+    }
+    if (
+      hasOwn(callJson, "structuredContent") ||
+      hasOwn(callJson, "content") ||
+      hasOwn(callJson, "isError")
+    ) {
+      return {
+        result: callJson,
+        hasResultKey: hasOwn(callJson, "result"),
+        source: "json_direct_tool_payload",
+      };
+    }
+    return {
+      result: {},
+      hasResultKey: hasOwn(callJson, "result"),
+      source: hasOwn(callJson, "result") ? "null_result_fallback_empty_object" : "missing_result_fallback_empty_object",
+    };
   }
 
   function captureStack(skipLines = 2) {
@@ -557,6 +665,8 @@ function createMcpClient(ctx, logger) {
         ok: response.ok,
         status: response.status,
         json,
+        rawText: text,
+        contentType,
         sessionId: nextSessionId,
         retryAfter: response.headers.get("retry-after") || null,
       };
@@ -742,7 +852,23 @@ function createMcpClient(ctx, logger) {
       }
       if (call.json?.error)
         throw new Error(`RPC error: ${JSON.stringify(call.json.error)}`);
-      return call.json?.result || {};
+      const extracted = extractToolResultPayload(call.json);
+      writeRawPayloadDebugLog({
+        toolName,
+        phase: "tool_call_response",
+        status: call.status,
+        contentType: call.contentType,
+        hasResultKey: extracted.hasResultKey,
+        resultSource: extracted.source,
+        jsonShape: summarizeShape(call.json),
+        resultShape: summarizeShape(extracted.result),
+        args,
+        reason: String(opts?.reason || "").trim() || null,
+        rawText: call.rawText,
+        parsedJson: call.json,
+        extractedResult: extracted.result,
+      });
+      return extracted.result;
     };
 
     const userMissionsGenerationAtStart = missionSnapshotEligible
@@ -919,7 +1045,17 @@ function createMcpClient(ctx, logger) {
   }
 
   async function getUserMissions(opts = {}) {
-    return mcpToolCall("get_user_missions", {}, opts);
+    const result = await mcpToolCall("get_user_missions", {}, opts);
+    const stabilized = stabilizeMissionAssignments(ctx, result, {
+      ttlMs: TRANSIENT_ASSIGNMENT_TTL_MS,
+    });
+    if (stabilized.patchedCount > 0) {
+      logDebug("mcp", "user_missions_transient_assignment_stabilized", {
+        patchedCount: stabilized.patchedCount,
+        reason: String(opts?.reason || "").trim() || null,
+      });
+    }
+    return stabilized.result;
   }
 
   async function runLoginFlow(opts = {}) {

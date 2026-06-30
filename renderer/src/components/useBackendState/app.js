@@ -87,6 +87,7 @@ export default function useBackendState() {
     missionResetPerSlotLevelBySlot: null,
     debugMode: null,
     nftCooldownResetEnabled: null,
+    nftAssignmentOrder: null,
     nftCooldownResetMaxPbp: null,
     currentMissionResetLevel: null,
     sessionTotalsEpoch: null,

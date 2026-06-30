@@ -1023,6 +1023,41 @@ function createChecksService(ctx, logger, mcp, services = {}) {
     return nftAccountId(a?.nft || a).localeCompare(nftAccountId(b?.nft || b));
   }
 
+  function nftAssignmentOrderMode() {
+    const raw = String(ctx.config?.nftAssignmentOrder || ctx.nftAssignmentOrder || "")
+      .trim()
+      .toLowerCase();
+    return raw === "highest_level_first" ? raw : "normal";
+  }
+
+  function nftLevelValue(nft) {
+    const rawLevel =
+      nft?.stats?.level ??
+      nft?.stats?.currentLevel ??
+      nft?.level ??
+      nft?.currentLevel ??
+      nft?.current_level ??
+      nft?.metadata?.level ??
+      nft?.DASMetadata?.level;
+    const level = Number(rawLevel);
+    return Number.isFinite(level) ? level : -1;
+  }
+
+  function compareNftAssignmentOrder(a, b) {
+    if (nftAssignmentOrderMode() === "highest_level_first") {
+      return (
+        nftLevelValue(b?.nft || b) - nftLevelValue(a?.nft || a) ||
+        nftCooldownSeconds(a?.nft || a) - nftCooldownSeconds(b?.nft || b) ||
+        compareNftAccountOrder(a, b)
+      );
+    }
+    return compareNftAccountOrder(a, b);
+  }
+
+  function sortOwnedAssignmentEntries(entries = []) {
+    return entries.slice().sort(compareNftAssignmentOrder);
+  }
+
   function nftCollectionText(nft) {
     const values = [
       nft?.collection,
@@ -1128,15 +1163,18 @@ function createChecksService(ctx, logger, mcp, services = {}) {
   }
 
   function prioritizeOwnedCandidatesForMission(entries, mission) {
-    if (!shouldReserveLevel20CollectionNfts(mission)) return entries;
+    const sortedEntries = sortOwnedAssignmentEntries(entries);
+    if (!shouldReserveLevel20CollectionNfts(mission)) return sortedEntries;
     const reserved = [];
     const standard = [];
-    for (const entry of entries) {
+    for (const entry of sortedEntries) {
       if (isLevel20ReservedCollectionNft(entry.nft)) reserved.push(entry);
       else standard.push(entry);
     }
     if (reserved.length === 0 || standard.length === 0) {
-      return isLevel20Mission(mission) ? [...reserved, ...standard] : entries;
+      return isLevel20Mission(mission)
+        ? [...reserved, ...standard]
+        : sortedEntries;
     }
     return isLevel20Mission(mission)
       ? [...reserved, ...standard]
@@ -1216,6 +1254,11 @@ function createChecksService(ctx, logger, mcp, services = {}) {
         id: sc.missionSwapId,
         path: "/mcp/sign-mission-swap",
         param: "missionSwapId",
+      },
+      {
+        id: sc.resetToken || sc.cooldownId || sc.nftCooldownResetId || sc.resetId,
+        path: "/mcp/sign-nft-cooldown-reset",
+        param: "resetToken",
       },
       {
         id: sc.missionSlotUnlockId || sc.slotUnlockId || sc.unlockId,
@@ -3352,11 +3395,6 @@ function createChecksService(ctx, logger, mcp, services = {}) {
     let assigningStarted = false;
     let assignedCountForEvent = null;
     try {
-      if (ctx.guiBridge?.sendEvent) {
-        ctx.guiBridge.sendEvent("assigning", { state: "start", reason });
-        assigningStarted = true;
-      }
-      if (ctx.guiBridge?.emitNow) ctx.guiBridge.emitNow();
       let {
         result: currentMissionResult,
         missions,
@@ -3389,16 +3427,14 @@ function createChecksService(ctx, logger, mcp, services = {}) {
             summarizeSelectedMissionState(missions, resolved),
           ),
         });
-        if (assigningStarted && ctx.guiBridge?.sendEvent) {
-          ctx.guiBridge.sendEvent("assigning", {
-            state: "done",
-            reason,
-            assigned: 0,
-          });
-        }
-        if (ctx.guiBridge?.emitNow) ctx.guiBridge.emitNow();
         return { ok: true, attempted: 0, assigned: 0 };
       }
+
+      if (ctx.guiBridge?.sendEvent) {
+        ctx.guiBridge.sendEvent("assigning", { state: "start", reason });
+        assigningStarted = true;
+      }
+      if (ctx.guiBridge?.emitNow) ctx.guiBridge.emitNow();
 
       logWithTimestamp(
         `[ASSIGN] 🚀 Attempting to start ${candidates.length} mission(s) via NFT assignment...`,
@@ -3414,12 +3450,21 @@ function createChecksService(ctx, logger, mcp, services = {}) {
         ctx.config?.enableRentals === true;
       logDebug("assign", "assignment_order_policy", {
         reason,
-        order: [
-          "ready_owned_nft",
-          "ready_rental",
-          "owned_cooldown_reset",
-          "rental_cooldown_reset",
-        ],
+        mode: nftAssignmentOrderMode(),
+        order:
+          nftAssignmentOrderMode() === "highest_level_first"
+            ? [
+                "ready_owned_nft_highest_level",
+                "ready_rental",
+                "owned_cooldown_reset_highest_level",
+                "rental_cooldown_reset",
+              ]
+            : [
+                "ready_owned_nft",
+                "ready_rental",
+                "owned_cooldown_reset",
+                "rental_cooldown_reset",
+              ],
         rentalFallbackEnabled,
         autoNftCooldownResetEnabled: autoNftCooldownResetEnabled(),
       });
@@ -3457,7 +3502,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
         }
 
         logWithTimestamp(
-          `[ASSIGN] 🔢 ${name}: order=ready owned → ready rental → owned cooldown reset → rental cooldown reset.`,
+          `[ASSIGN] 🔢 ${name}: order=${nftAssignmentOrderMode() === "highest_level_first" ? "highest level owned → ready rental → highest level owned cooldown → rental cooldown reset" : "ready owned → ready rental → owned cooldown reset → rental cooldown reset"}.`,
         );
 
         const currentMission = findMissionByAssignedMissionId(missions, id);

@@ -478,6 +478,11 @@ function createSignerService(ctx, logger) {
         param: "missionSwapId",
       },
       {
+        id: sc.resetToken || sc.cooldownId || sc.nftCooldownResetId || sc.resetId,
+        path: "/mcp/sign-nft-cooldown-reset",
+        param: "resetToken",
+      },
+      {
         id: sc.missionSlotUnlockId || sc.slotUnlockId || sc.unlockId,
         path: "/mcp/sign-mission-slot-unlock",
         param: "missionSlotUnlockId",

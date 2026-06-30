@@ -594,6 +594,11 @@ function ControlView() {
   const [nftResetMaxPbp, setNftResetMaxPbp] = useState(
     String(status.nftCooldownResetMaxPbp ?? 20),
   );
+  const [nftAssignmentOrder, setNftAssignmentOrderState] = useState(
+    status.nftAssignmentOrder === "highest_level_first"
+      ? "highest_level_first"
+      : "normal",
+  );
   const [competitionRangeLockEnabled, setCompetitionRangeLockEnabled] =
     useState(false);
   const [competitionRangeLockMinRank, setCompetitionRangeLockMinRank] =
@@ -884,6 +889,16 @@ function ControlView() {
   }, [status.nftCooldownResetEnabled]);
 
   useEffect(() => {
+    if (typeof status.nftAssignmentOrder === "string") {
+      setNftAssignmentOrderState(
+        status.nftAssignmentOrder === "highest_level_first"
+          ? "highest_level_first"
+          : "normal",
+      );
+    }
+  }, [status.nftAssignmentOrder]);
+
+  useEffect(() => {
     const maxPbp = Number(status.nftCooldownResetMaxPbp);
     if (Number.isFinite(maxPbp) && maxPbp >= 0) {
       setNftResetMaxPbp(String(maxPbp));
@@ -940,6 +955,11 @@ function ControlView() {
       if (typeof config.nftCooldownResetEnabled === "boolean") {
         setNftResetEnabled(config.nftCooldownResetEnabled);
       }
+      setNftAssignmentOrderState(
+        config.nftAssignmentOrder === "highest_level_first"
+          ? "highest_level_first"
+          : "normal",
+      );
       if (typeof config.competitionRangeLockEnabled === "boolean") {
         setCompetitionRangeLockEnabled(config.competitionRangeLockEnabled);
       }
@@ -1222,6 +1242,14 @@ function ControlView() {
     const next = Number(raw);
     if (!Number.isFinite(next) || next < 0) return;
     await applyConfigPatch({ nftCooldownResetMaxPbp: next });
+  };
+  const setNftAssignmentOrder = async (value) => {
+    const next =
+      String(value || "").trim() === "highest_level_first"
+        ? "highest_level_first"
+        : "normal";
+    setNftAssignmentOrderState(next);
+    await applyConfigPatch({ nftAssignmentOrder: next });
   };
   const setMissionActionEnabled = async (slot, enabled) => {
     const key = String(slot);
@@ -1880,7 +1908,7 @@ function ControlView() {
     } else if (type === "assigning") {
       const state = String(lastEvent.state || "").trim();
       if (state === "start") {
-        next = "🚀 Starting mission...";
+        next = "🚀 Assigning...";
       } else if (state === "done") {
         const count = Number(lastEvent.assigned || 0);
         next = count > 0 ? "✅ Started mission" : "Watching missions...";
@@ -1908,7 +1936,7 @@ function ControlView() {
       const current = String(activityLabel || "").toLowerCase();
       if (
         current.includes("claiming mission") ||
-        current.includes("starting mission")
+        current.includes("assigning")
       ) {
         next = "Watching missions...";
       }
@@ -3201,6 +3229,9 @@ function ControlView() {
               }
               reducedMotionEnabled={reducedMotionEnabled}
               setReducedMotionEnabled={setReducedMotionEnabled}
+              nftAssignmentOrder={nftAssignmentOrder}
+              setNftAssignmentOrder={setNftAssignmentOrder}
+              debugEnabled={debugEnabled}
               onManualUpdateCheck={() => runUpdateCheck({ manual: true })}
               updateCheckBusy={updateCheckBusy}
               updateCheckMessage={updateCheckMessage}

@@ -316,6 +316,11 @@ function createWatchService(
         param: "missionSwapId",
       },
       {
+        id: sc.resetToken || sc.cooldownId || sc.nftCooldownResetId || sc.resetId,
+        path: "/mcp/sign-nft-cooldown-reset",
+        param: "resetToken",
+      },
+      {
         id: sc.missionSlotUnlockId || sc.slotUnlockId || sc.unlockId,
         path: "/mcp/sign-mission-slot-unlock",
         param: "missionSlotUnlockId",
@@ -2763,6 +2768,9 @@ function createWatchService(
       failedClaims,
       watchSuccess,
     });
+    if (ctx.debugMode || ctx.config?.mcpRawDebug === true) {
+      logDebug("watch", "claim_parse_payload", summarizeWatchPayload(result));
+    }
     if (ctx.debugMode && claimed > 0) {
       logWithTimestamp(
         `[WATCH] [DEBUG] ✅ Claim signal detected: parsedSuccess=${claimed}`,

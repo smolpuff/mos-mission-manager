@@ -135,7 +135,7 @@ const FUNDING_WALLET_REFRESH_MIN_INTERVAL_MS = 30000;
 const BOOTSTRAP_WALLET_REFRESH_MIN_INTERVAL_MS = 30000;
 const PAGE_PREVIEW_CACHE_TTL_MS = 2000;
 const RENTALS_PREVIEW_CACHE_TTL_MS = 120000;
-const NFT_LIST_CACHE_TTL_MS = 60000;
+const NFT_LIST_CACHE_TTL_MS = 300000;
 const COMPETITION_RANGE_LOCK_MIN_POLL_SECONDS = 60;
 const COMPETITION_RANGE_LOCK_DEFAULT_POLL_SECONDS = 150;
 const MISSIONS_ANALYTICS_TRACK_URL =
@@ -186,6 +186,7 @@ const backendStatus = {
   missionResetPerSlotLevelBySlot: null,
   debugMode: null,
   nftCooldownResetEnabled: null,
+  nftAssignmentOrder: null,
   nftCooldownResetMaxPbp: null,
   currentMissionResetLevel: null,
   sessionTotalsEpoch: null,
@@ -1322,7 +1323,11 @@ function buildTelemetryPayload(eventType, extra = {}) {
 async function postTelemetryEvent(eventType, extra = {}) {
   const config = telemetryConfigFromDesktopConfig();
   if (!config.enabled) return false;
-  const payload = buildTelemetryPayload(eventType, extra);
+  const externalIp = await externalIpForPayload();
+  const payload = buildTelemetryPayload(eventType, {
+    ...(externalIp ? { external_ip: externalIp } : {}),
+    ...extra,
+  });
   if (!payload.event_type || !payload.client_id) return false;
   const controller = new AbortController();
   const timeout = setTimeout(
@@ -1570,6 +1575,51 @@ function readDesktopConfig() {
   } catch {
     return {};
   }
+}
+
+let externalIpPromise = null;
+let externalIpCache = "";
+let externalIpCachedAt = 0;
+
+async function externalIpForPayload() {
+  const cacheTtlMs = 60 * 60 * 1000;
+  if (externalIpCache && Date.now() - externalIpCachedAt <= cacheTtlMs) {
+    return externalIpCache;
+  }
+  if (externalIpPromise) return externalIpPromise;
+  externalIpPromise = (async () => {
+    const endpoints = [
+      "https://api.ipify.org?format=json",
+      "https://ifconfig.me/ip",
+    ];
+    for (const endpoint of endpoints) {
+      try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 8000);
+        const response = await fetch(endpoint, { signal: controller.signal });
+        clearTimeout(timeout);
+        if (!response.ok) continue;
+        const text = String(await response.text()).trim();
+        let ip = text;
+        try {
+          const parsed = JSON.parse(text);
+          ip =
+            String(parsed?.ip || parsed?.address || parsed?.ip_addr || "")
+              .trim() || ip;
+        } catch {}
+        ip = ip.replace(/^"|"$/g, "").trim();
+        if (ip) {
+          externalIpCache = ip;
+          externalIpCachedAt = Date.now();
+          return ip;
+        }
+      } catch {}
+    }
+    return "";
+  })().finally(() => {
+    externalIpPromise = null;
+  });
+  return externalIpPromise;
 }
 
 function autoUpdateCheckEnabledFromConfig(config = {}) {
@@ -1871,6 +1921,19 @@ function normalizeRewardToken(value) {
   return null;
 }
 
+function rewardTokenDisplayName(token) {
+  switch (normalizeRewardToken(token)) {
+    case "pbp":
+      return "Pixel By Pixel";
+    case "tc":
+      return "Tournament Coin";
+    case "cc":
+      return "Community Coin";
+    default:
+      return null;
+  }
+}
+
 function rewardFromStatsPayload(payload = {}) {
   const reward =
     payload?.reward && typeof payload.reward === "object" ? payload.reward : {};
@@ -2027,8 +2090,17 @@ function applyAnalyticsClaimEvent(payload = {}) {
   trackFeatureUsage("mission_claim", {
     mission_name: telemetryMissionName,
     mission_level: missionLevel ?? undefined,
+    level: missionLevel ?? undefined,
+    currentLevel: missionLevel ?? undefined,
     reward_token: reward.token || undefined,
+    rewardToken: reward.token || undefined,
+    token: reward.token || undefined,
+    reward_token_code: reward.token ? String(reward.token).toUpperCase() : undefined,
+    reward_token_name: rewardTokenDisplayName(reward.token) || undefined,
     reward_amount: reward.amount > 0 ? reward.amount : undefined,
+    reward: reward.amount > 0 ? reward.amount : undefined,
+    prize: reward.token || undefined,
+    prize_amount: reward.amount > 0 ? reward.amount : undefined,
     timestamp: analyticsTimestampIso(at),
     mission_start_timestamp: analyticsTimestampIso(missionStartedAt),
     mission_completion_timestamp: analyticsTimestampIso(missionCompletedAt),
@@ -2792,6 +2864,13 @@ function hydrateBackendStatusFromConfig() {
   } else {
     backendStatus.nftCooldownResetEnabled = false;
   }
+  const nftAssignmentOrder = String(config.nftAssignmentOrder || "")
+    .trim()
+    .toLowerCase();
+  backendStatus.nftAssignmentOrder =
+    nftAssignmentOrder === "highest_level_first"
+      ? "highest_level_first"
+      : "normal";
   if (config.nftCooldownResetMaxPbp !== undefined) {
     const maxPbp = Number(config.nftCooldownResetMaxPbp);
     backendStatus.nftCooldownResetMaxPbp =
@@ -4897,6 +4976,13 @@ app.whenReady().then(async () => {
     if (typeof next.nftCooldownResetEnabled === "boolean") {
       backendStatus.nftCooldownResetEnabled = next.nftCooldownResetEnabled;
     }
+    if (typeof next.nftAssignmentOrder === "string") {
+      const nextOrder = String(next.nftAssignmentOrder || "")
+        .trim()
+        .toLowerCase();
+      backendStatus.nftAssignmentOrder =
+        nextOrder === "highest_level_first" ? nextOrder : "normal";
+    }
     if (typeof next.debugMode === "boolean") {
       backendStatus.debugMode = next.debugMode;
     }
@@ -5004,6 +5090,10 @@ app.whenReady().then(async () => {
         ) ||
         Object.prototype.hasOwnProperty.call(
           requestedPatch,
+          "nftAssignmentOrder",
+        ) ||
+        Object.prototype.hasOwnProperty.call(
+          requestedPatch,
           "nftCooldownResetMaxPbp",
         ))
     ) {
@@ -5014,6 +5104,7 @@ app.whenReady().then(async () => {
         missionResetPerSlotEnabledBySlot: next.missionResetPerSlotEnabledBySlot,
         missionResetPerSlotLevelBySlot: next.missionResetPerSlotLevelBySlot,
         nftCooldownResetEnabled: next.nftCooldownResetEnabled,
+        nftAssignmentOrder: next.nftAssignmentOrder,
         nftCooldownResetMaxPbp: next.nftCooldownResetMaxPbp,
       }).catch((error) => {
         pushSystemLog(

@@ -139,6 +139,7 @@ function NftCardImage({ src, alt }) {
 
 export default function NftsPage({ bridge, signerMode = "" }) {
   const [loading, setLoading] = useState(false);
+  const [hasLoaded, setHasLoaded] = useState(false);
   const [error, setError] = useState(null);
   const [resetModal, setResetModal] = useState(null);
   const [resetBusy, setResetBusy] = useState(false);
@@ -204,12 +205,9 @@ export default function NftsPage({ bridge, signerMode = "" }) {
       setError(String(err?.message || err));
     } finally {
       setLoading(false);
+      setHasLoaded(true);
     }
   };
-
-  useEffect(() => {
-    void load();
-  }, [bridge]);
 
   useEffect(() => {
     const timer = setInterval(() => setNowMs(Date.now()), 1000);
@@ -483,7 +481,7 @@ export default function NftsPage({ bridge, signerMode = "" }) {
               width: "auto",
             }}
           >
-            {loading ? "Refreshing..." : "Refresh"}
+            {loading ? "Loading..." : hasLoaded ? "Refresh NFTs" : "Load NFTs"}
           </button>
         </div>
         <div className="card p-4 border border-white/10 bg-black/30">
@@ -563,7 +561,29 @@ export default function NftsPage({ bridge, signerMode = "" }) {
       ) : null}
 
       <div className="card !pr-2 border border-white/10 bg-black/30 h-120 flex flex-col overflow-hidden">
-        {data.nfts.length === 0 ? (
+        {!hasLoaded ? (
+          <div className="flex h-full min-h-0 items-center justify-center">
+            <div className="max-w-sm rounded-xl border border-white/10 bg-black/30 p-5 text-center">
+              <div className="text-sm uppercase tracking-[0.22em] text-slate-400">
+                NFT inventory
+              </div>
+              <div className="mt-2 text-lg text-slate-100">
+                Click load to fetch your NFTs.
+              </div>
+              <div className="mt-3 text-xs text-slate-400">
+                This avoids a server call until you explicitly open the list.
+              </div>
+              <button
+                type="button"
+                className="btn btn-gradient btn-sm mt-4"
+                onClick={() => void load()}
+                disabled={loading}
+              >
+                {loading ? "Loading..." : "Load NFTs"}
+              </button>
+            </div>
+          </div>
+        ) : data.nfts.length === 0 ? (
           <div className="text-sm text-slate-400 mt-3 flex items-center gap-2">
             {loading ? (
               <>

@@ -27,6 +27,7 @@ const SALVAGE_TOP_LEVEL_KEYS = [
   "missionResetPerSlotEnabledBySlot",
   "missionResetPerSlotLevelBySlot",
   "nftCooldownResetEnabled",
+  "nftAssignmentOrder",
   "nftCooldownResetMissionModeEnabled",
   "nftCooldownResetMaxPbp",
   "nftCooldownResetProbeLimit",
@@ -364,6 +365,14 @@ function loadConfig(ctx, logWithTimestamp) {
     ctx.config.nftCooldownResetEnabled = false;
     ctx.nftCooldownResetEnabled = false;
   }
+  const nftAssignmentOrder = String(ctx.config.nftAssignmentOrder || "")
+    .trim()
+    .toLowerCase();
+  ctx.config.nftAssignmentOrder =
+    nftAssignmentOrder === "highest_level_first"
+      ? "highest_level_first"
+      : "normal";
+  ctx.nftAssignmentOrder = ctx.config.nftAssignmentOrder;
   const nftCooldownResetMaxPbp = Number(ctx.config.nftCooldownResetMaxPbp);
   ctx.config.nftCooldownResetMaxPbp =
     Number.isFinite(nftCooldownResetMaxPbp) && nftCooldownResetMaxPbp >= 0

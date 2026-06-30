@@ -289,6 +289,14 @@ if (process.env.PBP_GUI_BRIDGE === "1" && typeof process.send === "function") {
           ctx.nftCooldownResetEnabled = payload.nftCooldownResetEnabled;
           ctx.config.nftCooldownResetEnabled = payload.nftCooldownResetEnabled;
         }
+        if (typeof payload.nftAssignmentOrder === "string") {
+          const nextOrder = String(payload.nftAssignmentOrder || "")
+            .trim()
+            .toLowerCase();
+          ctx.nftAssignmentOrder =
+            nextOrder === "highest_level_first" ? nextOrder : "normal";
+          ctx.config.nftAssignmentOrder = ctx.nftAssignmentOrder;
+        }
         if (typeof payload.missionResetPerSlotModeEnabled === "boolean") {
           ctx.missionResetPerSlotModeEnabled =
             payload.missionResetPerSlotModeEnabled;
@@ -354,6 +362,7 @@ if (process.env.PBP_GUI_BRIDGE === "1" && typeof process.send === "function") {
           missionActionEnabledBySlot: ctx.missionActionEnabledBySlot,
           missionResetPerSlotModeEnabled: ctx.missionResetPerSlotModeEnabled,
           nftCooldownResetEnabled: ctx.nftCooldownResetEnabled,
+          nftAssignmentOrder: ctx.nftAssignmentOrder,
           nftCooldownResetMaxPbp: Number(ctx.config.nftCooldownResetMaxPbp ?? 20),
         });
         sendGuiResponse(requestId, {
@@ -366,6 +375,7 @@ if (process.env.PBP_GUI_BRIDGE === "1" && typeof process.send === "function") {
               ctx.missionResetPerSlotEnabledBySlot,
             missionResetPerSlotLevelBySlot: ctx.missionResetPerSlotLevelBySlot,
             nftCooldownResetEnabled: ctx.nftCooldownResetEnabled,
+            nftAssignmentOrder: ctx.nftAssignmentOrder,
             nftCooldownResetMaxPbp: ctx.config.nftCooldownResetMaxPbp,
           },
         });
