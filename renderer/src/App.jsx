@@ -21,11 +21,15 @@ class RendererErrorBoundary extends React.Component {
   render() {
     if (this.state.error) {
       const message =
-        this.state.error?.stack || this.state.error?.message || String(this.state.error);
+        this.state.error?.stack ||
+        this.state.error?.message ||
+        String(this.state.error);
       return (
-        <main className="shell p-4">
+        <main className="shell   ">
           <section className="card space-y-3 !bg-[#0b1116] border border-error/50">
-            <div className="text-lg font-semibold text-error">Renderer crashed</div>
+            <div className="text-lg font-semibold text-error">
+              Renderer crashed
+            </div>
             <div className="text-sm text-slate-300">
               The UI hit an unhandled error. Copy this and share it.
             </div>

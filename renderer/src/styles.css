@@ -380,17 +380,16 @@
 
   .shell,
   .cli-shell {
-    @apply min-h-screen p-0;
+    @apply w-full min-h-screen;
   }
 
   #main-window {
-    @apply p-0;
-    min-height: calc(100vh - 41px)
+    @apply flex flex-1 min-h-0 w-full p-0;
   }
 
   .shell {
-    display: flex;
-    flex-wrap: wrap;
+    @apply flex flex-col h-screen overflow-hidden;
+
   }
 
   .cli-shell {
@@ -542,7 +541,8 @@
   }
 
   .shell .main-wrapper {
-    @apply w-full mx-4 grid gap-8;
+    /* @apply w-full mx-4 grid gap-4; */
+    @apply w-full mx-4 min-w-0 flex min-h-0 flex-col mb-4;
 
   }
 
@@ -1046,29 +1046,23 @@ button.btn.btn-gradient {
   }
 }
 
-.mission-modes {
+.mission-modes button.active {
+  @apply bg-white/10;
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.03),
+    0 10px 30px rgba(0, 0, 0, 0.28);
+}
 
-  button {
-    &.active {
-      @apply bg-white/10;
-      /* box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35); */
-
-      &::after {
-        content: "";
-        @apply absolute inset-0 p-0.5 pointer-events-none z-0;
-        border-radius: inherit;
-        background: linear-gradient(105deg,
-            var(--color-success),
-            var(--color-info),
-            var(--color-primary),
-            var(--color-secondary),
-            var(--color-accent));
-        background-size: 100% 100%;
-
-
-      }
-    }
-  }
+.mission-modes button.active::after {
+  background-image: linear-gradient(105deg,
+      var(--color-success),
+      var(--color-info),
+      var(--color-primary),
+      var(--color-secondary),
+      var(--color-accent));
+  background-size: 200% 100%;
+  background-position: 0% 50%;
+  animation: btnGradientShift 8s linear infinite;
 }
 
 .mission-image {

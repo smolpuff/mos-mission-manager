@@ -624,16 +624,20 @@ function ControlView() {
     competitionNotificationSuppressChecked,
     setCompetitionNotificationSuppressChecked,
   ] = useState(false);
+  const resolveMissionModeButtonLevel = (nextStatus = status) =>
+    String(
+      nextStatus?.missionModeResetLevel ||
+        nextStatus?.defaultMissionResetLevel ||
+        (debugEnabled ? "5" : "10"),
+    ).trim();
   const [modeSelection, setModeSelection] = useState(
     status.missionModeEnabled === true ? "mission" : "normal",
   );
   const [missionModeButtonLevel, setMissionModeButtonLevel] = useState(
-    String(
-      status.missionModeResetLevel ||
-        status.defaultMissionResetLevel ||
-        (debugEnabled ? "5" : "10"),
-    ).trim(),
+    resolveMissionModeButtonLevel(status),
   );
+  const [missionModeButtonLevelEditing, setMissionModeButtonLevelEditing] =
+    useState(false);
   const [missionActionEnabledBySlot, setMissionActionEnabledBySlot] = useState(
     normalizeSlotBooleanMap(status.missionActionEnabledBySlot, true),
   );
@@ -698,8 +702,7 @@ function ControlView() {
   const lastThrottleModalKeyRef = useRef(null);
   const isMissionMode = modeSelection === "mission";
   const isNormalMode = !isMissionMode;
-  const debugControlsVisible =
-    debug === true || bridge?.desktopDevMode === true;
+  const debugControlsVisible = debug === true;
   const debugPageVisible = debug === true;
   const competitionRangeLockDisabled = !debug || !isMissionMode;
   const competitionRangeLockInputsDisabled =
@@ -806,16 +809,19 @@ function ControlView() {
   }, [status.missionModeEnabled]);
 
   useEffect(() => {
-    const nextLevel = String(
-      status.missionModeResetLevel ||
-        status.defaultMissionResetLevel ||
-        (debugEnabled ? "5" : "10"),
-    ).trim();
-    if (nextLevel) setMissionModeButtonLevel(nextLevel);
+    if (missionModeButtonLevelEditing) return;
+    const nextLevel = String(status.missionModeResetLevel || "").trim();
+    if (nextLevel) {
+      setMissionModeButtonLevel(nextLevel);
+      return;
+    }
+    if (!String(missionModeButtonLevel || "").trim()) {
+      setMissionModeButtonLevel(resolveMissionModeButtonLevel(status));
+    }
   }, [
     status.missionModeResetLevel,
-    status.defaultMissionResetLevel,
-    debugEnabled,
+    missionModeButtonLevel,
+    missionModeButtonLevelEditing,
   ]);
 
   useEffect(() => {
@@ -1224,6 +1230,31 @@ function ControlView() {
     await applyConfigPatch({ level20ResetEnabled: enabled });
     await runModeCommand(enabled ? "20r on" : "20r off");
   };
+  const commitMissionModeResetLevel = async (value) => {
+    setMissionModeButtonLevelEditing(false);
+    const raw = String(value ?? "")
+      .replace(/[^\d]/g, "")
+      .trim();
+    if (!raw) {
+      setMissionModeButtonLevel(resolveMissionModeButtonLevel(status));
+      return;
+    }
+    await setMissionModeResetLevel(raw);
+  };
+  const setMissionModeResetLevel = async (value) => {
+    const raw = String(value ?? "").trim();
+    const parsed = Number(raw);
+    if (!Number.isFinite(parsed) || parsed <= 0) return;
+    const nextLevel = String(Math.floor(parsed));
+    setMissionModeButtonLevel(nextLevel);
+    setModeSelection("mission");
+    await applyConfigPatch({
+      missionModeEnabled: true,
+      missionResetLevel: nextLevel,
+      missionModeResetLevel: nextLevel,
+    });
+    await runModeCommand([`mm ${nextLevel}`]);
+  };
   const setRentalsFallbackEnabled = async (enabled) => {
     if (isMissionMode) return;
     setRentalsEnabled(enabled);
@@ -1435,17 +1466,16 @@ function ControlView() {
     const missionModeNftResetEnabled = isMissionMode
       ? nftResetEnabled
       : undefined;
-    const missionModeDefaultResetLevel = String(
-      status.defaultMissionResetLevel || "10",
+    const missionModeResetLevel = String(
+      missionModeButtonLevel || resolveMissionModeButtonLevel(status) || "10",
     ).trim();
-    setMissionModeButtonLevel(missionModeDefaultResetLevel);
     setModeSelection("normal");
     setResetEnabled(true);
     setRentalsEnabled(true);
     setNftResetEnabled(false);
     await applyConfigPatch({
       missionModeEnabled: false,
-      missionModeResetLevel: missionModeDefaultResetLevel,
+      missionModeResetLevel: missionModeResetLevel,
       enableRentals: true,
       missionResetLevel: "20",
       level20ResetEnabled: true,
@@ -1458,7 +1488,7 @@ function ControlView() {
   };
   const activateMissionMode = async () => {
     const resetLevel = String(
-      status.defaultMissionResetLevel || status.missionModeResetLevel || "10",
+      missionModeButtonLevel || resolveMissionModeButtonLevel(status) || "10",
     ).trim();
     setMissionModeButtonLevel(resetLevel);
     const cooldownMaxPbp = Number(nftResetMaxPbp);
@@ -1542,21 +1572,15 @@ function ControlView() {
     const text = String(latestLog?.text || "").trim();
     const match = text.match(/^>\s*mm(?:\s+(.+))?$/i);
     if (!match) return;
+    if (missionModeButtonLevelEditing) return;
     const arg = String(match[1] || "")
       .trim()
       .toLowerCase();
-    if (!arg || arg === "off" || arg === "on") {
-      setMissionModeButtonLevel(
-        String(
-          status.defaultMissionResetLevel || (debugEnabled ? "5" : "10"),
-        ).trim(),
-      );
-      return;
-    }
+    if (!arg || arg === "off" || arg === "on") return;
     const next = Number(arg);
     if (!Number.isFinite(next) || next <= 0) return;
     setMissionModeButtonLevel(String(Math.floor(next)));
-  }, [latestLog, status.defaultMissionResetLevel, debugEnabled]);
+  }, [latestLog, missionModeButtonLevelEditing]);
   const walletTiles = useMemo(() => {
     const balances = Array.isArray(status.currentUserWalletSummary?.balances)
       ? status.currentUserWalletSummary.balances
@@ -3165,11 +3189,13 @@ function ControlView() {
   };
 
   return (
-    <main className="shell">
+    <main className="shell flex flex-col">
       <WindowChrome title="missions-v3-mcp" styling="min-w-full" />
 
-      <div className="flex gap-0 w-full h-full" id="main-window">
-        {" "}
+      <div
+        className="flex min-h-0 flex-1 gap-0 w-full overflow-hidden"
+        id="main-window"
+      >
         <NavMain
           onOpenCli={openCliWindow}
           onNavigate={setCurrentPage}
@@ -3178,9 +3204,9 @@ function ControlView() {
           debugPageVisible={debugPageVisible}
         />
         <div
-          className={`main-wrapper h-full ${
-            currentPage === "debug" ? "!min-h-0 !overflow-hidden" : ""
-          }`}
+          className={`main-wrapper w-full ${
+            currentPage === "debug" ? "!min-h-0 " : ""
+          } ${!debugControlsVisible ? "gap-5.5" : "gap-4"}`}
           style={
             currentPage === "debug"
               ? {
@@ -4241,151 +4267,205 @@ function ControlView() {
                 </section>
               </div>
 
-              <section className="">
-                <div className="grid grid-cols-2 gap-2 ">
-                  <div className="grid grid-cols-2 gap-2 mission-modes h-54">
-                    <button
-                      className={`h-full card items-center justify-center transition-all ${isNormalMode ? "active" : ""}`}
-                      onClick={() => void activateNormalMode()}
-                      type="button"
-                    >
-                      <div className="space-y-2 text-shadow-md text-shadow-black/15">
-                        <div className="z-10 mode__name font-bold text-2xl leading-7">
-                          Normal Mode
+              <section className=" flex-1">
+                <div className="grid grid-cols-2 gap-2 h-full">
+                  <div className="grid grid-cols-2 gap-2 mission-modes ">
+                    <div className="flex gap-3 flex-col">
+                      {" "}
+                      <button
+                        className={` card h-full  flex-1 items-center w-full justify-center transition-all ${isNormalMode ? "active" : ""}`}
+                        onClick={() => void activateNormalMode()}
+                        type="button"
+                      >
+                        <div className="space-y-2 text-shadow-md text-shadow-black/15">
+                          <div className="z-10 mode__name font-bold text-2xl leading-7">
+                            Normal Mode
+                          </div>
+                          <div className="text-xs">Resets level 20</div>
                         </div>
-                        <div className="text-xs">Resets level 20</div>
-                      </div>
-                    </button>
-                    <button
-                      className={`h-full card @container items-center justify-center overflow-hidden transition-all ${isMissionMode ? "active" : ""}`}
-                      onClick={() => void activateMissionMode()}
-                      type="button"
-                      id="mission-mode-mm_button"
-                    >
-                      <div className="mission-mode-copy space-y-2">
-                        <div className="mode__name font-bold text-2xl leading-7">
-                          Mission Mode
+                      </button>
+                      {debugControlsVisible ? (
+                        <>
+                          <div
+                            className={` w-full !p-0 items-center ${competitionRangeLockDisabled ? "grayscale opacity-60" : ""}`}
+                          >
+                            <div class="w-full">
+                              <ToggleSwitch
+                                switchID="enableCompetitionRangeLock"
+                                checked={competitionRangeLockEnabled}
+                                title="Finish Target"
+                                styling="text-xs flex !flex-row"
+                                disabled={competitionRangeLockDisabled}
+                                onChange={(event) =>
+                                  void setCompetitionRangeLock(
+                                    event.target.checked,
+                                  )
+                                }
+                              />
+                            </div>
+                            <div class="w-full mt-0 flex gap-3  items-center text-xs">
+                              <div class="flex items-center rounded-full border border-white/15 px-0 py-1">
+                                <input
+                                  type="text"
+                                  value={competitionRangeLockMinRank}
+                                  onChange={(event) =>
+                                    void setCompetitionRangeLockMin(
+                                      event.target.value,
+                                    )
+                                  }
+                                  disabled={competitionRangeLockInputsDisabled}
+                                  class="w-7.5 border-0 bg-transparent p-0 text-center text-xs !text-white outline-none disabled:opacity-50"
+                                />
+                                <span class=" text-xs text-white/70">-</span>
+                                <input
+                                  type="text"
+                                  value={competitionRangeLockMaxRank}
+                                  onChange={(event) =>
+                                    void setCompetitionRangeLockMax(
+                                      event.target.value,
+                                    )
+                                  }
+                                  disabled={competitionRangeLockInputsDisabled}
+                                  class="w-7.5 border-0 bg-transparent p-0 text-center text-xs !text-white outline-none disabled:opacity-50"
+                                />
+                              </div>
+                              Range
+                            </div>
+                          </div>
+                        </>
+                      ) : null}
+                    </div>
+                    <div class="flex flex-col gap-3">
+                      <button
+                        className={` w-full card h-full @container items-center justify-center overflow-hidden transition-all ${isMissionMode ? "active" : ""}`}
+                        onClick={() => void activateMissionMode()}
+                        type="button"
+                        id="mission-mode-mm_button"
+                      >
+                        <div className="mission-mode-copy space-y-2">
+                          <div className="mode__name font-bold text-2xl leading-7">
+                            Mission Mode
+                          </div>
+                          <div className="text-xs">
+                            Resets level {missionModeButtonLevel}
+                          </div>
                         </div>
-                        <div className="text-xs">
-                          Resets level {missionModeButtonLevel}
-                        </div>
-                      </div>
-                      <div class="mo-fire">
-                        <svg
-                          version="1.1"
-                          id="Layer_1"
-                          xmlns="http://www.w3.org/2000/svg"
-                          xmlns:xlink="http://www.w3.org/1999/xlink"
-                          x="0px"
-                          y="0px"
-                          width="1016px"
-                          height="493px"
-                          viewBox="0 0 1016 493"
-                          enable-background="new 0 0 1016 493"
-                          xml:space="preserve"
-                        >
-                          <g>
-                            <path
-                              class="flame"
-                              fill-rule="evenodd"
-                              clip-rule="evenodd"
-                              fill="#F58553"
-                              d="M260.138,279.034c0.329,2.103,0.929,3.955,3.466,1.591
+                        <div class="mo-fire">
+                          <svg
+                            version="1.1"
+                            id="Layer_1"
+                            xmlns="http://www.w3.org/2000/svg"
+                            xmlns:xlink="http://www.w3.org/1999/xlink"
+                            x="0px"
+                            y="0px"
+                            width="1016px"
+                            height="493px"
+                            viewBox="0 0 1016 493"
+                            enable-background="new 0 0 1016 493"
+                            xml:space="preserve"
+                          >
+                            <g>
+                              <path
+                                class="flame"
+                                fill-rule="evenodd"
+                                clip-rule="evenodd"
+                                fill="#F58553"
+                                d="M260.138,279.034c0.329,2.103,0.929,3.955,3.466,1.591
         c1.36-1.269,2.555-2.34,2.946-4.48c0.611-3.344,1.288-6.88,4.965-9.637C262.791,267.109,258.981,271.64,260.138,279.034z"
-                            />
-                            <path
-                              class="flame one"
-                              fill-rule="evenodd"
-                              clip-rule="evenodd"
-                              fill="#F58553"
-                              d="M642.133,261.121c-0.602,1.805,2.854,4.751,5.137,4.486
+                              />
+                              <path
+                                class="flame one"
+                                fill-rule="evenodd"
+                                clip-rule="evenodd"
+                                fill="#F58553"
+                                d="M642.133,261.121c-0.602,1.805,2.854,4.751,5.137,4.486
         c2.775-0.322,5.049-1.429,4.986-4.831c-0.051-2.835-2.447-5.298-5.188-5.287C643.428,255.591,642.939,258.697,642.133,261.121z"
-                            />
-                            <path
-                              class="flame two"
-                              fill-rule="evenodd"
-                              clip-rule="evenodd"
-                              fill="#F58553"
-                              d="M236.169,192.895c2.469-0.638,4.981-0.998,4.781-3.98
+                              />
+                              <path
+                                class="flame two"
+                                fill-rule="evenodd"
+                                clip-rule="evenodd"
+                                fill="#F58553"
+                                d="M236.169,192.895c2.469-0.638,4.981-0.998,4.781-3.98
         c-0.117-1.744-0.676-3.642-3.098-3.758c-2.766-0.133-4.256,1.769-4.511,3.915C233.163,190.574,234.413,192.402,236.169,192.895z"
-                            />
-                            <path
-                              class="flame"
-                              fill-rule="evenodd"
-                              clip-rule="evenodd"
-                              fill="#F58553"
-                              d="M394.363,104.625c2.114,0.205,3.56-0.855,3.625-2.719
+                              />
+                              <path
+                                class="flame"
+                                fill-rule="evenodd"
+                                clip-rule="evenodd"
+                                fill="#F58553"
+                                d="M394.363,104.625c2.114,0.205,3.56-0.855,3.625-2.719
         c0.057-1.631-1.206-2.715-3.106-2.809c-1.935-0.095-2.961,0.578-3.069,2.6C391.708,103.615,392.298,104.781,394.363,104.625z"
-                            />
-                            <path
-                              class="flame one"
-                              fill-rule="evenodd"
-                              clip-rule="evenodd"
-                              fill="#F58553"
-                              d="M257.108,216.734c1.575,0.05,2.945-0.246,2.794-2.009
+                              />
+                              <path
+                                class="flame one"
+                                fill-rule="evenodd"
+                                clip-rule="evenodd"
+                                fill="#F58553"
+                                d="M257.108,216.734c1.575,0.05,2.945-0.246,2.794-2.009
         c-0.133-1.558-1.21-2.582-2.89-2.516c-1.492,0.059-2.595,1.087-2.394,2.435C254.774,215.686,255.437,217.224,257.108,216.734z"
-                            />
-                            <path
-                              class="flame two"
-                              fill-rule="evenodd"
-                              clip-rule="evenodd"
-                              fill="#F58553"
-                              d="M73.648,152.806c1.225,0.057,1.942-0.5,2.374-1.896
+                              />
+                              <path
+                                class="flame two"
+                                fill-rule="evenodd"
+                                clip-rule="evenodd"
+                                fill="#F58553"
+                                d="M73.648,152.806c1.225,0.057,1.942-0.5,2.374-1.896
         c-0.912-0.418-0.55-1.965-2.227-2.114c-1.723-0.152-2.062,1.195-2.287,2.05C71.119,152.317,72.336,152.744,73.648,152.806z"
-                            />
-                          </g>
-                          <g>
-                            <path
-                              class="flame one"
-                              fill-rule="evenodd"
-                              clip-rule="evenodd"
-                              fill="#DF513D"
-                              d="M217.934,126.101c-1.167-3.763-2.061-7.788-5.236-11.302
+                              />
+                            </g>
+                            <g>
+                              <path
+                                class="flame one"
+                                fill-rule="evenodd"
+                                clip-rule="evenodd"
+                                fill="#DF513D"
+                                d="M217.934,126.101c-1.167-3.763-2.061-7.788-5.236-11.302
         c0.108,2.457-0.002,4.26-0.827,5.933c-0.684,1.387-0.368,3.43-2.745,3.684c-2.311,0.248-3.482-0.874-4.668-2.691
         c-3.922-6.005-2.688-12.452-1.678-18.786c0.745-4.666,2.17-9.221,3.387-14.22c-9.078,5.882-13.839,18.679-11.527,29.102
         c2.305,10.385,6.331,19.888,12.472,28.634c7.29,10.382,7.329,20.787,0.019,30.697c2.168,0.269,3.337-0.783,4.553-1.723
         c8.892-6.871,10.305-16.748,10.146-26.877C221.712,140.951,220.195,133.394,217.934,126.101z"
-                            />
-                            <path
-                              class="flame one"
-                              fill-rule="evenodd"
-                              clip-rule="evenodd"
-                              fill="#DF513D"
-                              d="M537.457,199.138c-3.573,3.704-3.719,8.707-4.095,13.078
+                              />
+                              <path
+                                class="flame one"
+                                fill-rule="evenodd"
+                                clip-rule="evenodd"
+                                fill="#DF513D"
+                                d="M537.457,199.138c-3.573,3.704-3.719,8.707-4.095,13.078
         c-0.443,5.159,2.751,9.729,6.305,13.933c1.678-4.575,1.526-8.778-0.152-13.235C537.881,208.579,536.785,203.986,537.457,199.138z"
-                            />
-                            <path
-                              class="flame two"
-                              fill-rule="evenodd"
-                              clip-rule="evenodd"
-                              fill="#DF513D"
-                              d="M790.553,136.011c-1.086-0.688-1.059,0.386-1.111,0.802
+                              />
+                              <path
+                                class="flame two"
+                                fill-rule="evenodd"
+                                clip-rule="evenodd"
+                                fill="#DF513D"
+                                d="M790.553,136.011c-1.086-0.688-1.059,0.386-1.111,0.802
         c-0.26,2.063-1.121,4.191,0.15,6.185c2.043,3.204,3.762,6.5,3.252,11.266c3.506-3.165,4.613-6.646,4.301-10.125
         C796.799,140.311,793.68,137.989,790.553,136.011z"
-                            />
-                            <path
-                              class="flame one"
-                              fill-rule="evenodd"
-                              clip-rule="evenodd"
-                              fill="#DF513D"
-                              d="M939.061,13.063c-2.963-0.039-4.814,2.08-4.898,5.601
+                              />
+                              <path
+                                class="flame one"
+                                fill-rule="evenodd"
+                                clip-rule="evenodd"
+                                fill="#DF513D"
+                                d="M939.061,13.063c-2.963-0.039-4.814,2.08-4.898,5.601
         c-0.365,3.134,2.238,3.978,4.217,4.556c2.504,0.733,5.953-2.514,5.951-5.005C944.33,15.513,941.861,13.101,939.061,13.063z"
-                            />
+                              />
+                              <path
+                                class="flame"
+                                fill-rule="evenodd"
+                                clip-rule="evenodd"
+                                fill="#DF513D"
+                                d="M553.012,173.176c-5.986,4.961-6.033,6.817-1.004,11.31
+        C555.391,181.12,551.922,177.398,553.012,173.176z"
+                              />
+                            </g>
                             <path
-                              class="flame"
+                              class="flame-main one"
                               fill-rule="evenodd"
                               clip-rule="evenodd"
                               fill="#DF513D"
-                              d="M553.012,173.176c-5.986,4.961-6.033,6.817-1.004,11.31
-        C555.391,181.12,551.922,177.398,553.012,173.176z"
-                            />
-                          </g>
-                          <path
-                            class="flame-main one"
-                            fill-rule="evenodd"
-                            clip-rule="evenodd"
-                            fill="#DF513D"
-                            d="M855.631,466.945C944.262,471.891,972,449.18,972,449.18
+                              d="M855.631,466.945C944.262,471.891,972,449.18,972,449.18
     C1027,321.359,944.33,235,944.33,235c-25.416-5.286-45.699-63.5-49.117-88.546c-1.01-7.383,0.025-15.348,1.727-22.938
     c4.066-18.146,11.555-34.489,25.205-47.463c6.234-5.924,13.301-10.446,23.752-8.588c-14.379-8.771-28.559-10.971-43.646-6.452
     c-13.455,4.031-24.506,11.925-34.635,21.463c-10.742,10.116-19.926,21.219-25.68,34.991c-2.672,6.39-4.943,12.996-5.521,19.735
@@ -4443,11 +4523,11 @@ function ControlView() {
     c-0.02,0.195-0.037,0.39-0.055,0.584C824.717,227.09,824.734,226.894,824.752,226.698z M574.146,136.221
     c1.001,0.838,1.496,2.265,2.499,3.105C575.644,138.489,575.148,137.061,574.146,136.221z M47.543,347.683L47.543,347.683
     l0.125,0.123C47.618,347.757,47.542,347.682,47.543,347.683z"
-                          />
-                          <path
-                            class="flame-main two"
-                            fill="#F26C52"
-                            d="M976.667,324.592c1.229,3.776,2.013,7.837,2.314,12.227c0,0,0.169-78.337-70.811-125.496
+                            />
+                            <path
+                              class="flame-main two"
+                              fill="#F26C52"
+                              d="M976.667,324.592c1.229,3.776,2.013,7.837,2.314,12.227c0,0,0.169-78.337-70.811-125.496
     c-12.488-10.562-22.174-23.317-29.328-37.979c-5.111-10.474-8.277-21.568-8.316-33.246c-0.061-17.212,5.729-32.611,15.887-46.398
     c4.676-6.347,9.795-12.306,16.17-17.068c0.813-0.606,1.436-1.467,2.709-2.8c-6.471,0.968-11.582,3.497-16.594,6.001
     c-12.121,6.057-21.768,15.038-29.004,26.446c-6.633,10.455-9.918,22.096-10.471,34.407c-0.984,21.887,5.711,41.839,15.961,60.806
@@ -4491,14 +4571,14 @@ function ControlView() {
     C6.589,401.313,52,444,52,444c156.805,14.154,296.961,20.449,417.648,22.161c1.765,0.024,3.536,0.051,5.292,0.074
     c148.598,1.953,267.32-3.039,350.782-8.784c1.064-0.073,2.109-0.146,3.162-0.221C918.027,451.008,966,444,966,444
     C987.153,425.667,981.715,361.088,976.667,324.592z"
-                          />
-                          <path
-                            class="flame-main three"
-                            opacity="0.8"
-                            fill-rule="evenodd"
-                            clip-rule="evenodd"
-                            fill="#F58553"
-                            d="M771.154,453.647c4.645,0,9.287-0.143,13.924-0.219
+                            />
+                            <path
+                              class="flame-main three"
+                              opacity="0.8"
+                              fill-rule="evenodd"
+                              clip-rule="evenodd"
+                              fill="#F58553"
+                              d="M771.154,453.647c4.645,0,9.287-0.143,13.924-0.219
     c-25.818-16.325-17.105-41.962-15.551-65.757c-3.521,0.37-4.951,3.345-7.004,5.331c-9.867,9.548-14.1,23.04-21.363,34.415
     c-9.449,14.788-17.018,14.925-25.93-0.033c-2.594-4.349-4.225-4.217-7.916-1.868c-10.408,6.618-19.42,5.279-28.299-3.677
     c-6.129-6.184-10.113-14.14-15.355-21.021c-4.699-6.163-5.984-12.75-6.344-20.355c-0.447-9.584,2.104-18.817,1.871-28.303h-0.004
@@ -4525,14 +4605,14 @@ function ControlView() {
     c-3.339,18.082-11.792,33.119-25.715,44.48c-0.109,0.245-0.177,0.536-0.345,0.72c-0.098,0.107-0.362,0.044-0.551,0.057
     c0.301-0.259,0.602-0.52,0.902-0.776c0.272-11.404,0.781-22.873-7.828-32.517c-3.199,11.496-7.804,18.17-22.956,32.627
     c0,0-20.409,7.137,13.348,20.188C104.064,462.01,446.695,479.899,771.154,453.647z"
-                          />
-                          <path
-                            class="flame-main three"
-                            opacity="0.8"
-                            fill-rule="evenodd"
-                            clip-rule="evenodd"
-                            fill="#F58553"
-                            d="M956.425,464.105
+                            />
+                            <path
+                              class="flame-main three"
+                              opacity="0.8"
+                              fill-rule="evenodd"
+                              clip-rule="evenodd"
+                              fill="#F58553"
+                              d="M956.425,464.105
     c-283.913,0.026-436.816-4.843-720.731-4.854c-5.471,0-10.94-0.17-16.414-0.259c17.521-8.644,29.516-19.407,35.464-33.646
     c3.527,1.396,5.092,3.325,7.317,4.926c35.38,25.433,78.727,21.837,116.905,6.063c14.958-6.18,25.563-14.081,20.298-26.71
     c18.336,1.768,30.708,6.852,38.003,16.78c6.811,9.263,17.117,9.926,28.419,2.379c5.181-3.462,7.175-7.52,7.832-12.224
@@ -4547,122 +4627,62 @@ function ControlView() {
     c0.767,11.759-5.291,23.314-0.978,35.305c3.61,10.039,9.313,19.199,18.593,27.751c7.567,6.975,13.455,14.467,16.165,22.727
     c0.994,3.797,1.986,7.59,2.982,11.382c-0.127,5.22-0.251,10.438-0.38,15.66c-5.04,9.903-10.8,19.7-14.889,29.741
     c-3.156,7.76,0.219,14.943,12.113,19.614C963.82,417.971,967.399,461.364,956.425,464.105z"
-                          />
-                        </svg>
-                      </div>
-                    </button>
-                    {debugControlsVisible ? (
-                      <>
-                        <div
-                          className={`h-full w-full !p-0 items-center ${competitionRangeLockDisabled ? "grayscale opacity-60" : ""}`}
-                        >
-                          <div class="w-full">
-                            <ToggleSwitch
-                              switchID="enableCompetitionRangeLock"
-                              checked={competitionRangeLockEnabled}
-                              title="Finish Target"
-                              styling="text-xs flex !flex-row"
-                              disabled={competitionRangeLockDisabled}
-                              onChange={(event) =>
-                                void setCompetitionRangeLock(
-                                  event.target.checked,
-                                )
-                              }
                             />
-                          </div>
-                          <div class="w-full mt-0 flex gap-3  items-center text-xs">
-                            <div class="flex items-center rounded-full border border-white/15 px-0 py-1">
-                              <input
-                                type="text"
-                                value={competitionRangeLockMinRank}
+                          </svg>
+                        </div>
+                      </button>
+                      {debugControlsVisible ? (
+                        <>
+                          <div
+                            className={`{h-full w-full  !p-0 items-center  ${!isMissionMode ? "grayscale opacity-60" : ""}`}
+                          >
+                            <div class=" w-full">
+                              <ToggleSwitch
+                                switchID="enableNFTReset"
+                                checked={nftResetEnabled}
+                                title="NFT Resets"
+                                styling="text-xs flex !flex-row"
+                                disabled={!isMissionMode}
                                 onChange={(event) =>
-                                  void setCompetitionRangeLockMin(
-                                    event.target.value,
+                                  void setAutoNftResetEnabled(
+                                    event.target.checked,
                                   )
                                 }
-                                disabled={competitionRangeLockInputsDisabled}
-                                class="w-7.5 border-0 bg-transparent p-0 text-center text-xs !text-white outline-none disabled:opacity-50"
-                              />
-                              <span class=" text-xs text-white/70">-</span>
-                              <input
-                                type="text"
-                                value={competitionRangeLockMaxRank}
-                                onChange={(event) =>
-                                  void setCompetitionRangeLockMax(
-                                    event.target.value,
-                                  )
-                                }
-                                disabled={competitionRangeLockInputsDisabled}
-                                class="w-7.5 border-0 bg-transparent p-0 text-center text-xs !text-white outline-none disabled:opacity-50"
                               />
                             </div>
-                            Range
+                            <div class=" w-full flex  text-xs items-center gap-3 ">
+                              <label class="flex gap-3 items-center">
+                                <div class="relative">
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    step="1"
+                                    value={nftResetMaxPbp}
+                                    onChange={(event) =>
+                                      void setAutoNftResetMaxPbp(
+                                        event.target.value,
+                                      )
+                                    }
+                                    disabled={nftResetInputsDisabled}
+                                    class="relative input bg-transparent text-xs w-17 p-1 pr-3 h-auto !text-white text-center !rounded-full outline-none border-white/15 "
+                                  />
+                                  <img
+                                    src={pbpIcon}
+                                    class="h-3.5 w-3.5 absolute right-2 top-1/2 -translate-y-1/2 "
+                                  />
+                                </div>
+                                Max Cost
+                              </label>
+                            </div>
                           </div>
-                        </div>
-
-                        <div
-                          className={`{h-full w-full  !p-0 items-center  ${!isMissionMode ? "grayscale opacity-60" : ""}`}
-                        >
-                          <div class=" w-full">
-                            <ToggleSwitch
-                              switchID="enableNFTReset"
-                              checked={nftResetEnabled}
-                              title="NFT Resets"
-                              styling="text-xs flex !flex-row"
-                              disabled={!isMissionMode}
-                              onChange={(event) =>
-                                void setAutoNftResetEnabled(
-                                  event.target.checked,
-                                )
-                              }
-                            />
-                          </div>
-                          <div class=" w-full flex  text-xs items-center gap-3 ">
-                            <label class="flex gap-3 items-center">
-                              <div class="relative">
-                                <input
-                                  type="number"
-                                  min="0"
-                                  step="1"
-                                  value={nftResetMaxPbp}
-                                  onChange={(event) =>
-                                    void setAutoNftResetMaxPbp(
-                                      event.target.value,
-                                    )
-                                  }
-                                  disabled={nftResetInputsDisabled}
-                                  class="relative input bg-transparent text-xs w-17 p-1 pr-3 h-auto !text-white text-center !rounded-full outline-none border-white/15 "
-                                />
-                                <img
-                                  src={pbpIcon}
-                                  class="h-3.5 w-3.5 absolute right-2 top-1/2 -translate-y-1/2 "
-                                />
-                              </div>
-                              Max Cost
-                            </label>
-                          </div>
-                        </div>
-                      </>
-                    ) : null}
+                        </>
+                      ) : null}
+                    </div>
                   </div>
-                  <div className="flex flex-col items-center px-9 ">
+                  <div className="flex flex-col items-center pl-8 ">
                     <div className="flex flex-1  mx-8  user__wallet-balance h-1/2 items-center">
                       {/* make me a component */}
-                      <div className="flex gap-2 flex-col">
-                        <ToggleSwitch
-                          switchID="enableResets"
-                          title="Enable Mission Level Reset"
-                          checked={isMissionMode ? true : resetEnabled}
-                          disabled={isMissionMode}
-                          onChange={(event) =>
-                            void setMissionResetEnabled(event.target.checked)
-                          }
-                          helperText={
-                            isMissionMode
-                              ? "Level Reset locked"
-                              : "Reset mission at level 20"
-                          }
-                        />
+                      <div className="flex gap-1 flex-col w-full ">
                         <ToggleSwitch
                           switchID="enableRentals"
                           title="Enable Rentals"
@@ -4676,7 +4696,84 @@ function ControlView() {
                               ? "Rentals locked"
                               : "Rentals will be used last"
                           }
+                        />{" "}
+                        <ToggleSwitch
+                          switchID="enableResets"
+                          title="Enable Mission Resets"
+                          checked={isMissionMode ? true : resetEnabled}
+                          disabled={isMissionMode}
+                          onChange={(event) =>
+                            void setMissionResetEnabled(event.target.checked)
+                          }
+                          helperText={
+                            isMissionMode
+                              ? "Level Reset locked"
+                              : "Reset mission at level 20"
+                          }
                         />
+                        <>
+                          <div
+                            className={`${!isMissionMode ? "opacity-50" : ""} w-full mt-0 flex gap-3 items-center text-xs`}
+                          >
+                            <div
+                              className={` flex items-center rounded-full border border-white/15 px-0 py-1`}
+                            >
+                              <input
+                                type="text"
+                                inputMode="numeric"
+                                pattern="[0-9]*"
+                                disabled={!isMissionMode}
+                                value={missionModeButtonLevel}
+                                onFocus={() =>
+                                  setMissionModeButtonLevelEditing(true)
+                                }
+                                onChange={(event) => {
+                                  const nextValue = event.target.value.replace(
+                                    /[^\d]/g,
+                                    "",
+                                  );
+                                  setMissionModeButtonLevel(nextValue);
+                                }}
+                                onBlur={(event) =>
+                                  void commitMissionModeResetLevel(
+                                    event.target.value,
+                                  )
+                                }
+                                onKeyDown={(event) => {
+                                  if (event.key === "Enter") {
+                                    event.currentTarget.blur();
+                                  }
+                                }}
+                                className="w-16 border-0 bg-transparent p-0 text-center text-xs !text-white outline-none disabled:opacity-50 input-no-spinner"
+                                aria-label="Manual mission reset level"
+                              />
+                            </div>
+                            <span className="flex flex-col gap-0 text-sm">
+                              Mission reset level
+                              <span className="text-[10px]  ">
+                                Requires Mission Mode
+                              </span>
+                            </span>
+                          </div>
+                        </>
+                        {/* <div className="w-full mt-0 flex gap-3 items-center text-xs">
+                          <div className="flex items-center rounded-full border border-white/15 px-0 py-1">
+                            <input
+                              type="number"
+                              min="1"
+                              step="1"
+                              value={missionModeButtonLevel}
+                              onChange={(event) => {
+                                const nextValue = event.target.value;
+                                setMissionModeButtonLevel(nextValue);
+                                void setMissionModeResetLevel(nextValue);
+                              }}
+                              className="w-16 border-0 bg-transparent p-0 text-center text-xs !text-white outline-none disabled:opacity-50 input-no-spinner"
+                              aria-label="Manual mission reset level"
+                            />
+                          </div>
+                          Mission reset level
+                        </div> */}
                       </div>
                     </div>
                     <div className="grid  grid-cols-2 gap-x-2 gap-y-1 mx-8  mb-5 user__wallet-balance  mt-auto items-center">
