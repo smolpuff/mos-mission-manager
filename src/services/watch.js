@@ -2716,12 +2716,6 @@ function createWatchService(
             "[WATCH] ✅ Claimed (live state)",
             liveClaimLookup,
           );
-          applyClaimCountUpdate(transitions.claimedTransitions, {
-            logLabel: "Claimed count updated",
-          });
-          liveStateClaimedApplied += Number(
-            transitions.claimedTransitions || 0,
-          );
           logWithTimestamp(
             "[ASSIGN] ▶ Post-claim assign check (live state)...",
           );

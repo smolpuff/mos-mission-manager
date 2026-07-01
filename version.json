@@ -4,8 +4,8 @@
   "notes": [
     "Updated fashionably late for season 70",
     "Optimized startup mcp calls",
-    "Fixed mission card state-mismatch",
-    "Fixed level 20 NFT reservation.. I hope?",
+    "Fixed lagging mission card updates",
+    "Fixed level 20 NFT reservation",
     "Added custom mission reset level",
     "Added time remaining to unlockedSlot 4",
     "Added user stat dashboard link to settings page"
