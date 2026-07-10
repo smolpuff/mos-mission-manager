@@ -25,6 +25,7 @@ const {
   normalizeMissionList,
   normalizeMissionCatalogList,
   normalizeNftList,
+  extractMissionReward,
   missionHasAssignedNft,
   missionIsActive,
 } = require("../src/missions/normalize");
@@ -363,6 +364,7 @@ function missionLevelFromPayload(payload = {}) {
 }
 
 function claimEventDedupKey(payload = {}) {
+  const assignedMissionId = String(payload?.assignedMissionId || "").trim();
   const missionStartedAt = normalizeAnalyticsTimestampMs(
     payload?.missionStartedAt ??
       payload?.missionStartTimestamp ??
@@ -371,8 +373,7 @@ function claimEventDedupKey(payload = {}) {
   const missionCompletedAt = normalizeAnalyticsTimestampMs(
     payload?.missionCompletedAt ??
       payload?.missionCompletionTimestamp ??
-      payload?.mission_completion_timestamp ??
-      payload?.at,
+      payload?.mission_completion_timestamp,
   );
   const slot = Number(payload?.slot);
   const level = missionLevelFromPayload(payload);
@@ -381,6 +382,7 @@ function claimEventDedupKey(payload = {}) {
     .toLowerCase();
   const reward = rewardFromStatsPayload(payload);
   const parts = ["claim"];
+  if (assignedMissionId) parts.push(`mission-id:${assignedMissionId}`);
   if (Number.isFinite(missionStartedAt) && missionStartedAt > 0) {
     parts.push(`start:${missionStartedAt}`);
   }
@@ -421,16 +423,32 @@ function claimHistoryIdentities(entry = {}) {
       entry?.missionStartTimestamp ??
       entry?.mission_start_timestamp,
   );
+  const missionCompletedAt = normalizeAnalyticsTimestampMs(
+    entry?.missionCompletedAt ??
+      entry?.missionCompletionTimestamp ??
+      entry?.mission_completion_timestamp,
+  );
   const slot = Number(entry?.slot);
   const level = Number(entry?.level ?? entry?.missionLevel ?? null);
   const mission = String(entry?.mission || "")
     .trim()
     .toLowerCase();
   const identities = [];
-  if (assignedMissionId) identities.push(`mission-id:${assignedMissionId}`);
+  if (assignedMissionId) {
+    const missionIdParts = [`mission-id:${assignedMissionId}`];
+    if (Number.isFinite(missionCompletedAt) && missionCompletedAt > 0) {
+      missionIdParts.push(`done:${missionCompletedAt}`);
+    } else if (Number.isFinite(missionStartedAt) && missionStartedAt > 0) {
+      missionIdParts.push(`start:${missionStartedAt}`);
+    }
+    identities.push(missionIdParts.join("|"));
+  }
   const parts = ["mission-claim"];
   if (Number.isFinite(missionStartedAt) && missionStartedAt > 0) {
     parts.push(`start:${missionStartedAt}`);
+  }
+  if (Number.isFinite(missionCompletedAt) && missionCompletedAt > 0) {
+    parts.push(`done:${missionCompletedAt}`);
   }
   if (Number.isFinite(slot)) parts.push(`slot:${slot}`);
   if (Number.isFinite(level)) parts.push(`level:${level}`);
@@ -440,6 +458,9 @@ function claimHistoryIdentities(entry = {}) {
   const fallbackParts = ["mission-claim"];
   if (Number.isFinite(missionStartedAt) && missionStartedAt > 0) {
     fallbackParts.push(`start:${missionStartedAt}`);
+  }
+  if (Number.isFinite(missionCompletedAt) && missionCompletedAt > 0) {
+    fallbackParts.push(`done:${missionCompletedAt}`);
   }
   if (Number.isFinite(slot)) fallbackParts.push(`slot:${slot}`);
   if (mission) fallbackParts.push(`mission:${mission}`);
@@ -620,6 +641,11 @@ function normalizeRentalHistory(raw) {
     })
     .filter((entry) => entry.at)
     .slice(-2000);
+}
+
+function claimCountFromHistoryEntry(entry = {}) {
+  const claims = Number(entry?.claims);
+  return Number.isFinite(claims) && claims > 0 ? claims : 0;
 }
 
 function normalizeAssignmentHistory(raw) {
@@ -1869,12 +1895,10 @@ function competitionRangeLockRuntimeState(config = readDesktopConfig()) {
   const lockConfig = competitionRangeLockConfigFrom(config);
   const reasons = [];
   if (lockConfig.enabled !== true) reasons.push("disabled");
-  if (config?.debugMode !== true) reasons.push("debug_mode_off");
   if (config?.missionModeEnabled !== true) reasons.push("mission_mode_off");
   return {
     enabled:
       lockConfig.enabled === true &&
-      config?.debugMode === true &&
       config?.missionModeEnabled === true,
     lockConfig,
     reasons,
@@ -2107,6 +2131,91 @@ function rewardTokenDisplayName(token) {
       return null;
   }
 }
+function analyticsSpendActionLabel(action) {
+  const normalized = String(action || "")
+    .trim()
+    .toLowerCase();
+
+  const labelsByAction = {
+    mission_reroll: "Mission reroll",
+    mission_swap: "Mission change",
+    mission_change: "Mission change",
+    nft_cooldown_reset: "NFT reset",
+    cooldown_reset: "NFT reset",
+  };
+
+  if (labelsByAction[normalized]) return labelsByAction[normalized];
+
+  const readable = normalized
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!readable) return "Other cost";
+
+  return readable.replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function buildAnalyticsSpendRows(spendByAction = {}) {
+  const totals = new Map();
+
+  if (!spendByAction || typeof spendByAction !== "object") return [];
+
+  for (const [action, rawAmount] of Object.entries(spendByAction)) {
+    const amount = Number(rawAmount);
+    if (!Number.isFinite(amount) || amount <= 0) continue;
+
+    const label = analyticsSpendActionLabel(action);
+    totals.set(label, (totals.get(label) || 0) + amount);
+  }
+
+  return Array.from(totals.entries())
+    .map(([label, amount]) => [label, amount])
+    .sort((a, b) => a[0].localeCompare(b[0]));
+}
+function buildAnalyticsEventRows(bucket = {}) {
+  const claimRows = normalizeClaimHistory(bucket.claimHistory).map((entry) => ({
+    at: normalizeAnalyticsTimestampMs(entry.at) || 0,
+    row: [
+      entry.at ? new Date(entry.at).toISOString() : "",
+      `Claim: ${String(entry.mission || "unknown mission").trim() || "unknown mission"}`,
+      entry.assignedMissionId || "",
+      entry.slot ?? "",
+      entry.level ?? "",
+      entry.missionStartedAt
+        ? new Date(entry.missionStartedAt).toISOString()
+        : "",
+      entry.missionCompletedAt
+        ? new Date(entry.missionCompletedAt).toISOString()
+        : "",
+      entry.rewardAmount ?? "",
+      entry.rewardToken || "",
+    ],
+  }));
+
+  const spendRows = normalizeSpendHistory(bucket.spendHistory).map((entry) => {
+    const amount = Number(entry.amount || 0);
+
+    return {
+      at: normalizeAnalyticsTimestampMs(entry.at) || 0,
+      row: [
+        entry.at ? new Date(entry.at).toISOString() : "",
+        analyticsSpendActionLabel(entry.action),
+        "",
+        "",
+        "",
+        entry.at ? new Date(entry.at).toISOString() : "",
+        "",
+        Number.isFinite(amount) && amount > 0 ? -amount : "",
+        "PBP",
+      ],
+    };
+  });
+
+  return [...claimRows, ...spendRows]
+    .sort((a, b) => a.at - b.at)
+    .map((entry) => entry.row);
+}
 
 function rewardFromStatsPayload(payload = {}) {
   const reward =
@@ -2253,8 +2362,16 @@ function applyAnalyticsClaimEvent(payload = {}) {
     afterLifetimeClaims > beforeLifetimeClaims ||
     afterSessionClaims > beforeSessionClaims
   ) {
+    const assignedMissionId = claimEntry.assignedMissionId || undefined;
+    const slot = Number.isFinite(claimEntry.slot) ? claimEntry.slot : undefined;
     trackFeatureUsage("mission_claim", {
       mission_name: telemetryMissionName,
+      mission: telemetryMissionName,
+      assigned_mission_id: assignedMissionId,
+      assignedMissionId: assignedMissionId,
+      mission_id: assignedMissionId,
+      missionId: assignedMissionId,
+      slot,
       mission_level: missionLevel ?? undefined,
       level: missionLevel ?? undefined,
       currentLevel: missionLevel ?? undefined,
@@ -2269,6 +2386,7 @@ function applyAnalyticsClaimEvent(payload = {}) {
       reward: reward.amount > 0 ? reward.amount : undefined,
       prize: reward.token || undefined,
       prize_amount: reward.amount > 0 ? reward.amount : undefined,
+      source: String(payload?.source || "").trim() || undefined,
       timestamp: analyticsTimestampIso(at),
       mission_start_timestamp: analyticsTimestampIso(missionStartedAt),
       mission_completion_timestamp: analyticsTimestampIso(missionCompletedAt),
@@ -2465,30 +2583,13 @@ function applyAnalyticsAssignmentEvent(payload = {}) {
 
 function analyticsBucketFromRange(bucket = {}, rangeKey = "session") {
   const src = bucket && typeof bucket === "object" ? bucket : {};
-  if (rangeKey === "session") {
-    return {
+  if (rangeKey === "session" || rangeKey === "all") {
+    return rebuildAnalyticsBucketFromHistories({
+      ...src,
       startedAt: Number.isFinite(Number(src.startedAt))
         ? Number(src.startedAt)
         : Date.now(),
-      totalClaims: Number(src.totalClaims || 0) || 0,
-      totalResets: Number(src.totalResets || 0) || 0,
-      totalResetCostPbp: Number(src.totalResetCostPbp || 0) || 0,
-      totalLeased: Number(src.totalLeased || 0) || 0,
-      currencyEarned: normalizeTotals(src.currencyEarned),
-      missionClaims: normalizeCounterObject(src.missionClaims),
-      claimHistory: normalizeClaimHistory(src.claimHistory),
-      spendHistory: normalizeSpendHistory(src.spendHistory),
-      resetHistory: normalizeResetHistory(src.resetHistory),
-      rentalHistory: normalizeRentalHistory(src.rentalHistory),
-      assignmentHistory: normalizeAssignmentHistory(src.assignmentHistory),
-      resetTypes: {
-        mission: Number(src?.resetTypes?.mission || 0) || 0,
-        nft: Number(src?.resetTypes?.nft || 0) || 0,
-      },
-      nftResetUsage: normalizeNftResetUsage(src.nftResetUsage),
-      spendByAction: normalizeCounterObject(src.spendByAction),
-      nftsUsed: Array.isArray(src.nftsUsed) ? src.nftsUsed.slice() : [],
-    };
+    });
   }
 
   const rangeMs =
@@ -2513,7 +2614,8 @@ function analyticsBucketFromRange(bucket = {}, rangeKey = "session") {
   const missionClaims = {};
   for (const entry of claimHistory) {
     const mission = String(entry?.mission || "").trim() || "unknown mission";
-    missionClaims[mission] = Number(missionClaims[mission] || 0) + 1;
+    const claimCount = claimCountFromHistoryEntry(entry);
+    missionClaims[mission] = Number(missionClaims[mission] || 0) + claimCount;
     const token = normalizeRewardToken(entry?.rewardToken);
     const amount = Number(entry?.rewardAmount || 0);
     if (token && Number.isFinite(amount) && amount > 0) {
@@ -2553,7 +2655,10 @@ function analyticsBucketFromRange(bucket = {}, rangeKey = "session") {
   );
   return {
     startedAt: cutoff,
-    totalClaims: claimHistory.length,
+    totalClaims: claimHistory.reduce(
+      (sum, entry) => sum + claimCountFromHistoryEntry(entry),
+      0,
+    ),
     totalResets: resetHistory.length,
     totalResetCostPbp: spendHistory.reduce(
       (sum, entry) => sum + Number(entry.amount || 0),
@@ -2586,7 +2691,8 @@ function rebuildAnalyticsBucketFromHistories(bucket = {}) {
   const missionClaims = {};
   for (const entry of claimHistory) {
     const mission = String(entry?.mission || "").trim() || "unknown mission";
-    missionClaims[mission] = Number(missionClaims[mission] || 0) + 1;
+    const claimCount = claimCountFromHistoryEntry(entry);
+    missionClaims[mission] = Number(missionClaims[mission] || 0) + claimCount;
     const token = normalizeRewardToken(entry?.rewardToken);
     const amount = Number(entry?.rewardAmount || 0);
     if (token && Number.isFinite(amount) && amount > 0) {
@@ -2619,7 +2725,10 @@ function rebuildAnalyticsBucketFromHistories(bucket = {}) {
   }
   return {
     ...bucket,
-    totalClaims: claimHistory.length,
+    totalClaims: claimHistory.reduce(
+      (sum, entry) => sum + claimCountFromHistoryEntry(entry),
+      0,
+    ),
     totalResets: resetHistory.length,
     totalResetCostPbp: spendHistory.reduce(
       (sum, entry) => sum + Number(entry.amount || 0),
@@ -2655,9 +2764,9 @@ function analyticsView(rangeKey = "session") {
     : "session";
   const bucket =
     key === "session"
-      ? analytics.session
+      ? analyticsBucketFromRange(analytics.session, "session")
       : key === "all"
-        ? analytics.lifetime
+        ? analyticsBucketFromRange(analytics.lifetime, "all")
         : analyticsBucketFromRange(analytics.lifetime, key);
   return {
     rangeKey: key,
@@ -2761,6 +2870,9 @@ function buildAnalyticsCsv(rangeKey = "session") {
     ["CC Earned", Number(bucket?.currencyEarned?.cc || 0)],
     ["PBP Spent", Number(bucket.totalResetCostPbp || 0)],
     [],
+    ["Cost", "PBP Spent"],
+    ...buildAnalyticsSpendRows(bucket.spendByAction),
+    [],
     ["Mission", "Claims"],
     ...Object.entries(bucket.missionClaims || {}).map(([mission, claims]) => [
       mission,
@@ -2768,8 +2880,8 @@ function buildAnalyticsCsv(rangeKey = "session") {
     ]),
     [],
     [
-      "Claim At",
-      "Mission",
+      "",
+      "Event",
       "Assigned Mission ID",
       "Slot",
       "Level",
@@ -2778,21 +2890,7 @@ function buildAnalyticsCsv(rangeKey = "session") {
       "Reward Amount",
       "Reward Token",
     ],
-    ...normalizeClaimHistory(bucket.claimHistory).map((entry) => [
-      new Date(entry.at).toISOString(),
-      entry.mission,
-      entry.assignedMissionId || "",
-      entry.slot ?? "",
-      entry.level ?? "",
-      entry.missionStartedAt
-        ? new Date(entry.missionStartedAt).toISOString()
-        : "",
-      entry.missionCompletedAt
-        ? new Date(entry.missionCompletedAt).toISOString()
-        : "",
-      entry.rewardAmount ?? "",
-      entry.rewardToken || "",
-    ]),
+    ...buildAnalyticsEventRows(bucket),
   ];
   return lines
     .map((row) => row.map((value) => csvEscape(value)).join(","))
@@ -3591,85 +3689,7 @@ function assignedNftImageFromMission(mission = {}) {
 }
 
 function missionRewardLabel(mission = {}) {
-  const direct = mission?.reward || mission?.rewards || mission?.rewardText;
-  if (typeof direct === "string" && direct.trim()) return direct.trim();
-  if (direct && typeof direct === "object") {
-    const nestedAmount =
-      direct?.amount ??
-      direct?.value ??
-      direct?.rewardAmount ??
-      direct?.prizeAmount ??
-      null;
-    const nestedSymbol =
-      direct?.symbol ??
-      direct?.token ??
-      direct?.currency ??
-      direct?.rewardSymbol ??
-      direct?.prize ??
-      null;
-    const nestedN = Number(nestedAmount);
-    const nestedS = String(nestedSymbol || "").trim();
-    if (Number.isFinite(nestedN) && nestedS) {
-      return `${nestedN.toLocaleString()} ${nestedS}`;
-    }
-    if (Number.isFinite(nestedN)) return nestedN.toLocaleString();
-  }
-  if (Array.isArray(mission?.rewards)) {
-    const rewardText = mission.rewards
-      .map((entry) => {
-        if (!entry) return null;
-        if (typeof entry === "string" && entry.trim()) return entry.trim();
-        if (typeof entry !== "object") return null;
-        const amount =
-          entry?.amount ??
-          entry?.value ??
-          entry?.rewardAmount ??
-          entry?.prizeAmount ??
-          null;
-        const symbol =
-          entry?.symbol ??
-          entry?.token ??
-          entry?.currency ??
-          entry?.rewardSymbol ??
-          entry?.prize ??
-          null;
-        const n = Number(amount);
-        const s = String(symbol || "").trim();
-        if (Number.isFinite(n) && s) return `${n.toLocaleString()} ${s}`;
-        if (Number.isFinite(n)) return n.toLocaleString();
-        return null;
-      })
-      .filter(Boolean)
-      .join(" + ");
-    if (rewardText) return rewardText;
-  }
-  const amount =
-    mission?.rewardAmount ??
-    mission?.reward_amount ??
-    mission?.tokenReward ??
-    mission?.token_reward ??
-    mission?.prizeAmount ??
-    mission?.prize_amount ??
-    mission?.amount ??
-    null;
-  const symbol =
-    mission?.rewardSymbol ??
-    mission?.reward_symbol ??
-    mission?.tokenSymbol ??
-    mission?.token_symbol ??
-    mission?.prize ??
-    mission?.rewardToken ??
-    mission?.prizeToken ??
-    mission?.currency ??
-    mission?.currencySymbol ??
-    null;
-  const n = Number(amount);
-  const s = String(symbol || "").trim();
-  if (Number.isFinite(n) && s) {
-    return `${n.toLocaleString()} ${s}`;
-  }
-  if (Number.isFinite(n)) return n.toLocaleString();
-  return null;
+  return extractMissionReward(mission).label;
 }
 
 function missionCollectionEntries(mission = {}) {
@@ -4219,7 +4239,6 @@ function applyStoppedModeConfig(parsed) {
     if (parsed.mode === "off") {
       patch.missionResetPerSlotModeEnabled = false;
     } else {
-      if (current.debugMode !== true) return current;
       patch.missionResetPerSlotModeEnabled =
         parsed.mode === "toggle"
           ? current.missionResetPerSlotModeEnabled !== true
@@ -4292,7 +4311,7 @@ function debugToggleSummaryLines(config = {}) {
     `[DEBUG] runtimeDefaults: missionResetLevel ${NORMAL_DEFAULTS.missionResetLevel} -> ${defaults.missionResetLevel}, rentalFastRefreshTickMs ${NORMAL_DEFAULTS.rentalFastRefreshTickMs} -> ${defaults.rentalFastRefreshTickMs}, rentalBatchLimit ${NORMAL_DEFAULTS.rentalBatchLimit} -> ${defaults.rentalBatchLimit}, watchMinCycleSeconds ${NORMAL_DEFAULTS.watchMinCycleSeconds} -> ${defaults.watchMinCycleSeconds}, watchDefaultPollSeconds ${NORMAL_DEFAULTS.watchDefaultPollSeconds} -> ${defaults.watchDefaultPollSeconds}`,
     `[DEBUG] watcher behavior: live mission polling=${enabled ? "enabled" : "disabled unless separately configured"}, verbose debug logs=${enabled ? "enabled" : "disabled"}, startup FX=${enabled ? "disabled" : "enabled"}`,
     `[DEBUG] auth behavior: startup interactive login=${enabled ? "enabled when token is missing" : "normal token-first flow"}, browser login prompts=${enabled ? "enabled" : "disabled unless interactiveAuth is enabled"}`,
-    `[DEBUG] auto NFT cooldown reset gate: debug=${enabled}, missionMode=${config?.missionModeEnabled === true}, nftCooldownResetEnabled=${config?.nftCooldownResetEnabled === true}`,
+    `[DEBUG] auto NFT cooldown reset conditions: missionMode=${config?.missionModeEnabled === true}, nftCooldownResetEnabled=${config?.nftCooldownResetEnabled === true}`,
     `[DEBUG] dev-equivalent defaults are now ${enabled ? "active" : "inactive"}; target dev values are missionResetLevel=${DEV_DEFAULTS.missionResetLevel}, rentalFastRefreshTickMs=${DEV_DEFAULTS.rentalFastRefreshTickMs}, rentalBatchLimit=${DEV_DEFAULTS.rentalBatchLimit}, watchMinCycleSeconds=${DEV_DEFAULTS.watchMinCycleSeconds}, watchDefaultPollSeconds=${DEV_DEFAULTS.watchDefaultPollSeconds}`,
   ];
 }
@@ -4377,13 +4396,6 @@ async function sendBackendCommand(command) {
     const parsed = parseStoppedModeCommand(trimmed);
     if (parsed.type === "mr") {
       const current = readDesktopConfig();
-      const wouldEnable =
-        parsed.mode === "on" ||
-        (parsed.mode === "toggle" &&
-          current.missionResetPerSlotModeEnabled !== true);
-      if (wouldEnable && current.debugMode !== true) {
-        throw new Error("mr requires debug mode to be enabled.");
-      }
     }
     if (parsed.type === "start") {
       startBackend();

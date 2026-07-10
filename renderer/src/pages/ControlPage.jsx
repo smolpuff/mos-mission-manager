@@ -702,14 +702,12 @@ function ControlView() {
   const lastThrottleModalKeyRef = useRef(null);
   const isMissionMode = modeSelection === "mission";
   const isNormalMode = !isMissionMode;
-  const debugControlsVisible = debug === true;
   const debugPageVisible = debug === true;
-  const competitionRangeLockDisabled = !debug || !isMissionMode;
+  const competitionRangeLockDisabled = !isMissionMode;
   const competitionRangeLockInputsDisabled =
     competitionRangeLockDisabled || !competitionRangeLockEnabled;
   const nftResetInputsDisabled = !isMissionMode || !nftResetEnabled;
-  const perSlotMissionResetControlsVisible =
-    debug === true && missionResetPerSlotModeEnabled;
+  const perSlotMissionResetControlsVisible = missionResetPerSlotModeEnabled;
   const perSlotMissionResetControlsDisabled = !missionResetPerSlotModeEnabled;
   const normalizePositiveIntegerString = (value, fallback) => {
     const next = Number(value);
@@ -3206,7 +3204,7 @@ function ControlView() {
         <div
           className={`main-wrapper w-full ${
             currentPage === "debug" ? "!min-h-0 " : ""
-          } ${!debugControlsVisible ? "gap-5.5" : "gap-4"}`}
+          } ${!debugPageVisible ? "gap-5.5" : "gap-4"}`}
           style={
             currentPage === "debug"
               ? {
@@ -4284,56 +4282,52 @@ function ControlView() {
                           <div className="text-xs">Resets level 20</div>
                         </div>
                       </button>
-                      {debugControlsVisible ? (
-                        <>
-                          <div
-                            className={` w-full !p-0 items-center ${competitionRangeLockDisabled ? "grayscale opacity-60" : ""}`}
-                          >
-                            <div class="w-full">
-                              <ToggleSwitch
-                                switchID="enableCompetitionRangeLock"
-                                checked={competitionRangeLockEnabled}
-                                title="Finish Target"
-                                styling="text-xs flex !flex-row"
-                                disabled={competitionRangeLockDisabled}
-                                onChange={(event) =>
-                                  void setCompetitionRangeLock(
-                                    event.target.checked,
-                                  )
-                                }
-                              />
-                            </div>
-                            <div class="w-full mt-0 flex gap-3  items-center text-xs">
-                              <div class="flex items-center rounded-full border border-white/15 px-0 py-1">
-                                <input
-                                  type="text"
-                                  value={competitionRangeLockMinRank}
-                                  onChange={(event) =>
-                                    void setCompetitionRangeLockMin(
-                                      event.target.value,
-                                    )
-                                  }
-                                  disabled={competitionRangeLockInputsDisabled}
-                                  class="w-7.5 border-0 bg-transparent p-0 text-center text-xs !text-white outline-none disabled:opacity-50"
-                                />
-                                <span class=" text-xs text-white/70">-</span>
-                                <input
-                                  type="text"
-                                  value={competitionRangeLockMaxRank}
-                                  onChange={(event) =>
-                                    void setCompetitionRangeLockMax(
-                                      event.target.value,
-                                    )
-                                  }
-                                  disabled={competitionRangeLockInputsDisabled}
-                                  class="w-7.5 border-0 bg-transparent p-0 text-center text-xs !text-white outline-none disabled:opacity-50"
-                                />
-                              </div>
-                              Range
-                            </div>
+                      <div
+                        className={` w-full !p-0 items-center ${competitionRangeLockDisabled ? "grayscale opacity-60" : ""}`}
+                      >
+                        <div class="w-full">
+                          <ToggleSwitch
+                            switchID="enableCompetitionRangeLock"
+                            checked={competitionRangeLockEnabled}
+                            title="Finish Target"
+                            styling="text-xs flex !flex-row"
+                            disabled={competitionRangeLockDisabled}
+                            onChange={(event) =>
+                              void setCompetitionRangeLock(
+                                event.target.checked,
+                              )
+                            }
+                          />
+                        </div>
+                        <div class="w-full mt-0 flex gap-3  items-center text-xs">
+                          <div class="flex items-center rounded-full border border-white/15 px-0 py-1">
+                            <input
+                              type="text"
+                              value={competitionRangeLockMinRank}
+                              onChange={(event) =>
+                                void setCompetitionRangeLockMin(
+                                  event.target.value,
+                                )
+                              }
+                              disabled={competitionRangeLockInputsDisabled}
+                              class="w-7.5 border-0 bg-transparent p-0 text-center text-xs !text-white outline-none disabled:opacity-50"
+                            />
+                            <span class=" text-xs text-white/70">-</span>
+                            <input
+                              type="text"
+                              value={competitionRangeLockMaxRank}
+                              onChange={(event) =>
+                                void setCompetitionRangeLockMax(
+                                  event.target.value,
+                                )
+                              }
+                              disabled={competitionRangeLockInputsDisabled}
+                              class="w-7.5 border-0 bg-transparent p-0 text-center text-xs !text-white outline-none disabled:opacity-50"
+                            />
                           </div>
-                        </>
-                      ) : null}
+                          Range
+                        </div>
+                      </div>
                     </div>
                     <div class="flex flex-col gap-3">
                       <button
@@ -4631,52 +4625,48 @@ function ControlView() {
                           </svg>
                         </div>
                       </button>
-                      {debugControlsVisible ? (
-                        <>
-                          <div
-                            className={`{h-full w-full  !p-0 items-center  ${!isMissionMode ? "grayscale opacity-60" : ""}`}
-                          >
-                            <div class=" w-full">
-                              <ToggleSwitch
-                                switchID="enableNFTReset"
-                                checked={nftResetEnabled}
-                                title="NFT Resets"
-                                styling="text-xs flex !flex-row"
-                                disabled={!isMissionMode}
+                      <div
+                        className={`{h-full w-full  !p-0 items-center  ${!isMissionMode ? "grayscale opacity-60" : ""}`}
+                      >
+                        <div class=" w-full">
+                          <ToggleSwitch
+                            switchID="enableNFTReset"
+                            checked={nftResetEnabled}
+                            title="NFT Resets"
+                            styling="text-xs flex !flex-row"
+                            disabled={!isMissionMode}
+                            onChange={(event) =>
+                              void setAutoNftResetEnabled(
+                                event.target.checked,
+                              )
+                            }
+                          />
+                        </div>
+                        <div class=" w-full flex  text-xs items-center gap-3 ">
+                          <label class="flex gap-3 items-center">
+                            <div class="relative">
+                              <input
+                                type="number"
+                                min="0"
+                                step="1"
+                                value={nftResetMaxPbp}
                                 onChange={(event) =>
-                                  void setAutoNftResetEnabled(
-                                    event.target.checked,
+                                  void setAutoNftResetMaxPbp(
+                                    event.target.value,
                                   )
                                 }
+                                disabled={nftResetInputsDisabled}
+                                class="relative input bg-transparent text-xs w-17 p-1 pr-3 h-auto !text-white text-center !rounded-full outline-none border-white/15 "
+                              />
+                              <img
+                                src={pbpIcon}
+                                class="h-3.5 w-3.5 absolute right-2 top-1/2 -translate-y-1/2 "
                               />
                             </div>
-                            <div class=" w-full flex  text-xs items-center gap-3 ">
-                              <label class="flex gap-3 items-center">
-                                <div class="relative">
-                                  <input
-                                    type="number"
-                                    min="0"
-                                    step="1"
-                                    value={nftResetMaxPbp}
-                                    onChange={(event) =>
-                                      void setAutoNftResetMaxPbp(
-                                        event.target.value,
-                                      )
-                                    }
-                                    disabled={nftResetInputsDisabled}
-                                    class="relative input bg-transparent text-xs w-17 p-1 pr-3 h-auto !text-white text-center !rounded-full outline-none border-white/15 "
-                                  />
-                                  <img
-                                    src={pbpIcon}
-                                    class="h-3.5 w-3.5 absolute right-2 top-1/2 -translate-y-1/2 "
-                                  />
-                                </div>
-                                Max Cost
-                              </label>
-                            </div>
-                          </div>
-                        </>
-                      ) : null}
+                            Max Cost
+                          </label>
+                        </div>
+                      </div>
                     </div>
                   </div>
                   <div className="flex flex-col items-center pl-8 ">
@@ -5009,6 +4999,7 @@ function ControlView() {
                                       title=""
                                       styling="hidden"
                                       size="tiny"
+                                      tinyStateText
                                       switchWrapClassName="slot-card-toggle-muted"
                                       onChange={(event) =>
                                         void setMissionActionEnabled(
@@ -5020,7 +5011,7 @@ function ControlView() {
 
                                     {perSlotMissionResetControlsVisible ? (
                                       <div
-                                        className={`relative z-20 ${
+                                        className={`relative z-20 mt-1 ${
                                           perSlotMissionResetControlsDisabled
                                             ? "grayscale opacity-60"
                                             : ""
@@ -5035,13 +5026,14 @@ function ControlView() {
                                           event.stopPropagation()
                                         }
                                       >
-                                        <div className="flex flex-col items-end gap-1">
+                                        <div className="flex flex-col items-start gap-0">
                                           <ToggleSwitch
                                             switchID={`slot-reset-override-${slot}`}
                                             checked={perSlotResetEnabled}
                                             title=""
                                             styling="hidden"
                                             size="tiny"
+                                            switchWrapClassName="slot-reset-toggle"
                                             disabled={
                                               perSlotMissionResetControlsDisabled
                                             }
@@ -5077,7 +5069,7 @@ function ControlView() {
                                                 disabled={
                                                   perSlotMissionResetControlsDisabled
                                                 }
-                                                className="input-no-spinner slot-level-input h-min"
+                                                className="input-no-spinner slot-level-input h-min bg-white text-black shadow-md"
                                               />
                                             </label>
                                           ) : null}
@@ -5089,11 +5081,11 @@ function ControlView() {
                                   <div />
                                 )}
 
-                                <div className="flex flex-col items-end gap-1">
+                                <div className="card-mission__status flex flex-col items-end gap-1">
                                   {missionLevel &&
                                   !showRealLockedSlot4 &&
                                   hasSlotInfo ? (
-                                    <div className="card-mission__level z-10 text-sm flex items-center rounded-[5px] justify-center w-7 h-7 opacity-100 self-end shadow-md shadow-black/20 font-semibold bg-amber-500 border-orange-200 border-2">
+                                    <div className="card-mission__level z-10 text-[11px] flex items-center rounded-[4px] justify-center w-6 h-6 opacity-100 self-end shadow-md shadow-black/20 bg-amber-500 border-orange-200 border-2 text-shadow-amber-600 text-shadow-md">
                                       {missionLevel}
                                     </div>
                                   ) : null}
@@ -5104,22 +5096,24 @@ function ControlView() {
                               hasProgress &&
                               hasSlotInfo &&
                               !showRealLockedSlot4 ? (
-                                <div
-                                  className={`card-mission__progress relative w-full h-4 rounded-full overflow-hidden bg-zinc-800 opacity-90 shadow-md shadow-black/20 after:hidden ${
-                                    usesKoreaTakeitArt ? "grayscale" : ""
-                                  } `}
-                                >
-                                  <div className="absolute rounded-full inset-0 z-0 bg-linear-to-r from-violet-500 via-fuchsia-500 to-pink-500 after:hidden transition-all"></div>
-
+                                <div className="flex flex-col gap-1">
                                   <div
-                                    className="absolute rounded-r-full rounded-l-none top-0 right-0 z-10 h-full bg-zinc-800 after:hidden transition-all"
-                                    style={{
-                                      width: `${100 - progressPercent}%`,
-                                    }}
-                                  ></div>
+                                    className={`card-mission__progress relative w-full h-4 rounded-full overflow-hidden bg-zinc-800 opacity-90 shadow-md shadow-black/20 after:hidden ${
+                                      usesKoreaTakeitArt ? "grayscale" : ""
+                                    } `}
+                                  >
+                                    <div className="absolute rounded-full inset-0 z-0 bg-linear-to-r from-violet-500 via-fuchsia-500 to-pink-500 after:hidden transition-all"></div>
 
-                                  <div className="absolute inset-0 z-20 flex items-center rounded-full justify-center text-[10px] font-semibold text-white">
-                                    {progress}
+                                    <div
+                                      className="absolute rounded-r-full rounded-l-none top-0 right-0 z-10 h-full bg-zinc-800 after:hidden transition-all"
+                                      style={{
+                                        width: `${100 - progressPercent}%`,
+                                      }}
+                                    ></div>
+
+                                    <div className="absolute inset-0 z-20 flex items-center rounded-full justify-center text-[10px] font-semibold text-white">
+                                      {progress}
+                                    </div>
                                   </div>
                                 </div>
                               ) : null}

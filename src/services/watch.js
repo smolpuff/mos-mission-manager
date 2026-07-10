@@ -2,6 +2,7 @@
 
 const {
   normalizeMissionList,
+  extractMissionReward,
   missionHasAssignedNft,
   missionIsClaimable,
 } = require("../missions/normalize");
@@ -859,6 +860,57 @@ function createWatchService(
     return null;
   }
 
+  function claimEventIdentity(entry) {
+    if (!entry || typeof entry !== "object") return "";
+    const missionId = String(
+      entry?.assignedMissionId ??
+        entry?.assigned_mission_id ??
+        entry?.missionId ??
+        entry?.id ??
+        "",
+    ).trim();
+    const startTime = String(
+      entry?.missionStartTimestamp ??
+        entry?.mission_start_timestamp ??
+        entry?.startTime ??
+        entry?.start_time ??
+        "",
+    ).trim();
+    const slot = Number(entry?.slot);
+    const level = Number(
+      entry?.level ??
+        entry?.missionLevel ??
+        entry?.mission_level ??
+        entry?.currentLevel ??
+        entry?.current_level ??
+        null,
+    );
+    const rewardToken = String(
+      entry?.rewardToken ?? entry?.prize ?? entry?.token ?? "",
+    )
+      .trim()
+      .toLowerCase();
+    const rewardAmount = Number(
+      entry?.rewardAmount ??
+        entry?.reward_amount ??
+        entry?.amount ??
+        entry?.prizeAmount ??
+        entry?.prize_amount ??
+        null,
+    );
+    const success = entry?.success === false ? "failed" : "ok";
+    const parts = ["claim", success];
+    if (missionId) parts.push(`mission-id:${missionId}`);
+    if (startTime) parts.push(`start:${startTime}`);
+    if (Number.isFinite(slot)) parts.push(`slot:${slot}`);
+    if (Number.isFinite(level)) parts.push(`level:${level}`);
+    if (rewardToken) parts.push(`token:${rewardToken}`);
+    if (Number.isFinite(rewardAmount) && rewardAmount > 0) {
+      parts.push(`amount:${rewardAmount}`);
+    }
+    return parts.length >= 4 ? parts.join("|") : "";
+  }
+
   function collectClaimEvents(result) {
     const sc = result?.structuredContent || {};
     const buckets = [
@@ -870,11 +922,18 @@ function createWatchService(
       sc?.watch?.rewardsClaimed,
     ];
     const events = [];
+    const seen = new Set();
     for (const bucket of buckets) {
       if (!Array.isArray(bucket)) continue;
       for (const item of bucket) {
         const normalized = normalizeClaimEvent(item);
-        if (normalized) events.push(normalized);
+        if (!normalized) continue;
+        const identity = claimEventIdentity(normalized);
+        if (identity) {
+          if (seen.has(identity)) continue;
+          seen.add(identity);
+        }
+        events.push(normalized);
       }
     }
     return events;
@@ -1204,17 +1263,13 @@ function createWatchService(
     for (const m of missions) {
       const id = m?.assignedMissionId || m?.assigned_mission_id;
       if (!id) continue;
+      const reward = extractMissionReward(m);
       byAssignedMissionId.set(id, {
         name: missionName(m) || null,
         slot: m?.slot ?? null,
         level: m?.current_level ?? m?.level ?? null,
-        reward:
-          m?.prize_amount ??
-          m?.prizeAmount ??
-          m?.rewardAmount ??
-          m?.reward_amount ??
-          null,
-        prize: m?.prize ?? m?.prizeToken ?? m?.rewardToken ?? null,
+        reward: reward.amount,
+        prize: reward.token,
       });
     }
     return byAssignedMissionId;
@@ -1356,7 +1411,26 @@ function createWatchService(
             after.assignedMissionId || before.assignedMissionId || null,
         });
       }
+      const looksLikeResetTransition =
+        before.completed === true &&
+        after.completed === false &&
+        !idChanged &&
+        Boolean(after.assignedNft) &&
+        (levelUp === false || Number(after.level || 0) <= Number(before.level || 0)) &&
+        startTimeChanged;
       if (before.completed === true && after.completed === false) {
+        if (looksLikeResetTransition) {
+          restarted.push({
+            name: after.name || before.name || "unknown mission",
+            slot: after.slot ?? before.slot ?? null,
+            fromLevel: before.level ?? null,
+            toLevel: after.level ?? null,
+            startTimeChanged,
+            assignedMissionId:
+              after.assignedMissionId || before.assignedMissionId || null,
+          });
+          continue;
+        }
         claimedTransitions += 1;
         claimed.push({
           name: before.name || after.name || "unknown mission",
@@ -1366,17 +1440,6 @@ function createWatchService(
           missionStartTimestamp: before.startTime || null,
           assignedMissionId: beforeId || afterId || null,
           reason: "completed_to_incomplete",
-        });
-      } else if (levelUp) {
-        claimedTransitions += 1;
-        claimed.push({
-          name: before.name || after.name || "unknown mission",
-          slot: before.slot ?? after.slot ?? null,
-          fromLevel: before.level ?? null,
-          toLevel: after.level ?? null,
-          missionStartTimestamp: before.startTime || null,
-          assignedMissionId: beforeId || afterId || null,
-          reason: "level_up",
         });
       } else if (idChanged && before.assignedNft && !after.assignedNft) {
         // Backend can represent claim as remove+add with a new assignedMissionId.
@@ -1769,6 +1832,8 @@ function createWatchService(
     traceId = null,
     missionResultLoader = null,
   } = {}) {
+    const shouldLogAssignIntro =
+      !String(assignReason || "").startsWith("post_claim");
     let currentClaimed = Number(claimed || 0);
     let assigned = 0;
     let missionResult = initialMissionResult;
@@ -1896,7 +1961,9 @@ function createWatchService(
       });
       return { claimed: currentClaimed, assigned, missionResult };
     }
-    logWithTimestamp(assignIntro);
+    if (shouldLogAssignIntro) {
+      logWithTimestamp(assignIntro);
+    }
     try {
       if (claimWorkPaused()) {
         trace("watch", "claim_followup_assign_aborted_paused", {
@@ -3152,6 +3219,9 @@ function createWatchService(
               reason: "cycle_end_unassigned_check",
               missionsResult: postCycleMissionResult,
             });
+            if (assignResult?.missionResult) {
+              postCycleMissionResult = assignResult.missionResult;
+            }
             if (ctx.debugMode) {
               logWithTimestamp(
                 Number(assignResult?.assigned || 0) > 0
@@ -3331,6 +3401,7 @@ function createWatchService(
         if (!hasActiveMcpCooldown()) {
           try {
             startupActionMissionResult = await mcp.getUserMissions({
+              forceFresh: true,
               reason: "startup_action_refresh",
             });
             initialMissionResult =

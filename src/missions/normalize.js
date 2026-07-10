@@ -48,6 +48,191 @@ function normalizeMissionCatalogList(result) {
   return [];
 }
 
+function normalizeRewardToken(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return null;
+  const normalized = raw.toLowerCase().replace(/[^a-z0-9]+/g, "_");
+  if (
+    normalized === "pbp" ||
+    normalized === "pbp_token" ||
+    normalized === "pixel_by_pixel"
+  ) {
+    return "PBP";
+  }
+  if (
+    normalized === "tc" ||
+    normalized === "tc_token" ||
+    normalized === "tournament_coin" ||
+    normalized === "tournament_coins"
+  ) {
+    return "TC";
+  }
+  if (
+    normalized === "cc" ||
+    normalized === "cc_token" ||
+    normalized === "community_coin" ||
+    normalized === "community_coins"
+  ) {
+    return "CC";
+  }
+  return raw;
+}
+
+function parseRewardAmount(value) {
+  const numeric = Number(value);
+  if (Number.isFinite(numeric) && numeric > 0) return numeric;
+  if (typeof value === "string") {
+    const match = value.match(/([0-9]+(?:\.[0-9]+)?)/);
+    if (match) {
+      const parsed = Number(match[1]);
+      if (Number.isFinite(parsed) && parsed > 0) return parsed;
+    }
+  }
+  return null;
+}
+
+function parseRewardText(value) {
+  const text = String(value || "").trim();
+  if (!text) return null;
+  const match = text.match(/([0-9]+(?:\.[0-9]+)?)\s*([A-Za-z_]+)/);
+  if (!match) {
+    return { amount: null, token: null, label: text };
+  }
+  const amount = parseRewardAmount(match[1]);
+  const token = normalizeRewardToken(match[2]);
+  return {
+    amount,
+    token,
+    label:
+      amount !== null && token
+        ? `${amount.toLocaleString(undefined, { maximumFractionDigits: 2 })} ${token}`
+        : text,
+  };
+}
+
+function buildRewardDetails(amount, token, fallbackLabel = null) {
+  const numericAmount = parseRewardAmount(amount);
+  const normalizedToken = normalizeRewardToken(token);
+  if (numericAmount !== null && normalizedToken) {
+    return {
+      amount: numericAmount,
+      token: normalizedToken,
+      label: `${numericAmount.toLocaleString(undefined, {
+        maximumFractionDigits: 2,
+      })} ${normalizedToken}`,
+    };
+  }
+  if (numericAmount !== null) {
+    return {
+      amount: numericAmount,
+      token: null,
+      label: numericAmount.toLocaleString(undefined, {
+        maximumFractionDigits: 2,
+      }),
+    };
+  }
+  if (fallbackLabel) {
+    const parsed = parseRewardText(fallbackLabel);
+    if (parsed) return parsed;
+  }
+  return { amount: null, token: null, label: null };
+}
+
+function rewardDetailsFromObject(entry) {
+  if (!entry || typeof entry !== "object") return null;
+  return buildRewardDetails(
+    entry?.amount ??
+      entry?.value ??
+      entry?.rewardAmount ??
+      entry?.reward_amount ??
+      entry?.prizeAmount ??
+      entry?.prize_amount ??
+      null,
+    entry?.symbol ??
+      entry?.token ??
+      entry?.currency ??
+      entry?.rewardSymbol ??
+      entry?.reward_symbol ??
+      entry?.rewardToken ??
+      entry?.reward_token ??
+      entry?.prize ??
+      entry?.prizeToken ??
+      null,
+    entry?.label ?? entry?.reward ?? entry?.rewardText ?? null,
+  );
+}
+
+function extractMissionReward(mission = {}) {
+  if (!mission || typeof mission !== "object") {
+    return { amount: null, token: null, label: null };
+  }
+
+  if (Array.isArray(mission?.rewards)) {
+    const labels = [];
+    let primary = null;
+    for (const reward of mission.rewards) {
+      if (typeof reward === "string") {
+        const parsed = parseRewardText(reward);
+        if (parsed?.label) {
+          labels.push(parsed.label);
+          if (!primary && (parsed.amount !== null || parsed.token)) primary = parsed;
+        }
+        continue;
+      }
+      const details = rewardDetailsFromObject(reward);
+      if (details?.label) {
+        labels.push(details.label);
+        if (!primary && (details.amount !== null || details.token)) {
+          primary = details;
+        }
+      }
+    }
+    if (labels.length > 0) {
+      return primary
+        ? { ...primary, label: labels.join(" + ") }
+        : { amount: null, token: null, label: labels.join(" + ") };
+    }
+  }
+
+  if (mission?.reward && typeof mission.reward === "object") {
+    const details = rewardDetailsFromObject(mission.reward);
+    if (details?.label) return details;
+  }
+
+  const direct = buildRewardDetails(
+    mission?.rewardAmount ??
+      mission?.reward_amount ??
+      mission?.tokenReward ??
+      mission?.token_reward ??
+      mission?.prizeAmount ??
+      mission?.prize_amount ??
+      mission?.amount ??
+      null,
+    mission?.rewardSymbol ??
+      mission?.reward_symbol ??
+      mission?.tokenSymbol ??
+      mission?.token_symbol ??
+      mission?.prize ??
+      mission?.rewardToken ??
+      mission?.reward_token ??
+      mission?.prizeToken ??
+      mission?.currency ??
+      mission?.currencySymbol ??
+      null,
+    mission?.rewardText ?? null,
+  );
+  if (direct.label) return direct;
+
+  const fallbackTextCandidates = [mission?.rewardText, mission?.reward, mission?.rewards];
+  for (const candidate of fallbackTextCandidates) {
+    if (typeof candidate !== "string") continue;
+    const parsed = parseRewardText(candidate);
+    if (parsed?.label) return parsed;
+  }
+
+  return { amount: null, token: null, label: null };
+}
+
 function missionHasAssignedNft(mission) {
   const nft = [
     mission?.assigned_nft,
@@ -144,6 +329,8 @@ module.exports = {
   normalizeMissionList,
   normalizeNftList,
   normalizeMissionCatalogList,
+  normalizeRewardToken,
+  extractMissionReward,
   missionHasAssignedNft,
   missionIsClaimable,
   missionIsActive,

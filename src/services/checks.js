@@ -5,6 +5,7 @@ const {
   normalizeMissionList,
   normalizeNftList,
   normalizeMissionCatalogList,
+  extractMissionReward,
   computeMissionStats,
   missionHasAssignedNft,
   missionIsClaimable,
@@ -440,30 +441,9 @@ function createChecksService(ctx, logger, mcp, services = {}) {
     ].filter((entry) => entry && typeof entry === "object");
 
     for (const source of directSources) {
-      const token = normalizeRewardBucket(
-        source?.rewardToken ??
-          source?.reward_token ??
-          source?.prize ??
-          source?.prizeToken ??
-          source?.currency ??
-          source?.symbol ??
-          source?.token ??
-          null,
-      );
-      const rawAmount =
-        source?.rewardAmount ??
-        source?.reward_amount ??
-        source?.prizeAmount ??
-        source?.prize_amount ??
-        source?.amount ??
-        source?.reward ??
-        source?.value ??
-        null;
-      let amount = Number(rawAmount);
-      if (!Number.isFinite(amount) && typeof rawAmount === "string") {
-        const match = rawAmount.match(/([0-9]+(?:\.[0-9]+)?)/);
-        amount = match ? Number(match[1]) : NaN;
-      }
+      const structuredReward = extractMissionReward(source);
+      const token = normalizeRewardBucket(structuredReward.token);
+      const amount = Number(structuredReward.amount);
       if (token && Number.isFinite(amount) && amount > 0) {
         return { token, amount };
       }
@@ -958,13 +938,8 @@ function createChecksService(ctx, logger, mcp, services = {}) {
         level: Number.isFinite(Number(mission?.current_level ?? mission?.level))
           ? Number(mission?.current_level ?? mission?.level)
           : null,
-        reward:
-          mission?.prize_amount ??
-          mission?.prizeAmount ??
-          mission?.rewardAmount ??
-          mission?.reward_amount ??
-          null,
-        prize: mission?.prize ?? mission?.prizeToken ?? mission?.rewardToken ?? null,
+        reward: extractMissionReward(mission).amount,
+        prize: extractMissionReward(mission).token,
       };
       const previous = nextLookup[assignedMissionId];
       if (
@@ -1437,6 +1412,12 @@ function createChecksService(ctx, logger, mcp, services = {}) {
     return /NFT is already in an active mission/i.test(String(message || ""));
   }
 
+  function isMissionNoLongerActiveError(message = "") {
+    return /mission is no longer active|no longer active\. please try refreshing/i.test(
+      String(message || ""),
+    );
+  }
+
   function isMissionAlreadyAssignedError(message = "") {
     return /mission already has an nft assigned/i.test(String(message || ""));
   }
@@ -1500,7 +1481,6 @@ function createChecksService(ctx, logger, mcp, services = {}) {
 
   function autoNftCooldownResetEnabled() {
     return (
-      rentalDevAdvantagesEnabled() &&
       (ctx.missionModeEnabled === true ||
         ctx.config?.missionModeEnabled === true) &&
       (ctx.nftCooldownResetEnabled === true ||
@@ -3685,11 +3665,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
       }
 
       if (candidates.length === 0) {
-        if (
-          reason === "manual" ||
-          reason === "post_claim" ||
-          String(reason || "").startsWith("post_claim_")
-        ) {
+        if (reason === "manual") {
           logWithTimestamp(
             "[ASSIGN] ℹ️ No unassigned target mission to start right now.",
           );
@@ -3788,6 +3764,16 @@ function createChecksService(ctx, logger, mcp, services = {}) {
         );
 
         const currentMission = findMissionByAssignedMissionId(missions, id);
+        if (currentMission && missionHasAssignedNftForAssign(currentMission, reason)) {
+          logDebug("assign", "candidate_became_assigned", {
+            reason,
+            missionName: name,
+            missionId: id,
+            slot: currentMission?.slot ?? mission?.slot ?? null,
+            level: missionLevel(currentMission),
+          });
+          continue;
+        }
         if (currentMission && missionBlockedByResetThreshold(currentMission)) {
           const currentLevel = missionLevel(currentMission);
           logWithTimestamp(
@@ -4466,7 +4452,47 @@ function createChecksService(ctx, logger, mcp, services = {}) {
             break;
           } catch (error) {
             lastError = error;
+            if (isMissionNoLongerActiveError(error.message)) {
+              needsFreshMissionRefresh = true;
+              try {
+                if (typeof mcp.invalidateUserMissionsSnapshot === "function") {
+                  mcp.invalidateUserMissionsSnapshot(
+                    "assign_inactive_mission_error",
+                  );
+                }
+                currentMissionResult = await mcp.getUserMissions({
+                  forceFresh: true,
+                  reason: `${reason}_inactive_mission_refresh`,
+                });
+                missions = normalizeMissionList(currentMissionResult);
+              } catch (refreshError) {
+                logDebug("assign", "inactive_mission_refresh_failed", {
+                  missionName: name,
+                  missionId: id,
+                  error: refreshError.message,
+                });
+              }
+            }
             if (isMissionAlreadyAssignedError(error.message)) {
+              needsFreshMissionRefresh = true;
+              try {
+                if (typeof mcp.invalidateUserMissionsSnapshot === "function") {
+                  mcp.invalidateUserMissionsSnapshot(
+                    "assign_mission_already_assigned_error",
+                  );
+                }
+                currentMissionResult = await mcp.getUserMissions({
+                  forceFresh: true,
+                  reason: `${reason}_mission_already_assigned_refresh`,
+                });
+                missions = normalizeMissionList(currentMissionResult);
+              } catch (refreshError) {
+                logDebug("assign", "mission_already_assigned_refresh_failed", {
+                  missionName: name,
+                  missionId: id,
+                  error: refreshError.message,
+                });
+              }
               clearRecentClaimedMissionOverride(id);
               patchMissionResultAsAssignedPlaceholder(currentMissionResult, {
                 assignedMissionId: id,
@@ -4611,6 +4637,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
         ok: true,
         attempted: candidates.length,
         assigned,
+        missionResult: currentMissionResult,
         startedMissionNames,
         startedMissionDetails,
       };
@@ -4668,25 +4695,23 @@ function createChecksService(ctx, logger, mcp, services = {}) {
       const candidates = missions
         .filter((m) => !missionBlockedByDisabledSlot(m))
         .filter((m) => missionIsClaimable(m))
-        .map((m) => ({
-          id: assignedMissionId(m),
-          name: missionName(m) || "unknown mission",
-          level: missionLevel(m),
-          slot: m?.slot ?? null,
-          prize: m?.prize ?? m?.rewardToken ?? m?.reward_token ?? null,
-          prizeAmount:
-            m?.prize_amount ??
-            m?.prizeAmount ??
-            m?.rewardAmount ??
-            m?.reward_amount ??
-            null,
-          startTime:
-            m?.missionStartTimestamp ??
-            m?.mission_start_timestamp ??
-            m?.startTime ??
-            m?.start_time ??
-            null,
-        }))
+        .map((m) => {
+          const reward = extractMissionReward(m);
+          return {
+            id: assignedMissionId(m),
+            name: missionName(m) || "unknown mission",
+            level: missionLevel(m),
+            slot: m?.slot ?? null,
+            prize: reward.token,
+            prizeAmount: reward.amount,
+            startTime:
+              m?.missionStartTimestamp ??
+              m?.mission_start_timestamp ??
+              m?.startTime ??
+              m?.start_time ??
+              null,
+          };
+        })
         .filter((m) => m.id)
         .slice(0, limit);
 

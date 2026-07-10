@@ -13,15 +13,17 @@ export default function ToggleSwitch({
   styling,
   size = "default",
   switchWrapClassName = "",
+  tinyStateText = false,
 }) {
   const stopDisabledInteraction = (event) => {
     if (!disabled) return;
     event.preventDefault();
     event.stopPropagation();
   };
+  const hasInlineLabel = Boolean(String(title || "").trim() || helperText);
 
   return (
-    <div className="flex gap-2 justify-between w-full">
+    <div className={`flex gap-2 justify-between ${hasInlineLabel ? "w-full" : "w-auto"}`}>
       <div>
         <label
           htmlFor={forID || switchID}
@@ -53,9 +55,14 @@ export default function ToggleSwitch({
           />
 
           <span
-            className={`switch-wrap ${size === "tiny" ? "switch-wrap--tiny" : ""} ${switchWrapClassName}`}
+            className={`switch-wrap ${size === "tiny" ? "switch-wrap--tiny" : ""} ${tinyStateText ? "switch-wrap--tiny-state-text" : ""} ${switchWrapClassName}`}
           >
             <span className="switch-track" />
+            {tinyStateText ? (
+              <span className="switch-state-text" aria-hidden="true">
+                {checked ? "On" : "Off"}
+              </span>
+            ) : null}
           </span>
 
           <span

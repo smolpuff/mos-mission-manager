@@ -27,6 +27,7 @@ function normalizeLevel(payload = {}) {
 }
 
 function dedupeKeyFromPayload(payload = {}) {
+  const assignedMissionId = String(payload?.assignedMissionId || "").trim();
   const missionStartedAt = normalizeTimestampMs(
     payload?.missionStartedAt ??
       payload?.missionStartTimestamp ??
@@ -35,8 +36,7 @@ function dedupeKeyFromPayload(payload = {}) {
   const missionCompletedAt = normalizeTimestampMs(
     payload?.missionCompletedAt ??
       payload?.missionCompletionTimestamp ??
-      payload?.mission_completion_timestamp ??
-      payload?.at,
+      payload?.mission_completion_timestamp,
   );
   const slot = Number(payload?.slot);
   const level = normalizeLevel(payload);
@@ -55,6 +55,7 @@ function dedupeKeyFromPayload(payload = {}) {
       null,
   );
   const parts = ["claim"];
+  if (assignedMissionId) parts.push(`mission-id:${assignedMissionId}`);
   if (Number.isFinite(missionStartedAt) && missionStartedAt > 0) {
     parts.push(`start:${missionStartedAt}`);
   }

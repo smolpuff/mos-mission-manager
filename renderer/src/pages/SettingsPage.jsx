@@ -64,8 +64,8 @@ export default function SettingsPage({
 
   return (
     <section>
-      <div className="card gap-6">
-        <div className="space-y-4">
+      <div className="card gap-4">
+        <div className="space-y-3">
           <div className="flex items-center">
             <ToggleSwitch
               switchID="enabledFunding"
@@ -148,7 +148,7 @@ export default function SettingsPage({
         </div>
 
         {fundingEnabled && fundingSource === "app_wallet" ? (
-          <div className="space-y-3">
+          <div className="space-y-2">
             <h3 className="flex gap-4 sm border-b border-white/20 pb-1 justify-between items-center">
               <div>App Wallet Details</div>
               <button
@@ -159,7 +159,7 @@ export default function SettingsPage({
                 Generate New Wallet
               </button>
             </h3>
-            <div className="flex items-center justify-between gap-3 leading-none">
+            <div className="flex items-center justify-between gap-2 leading-none">
               <label
                 htmlFor="user__wallet-addres"
                 className="text-xs uppercase leading-none text-slate-300"
@@ -349,7 +349,7 @@ export default function SettingsPage({
               />{" "}
             </div>
 
-            <div>
+            <div className=" pb-2">
               {" "}
               <ToggleSwitch
                 switchID="reducedMotionEnabledSettings"
@@ -364,45 +364,28 @@ export default function SettingsPage({
             </div>
 
             {debugEnabled ? (
-              <div className="pt-2">
-                <div className="flex flex-col gap-2">
-                  <span className="text-base text-white">
-                    NFT Assignment Order
-                  </span>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-w-2xl">
-                    <button
-                      type="button"
-                      className={`rounded-lg border p-3 text-left transition-colors ${
-                        nftAssignmentOrder === "normal"
-                          ? "border-accent/70 bg-accent/15 text-white"
-                          : "border-white/10 bg-black/30 text-slate-300 hover:border-white/20 hover:bg-black/40"
-                      }`}
-                      onClick={() => void setNftAssignmentOrder?.("normal")}
-                    >
-                      <div className="text-sm font-semibold">Normal order</div>
-                      <div className="mt-1 text-xs text-slate-400">
-                        Keeps the current assignment ordering.
-                      </div>
-                    </button>
-                    <button
-                      type="button"
-                      className={`rounded-lg border p-3 text-left transition-colors ${
-                        nftAssignmentOrder === "highest_level_first"
-                          ? "border-accent/70 bg-accent/15 text-white"
-                          : "border-white/10 bg-black/30 text-slate-300 hover:border-white/20 hover:bg-black/40"
-                      }`}
-                      onClick={() =>
-                        void setNftAssignmentOrder?.("highest_level_first")
-                      }
-                    >
-                      <div className="text-sm font-semibold">
-                        Highest level first
-                      </div>
-                      <div className="mt-1 text-xs text-slate-400">
-                        Tries to use the highest-level eligible NFT first.
-                      </div>
-                    </button>
-                  </div>
+              <div className="">
+                <div className="flex flex-wrap items-center gap-5">
+                  <label
+                    htmlFor="nftAssignmentOrder"
+                    className="text-xs text-white whitespace-nowrap"
+                  >
+                    Assign By
+                  </label>
+                  <select
+                    id="nftAssignmentOrder"
+                    value={nftAssignmentOrder}
+                    onChange={(event) =>
+                      void setNftAssignmentOrder?.(event.target.value)
+                    }
+                    className="select select-sm bg-black/50 focus-within:bg-black border-white/10 text-slate-100 max-w-fit flex-1"
+                  >
+                    {" "}
+                    <option value="highest_level_first">
+                      Highest level NFT first
+                    </option>
+                    <option value="normal">Normal order</option>
+                  </select>
                 </div>
               </div>
             ) : null}

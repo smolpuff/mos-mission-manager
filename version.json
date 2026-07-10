@@ -3,11 +3,15 @@
   "downloadUrl": "https://github.com/smolpuff/mos-mission-manager/releases/latest",
   "notes": [
     "Updated fashionably late for season 70",
-    "Optimized startup mcp calls",
+    "Removed gating on mission mode NFT cooldown resets; enter max PBP and it will reset cheapest owned, fallback to cheapest rental if none ready",
+    "Removed gating on mission mode finish range. Will pause claiming at top of threshold to not go over (experimental)",
+    "Added per-slot mission level reset ability (2nd toggle switch on the mission nft; overrides all other reset logic)",
+    "Added custom mission reset level for mission mode",
+    "Added time remaining for unlockedSlot 4",
     "Fixed lagging mission card updates",
-    "Fixed level 20 NFT reservation",
-    "Added custom mission reset level",
-    "Added time remaining to unlockedSlot 4",
-    "Added user stat dashboard link to settings page"
+    "Fixed level 20 NFT reservation to not waste",
+    "Fixed costs missing from exported stats csv",
+    "Added user stat dashboard link on stat page bc I got bored one night",
+    "give me ideas for anything else y'all want <3"
   ]
 }

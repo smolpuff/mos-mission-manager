@@ -2,11 +2,7 @@
 
 const fs = require("fs");
 const path = require("path");
-const { normalizeMissionList } = require("../missions/normalize");
-const {
-  stabilizeMissionAssignments,
-  TRANSIENT_ASSIGNMENT_TTL_MS,
-} = require("../missions/transient-assignment");
+const { normalizeMissionList, extractMissionReward } = require("../missions/normalize");
 const {
   login: mcpLogin,
   refreshAccessToken,
@@ -407,19 +403,15 @@ function createMcpClient(ctx, logger) {
         mission?.assignedMissionId || mission?.assigned_mission_id || "",
       ).trim();
       if (!assignedMissionId) continue;
+      const reward = extractMissionReward(mission);
       const nextEntry = {
         name: missionName(mission) || null,
         slot: Number.isFinite(Number(mission?.slot)) ? Number(mission.slot) : null,
         level: Number.isFinite(Number(mission?.current_level ?? mission?.level))
           ? Number(mission?.current_level ?? mission?.level)
           : null,
-        reward:
-          mission?.prize_amount ??
-          mission?.prizeAmount ??
-          mission?.rewardAmount ??
-          mission?.reward_amount ??
-          null,
-        prize: mission?.prize ?? mission?.prizeToken ?? mission?.rewardToken ?? null,
+        reward: reward.amount,
+        prize: reward.token,
       };
       const previous = nextLookup[assignedMissionId];
       if (
@@ -1045,17 +1037,7 @@ function createMcpClient(ctx, logger) {
   }
 
   async function getUserMissions(opts = {}) {
-    const result = await mcpToolCall("get_user_missions", {}, opts);
-    const stabilized = stabilizeMissionAssignments(ctx, result, {
-      ttlMs: TRANSIENT_ASSIGNMENT_TTL_MS,
-    });
-    if (stabilized.patchedCount > 0) {
-      logDebug("mcp", "user_missions_transient_assignment_stabilized", {
-        patchedCount: stabilized.patchedCount,
-        reason: String(opts?.reason || "").trim() || null,
-      });
-    }
-    return stabilized.result;
+    return await mcpToolCall("get_user_missions", {}, opts);
   }
 
   async function runLoginFlow(opts = {}) {

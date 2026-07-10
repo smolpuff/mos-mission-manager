@@ -42,15 +42,10 @@ function defaultMissionModeThreshold(ctx = {}) {
   );
 }
 
-function debugModeEnabled(ctx = {}) {
-  return ctx?.debugMode === true || ctx?.config?.debugMode === true;
-}
-
 function missionResetPerSlotModeEnabled(ctx = {}) {
   return (
-    debugModeEnabled(ctx) &&
-    (ctx?.missionResetPerSlotModeEnabled === true ||
-      ctx?.config?.missionResetPerSlotModeEnabled === true)
+    ctx?.missionResetPerSlotModeEnabled === true ||
+    ctx?.config?.missionResetPerSlotModeEnabled === true
   );
 }
 

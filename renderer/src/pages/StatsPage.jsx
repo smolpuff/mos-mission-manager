@@ -4,6 +4,8 @@ import tcIcon from "../img/icon_tc.webp";
 import { useEffect, useState } from "react";
 import useDesktopBridge from "../components/useDesktopBridge";
 
+const DETAILED_STATS_URL_BASE = "https://missions.lol/missions-analytics/";
+
 function formatNumber(value, max = 2) {
   const n = Number(value || 0);
   return n.toLocaleString(undefined, { maximumFractionDigits: max });
@@ -12,6 +14,10 @@ function formatNumber(value, max = 2) {
 function asNumber(value, fallback = 0) {
   const n = Number(value);
   return Number.isFinite(n) ? n : fallback;
+}
+
+function historyClaimCount(entry) {
+  return Math.max(0, asNumber(entry?.claims, 0));
 }
 
 function missionName(value) {
@@ -145,7 +151,7 @@ function buildMissionRows(
       const mission = resolveMission(entry?.mission, entry);
       if (!mission || mission === "unknown mission") continue;
       const current = upsertRow(mission, entry);
-      current.claims += 1;
+      current.claims += historyClaimCount(entry);
     }
   }
 
@@ -209,7 +215,9 @@ function buildClaimBuckets(history = []) {
   for (const entry of list) {
     if (entry.at < startBucket || entry.at > endBucket + bucketMs) continue;
     const index = Math.floor((entry.at - startBucket) / bucketMs);
-    if (index >= 0 && index < counts.length) counts[index].count += 1;
+    if (index >= 0 && index < counts.length) {
+      counts[index].count += historyClaimCount(entry);
+    }
   }
   const firstClaimIndex = counts.findIndex((bucket) => bucket.count > 0);
   const lastClaimIndex = counts.findLastIndex((bucket) => bucket.count > 0);
@@ -450,8 +458,12 @@ export default function StatsPage({ status }) {
       : rangeKey === "24h"
         ? "Last 24hrs"
         : rangeKey === "7d"
-          ? "Last 7days"
+        ? "Last 7days"
           : "All Time";
+  const currentUserWalletId = String(safeStatus.currentUserWalletId || "").trim();
+  const detailedStatsUrl = currentUserWalletId
+    ? `${DETAILED_STATS_URL_BASE}?address=${encodeURIComponent(currentUserWalletId)}`
+    : DETAILED_STATS_URL_BASE;
 
   async function handleResetSession() {
     if (actionBusy) return;
@@ -481,6 +493,20 @@ export default function StatsPage({ status }) {
     } finally {
       setActionBusy(false);
     }
+  }
+
+  async function openDetailedStats() {
+    const target = String(detailedStatsUrl || "").trim();
+    if (!target) return;
+    if (bridge?.openExternal) {
+      try {
+        await bridge.openExternal(target);
+        return;
+      } catch {}
+    }
+    try {
+      window.open(target, "_blank", "noopener,noreferrer");
+    } catch {}
   }
 
   return (
@@ -735,8 +761,33 @@ export default function StatsPage({ status }) {
                 rentalNftResetMissed > 0 ? "text-amber-300" : "text-slate-100"
               }
             />
-          </DetailCard>{" "}
+          </DetailCard>
+          <button
+            type="button"
+            className="stats-online-link card"
+            onClick={() => void openDetailedStats()}
+            title="Open detailed stats online"
+          >
+            <div className="stats-online-link__content z-100">
+              <div className="stats-online-link__title">
+                View Your Detailed Stats
+              </div>
+              <div className="stats-online-link__copy text-lg font-semibold">
+                Open your full web stats dashboard
+              </div>
+            </div>
+            <div className="stats-online-link__cta">Open Stats</div>
+            <div className="stats-online-link__track" aria-hidden="true">
+              <div className="stats-online-link__lane stats-online-link__lane--one" />
+              <div className="stats-online-link__lane stats-online-link__lane--two" />
+              <div className="stats-online-link__lane stats-online-link__lane--three" />
+              <div className="stats-online-link__marble stats-online-link__marble--gold" />
+              <div className="stats-online-link__marble stats-online-link__marble--coral" />
+              <div className="stats-online-link__marble stats-online-link__marble--ice" />
+            </div>
+          </button>
         </div>
+
         <div
           className={`min-h-[16px] text-xs ${
             error

@@ -227,7 +227,7 @@ function createCommandHandler(ctx, logger, actions, configApi, services = {}) {
       `[DEBUG] auth behavior: startup interactive login=${enabled ? "enabled when token is missing" : "normal token-first flow"}, browser login prompts=${enabled ? "enabled" : "disabled unless interactiveAuth is enabled"}`,
     );
     logWithTimestamp(
-      `[DEBUG] auto NFT cooldown reset gate: debug=${enabled}, missionMode=${ctx.missionModeEnabled === true || ctx.config?.missionModeEnabled === true}, nftCooldownResetEnabled=${ctx.nftCooldownResetEnabled === true || ctx.config?.nftCooldownResetEnabled === true}`,
+      `[DEBUG] auto NFT cooldown reset conditions: missionMode=${ctx.missionModeEnabled === true || ctx.config?.missionModeEnabled === true}, nftCooldownResetEnabled=${ctx.nftCooldownResetEnabled === true || ctx.config?.nftCooldownResetEnabled === true}`,
     );
     logWithTimestamp(
       `[DEBUG] dev-equivalent defaults are now ${enabled ? "active" : "inactive"}; target dev values are missionResetLevel=${tuned.missionResetLevel}, rentalFastRefreshTickMs=${tuned.rentalFastRefreshTickMs}, rentalBatchLimit=${tuned.rentalBatchLimit}, watchMinCycleSeconds=${tuned.watchMinCycleSeconds}, watchDefaultPollSeconds=${tuned.watchDefaultPollSeconds}`,
@@ -1091,31 +1091,11 @@ function createCommandHandler(ctx, logger, actions, configApi, services = {}) {
       if (cmd === "mr" || cmd.startsWith("mr ")) {
         const arg = cmd.slice(2).trim();
         if (!arg) {
-          if (ctx.debugMode !== true) {
-            logWithTimestamp(
-              formatTaggedLog(
-                "MODE",
-                "🎛️",
-                "Per-slot mission reset overrides require debug mode.",
-              ),
-            );
-            return;
-          }
           ctx.missionResetPerSlotModeEnabled =
             ctx.missionResetPerSlotModeEnabled !== true;
         } else if (arg === "off") {
           ctx.missionResetPerSlotModeEnabled = false;
         } else if (arg === "on") {
-          if (ctx.debugMode !== true) {
-            logWithTimestamp(
-              formatTaggedLog(
-                "MODE",
-                "🎛️",
-                "Per-slot mission reset overrides require debug mode.",
-              ),
-            );
-            return;
-          }
           ctx.missionResetPerSlotModeEnabled = true;
         } else {
           logWithTimestamp("Usage: mr [off|on]");

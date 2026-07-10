@@ -219,6 +219,20 @@
   }
 
   .switch-wrap--tiny.slot-card-toggle-muted {
+    /* &::after {
+      content: "Slot";
+      position: absolute;
+      left: 50%;
+      top: -0.7rem;
+      transform: translateX(-50%);
+      font-size: 8px;
+      line-height: 1;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      @apply text-black;
+      pointer-events: none;
+    } */
+
     &::before {
       background: rgba(234, 72, 72, 0.38);
       opacity: 0.24;
@@ -240,6 +254,55 @@
           inset 0 0 0 1.25px rgba(255, 255, 255, 0.22),
           0 1px 3px rgba(0, 0, 0, 0.3);
       }
+    }
+  }
+
+  .switch-wrap--tiny.slot-reset-toggle {
+    &::after {
+      content: "Reset";
+      position: absolute;
+      left: 50%;
+      top: -0.5rem;
+      transform: translateX(-50%);
+      font-size: 0.5rem;
+      line-height: 1;
+      font-weight: 800;
+      text-transform: uppercase;
+      @apply text-black/70;
+      pointer-events: none;
+    }
+  }
+
+  .switch-wrap--tiny-state-text {
+    position: relative;
+
+    .switch-state-text {
+      position: absolute;
+      top: 3px;
+      left: 3px;
+      z-index: 3;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 1.45rem;
+      height: 0.7rem;
+      padding: 0;
+      font-size: 0.42rem;
+      line-height: 1;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: rgba(255, 255, 255, 0.72);
+      pointer-events: none;
+      transition: transform 150ms linear, color 150ms linear;
+    }
+  }
+
+  .switch-wrap--tiny-state-text.slot-card-toggle-muted {
+    .switch-state-text {
+      @apply text-red-950;
+      text-align: center;
+      /* text-shadow: 0 1px 2px rgba(0, 0, 0, 0.35); */
     }
   }
 
@@ -319,6 +382,26 @@
             0 1px 3px rgba(0, 0, 0, 0.28);
         }
       }
+
+      .switch-state-text {
+        transform: translateX(0.65rem);
+        @apply text-green-700;
+        text-align: center;
+        text-shadow: none;
+      }
+    }
+  }
+
+  .peer {
+
+    &:checked+.switch-wrap.slot-card-toggle-muted,
+    &:checked+.switch-wrap.slot-reset-toggle {
+      .switch-track {
+        background: rgba(255, 255, 255, 0.88);
+        box-shadow:
+          inset 0 0 0 1.25px rgba(255, 255, 255, 0.92),
+          0 3px 7px rgba(0, 0, 0, 0.24);
+      }
     }
   }
 
@@ -334,7 +417,7 @@
   }
 
   .slot-level-input {
-    @apply block w-10 rounded-full border border-white/15 bg-transparent text-center text-[11px] text-white outline-none;
+    @apply block w-9.5 rounded-full border border-white/15 bg-transparent text-center text-[11px] text-white outline-none;
     height: 1.1rem;
     line-height: 1rem;
     padding: 0;
@@ -343,6 +426,11 @@
   .slot-level-input:disabled {
     @apply opacity-50;
   }
+
+  .card-mission__status {
+    position: relative;
+  }
+
 
   .card-mission__header--disabled .mission-image,
   .card-mission__header--disabled .mission-image-placeholder,
@@ -858,7 +946,7 @@
     @apply flex flex-col gap-1;
 
     .card-mission__header {
-      @apply flex flex-col p-3 rounded-lg aspect-square justify-between relative overflow-clip border-2 border-white/6 bg-white/3;
+      @apply flex flex-col p-2 rounded-lg aspect-square justify-between relative overflow-clip border-2 border-white/6 bg-white/3;
       box-shadow: 0 4px 5px rgba(0, 0, 0, 0.35) !important;
 
       &.card-mission__header--korea-art {
@@ -1568,6 +1656,249 @@ button.btn.btn-gradient {
   animation: statsCardBreath 5.5s ease-in-out infinite;
 }
 
+.stats-online-link {
+  position: relative;
+  isolation: isolate;
+  display: flex;
+  cursor: pointer !important;
+  min-height: 0;
+  align-items: stretch;
+  justify-content: space-between;
+  gap: 1rem;
+  overflow: hidden;
+  padding: 0.95rem 1rem;
+  text-align: left;
+  transition: transform 160ms ease, border-color 160ms ease, box-shadow 160ms ease, filter 160ms linear;
+}
+
+.stats-online-link:hover {
+  transform: translateY(-1px);
+  filter: brightness(1.12) saturate(1.08) drop-shadow(0 1px 4px rgba(0, 0, 0, 0.24));
+}
+
+.stats-online-link:hover .stats-online-link__cta,
+.stats-online-link:focus-visible .stats-online-link__cta {
+  transform: scale(1.035);
+}
+
+.stats-online-link__track {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background:
+    radial-gradient(circle at 12% 50%, rgba(255, 255, 255, 0.12), transparent 18%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.01)),
+    linear-gradient(140deg, rgba(255, 168, 83, 0.16), rgba(255, 111, 72, 0.08) 52%, rgba(255, 255, 255, 0.02) 100%);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08), inset 0 -28px 48px rgba(0, 0, 0, 0.24);
+  overflow: hidden;
+  z-index: -1;
+}
+
+.stats-online-link__track::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at 24% 22%, rgba(255, 255, 255, 0.16), transparent 0.9rem),
+    radial-gradient(circle at 71% 67%, rgba(255, 255, 255, 0.1), transparent 1rem),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.04), transparent 22%, transparent 78%, rgba(0, 0, 0, 0.16));
+  pointer-events: none;
+}
+
+.stats-online-link__track::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, rgba(10, 10, 18, 0.64), rgba(10, 10, 18, 0.36) 40%, rgba(10, 10, 18, 0.74));
+}
+
+.stats-online-link__lane {
+  position: absolute;
+  left: -8%;
+  right: -8%;
+  height: 1rem;
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.18), rgba(255, 255, 255, 0.06));
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+  transform: rotate(-12deg);
+}
+
+.stats-online-link__lane::after {
+  content: "";
+  position: absolute;
+  inset: 0.26rem 0.6rem;
+  border-radius: 999px;
+  border: 1px dashed rgba(15, 9, 26, 0.42);
+  opacity: 0.75;
+}
+
+.stats-online-link__lane--one {
+  top: 18%;
+}
+
+.stats-online-link__lane--two {
+  top: 46%;
+}
+
+.stats-online-link__lane--three {
+  top: 74%;
+}
+
+.stats-online-link__marble {
+  position: absolute;
+  left: -0.5rem;
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: 999px;
+  box-shadow:
+    inset -0.45rem -0.6rem 0.85rem rgba(0, 0, 0, 0.26),
+    inset 0.32rem 0.38rem 0.38rem rgba(255, 255, 255, 0.52),
+    0 0.65rem 1.35rem rgba(0, 0, 0, 0.3);
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+  will-change: transform;
+}
+
+.stats-online-link__marble::before {
+  content: "";
+  position: absolute;
+  inset: 0.22rem;
+  border-radius: inherit;
+  border: 1px solid rgba(255, 255, 255, 0.34);
+  opacity: 0.7;
+}
+
+.stats-online-link__marble--gold {
+  top: calc(74% - 0.38rem);
+  background: radial-gradient(circle at 30% 28%, #fff8d8 0%, #ffd57b 32%, #ff9f43 68%, #de5e17 100%);
+  animation: statsMarbleRaceOne 4.4s linear infinite;
+}
+
+.stats-online-link__marble--coral {
+  display: none;
+  background: radial-gradient(circle at 32% 28%, #fff1ef 0%, #ffb2a0 28%, #ff784e 62%, #b82239 100%);
+  animation: statsMarbleRaceTwo 5.1s linear infinite;
+}
+
+.stats-online-link__marble--ice {
+  top: calc(46% - 0.38rem);
+  background: radial-gradient(circle at 32% 28%, #effdff 0%, #b9f7ff 30%, #69d4ff 64%, #2563eb 100%);
+  animation: statsMarbleRaceThree 4.75s linear infinite;
+}
+
+.stats-online-link__content,
+.stats-online-link__cta {
+  position: relative;
+  z-index: 1;
+}
+
+.stats-online-link__content {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0.16rem;
+}
+
+.stats-online-link__eyebrow {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.62);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.stats-online-link__title {
+  font-size: 1.12rem;
+  line-height: 1.05;
+  font-weight: 700;
+  color: #fff7ea;
+}
+
+.stats-online-link__copy {
+  font-size: 12px;
+  color: rgba(255, 245, 232, 0.82);
+}
+
+.stats-online-link__cta {
+  align-self: flex-start;
+  border-radius: 999px;
+  border: 0;
+  background-color: transparent;
+  background-size: 140% 120%;
+  background-position: 50% 50%;
+  background-image: linear-gradient(105deg,
+      var(--color-success) 20%,
+      var(--color-info),
+      var(--color-primary),
+      var(--color-secondary),
+      var(--color-accent) 80%);
+  padding: 0.35rem 0.7rem;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #fff;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.22);
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.2);
+  backdrop-filter: blur(8px);
+  transition: filter 160ms linear, transform 120ms ease-out;
+}
+
+@keyframes statsMarbleRaceOne {
+  0% {
+    transform: translate3d(0, 0, 0) scale(0.96);
+  }
+
+  38% {
+    transform: translate3d(9rem, -1.9rem, 0) scale(1);
+  }
+
+  71% {
+    transform: translate3d(16rem, -3.35rem, 0) scale(0.98);
+  }
+
+  100% {
+    transform: translate3d(22rem, -4.6rem, 0) scale(1);
+  }
+}
+
+@keyframes statsMarbleRaceTwo {
+  0% {
+    transform: translate3d(0, 0, 0) scale(0.97);
+  }
+
+  34% {
+    transform: translate3d(7.4rem, -1.55rem, 0) scale(1);
+  }
+
+  69% {
+    transform: translate3d(14.8rem, -3.08rem, 0) scale(0.99);
+  }
+
+  100% {
+    transform: translate3d(22rem, -4.58rem, 0) scale(1);
+  }
+}
+
+@keyframes statsMarbleRaceThree {
+  0% {
+    transform: translate3d(0, 0, 0) scale(0.95);
+  }
+
+  41% {
+    transform: translate3d(9.8rem, -2.06rem, 0) scale(1);
+  }
+
+  76% {
+    transform: translate3d(16.8rem, -3.52rem, 0) scale(0.99);
+  }
+
+  100% {
+    transform: translate3d(22rem, -4.62rem, 0) scale(1);
+  }
+}
+
 @keyframes statsCardBreath {
 
   0%,
@@ -1780,12 +2111,14 @@ html[data-reduced-motion="true"] .mission-choice-card--selected::after,
 html[data-reduced-motion="true"] .signer-type label:has(input:checked)::after,
 html[data-reduced-motion="true"] .claim-bar,
 html[data-reduced-motion="true"] .stats-live-card::before,
+html[data-reduced-motion="true"] .stats-online-link__marble,
 html[data-reduced-motion="true"] .card-mission.card-mission--error .card-mission__header,
 body[data-reduced-motion="true"] .results-table .results-row--current td::after,
 body[data-reduced-motion="true"] .mission-choice-card--selected::after,
 body[data-reduced-motion="true"] .signer-type label:has(input:checked)::after,
 body[data-reduced-motion="true"] .claim-bar,
 body[data-reduced-motion="true"] .stats-live-card::before,
+body[data-reduced-motion="true"] .stats-online-link__marble,
 body[data-reduced-motion="true"] .card-mission.card-mission--error .card-mission__header {
   animation: none !important;
 }
