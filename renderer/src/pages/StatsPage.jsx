@@ -461,9 +461,12 @@ export default function StatsPage({ status }) {
         ? "Last 7days"
           : "All Time";
   const currentUserWalletId = String(safeStatus.currentUserWalletId || "").trim();
-  const detailedStatsUrl = currentUserWalletId
-    ? `${DETAILED_STATS_URL_BASE}?address=${encodeURIComponent(currentUserWalletId)}`
-    : DETAILED_STATS_URL_BASE;
+  const detailedStatsUrl = (() => {
+    const params = new URLSearchParams();
+    if (currentUserWalletId) params.set("address", currentUserWalletId);
+    const query = params.toString();
+    return query ? `${DETAILED_STATS_URL_BASE}?${query}` : DETAILED_STATS_URL_BASE;
+  })();
 
   async function handleResetSession() {
     if (actionBusy) return;
