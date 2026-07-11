@@ -1,10 +1,11 @@
 {
-  "version": "3.2.11",
+  "version": "3.2.12",
   "downloadUrl": "https://github.com/smolpuff/mos-mission-manager/releases/latest",
   "notes": [
     "Updated fashionably late for season 70",
     "Removed gating on mission mode NFT cooldown resets; enter max PBP and it will reset cheapest owned, fallback to cheapest rental if none ready",
     "Removed gating on mission mode finish range. Will pause claiming at top of threshold to not go over (experimental)",
+    "Added Auto Mode; attempt level 20, reset if no NFTs",
     "Added per-slot mission level reset ability (2nd toggle switch on the mission nft; overrides all other reset logic)",
     "Added custom mission reset level for mission mode",
     "Added time remaining for unlockedSlot 4",
