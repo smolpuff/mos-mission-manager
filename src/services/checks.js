@@ -1481,9 +1481,13 @@ function createChecksService(ctx, logger, mcp, services = {}) {
   }
 
   function autoNftCooldownResetEnabled() {
+    const autoEnabled =
+      ctx.autoModeEnabled === true || ctx.config?.autoModeEnabled === true;
+    const missionEnabled =
+      ctx.missionModeEnabled === true || ctx.config?.missionModeEnabled === true;
     return (
-      (ctx.missionModeEnabled === true ||
-        ctx.config?.missionModeEnabled === true) &&
+      missionEnabled &&
+      !autoEnabled &&
       (ctx.nftCooldownResetEnabled === true ||
         ctx.config?.nftCooldownResetEnabled === true)
     );

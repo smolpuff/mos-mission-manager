@@ -4841,7 +4841,7 @@ function ControlView() {
                                 isMissionMode
                                   ? "Reset NFTs"
                                   : isAutoMode
-                                    ? "Locked off for Auto Mode"
+                                    ? "Mission Mode Only"
                                     : "Mission Mode Only"
                               }
                             />
