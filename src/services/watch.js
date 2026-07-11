@@ -8,6 +8,7 @@ const {
 } = require("../missions/normalize");
 const { parseResetLevel, evaluateResetCandidates } = require("./reset");
 const {
+  autoModeEnabled,
   defaultResetPolicy,
   resetPolicyForMission,
 } = require("../mission-reset-policy");
@@ -57,6 +58,7 @@ function createWatchService(
   let currentWalletSummaryRefreshTimer = null;
   let currentWalletSummaryRefreshPendingReason = null;
   let nftCountWarmTimer = null;
+  let watchStartupAssignBackoffUntil = 0;
 
   function summarizeNamesForUser(items = [], limit = 2) {
     const list = Array.isArray(items)
@@ -1924,6 +1926,26 @@ function createWatchService(
         cooldownMs,
         waitMs,
       });
+      try {
+        missionResult = missionResultLoader
+          ? await missionResultLoader({
+              forceFresh: true,
+              reason: `${assignReason || "claim_followup"}_after_claim`,
+            })
+          : await mcp.getUserMissions({
+              forceFresh: true,
+              reason: `${assignReason || "claim_followup"}_after_claim`,
+            });
+        trace("watch", "claim_followup_refetched_after_claim", {
+          traceId,
+          assignReason,
+          claimed: currentClaimed,
+        });
+      } catch (error) {
+        logDebug("watch", "post_claim_missions_refresh_failed", {
+          error: error.message,
+        });
+      }
     } else {
       try {
         if (claimWorkPaused()) {
@@ -2307,6 +2329,17 @@ function createWatchService(
     return defaultResetPolicy(ctx);
   }
 
+  function shouldDeferResetForAutoMode(mission) {
+    if (!autoModeEnabled(ctx)) return false;
+    if (!checks?.isConfiguredTargetMission?.(mission)) return false;
+    const resetPolicy = resetPolicyForMission(ctx, mission);
+    if (!resetPolicy.enabled) return false;
+    const threshold = Number(resetPolicy.threshold);
+    if (!Number.isFinite(threshold) || threshold !== 20) return false;
+    const level = Number(parseResetLevel(mission) || 0);
+    return Number.isFinite(level) && level >= threshold;
+  }
+
   // reset my heart, version control girl
   async function handleLevelResetIfNeeded(
     snapshotMap,
@@ -2554,7 +2587,12 @@ function createWatchService(
     const snapshot = await loadMissionSnapshot(resolvedMissionResult, {
       selectedOnly: false,
     });
-    const openedFromSnapshot = await handleLevelResetIfNeeded(snapshot, {
+    const filteredSnapshot = new Map(
+      Array.from(snapshot.entries()).filter(
+        ([, mission]) => !shouldDeferResetForAutoMode(mission),
+      ),
+    );
+    const openedFromSnapshot = await handleLevelResetIfNeeded(filteredSnapshot, {
       reason,
       threshold: resetPolicy.threshold,
       label: resetPolicy.label,
@@ -2587,6 +2625,7 @@ function createWatchService(
       }))
       .filter(
         (m) =>
+          !shouldDeferResetForAutoMode(m) &&
           Number.isFinite(m.level) &&
           m.level >= Number(resetPolicyForMission(ctx, m).threshold) &&
           !m.assignedNft,
@@ -2741,7 +2780,10 @@ function createWatchService(
     let liveSelectedSnapshot = beforeSnapshot;
     let liveStateRecoveryRunning = false;
     let liveStateClaimedApplied = 0;
-    let nextAssignRecheckAtMs = 0;
+    let nextAssignRecheckAtMs = Math.max(
+      0,
+      Number(watchStartupAssignBackoffUntil || 0),
+    );
     const ASSIGN_RECHECK_COOLDOWN_MS = Math.max(
       15000,
       opts.pollIntervalSeconds * 1000,
@@ -2989,7 +3031,18 @@ function createWatchService(
           pollIntervalSeconds: opts.pollIntervalSeconds,
           maxClaims: opts.maxClaims,
         });
-        if (clientPollingEnabled) runLiveMissionCheck("local_safe_start");
+        if (clientPollingEnabled) {
+          if (Date.now() < Number(watchStartupAssignBackoffUntil || 0)) {
+            logDebug("watch", "local_safe_start_deferred_startup_backoff", {
+              retryAfterMs: Math.max(
+                0,
+                Number(watchStartupAssignBackoffUntil || 0) - Date.now(),
+              ),
+            });
+          } else {
+            runLiveMissionCheck("local_safe_start");
+          }
+        }
         const localStartedAt = Date.now();
         await new Promise((resolve, reject) => {
           const timer = setTimeout(resolve, Math.max(1000, opts.watchSeconds * 1000));
@@ -3167,7 +3220,13 @@ function createWatchService(
       }
     }
 
-    if (!hasClaimActivity && hasActiveMcpCooldown()) {
+    if (!hasClaimActivity && clientPollingEnabled) {
+      logDebug("watch", "cycle_followup_skipped_no_claim_activity", {
+        usedLocalSafeWatch,
+        watchSafeLocalMode,
+        reason: "client_polling_handles_rechecks",
+      });
+    } else if (!hasClaimActivity && hasActiveMcpCooldown()) {
       logDebug("watch", "⏳ cycle_followup_skipped_rate_limited", {
         retryAfterMs: getMcpCooldownRemainingMs(),
       });
@@ -3398,6 +3457,11 @@ function createWatchService(
         let startupClaimable = Number(startupStats.claimable || 0);
         let startupAvailable = Number(startupStats.available || 0);
         let startupActionMissionResult = initialMissionResult;
+        let startupHandledByClaimLifecycle = false;
+        const startupWatchBackoffMs = Math.max(
+          15000,
+          opts.pollIntervalSeconds * 1000,
+        );
         if (!hasActiveMcpCooldown()) {
           try {
             startupActionMissionResult = await mcp.getUserMissions({
@@ -3422,6 +3486,8 @@ function createWatchService(
           }
         }
         if (!hasActiveMcpCooldown() && startupClaimable > 0) {
+          watchStartupAssignBackoffUntil =
+            Date.now() + startupWatchBackoffMs;
           const traceId = nextTraceId("startup");
           let beforeSnapshot = new Map();
           try {
@@ -3443,6 +3509,7 @@ function createWatchService(
             });
           } else if (Number(claimResult?.claimed || 0) > 0) {
             startupDidClaimOrAssign = true;
+            startupHandledByClaimLifecycle = true;
             const followup = await runClaimLifecycle({
               traceId,
               beforeSnapshot,
@@ -3463,6 +3530,8 @@ function createWatchService(
           !hasActiveMcpCooldown() &&
           startupAvailable > 0
         ) {
+          watchStartupAssignBackoffUntil =
+            Date.now() + startupWatchBackoffMs;
           logWithTimestamp(
             formatTaggedLog("ASSIGN", "🛠️", "Startup assign check..."),
           );
@@ -3479,6 +3548,7 @@ function createWatchService(
         if (
           !claimWorkPaused() &&
           startupDidClaimOrAssign &&
+          !startupHandledByClaimLifecycle &&
           !hasActiveMcpCooldown()
         ) {
           try {

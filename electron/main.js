@@ -182,8 +182,10 @@ const backendStatus = {
   slotUnlockSummary: null,
   currentMode: null,
   defaultMissionResetLevel: null,
+  autoModeEnabled: null,
   level20ResetEnabled: null,
   missionModeEnabled: null,
+  missionResetLevel: null,
   missionModeResetLevel: null,
   missionActionEnabledBySlot: null,
   missionResetPerSlotModeEnabled: null,
@@ -3062,11 +3064,17 @@ function hydrateBackendStatusFromConfig() {
   backendStatus.defaultMissionResetLevel =
     defaultMissionResetLevelForConfig(config);
   backendStatus.debugMode = config.debugMode === true;
+  backendStatus.autoModeEnabled = config.autoModeEnabled === true;
   if (typeof config.level20ResetEnabled === "boolean") {
     backendStatus.level20ResetEnabled = config.level20ResetEnabled;
   }
   if (typeof config.missionModeEnabled === "boolean") {
     backendStatus.missionModeEnabled = config.missionModeEnabled;
+  }
+  if (typeof config.missionResetLevel === "string") {
+    backendStatus.missionResetLevel = config.missionResetLevel;
+  } else if (!backendStatus.missionResetLevel) {
+    backendStatus.missionResetLevel = defaultMissionResetLevelForConfig(config);
   }
   if (typeof config.missionModeResetLevel === "string") {
     backendStatus.missionModeResetLevel = config.missionModeResetLevel;
@@ -3148,16 +3156,22 @@ function hydrateBackendStatusFromConfig() {
   } else {
     backendStatus.nftCooldownResetMaxPbp = 20;
   }
-  if (typeof config.missionResetLevel === "string") {
-    backendStatus.currentMissionResetLevel = config.missionResetLevel;
-  }
-  if (!backendStatus.currentMissionResetLevel) {
-    backendStatus.currentMissionResetLevel =
-      defaultMissionResetLevelForConfig(config);
-  }
-  backendStatus.currentMode = backendStatus.missionModeEnabled
-    ? `mission-${backendStatus.currentMissionResetLevel || defaultMissionResetLevelForConfig(config)}`
-    : "normal";
+  backendStatus.currentMissionResetLevel = backendStatus.autoModeEnabled
+    ? "20"
+    : backendStatus.missionModeEnabled
+      ? String(
+          backendStatus.missionModeResetLevel ||
+            defaultMissionResetLevelForConfig(config),
+        )
+      : String(
+          backendStatus.missionResetLevel ||
+            defaultMissionResetLevelForConfig(config),
+        );
+  backendStatus.currentMode = backendStatus.autoModeEnabled
+    ? "auto-20"
+    : backendStatus.missionModeEnabled
+      ? `mission-${backendStatus.currentMissionResetLevel || defaultMissionResetLevelForConfig(config)}`
+      : "normal";
   syncCompetitionRangeLockScheduler();
 }
 
@@ -4181,6 +4195,12 @@ function parseStoppedModeCommand(command) {
     return { type: "invalidMm" };
   }
 
+  if (cmd === "am") {
+    if (parts.length === 1) return { type: "am", mode: "toggle" };
+    if (arg === "on" || arg === "off") return { type: "am", mode: arg };
+    return { type: "invalidAm" };
+  }
+
   if (cmd === "mr") {
     if (parts.length === 1) return { type: "mr", mode: "toggle" };
     if (arg === "on" || arg === "off") return { type: "mr", mode: arg };
@@ -4205,6 +4225,7 @@ function applyStoppedModeConfig(parsed) {
     const nextEnabled =
       parsed.mode === "toggle" ? !previous : parsed.mode === "on";
     patch.level20ResetEnabled = nextEnabled;
+    patch.autoModeEnabled = nextEnabled ? false : current.autoModeEnabled === true;
     patch.missionModeEnabled = nextEnabled
       ? false
       : current.missionModeEnabled === true;
@@ -4218,17 +4239,27 @@ function applyStoppedModeConfig(parsed) {
     if (parsed.mode === "off") nextMissionEnabled = false;
     if (parsed.mode === "level") {
       nextMissionEnabled = true;
-      patch.missionResetLevel = String(parsed.level);
+      patch.missionModeResetLevel = String(parsed.level);
     }
+    patch.autoModeEnabled = false;
     patch.missionModeEnabled = nextMissionEnabled;
-    patch.level20ResetEnabled = nextMissionEnabled
-      ? false
-      : current.level20ResetEnabled === true;
-    if (nextMissionEnabled && typeof patch.missionResetLevel !== "string") {
-      patch.missionResetLevel = String(
-        current.missionResetLevel || defaultMissionResetLevelForConfig(current),
+    if (
+      nextMissionEnabled &&
+      typeof patch.missionModeResetLevel !== "string"
+    ) {
+      patch.missionModeResetLevel = String(
+        current.missionModeResetLevel ||
+          defaultMissionResetLevelForConfig(current),
       );
     }
+  }
+
+  if (parsed.type === "am") {
+    const previous = current.autoModeEnabled === true;
+    const nextEnabled =
+      parsed.mode === "toggle" ? !previous : parsed.mode === "on";
+    patch.autoModeEnabled = nextEnabled;
+    patch.missionModeEnabled = nextEnabled;
   }
 
   if (parsed.type === "debug") {
@@ -4250,8 +4281,14 @@ function applyStoppedModeConfig(parsed) {
   if (typeof next.level20ResetEnabled === "boolean") {
     backendStatus.level20ResetEnabled = next.level20ResetEnabled;
   }
+  if (typeof next.autoModeEnabled === "boolean") {
+    backendStatus.autoModeEnabled = next.autoModeEnabled;
+  }
   if (typeof next.missionModeEnabled === "boolean") {
     backendStatus.missionModeEnabled = next.missionModeEnabled;
+  }
+  if (typeof next.missionResetLevel === "string") {
+    backendStatus.missionResetLevel = next.missionResetLevel;
   }
   if (typeof next.missionModeResetLevel === "string") {
     backendStatus.missionModeResetLevel = next.missionModeResetLevel;
@@ -4265,17 +4302,19 @@ function applyStoppedModeConfig(parsed) {
   }
   backendStatus.defaultMissionResetLevel =
     defaultMissionResetLevelForConfig(next);
-  if (
-    patch.debugMode !== undefined &&
-    (typeof next.missionResetLevel !== "string" ||
-      !next.missionResetLevel.trim())
-  ) {
-    backendStatus.currentMissionResetLevel =
-      backendStatus.defaultMissionResetLevel;
-  }
-  if (typeof next.missionResetLevel === "string") {
-    backendStatus.currentMissionResetLevel = next.missionResetLevel;
-  }
+  const nextManualResetLevel = String(
+    next.missionResetLevel || backendStatus.defaultMissionResetLevel || "10",
+  ).trim();
+  const nextMissionResetLevel = String(
+    next.missionModeResetLevel ||
+      backendStatus.defaultMissionResetLevel ||
+      "10",
+  ).trim();
+  backendStatus.currentMissionResetLevel = backendStatus.autoModeEnabled
+    ? "20"
+    : backendStatus.missionModeEnabled
+      ? nextMissionResetLevel
+      : nextManualResetLevel;
   if (
     next.missionResetPerSlotEnabledBySlot &&
     typeof next.missionResetPerSlotEnabledBySlot === "object"
@@ -4292,9 +4331,11 @@ function applyStoppedModeConfig(parsed) {
       ...next.missionResetPerSlotLevelBySlot,
     };
   }
-  backendStatus.currentMode = backendStatus.missionModeEnabled
-    ? `mission-${backendStatus.currentMissionResetLevel || backendStatus.defaultMissionResetLevel}`
-    : "normal";
+  backendStatus.currentMode = backendStatus.autoModeEnabled
+    ? "auto-20"
+    : backendStatus.missionModeEnabled
+      ? `mission-${backendStatus.currentMissionResetLevel || backendStatus.defaultMissionResetLevel}`
+      : "normal";
   syncCompetitionRangeLockScheduler();
   publishStatus();
   return next;
@@ -4331,7 +4372,7 @@ function toggleSettingsSummaryLines(config = {}, runtimeStatus = {}) {
   const onOff = (enabled) => (enabled ? "ON" : "OFF");
   return [
     `┌─ TOGGLES ${"─".repeat(44)}`,
-    `│ Mode              ${config?.missionModeEnabled === true ? "MISSION" : "NORMAL"}    Reset level ${configuredMissionResetLevel}`,
+    `│ Mode              ${config?.autoModeEnabled === true ? "AUTO" : config?.missionModeEnabled === true ? "MISSION" : "MANUAL"}    Reset level ${configuredMissionResetLevel}`,
     `│ Level 20 reset    ${onOff(config?.level20ResetEnabled === true)}        Per-slot reset ${onOff(config?.missionResetPerSlotModeEnabled === true)}`,
     `│ NFT reset         ${onOff(config?.nftCooldownResetEnabled === true)}        Max cost ${normalizedNftResetMaxPbp} PBP`,
     `│ Rentals           ${onOff(config?.enableRentals === true)}        Fast refresh ${onOff(config?.rentalFastRefreshEnabled === true)}`,
@@ -4402,6 +4443,7 @@ async function sendBackendCommand(command) {
     } else if (
       parsed.type === "20r" ||
       parsed.type === "mm" ||
+      parsed.type === "am" ||
       parsed.type === "mr" ||
       parsed.type === "debug"
     ) {
@@ -4428,6 +4470,8 @@ async function sendBackendCommand(command) {
       throw new Error("Usage: 20r [on|off]");
     } else if (parsed.type === "invalidMm") {
       throw new Error("Usage: mm [off|on|<level>]");
+    } else if (parsed.type === "invalidAm") {
+      throw new Error("Usage: am [on|off]");
     } else if (parsed.type === "invalidDebug") {
       throw new Error("Usage: debug [on|off]");
     } else if (parsed.type === "invalidMr") {
@@ -5150,15 +5194,21 @@ app.whenReady().then(async () => {
     const requestedPatch =
       patch && typeof patch === "object" ? { ...patch } : {};
     const next = applyDesktopConfigPatch(patch || {});
+    if (typeof next.autoModeEnabled === "boolean") {
+      backendStatus.autoModeEnabled = next.autoModeEnabled;
+    }
     if (typeof next.level20ResetEnabled === "boolean") {
       backendStatus.level20ResetEnabled = next.level20ResetEnabled;
     }
-    if (typeof next.missionModeEnabled === "boolean") {
-      backendStatus.missionModeEnabled = next.missionModeEnabled;
-    }
-    if (typeof next.missionModeResetLevel === "string") {
-      backendStatus.missionModeResetLevel = next.missionModeResetLevel;
-    }
+  if (typeof next.missionModeEnabled === "boolean") {
+    backendStatus.missionModeEnabled = next.missionModeEnabled;
+  }
+  if (typeof next.missionResetLevel === "string") {
+    backendStatus.missionResetLevel = next.missionResetLevel;
+  }
+  if (typeof next.missionModeResetLevel === "string") {
+    backendStatus.missionModeResetLevel = next.missionModeResetLevel;
+  }
     if (
       next.missionActionEnabledBySlot &&
       typeof next.missionActionEnabledBySlot === "object"
@@ -5191,9 +5241,19 @@ app.whenReady().then(async () => {
       backendStatus.nftCooldownResetMaxPbp =
         Number.isFinite(maxPbp) && maxPbp >= 0 ? maxPbp : 20;
     }
-    if (typeof next.missionResetLevel === "string") {
-      backendStatus.currentMissionResetLevel = next.missionResetLevel;
-    }
+    const nextManualResetLevel = String(
+      next.missionResetLevel || backendStatus.defaultMissionResetLevel || "10",
+    ).trim();
+    const nextMissionResetLevel = String(
+      next.missionModeResetLevel ||
+        backendStatus.defaultMissionResetLevel ||
+        "10",
+    ).trim();
+    backendStatus.currentMissionResetLevel = backendStatus.autoModeEnabled
+      ? "20"
+      : backendStatus.missionModeEnabled
+        ? nextMissionResetLevel
+        : nextManualResetLevel;
     if (
       next.missionResetPerSlotEnabledBySlot &&
       typeof next.missionResetPerSlotEnabledBySlot === "object"
@@ -5256,9 +5316,11 @@ app.whenReady().then(async () => {
             analyticsTotals,
           );
     }
-    backendStatus.currentMode = backendStatus.missionModeEnabled
-      ? `mission-${backendStatus.currentMissionResetLevel || backendStatus.defaultMissionResetLevel}`
-      : "normal";
+    backendStatus.currentMode = backendStatus.autoModeEnabled
+      ? "auto-20"
+      : backendStatus.missionModeEnabled
+        ? `mission-${backendStatus.currentMissionResetLevel || backendStatus.defaultMissionResetLevel}`
+        : "normal";
     logConfigPatch("Desktop", requestedPatch);
     syncCompetitionRangeLockScheduler();
     publishStatus();
@@ -5284,7 +5346,19 @@ app.whenReady().then(async () => {
         ) ||
         Object.prototype.hasOwnProperty.call(
           requestedPatch,
+          "missionResetLevel",
+        ) ||
+        Object.prototype.hasOwnProperty.call(
+          requestedPatch,
+          "missionModeResetLevel",
+        ) ||
+        Object.prototype.hasOwnProperty.call(
+          requestedPatch,
           "nftCooldownResetEnabled",
+        ) ||
+        Object.prototype.hasOwnProperty.call(
+          requestedPatch,
+          "nftCooldownResetMissionModeEnabled",
         ) ||
         Object.prototype.hasOwnProperty.call(
           requestedPatch,
@@ -5301,7 +5375,11 @@ app.whenReady().then(async () => {
         missionResetPerSlotModeEnabled: next.missionResetPerSlotModeEnabled,
         missionResetPerSlotEnabledBySlot: next.missionResetPerSlotEnabledBySlot,
         missionResetPerSlotLevelBySlot: next.missionResetPerSlotLevelBySlot,
+        missionResetLevel: next.missionResetLevel,
+        missionModeResetLevel: next.missionModeResetLevel,
         nftCooldownResetEnabled: next.nftCooldownResetEnabled,
+        nftCooldownResetMissionModeEnabled:
+          next.nftCooldownResetMissionModeEnabled,
         nftAssignmentOrder: next.nftAssignmentOrder,
         nftCooldownResetMaxPbp: next.nftCooldownResetMaxPbp,
       }).catch((error) => {

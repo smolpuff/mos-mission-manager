@@ -20,6 +20,7 @@ const DESKTOP_MANAGED_KEYS = [
 ];
 const SALVAGE_TOP_LEVEL_KEYS = [
   "targetMissions",
+  "autoModeEnabled",
   "level20ResetEnabled",
   "missionModeEnabled",
   "missionActionEnabledBySlot",
@@ -322,6 +323,12 @@ function loadConfig(ctx, logWithTimestamp) {
   if (typeof ctx.config.level20ResetEnabled === "boolean") {
     ctx.level20ResetEnabled = ctx.config.level20ResetEnabled;
   }
+  if (typeof ctx.config.autoModeEnabled === "boolean") {
+    ctx.autoModeEnabled = ctx.config.autoModeEnabled;
+  } else {
+    ctx.config.autoModeEnabled = false;
+    ctx.autoModeEnabled = false;
+  }
   if (typeof ctx.config.missionModeEnabled === "boolean") {
     ctx.missionModeEnabled = ctx.config.missionModeEnabled;
   }
@@ -364,6 +371,9 @@ function loadConfig(ctx, logWithTimestamp) {
   } else {
     ctx.config.nftCooldownResetEnabled = false;
     ctx.nftCooldownResetEnabled = false;
+  }
+  if (typeof ctx.config.nftCooldownResetMissionModeEnabled !== "boolean") {
+    ctx.config.nftCooldownResetMissionModeEnabled = true;
   }
   const nftAssignmentOrder = String(ctx.config.nftAssignmentOrder || "")
     .trim()
@@ -483,16 +493,39 @@ function loadConfig(ctx, logWithTimestamp) {
     typeof ctx.config.missionResetLevel !== "string" ||
     !ctx.config.missionResetLevel.trim()
   ) {
-    ctx.currentMissionResetLevel =
+    ctx.config.missionResetLevel =
       ctx.runtimeDefaults?.missionResetLevel || ctx.currentMissionResetLevel;
   }
   if (
     typeof ctx.config.missionModeResetLevel !== "string" ||
     !ctx.config.missionModeResetLevel.trim()
   ) {
-    ctx.missionModeResetLevel =
+    ctx.config.missionModeResetLevel =
       ctx.runtimeDefaults?.missionResetLevel || ctx.missionModeResetLevel;
   }
+  ctx.missionModeResetLevel = String(
+    ctx.config.missionModeResetLevel ||
+      ctx.runtimeDefaults?.missionResetLevel ||
+      "10",
+  );
+  ctx.currentMissionResetLevel = ctx.autoModeEnabled
+    ? "20"
+    : ctx.missionModeEnabled
+      ? String(
+          ctx.missionModeResetLevel ||
+            ctx.runtimeDefaults?.missionResetLevel ||
+            "10",
+        )
+      : String(
+          ctx.config.missionResetLevel ||
+            ctx.runtimeDefaults?.missionResetLevel ||
+            "10",
+        );
+  ctx.currentMode = ctx.autoModeEnabled
+    ? "auto-20"
+    : ctx.missionModeEnabled
+      ? `mission-${ctx.currentMissionResetLevel || ctx.runtimeDefaults?.missionResetLevel || "10"}`
+      : "normal";
   ctx.config.signerMode = ctx.signerMode;
 }
 

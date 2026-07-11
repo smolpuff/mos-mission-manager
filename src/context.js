@@ -66,6 +66,7 @@ function createContext() {
     currentUserWalletId: "unknown",
     currentUserWalletSummary: null,
     currentMode: "normal",
+    autoModeEnabled: false,
     level20ResetEnabled: false,
     missionModeEnabled: false,
     missionModeResetLevel: null,

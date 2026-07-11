@@ -16,6 +16,7 @@ const {
 } = require("../missions/gui-slots");
 const { parseResetLevel } = require("./reset");
 const {
+  autoModeEnabled,
   defaultResetPolicy,
   resetPolicyForMission,
 } = require("../mission-reset-policy");
@@ -2402,6 +2403,90 @@ function createChecksService(ctx, logger, mcp, services = {}) {
     }
   }
 
+  async function performAutoModeMissionReroll(
+    mission,
+    { reason = "auto_mode" } = {},
+  ) {
+    const wantedAssignedMissionId = assignedMissionId(mission);
+    const name = missionName(mission) || "unknown mission";
+    const level = missionLevel(mission);
+    const slot = mission?.slot ?? null;
+    if (!wantedAssignedMissionId) {
+      return { ok: false, rerolled: false, reason: "missing_mission_id" };
+    }
+    if (ctx.signerMode === "manual") {
+      logWithTimestamp(
+        `[RESET] 🌐 Auto mode fallback: open the missions page and reroll ${name} manually.`,
+      );
+      const openResult = await openMissionPlayPage({
+        cooldownMs: missionPageCooldownMs(),
+      });
+      if (!openResult?.ok) {
+        logWithTimestamp(
+          `[RESET] ❌ Failed to auto-open browser. Open manually: ${MISSION_PLAY_URL}`,
+        );
+      }
+      return { ok: true, rerolled: false, reason: "manual_mode" };
+    }
+    if (!signer) {
+      return { ok: false, rerolled: false, reason: "missing_signer" };
+    }
+    signer.ensureMissionActionSupported("mission_reroll");
+    const prepared = await mcp.mcpToolCall("prepare_mission_reroll", {
+      assignedMissionId: wantedAssignedMissionId,
+      ...preparedActionSigningArgs(),
+    });
+    if (usesBrowserBridgeSigning()) {
+      const signingUrl = browserBridgeUrlFromPrepared(prepared);
+      if (signingUrl) {
+        logWithTimestamp(
+          `[RESET] 🌐 Auto mode fallback: sign reroll for ${name} in your browser wallet.`,
+        );
+      }
+      return {
+        ok: true,
+        rerolled: false,
+        reason: "browser_wallet_signing_required",
+      };
+    }
+    const actionResult = await executePreparedMissionAction({
+      actionName: "mission_reroll",
+      prepareResult: prepared,
+      expected: { assignedMissionId: wantedAssignedMissionId },
+      debugScope: "assign",
+      submitDebugAction: "auto_mode_mission_reroll_submit",
+      debugMeta: {
+        reason,
+        missionName: name,
+        assignedMissionId: wantedAssignedMissionId,
+        level,
+        slot,
+      },
+    });
+    if (actionResult?.submitted) {
+      addSessionSpendTotals(
+        actionResult?.signed?.cost ?? prepared?.structuredContent?.rerollCost,
+        { actionName: "mission_reroll" },
+      );
+      scheduleFundingWalletRefresh("mission_reroll");
+    }
+    if (ctx.guiBridge?.sendEvent) {
+      ctx.guiBridge.sendEvent("stats_reset", {
+        source: "assign_auto_mode_reroll",
+        at: Date.now(),
+        resetType: "mission",
+        missionName: name,
+        slot,
+        level,
+        assignedMissionId: wantedAssignedMissionId,
+      });
+    }
+    logWithTimestamp(
+      `[RESET] ✅ Auto mode fallback rerolled: ${name}${level === null ? "" : ` lvl=${level}`}`,
+    );
+    return { ok: true, rerolled: true, reason: "rerolled" };
+  }
+
   async function prepareCooldownResetNftFromUi({
     nft,
     nftId = null,
@@ -3095,7 +3180,21 @@ function createChecksService(ctx, logger, mcp, services = {}) {
     return defaultResetPolicy(ctx);
   }
 
+  function missionEligibleForAutoModeThresholdFallbackReset(mission) {
+    if (!autoModeEnabled(ctx)) return false;
+    if (!isConfiguredTargetMission(mission)) return false;
+    const resetPolicy = resetPolicyForMission(ctx, mission);
+    if (!resetPolicy.enabled) return false;
+    const threshold = Number(resetPolicy.threshold);
+    if (!Number.isFinite(threshold) || threshold !== 20) return false;
+    const level = Number(parseResetLevel(mission) || 0);
+    return Number.isFinite(level) && level >= threshold;
+  }
+
   function missionBlockedByResetThreshold(mission) {
+    if (missionEligibleForAutoModeThresholdFallbackReset(mission)) {
+      return false;
+    }
     const resetPolicy = resetPolicyForMission(ctx, mission);
     if (!resetPolicy.enabled) return false;
     const level = Number(parseResetLevel(mission) || 0);
@@ -3796,6 +3895,19 @@ function createChecksService(ctx, logger, mcp, services = {}) {
             assignedMissionId: id,
           });
           nfts = normalizeNftList(nftResult);
+          if (nfts.length === 0 && /^startup_/.test(String(reason || ""))) {
+            needsFreshMissionRefresh = true;
+            logDebug("assign", "startup_empty_nfts_refresh_deferred", {
+              reason,
+              missionName: name,
+              missionId: id,
+              slot: mission?.slot ?? null,
+            });
+            logWithTimestamp(
+              `[ASSIGN] ⏳ ${name}: startup mission snapshot looks stale; retrying on next pass.`,
+            );
+            continue;
+          }
           logDebug("assign", "eligible_nfts_loaded", {
             reason,
             missionName: name,
@@ -4146,6 +4258,36 @@ function createChecksService(ctx, logger, mcp, services = {}) {
           logWithTimestamp(
             `[ASSIGN] ℹ️ No eligible NFT available for: ${name}`,
           );
+          if (missionEligibleForAutoModeThresholdFallbackReset(mission)) {
+            try {
+              const rerollResult = await performAutoModeMissionReroll(mission, {
+                reason: `${reason}_auto_mode_threshold_fallback`,
+              });
+              if (rerollResult?.rerolled) {
+                needsFreshMissionRefresh = true;
+                if (typeof mcp.invalidateUserMissionsSnapshot === "function") {
+                  mcp.invalidateUserMissionsSnapshot(
+                    "auto_mode_threshold_fallback_reroll",
+                  );
+                }
+                currentMissionResult = await mcp.getUserMissions({
+                  forceFresh: true,
+                  reason: `${reason}_auto_mode_threshold_fallback_refresh`,
+                });
+                missions = normalizeMissionList(currentMissionResult);
+              }
+            } catch (error) {
+              logWithTimestamp(
+                `[RESET] ❌ Auto mode fallback reroll failed for ${name}: ${error.message}`,
+              );
+              logDebug("assign", "auto_mode_fallback_reroll_failed", {
+                reason,
+                missionName: name,
+                missionId: id,
+                error: error.message,
+              });
+            }
+          }
           continue;
         }
 
@@ -4512,6 +4654,9 @@ function createChecksService(ctx, logger, mcp, services = {}) {
                 selectedFrom: option.source,
               });
             }
+            const inactiveMissionError = isMissionNoLongerActiveError(
+              error.message,
+            );
             const retryable = isRetryableActiveMissionAssignError(
               error.message,
             );
@@ -4519,11 +4664,14 @@ function createChecksService(ctx, logger, mcp, services = {}) {
             const shouldTryNext =
               abortedForRateLimit
                 ? false
+                : inactiveMissionError
+                  ? false
                 : error.rentalRefreshEmpty === true
-                ? false
-                : option.source === "rental" || option.source === "owned_cooldown"
-                  ? hasNext
-                  : retryable && hasNext;
+                  ? false
+                  : option.source === "rental" ||
+                      option.source === "owned_cooldown"
+                    ? hasNext
+                    : retryable && hasNext;
             logDebug("assign", "❌ assign_failed", {
               missionName: name,
               missionId: id,
@@ -4549,7 +4697,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
                   `[RENTAL] ❌ ${name}: rental attempt failed: ${error.message}`,
                 );
               }
-              if (!shouldTryNext) {
+              if (!shouldTryNext && !inactiveMissionError) {
                 requestRentalFastRefresh({
                   reason: "rental_attempt_failed",
                   missionName: name,

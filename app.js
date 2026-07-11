@@ -86,8 +86,10 @@ function createGuiStateEmitter(ctx) {
       guiMissionSlots: ctx.guiMissionSlots,
       slotUnlockSummary: ctx.slotUnlockSummary,
       currentMode: ctx.currentMode,
+      autoModeEnabled: ctx.autoModeEnabled,
       level20ResetEnabled: ctx.level20ResetEnabled,
       missionModeEnabled: ctx.missionModeEnabled,
+      missionResetLevel: ctx.config?.missionResetLevel,
       missionModeResetLevel: ctx.missionModeResetLevel,
       missionActionEnabledBySlot: ctx.missionActionEnabledBySlot,
       missionResetPerSlotModeEnabled: ctx.missionResetPerSlotModeEnabled,
@@ -289,6 +291,24 @@ if (process.env.PBP_GUI_BRIDGE === "1" && typeof process.send === "function") {
           ctx.nftCooldownResetEnabled = payload.nftCooldownResetEnabled;
           ctx.config.nftCooldownResetEnabled = payload.nftCooldownResetEnabled;
         }
+        if (typeof payload.nftCooldownResetMissionModeEnabled === "boolean") {
+          ctx.config.nftCooldownResetMissionModeEnabled =
+            payload.nftCooldownResetMissionModeEnabled;
+        }
+        if (typeof payload.missionResetLevel === "string") {
+          const nextLevel = String(payload.missionResetLevel || "").trim();
+          if (nextLevel) {
+            ctx.currentMissionResetLevel = nextLevel;
+            ctx.config.missionResetLevel = nextLevel;
+          }
+        }
+        if (typeof payload.missionModeResetLevel === "string") {
+          const nextLevel = String(payload.missionModeResetLevel || "").trim();
+          if (nextLevel) {
+            ctx.missionModeResetLevel = nextLevel;
+            ctx.config.missionModeResetLevel = nextLevel;
+          }
+        }
         if (typeof payload.nftAssignmentOrder === "string") {
           const nextOrder = String(payload.nftAssignmentOrder || "")
             .trim()
@@ -374,7 +394,11 @@ if (process.env.PBP_GUI_BRIDGE === "1" && typeof process.send === "function") {
             missionResetPerSlotEnabledBySlot:
               ctx.missionResetPerSlotEnabledBySlot,
             missionResetPerSlotLevelBySlot: ctx.missionResetPerSlotLevelBySlot,
+            missionResetLevel: ctx.config.missionResetLevel,
+            missionModeResetLevel: ctx.config.missionModeResetLevel,
             nftCooldownResetEnabled: ctx.nftCooldownResetEnabled,
+            nftCooldownResetMissionModeEnabled:
+              ctx.config.nftCooldownResetMissionModeEnabled,
             nftAssignmentOrder: ctx.nftAssignmentOrder,
             nftCooldownResetMaxPbp: ctx.config.nftCooldownResetMaxPbp,
           },

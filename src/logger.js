@@ -149,9 +149,11 @@ function createLogger(ctx) {
     const boxWidth = Math.max(termWidth, 40);
     const innerWidth = boxWidth - 4;
     const resetStatus = ctx.level20ResetEnabled ? "ON" : "OFF";
-    const modeStatus = ctx.missionModeEnabled
-      ? `mission (${ctx.currentMissionResetLevel} reset)`
-      : "normal";
+    const modeStatus = ctx.autoModeEnabled
+      ? "auto (attempt 20, reroll on no NFT)"
+      : ctx.missionModeEnabled
+        ? `mission (${ctx.currentMissionResetLevel} reset)`
+        : "manual";
     const status = ctx.watcherRunning ? "🟢 running" : "🔴 stopped";
     const totalClaimed =
       typeof ctx.config.totalClaimed === "number" ? ctx.config.totalClaimed : 0;

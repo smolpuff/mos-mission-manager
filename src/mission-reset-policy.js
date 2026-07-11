@@ -42,6 +42,17 @@ function defaultMissionModeThreshold(ctx = {}) {
   );
 }
 
+function defaultManualModeThreshold(ctx = {}) {
+  return normalizeMissionResetPerSlotLevel(
+    ctx?.currentMissionResetLevel || ctx?.config?.missionResetLevel || 20,
+    20,
+  );
+}
+
+function autoModeEnabled(ctx = {}) {
+  return ctx?.autoModeEnabled === true || ctx?.config?.autoModeEnabled === true;
+}
+
 function missionResetPerSlotModeEnabled(ctx = {}) {
   return (
     ctx?.missionResetPerSlotModeEnabled === true ||
@@ -65,6 +76,14 @@ function missionResetPerSlotEnabledBySlot(ctx = {}) {
 }
 
 function defaultResetPolicy(ctx = {}) {
+  if (autoModeEnabled(ctx)) {
+    return {
+      enabled: true,
+      threshold: 20,
+      label: "auto20",
+      source: "auto20",
+    };
+  }
   const mmEnabled =
     ctx?.missionModeEnabled === true || ctx?.config?.missionModeEnabled === true;
   if (mmEnabled) {
@@ -75,7 +94,12 @@ function defaultResetPolicy(ctx = {}) {
     ctx?.level20ResetEnabled === true ||
     ctx?.config?.level20ResetEnabled === true
   ) {
-    return { enabled: true, threshold: 20, label: "20r", source: "20r" };
+    return {
+      enabled: true,
+      threshold: defaultManualModeThreshold(ctx),
+      label: "20r",
+      source: "20r",
+    };
   }
   return { enabled: false, threshold: null, label: "", source: "off" };
 }
@@ -104,6 +128,7 @@ function resetPolicyForMission(ctx = {}, mission = {}) {
 }
 
 module.exports = {
+  autoModeEnabled,
   normalizeMissionResetPerSlotEnabledBySlot,
   normalizeMissionResetPerSlotLevel,
   normalizeMissionResetPerSlotLevelBySlot,

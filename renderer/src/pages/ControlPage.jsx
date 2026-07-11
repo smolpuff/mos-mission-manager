@@ -624,17 +624,44 @@ function ControlView() {
     competitionNotificationSuppressChecked,
     setCompetitionNotificationSuppressChecked,
   ] = useState(false);
-  const resolveMissionModeButtonLevel = (nextStatus = status) =>
-    String(
-      nextStatus?.missionModeResetLevel ||
+  const resolveResetLevelInput = (nextStatus = status, mode = "normal") => {
+    if (mode === "auto") return "20";
+    if (mode === "mission") {
+      return String(
+        nextStatus?.missionModeResetLevel ||
+          nextStatus?.defaultMissionResetLevel ||
+          (debugEnabled ? "5" : "10"),
+      ).trim();
+    }
+    return String(
+      nextStatus?.missionResetLevel ||
+        nextStatus?.currentMissionResetLevel ||
         nextStatus?.defaultMissionResetLevel ||
-        (debugEnabled ? "5" : "10"),
+        "20",
     ).trim();
+  };
   const [modeSelection, setModeSelection] = useState(
-    status.missionModeEnabled === true ? "mission" : "normal",
+    status.autoModeEnabled === true
+      ? "auto"
+      : status.missionModeEnabled === true
+        ? "mission"
+        : "normal",
+  );
+  const [manualModeResetLevel, setManualModeResetLevelState] = useState(
+    resolveResetLevelInput(status, "normal"),
   );
   const [missionModeButtonLevel, setMissionModeButtonLevel] = useState(
-    resolveMissionModeButtonLevel(status),
+    resolveResetLevelInput(status, "mission"),
+  );
+  const [resetLevelInput, setResetLevelInput] = useState(
+    resolveResetLevelInput(
+      status,
+      status.autoModeEnabled === true
+        ? "auto"
+        : status.missionModeEnabled === true
+          ? "mission"
+          : "normal",
+    ),
   );
   const [missionModeButtonLevelEditing, setMissionModeButtonLevelEditing] =
     useState(false);
@@ -700,13 +727,16 @@ function ControlView() {
   const competitionNotificationSuppressCheckedRef = useRef(false);
   const competitionNotificationCeilingNumberRef = useRef(null);
   const lastThrottleModalKeyRef = useRef(null);
+  const pendingModeSelectionRef = useRef(null);
   const isMissionMode = modeSelection === "mission";
-  const isNormalMode = !isMissionMode;
+  const isAutoMode = modeSelection === "auto";
+  const isMissionLikeMode = isMissionMode || isAutoMode;
+  const isNormalMode = modeSelection === "normal";
   const debugPageVisible = debug === true;
   const competitionRangeLockDisabled = !isMissionMode;
   const competitionRangeLockInputsDisabled =
     competitionRangeLockDisabled || !competitionRangeLockEnabled;
-  const nftResetInputsDisabled = !isMissionMode || !nftResetEnabled;
+  const nftResetInputsDisabled = !isMissionLikeMode || !nftResetEnabled;
   const perSlotMissionResetControlsVisible = missionResetPerSlotModeEnabled;
   const perSlotMissionResetControlsDisabled = !missionResetPerSlotModeEnabled;
   const normalizePositiveIntegerString = (value, fallback) => {
@@ -801,24 +831,56 @@ function ControlView() {
   }, [status.level20ResetEnabled]);
 
   useEffect(() => {
-    if (typeof status.missionModeEnabled === "boolean") {
-      setModeSelection(status.missionModeEnabled ? "mission" : "normal");
+    const backendModeSelection =
+      status.autoModeEnabled === true
+        ? "auto"
+        : status.missionModeEnabled === true
+          ? "mission"
+          : "normal";
+    if (
+      pendingModeSelectionRef.current &&
+      pendingModeSelectionRef.current !== backendModeSelection
+    ) {
+      return;
     }
-  }, [status.missionModeEnabled]);
+    if (pendingModeSelectionRef.current === backendModeSelection) {
+      pendingModeSelectionRef.current = null;
+    }
+    setModeSelection(backendModeSelection);
+  }, [status.autoModeEnabled, status.missionModeEnabled]);
 
   useEffect(() => {
     if (missionModeButtonLevelEditing) return;
-    const nextLevel = String(status.missionModeResetLevel || "").trim();
-    if (nextLevel) {
-      setMissionModeButtonLevel(nextLevel);
+    const nextManualLevel = String(
+      status.missionResetLevel || status.currentMissionResetLevel || "",
+    ).trim();
+    if (nextManualLevel) {
+      setManualModeResetLevelState(nextManualLevel);
+    }
+    const nextMissionLevel = String(status.missionModeResetLevel || "").trim();
+    if (nextMissionLevel) {
+      setMissionModeButtonLevel(nextMissionLevel);
+    }
+    if (modeSelection === "auto") {
+      setResetLevelInput("20");
       return;
     }
-    if (!String(missionModeButtonLevel || "").trim()) {
-      setMissionModeButtonLevel(resolveMissionModeButtonLevel(status));
+    if (modeSelection === "mission") {
+      setResetLevelInput(
+        nextMissionLevel || resolveResetLevelInput(status, "mission"),
+      );
+      return;
     }
+    setResetLevelInput(
+      nextManualLevel || resolveResetLevelInput(status, "normal"),
+    );
   }, [
+    modeSelection,
+    status.autoModeEnabled,
+    status.missionResetLevel,
+    status.currentMissionResetLevel,
+    status.missionModeEnabled,
     status.missionModeResetLevel,
-    missionModeButtonLevel,
     missionModeButtonLevelEditing,
   ]);
 
@@ -936,7 +998,9 @@ function ControlView() {
       if (typeof config.enableRentals === "boolean") {
         setRentalsEnabled(config.enableRentals);
       }
-      if (typeof config.missionModeEnabled === "boolean") {
+      if (config.autoModeEnabled === true) {
+        setModeSelection("auto");
+      } else if (typeof config.missionModeEnabled === "boolean") {
         setModeSelection(config.missionModeEnabled ? "mission" : "normal");
       }
       setMissionActionEnabledBySlot(
@@ -956,6 +1020,12 @@ function ControlView() {
           config.missionResetLevel ?? status.currentMissionResetLevel ?? 10,
         ),
       );
+      if (typeof config.missionResetLevel === "string") {
+        setManualModeResetLevelState(config.missionResetLevel);
+      }
+      if (typeof config.missionModeResetLevel === "string") {
+        setMissionModeButtonLevel(config.missionModeResetLevel);
+      }
       if (typeof config.nftCooldownResetEnabled === "boolean") {
         setNftResetEnabled(config.nftCooldownResetEnabled);
       }
@@ -1223,21 +1293,40 @@ function ControlView() {
   ]);
 
   const setMissionResetEnabled = async (enabled) => {
-    if (isMissionMode) return;
+    if (isMissionLikeMode) return;
     setResetEnabled(enabled);
     await applyConfigPatch({ level20ResetEnabled: enabled });
     await runModeCommand(enabled ? "20r on" : "20r off");
   };
-  const commitMissionModeResetLevel = async (value) => {
+  const commitResetLevel = async (value) => {
     setMissionModeButtonLevelEditing(false);
     const raw = String(value ?? "")
       .replace(/[^\d]/g, "")
       .trim();
     if (!raw) {
-      setMissionModeButtonLevel(resolveMissionModeButtonLevel(status));
+      setResetLevelInput(
+        resolveResetLevelInput(status, isMissionMode ? "mission" : "normal"),
+      );
       return;
     }
-    await setMissionModeResetLevel(raw);
+    if (isMissionMode) {
+      await setMissionModeResetLevel(raw);
+      return;
+    }
+    if (isNormalMode) {
+      await setManualModeResetLevel(raw);
+    }
+  };
+  const setManualModeResetLevel = async (value) => {
+    const raw = String(value ?? "").trim();
+    const parsed = Number(raw);
+    if (!Number.isFinite(parsed) || parsed <= 0) return;
+    const nextLevel = String(Math.floor(parsed));
+    setManualModeResetLevelState(nextLevel);
+    setResetLevelInput(nextLevel);
+    await applyConfigPatch({
+      missionResetLevel: nextLevel,
+    });
   };
   const setMissionModeResetLevel = async (value) => {
     const raw = String(value ?? "").trim();
@@ -1245,16 +1334,16 @@ function ControlView() {
     if (!Number.isFinite(parsed) || parsed <= 0) return;
     const nextLevel = String(Math.floor(parsed));
     setMissionModeButtonLevel(nextLevel);
+    setResetLevelInput(nextLevel);
     setModeSelection("mission");
     await applyConfigPatch({
       missionModeEnabled: true,
-      missionResetLevel: nextLevel,
       missionModeResetLevel: nextLevel,
     });
     await runModeCommand([`mm ${nextLevel}`]);
   };
   const setRentalsFallbackEnabled = async (enabled) => {
-    if (isMissionMode) return;
+    if (isMissionLikeMode) return;
     setRentalsEnabled(enabled);
     await applyConfigPatch({ enableRentals: enabled });
   };
@@ -1461,51 +1550,69 @@ function ControlView() {
     };
   }, [autoUpdateCheckEnabled, bridge, runUpdateCheck]);
   const activateNormalMode = async () => {
-    const missionModeNftResetEnabled = isMissionMode
+    const missionModeNftResetEnabled = isMissionLikeMode
       ? nftResetEnabled
       : undefined;
-    const missionModeResetLevel = String(
-      missionModeButtonLevel || resolveMissionModeButtonLevel(status) || "10",
+    const nextManualResetLevel = String(
+      manualModeResetLevel || resolveResetLevelInput(status, "normal") || "20",
     ).trim();
+    pendingModeSelectionRef.current = "normal";
     setModeSelection("normal");
-    setResetEnabled(true);
+    setResetLevelInput(nextManualResetLevel);
     setRentalsEnabled(true);
     setNftResetEnabled(false);
     await applyConfigPatch({
+      autoModeEnabled: false,
       missionModeEnabled: false,
-      missionModeResetLevel: missionModeResetLevel,
+      missionModeResetLevel: String(
+        status.missionModeResetLevel ||
+          resolveResetLevelInput(status, "mission") ||
+          "10",
+      ).trim(),
       enableRentals: true,
-      missionResetLevel: "20",
-      level20ResetEnabled: true,
+      missionResetLevel: nextManualResetLevel,
+      level20ResetEnabled: resetEnabled === true,
       nftCooldownResetEnabled: false,
       ...(typeof missionModeNftResetEnabled === "boolean"
         ? { nftCooldownResetMissionModeEnabled: missionModeNftResetEnabled }
         : {}),
     });
-    await runModeCommand(["mm off", "20r on"]);
+    await runModeCommand(["mm off", resetEnabled ? "20r on" : "20r off"]);
+  };
+  const activateAutoMode = async () => {
+    pendingModeSelectionRef.current = "auto";
+    setModeSelection("auto");
+    setResetLevelInput("20");
+    setRentalsEnabled(true);
+    await applyConfigPatch({
+      autoModeEnabled: true,
+      missionModeEnabled: false,
+      enableRentals: true,
+    });
+    await runModeCommand(["am on"]);
   };
   const activateMissionMode = async () => {
     const resetLevel = String(
-      missionModeButtonLevel || resolveMissionModeButtonLevel(status) || "10",
+      missionModeButtonLevel ||
+        resolveResetLevelInput(status, "mission") ||
+        "10",
     ).trim();
     setMissionModeButtonLevel(resetLevel);
+    setResetLevelInput(resetLevel);
     const cooldownMaxPbp = Number(nftResetMaxPbp);
-    let restoredNftResetEnabled = false;
+    let restoredNftResetEnabled = true;
     try {
       const response = await bridge?.getConfig?.();
-      const stored =
-        response?.config?.nftCooldownResetMissionModeEnabled ??
-        response?.config?.nftCooldownResetEnabled;
+      const stored = response?.config?.nftCooldownResetMissionModeEnabled;
       if (typeof stored === "boolean") restoredNftResetEnabled = stored;
     } catch {}
+    pendingModeSelectionRef.current = "mission";
     setModeSelection("mission");
-    setResetEnabled(false);
     setNftResetEnabled(restoredNftResetEnabled);
     await applyConfigPatch({
+      autoModeEnabled: false,
       missionModeEnabled: true,
-      missionResetLevel: resetLevel,
       missionModeResetLevel: resetLevel,
-      level20ResetEnabled: false,
       nftCooldownResetEnabled: restoredNftResetEnabled,
       nftCooldownResetMissionModeEnabled: restoredNftResetEnabled,
       nftCooldownResetMaxPbp:
@@ -2352,6 +2459,10 @@ function ControlView() {
   const startMissions = async () => {
     const applyPersistedModeToBackend = async () => {
       if (!bridge?.sendCommand) return;
+      if (isAutoMode) {
+        await bridge.sendCommand("am on");
+        return;
+      }
       if (isMissionMode) {
         const resetLevel = String(
           status.missionModeResetLevel ||
@@ -4246,102 +4357,54 @@ function ControlView() {
                     </div>
                   </div>
                 </section>
-
-                <section className="card grid grid-cols-[auto_min-content] gap-2 items-center !py-3">
-                  <div
-                    className={`text-xs w-full overflow-hidden whitespace-nowrap text-ellipsis ${
-                      latestLog?.stream === "stderr"
-                        ? "text-red-300"
-                        : latestLog?.stream === "stdin"
-                          ? "text-sky-300"
-                          : "text-slate-300"
-                    }`}
-                    title={
-                      latestLog ? latestLog.text : "No backend output yet."
-                    }
-                  >
-                    {latestLog ? latestLog.text : "No backend output yet."}
-                  </div>
-                </section>
               </div>
 
               <section className=" flex-1">
                 <div className="grid grid-cols-2 gap-2 h-full">
-                  <div className="grid grid-cols-2 gap-2 mission-modes ">
-                    <div className="flex gap-3 flex-col">
-                      {" "}
+                  <div className="h-full flex gap-2 flex-col  mission-modes ">
+                    <div className="grid grid-rows-auto gap-2 h-full transition-all ">
                       <button
-                        className={` card h-full  flex-1 items-center w-full justify-center transition-all ${isNormalMode ? "active" : ""}`}
+                        className={` w-full card  h-auto flex-1 @container items-center justify-center overflow-hidden transition-all transition-size !p-4 ${isAutoMode ? "active" : ""}`}
+                        onClick={() => void activateAutoMode()}
+                        type="button"
+                      >
+                        <div className="mission-mode-copy space-y-1">
+                          <div className="mode__name font-bold text-lg leading-4">
+                            Auto Mode
+                          </div>
+                          <div className="text-xs">
+                            Try level 20, reset mission if no NFTs
+                          </div>
+                        </div>
+                      </button>
+                      <button
+                        className={` card flex-1  h-auto items-center w-full justify-center transition-all !p-4 ${isNormalMode ? "active" : ""}`}
                         onClick={() => void activateNormalMode()}
                         type="button"
                       >
-                        <div className="space-y-2 text-shadow-md text-shadow-black/15">
-                          <div className="z-10 mode__name font-bold text-2xl leading-7">
-                            Normal Mode
+                        <div className="space-y-1 text-shadow-md text-shadow-black/15">
+                          <div className="z-10 mode__name font-bold text-lg leading-4">
+                            Manual Mode
                           </div>
-                          <div className="text-xs">Resets level 20</div>
-                        </div>
-                      </button>
-                      <div
-                        className={` w-full !p-0 items-center ${competitionRangeLockDisabled ? "grayscale opacity-60" : ""}`}
-                      >
-                        <div class="w-full">
-                          <ToggleSwitch
-                            switchID="enableCompetitionRangeLock"
-                            checked={competitionRangeLockEnabled}
-                            title="Finish Target"
-                            styling="text-xs flex !flex-row"
-                            disabled={competitionRangeLockDisabled}
-                            onChange={(event) =>
-                              void setCompetitionRangeLock(
-                                event.target.checked,
-                              )
-                            }
-                          />
-                        </div>
-                        <div class="w-full mt-0 flex gap-3  items-center text-xs">
-                          <div class="flex items-center rounded-full border border-white/15 px-0 py-1">
-                            <input
-                              type="text"
-                              value={competitionRangeLockMinRank}
-                              onChange={(event) =>
-                                void setCompetitionRangeLockMin(
-                                  event.target.value,
-                                )
-                              }
-                              disabled={competitionRangeLockInputsDisabled}
-                              class="w-7.5 border-0 bg-transparent p-0 text-center text-xs !text-white outline-none disabled:opacity-50"
-                            />
-                            <span class=" text-xs text-white/70">-</span>
-                            <input
-                              type="text"
-                              value={competitionRangeLockMaxRank}
-                              onChange={(event) =>
-                                void setCompetitionRangeLockMax(
-                                  event.target.value,
-                                )
-                              }
-                              disabled={competitionRangeLockInputsDisabled}
-                              class="w-7.5 border-0 bg-transparent p-0 text-center text-xs !text-white outline-none disabled:opacity-50"
-                            />
+                          <div className="text-xs">
+                            {resetEnabled
+                              ? `Mission reset at custom level ${manualModeResetLevel || "20"}`
+                              : "Mission resets off"}
                           </div>
-                          Range
                         </div>
-                      </div>
-                    </div>
-                    <div class="flex flex-col gap-3">
+                      </button>{" "}
                       <button
-                        className={` w-full card h-full @container items-center justify-center overflow-hidden transition-all ${isMissionMode ? "active" : ""}`}
+                        className={` w-full card h-auto @container items-center justify-center overflow-hidden transition-all !p-4  ${isMissionMode ? "active" : ""}`}
                         onClick={() => void activateMissionMode()}
                         type="button"
                         id="mission-mode-mm_button"
                       >
-                        <div className="mission-mode-copy space-y-2">
-                          <div className="mode__name font-bold text-2xl leading-7">
+                        <div className="mission-mode-copy space-y-1">
+                          <div className="mode__name font-bold text-lg leading-4">
                             Mission Mode
                           </div>
                           <div className="text-xs">
-                            Resets level {missionModeButtonLevel}
+                            Mission reset at level {missionModeButtonLevel}
                           </div>
                         </div>
                         <div class="mo-fire">
@@ -4625,47 +4688,49 @@ function ControlView() {
                           </svg>
                         </div>
                       </button>
-                      <div
-                        className={`{h-full w-full  !p-0 items-center  ${!isMissionMode ? "grayscale opacity-60" : ""}`}
-                      >
-                        <div class=" w-full">
-                          <ToggleSwitch
-                            switchID="enableNFTReset"
-                            checked={nftResetEnabled}
-                            title="NFT Resets"
-                            styling="text-xs flex !flex-row"
-                            disabled={!isMissionMode}
+                    </div>
+                    <div
+                      className={`w-full flex h-auto justify-between !p-0 items-center ${competitionRangeLockDisabled ? "hidden grayscale opacity-60" : ""}`}
+                    >
+                      <div class="w-full ">
+                        <ToggleSwitch
+                          switchID="enableCompetitionRangeLock"
+                          checked={competitionRangeLockEnabled}
+                          title="Finish Target"
+                          styling="text-xs flex !flex-row"
+                          disabled={competitionRangeLockDisabled}
+                          onChange={(event) =>
+                            void setCompetitionRangeLock(event.target.checked)
+                          }
+                        />
+                      </div>
+                      <div class="w-full m-0 flex gap-3  items-center text-xs -translate-y-0.5 ">
+                        <div class="flex items-center rounded-full border border-white/15 px-0 py-1">
+                          <input
+                            type="text"
+                            value={competitionRangeLockMinRank}
                             onChange={(event) =>
-                              void setAutoNftResetEnabled(
-                                event.target.checked,
+                              void setCompetitionRangeLockMin(
+                                event.target.value,
                               )
                             }
+                            disabled={competitionRangeLockInputsDisabled}
+                            class="w-7.5 border-0 bg-transparent p-0 text-center text-xs !text-white outline-none disabled:opacity-50"
+                          />
+                          <span class=" text-xs text-white/70">-</span>
+                          <input
+                            type="text"
+                            value={competitionRangeLockMaxRank}
+                            onChange={(event) =>
+                              void setCompetitionRangeLockMax(
+                                event.target.value,
+                              )
+                            }
+                            disabled={competitionRangeLockInputsDisabled}
+                            class="w-7.5 border-0 bg-transparent p-0 text-center text-xs !text-white outline-none disabled:opacity-50"
                           />
                         </div>
-                        <div class=" w-full flex  text-xs items-center gap-3 ">
-                          <label class="flex gap-3 items-center">
-                            <div class="relative">
-                              <input
-                                type="number"
-                                min="0"
-                                step="1"
-                                value={nftResetMaxPbp}
-                                onChange={(event) =>
-                                  void setAutoNftResetMaxPbp(
-                                    event.target.value,
-                                  )
-                                }
-                                disabled={nftResetInputsDisabled}
-                                class="relative input bg-transparent text-xs w-17 p-1 pr-3 h-auto !text-white text-center !rounded-full outline-none border-white/15 "
-                              />
-                              <img
-                                src={pbpIcon}
-                                class="h-3.5 w-3.5 absolute right-2 top-1/2 -translate-y-1/2 "
-                              />
-                            </div>
-                            Max Cost
-                          </label>
-                        </div>
+                        Range
                       </div>
                     </div>
                   </div>
@@ -4675,35 +4740,39 @@ function ControlView() {
                       <div className="flex gap-1 flex-col w-full ">
                         <ToggleSwitch
                           switchID="enableRentals"
-                          title="Enable Rentals"
-                          checked={isMissionMode ? true : rentalsEnabled}
-                          disabled={isMissionMode}
+                          title="Enable rentals"
+                          checked={isMissionLikeMode ? true : rentalsEnabled}
+                          disabled={isMissionLikeMode}
                           onChange={(event) =>
                             void setRentalsFallbackEnabled(event.target.checked)
                           }
                           helperText={
-                            isMissionMode
-                              ? "Rentals locked"
-                              : "Rentals will be used last"
+                            isAutoMode
+                              ? "Locked on for Auto Mode"
+                              : isMissionMode
+                                ? "Locked on for Mission Mode"
+                                : "Rentals will be used last"
                           }
                         />{" "}
                         <ToggleSwitch
                           switchID="enableResets"
-                          title="Enable Mission Resets"
-                          checked={isMissionMode ? true : resetEnabled}
-                          disabled={isMissionMode}
+                          title="Enable mission resets"
+                          checked={isMissionLikeMode ? true : resetEnabled}
+                          disabled={isMissionLikeMode}
                           onChange={(event) =>
                             void setMissionResetEnabled(event.target.checked)
                           }
                           helperText={
-                            isMissionMode
-                              ? "Level Reset locked"
-                              : "Reset mission at level 20"
+                            isAutoMode
+                              ? "Locked on for Auto Mode"
+                              : isMissionMode
+                                ? "Locked on for Mission Mode"
+                                : "Reset mission at selected level"
                           }
                         />
                         <>
                           <div
-                            className={`${!isMissionMode ? "opacity-50" : ""} w-full mt-0 flex gap-3 items-center text-xs`}
+                            className={`${!(isMissionMode || (isNormalMode && resetEnabled)) ? "opacity-50" : ""} w-full mt-0 flex gap-3 items-center text-xs`}
                           >
                             <div
                               className={` flex items-center rounded-full border border-white/15 px-0 py-1`}
@@ -4712,8 +4781,13 @@ function ControlView() {
                                 type="text"
                                 inputMode="numeric"
                                 pattern="[0-9]*"
-                                disabled={!isMissionMode}
-                                value={missionModeButtonLevel}
+                                disabled={
+                                  !(
+                                    isMissionMode ||
+                                    (isNormalMode && resetEnabled)
+                                  )
+                                }
+                                value={resetLevelInput}
                                 onFocus={() =>
                                   setMissionModeButtonLevelEditing(true)
                                 }
@@ -4722,12 +4796,10 @@ function ControlView() {
                                     /[^\d]/g,
                                     "",
                                   );
-                                  setMissionModeButtonLevel(nextValue);
+                                  setResetLevelInput(nextValue);
                                 }}
                                 onBlur={(event) =>
-                                  void commitMissionModeResetLevel(
-                                    event.target.value,
-                                  )
+                                  void commitResetLevel(event.target.value)
                                 }
                                 onKeyDown={(event) => {
                                   if (event.key === "Enter") {
@@ -4739,31 +4811,66 @@ function ControlView() {
                               />
                             </div>
                             <span className="flex flex-col gap-0 text-sm">
-                              Mission reset level
-                              <span className="text-[10px]  ">
-                                Requires Mission Mode
+                              Custom mission reset level
+                              <span className="text-[11px] text-slate-400 leading-tight font-normal  ">
+                                {isMissionMode
+                                  ? "Will reset missions at this level"
+                                  : isNormalMode
+                                    ? "Will reset missions at this level"
+                                    : "Unavailable in Auto Mode"}
                               </span>
                             </span>
                           </div>
                         </>
-                        {/* <div className="w-full mt-0 flex gap-3 items-center text-xs">
-                          <div className="flex items-center rounded-full border border-white/15 px-0 py-1">
-                            <input
-                              type="number"
-                              min="1"
-                              step="1"
-                              value={missionModeButtonLevel}
-                              onChange={(event) => {
-                                const nextValue = event.target.value;
-                                setMissionModeButtonLevel(nextValue);
-                                void setMissionModeResetLevel(nextValue);
-                              }}
-                              className="w-16 border-0 bg-transparent p-0 text-center text-xs !text-white outline-none disabled:opacity-50 input-no-spinner"
-                              aria-label="Manual mission reset level"
+                        <div
+                          className={`mt-4 w-full flex items-center  gap-3 ${!isMissionMode ? "grayscale opacity-60" : ""}`}
+                        >
+                          <div className="flex-1 items-center">
+                            <ToggleSwitch
+                              switchID="enableNFTReset"
+                              checked={isMissionMode ? nftResetEnabled : false}
+                              title="NFT CD resets"
+                              styling=" flex  leading-4"
+                              disabled={!isMissionMode}
+                              onChange={(event) =>
+                                void setAutoNftResetEnabled(
+                                  event.target.checked,
+                                )
+                              }
+                              helperText={
+                                isMissionMode
+                                  ? "Reset NFTs"
+                                  : isAutoMode
+                                    ? "Locked off for Auto Mode"
+                                    : "Mission Mode Only"
+                              }
                             />
                           </div>
-                          Mission reset level
-                        </div> */}
+                          <div
+                            className={` w-26 flex items-center text-xs ${!isMissionMode ? "grayscale opacity-60" : ""}`}
+                          >
+                            <label className=" -translate-y-0.5  flex items-center gap-2  text-[11px] leading-none">
+                              <div className="relative flex items-center">
+                                <input
+                                  type="number"
+                                  min="0"
+                                  step="1"
+                                  value={nftResetMaxPbp}
+                                  onChange={(event) =>
+                                    void setAutoNftResetMaxPbp(
+                                      event.target.value,
+                                    )
+                                  }
+                                  disabled={nftResetInputsDisabled}
+                                  className="input relative h-7 min-h-0 w-12  rounded-full border-white/15 bg-transparent p-1 text-center text-xs leading-none !text-white outline-none !mt-0"
+                                />
+                              </div>
+                              Max PBP
+                              <br />
+                              Cost
+                            </label>
+                          </div>
+                        </div>
                       </div>
                     </div>
                     <div className="grid  grid-cols-2 gap-x-2 gap-y-1 mx-8  mb-5 user__wallet-balance  mt-auto items-center">

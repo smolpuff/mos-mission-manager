@@ -67,7 +67,7 @@ function createCommandHandler(ctx, logger, actions, configApi, services = {}) {
       formatTaggedLog(
         "HELP",
         "💡",
-        "h/help, clear, status, i, login, logout, check, c, r, reset20, 20r [on|off], mm [off|on|<level>], debug [on|off], pause, resume, q",
+        "h/help, clear, status, i, login, logout, check, c, r, reset20, 20r [on|off], mm [off|on|<level>], am [on|off], debug [on|off], pause, resume, q",
       ),
     );
     logWithTimestamp(
@@ -159,7 +159,13 @@ function createCommandHandler(ctx, logger, actions, configApi, services = {}) {
       `┌─ ${title} ${"─".repeat(44)}`,
       toggleRow(
         "Mode",
-        value(ctx.missionModeEnabled ? "MISSION" : "NORMAL"),
+        value(
+          ctx.autoModeEnabled
+            ? "AUTO"
+            : ctx.missionModeEnabled
+              ? "MISSION"
+              : "MANUAL",
+        ),
         "Reset level",
         value(configuredMissionResetLevel),
       ),
@@ -1008,11 +1014,21 @@ function createCommandHandler(ctx, logger, actions, configApi, services = {}) {
           return;
         }
         if (ctx.level20ResetEnabled) {
+          ctx.autoModeEnabled = false;
           ctx.missionModeEnabled = false;
         }
+        ctx.config.autoModeEnabled = ctx.autoModeEnabled;
         ctx.config.level20ResetEnabled = ctx.level20ResetEnabled;
         ctx.config.missionModeEnabled = ctx.missionModeEnabled;
-        ctx.currentMode = ctx.missionModeEnabled
+        ctx.currentMissionResetLevel = String(
+          ctx.config.missionResetLevel ||
+            process.env.PBP_DEFAULT_MISSION_RESET_LEVEL ||
+            ctx.runtimeDefaults?.missionResetLevel ||
+            "10",
+        );
+        ctx.currentMode = ctx.autoModeEnabled
+          ? "auto-20"
+          : ctx.missionModeEnabled
           ? `mission-${ctx.currentMissionResetLevel}`
           : "normal";
         flushConfig(ctx, logger.logDebug);
@@ -1029,8 +1045,66 @@ function createCommandHandler(ctx, logger, actions, configApi, services = {}) {
             "MODE",
             "🎛️",
             ctx.level20ResetEnabled
-              ? "Normal mode enabled (mission resets at level 20)."
-              : "Normal mode disabled.",
+              ? `Manual mode mission resets enabled (level ${ctx.config.missionResetLevel || ctx.currentMissionResetLevel || "20"}).`
+              : "Manual mode mission resets disabled.",
+          ),
+        );
+        return;
+      }
+      if (cmd === "am" || cmd.startsWith("am ")) {
+        const arg = cmd.slice(2).trim();
+        if (!arg) {
+          ctx.autoModeEnabled = !ctx.autoModeEnabled;
+        } else if (arg === "on") {
+          ctx.autoModeEnabled = true;
+        } else if (arg === "off") {
+          ctx.autoModeEnabled = false;
+        } else {
+          logWithTimestamp("Usage: am [on|off]");
+          return;
+        }
+        if (ctx.autoModeEnabled) {
+          ctx.missionModeEnabled = true;
+          ctx.currentMissionResetLevel = "20";
+        } else {
+          ctx.missionModeEnabled = false;
+          ctx.currentMissionResetLevel = String(
+            ctx.config.missionResetLevel ||
+              process.env.PBP_DEFAULT_MISSION_RESET_LEVEL ||
+              ctx.runtimeDefaults?.missionResetLevel ||
+              "10",
+          );
+        }
+        ctx.config.autoModeEnabled = ctx.autoModeEnabled;
+        ctx.config.missionModeEnabled = ctx.missionModeEnabled;
+        ctx.config.missionResetLevel = String(
+          ctx.config.missionResetLevel ||
+            process.env.PBP_DEFAULT_MISSION_RESET_LEVEL ||
+            ctx.runtimeDefaults?.missionResetLevel ||
+            "10",
+        );
+        ctx.config.missionModeResetLevel = String(
+          ctx.missionModeResetLevel ||
+            ctx.config.missionModeResetLevel ||
+            process.env.PBP_DEFAULT_MISSION_RESET_LEVEL ||
+            ctx.runtimeDefaults?.missionResetLevel ||
+            "10",
+        );
+        ctx.config.level20ResetEnabled = ctx.level20ResetEnabled;
+        ctx.currentMode = ctx.autoModeEnabled
+          ? "auto-20"
+          : ctx.missionModeEnabled
+            ? `mission-${ctx.currentMissionResetLevel}`
+            : "normal";
+        flushConfig(ctx, logger.logDebug);
+        if (ctx.guiBridge?.emitNow) ctx.guiBridge.emitNow();
+        logWithTimestamp(
+          formatTaggedLog(
+            "MODE",
+            "🎛️",
+            ctx.autoModeEnabled
+              ? "Auto mode enabled (tries level 20 first, rerolls only if no NFT is available)."
+              : "Auto mode disabled.",
           ),
         );
         return;
@@ -1049,16 +1123,30 @@ function createCommandHandler(ctx, logger, actions, configApi, services = {}) {
           logWithTimestamp("Usage: mm [off|on|<level>]");
           return;
         }
-        ctx.currentMissionResetLevel = String(Math.floor(n));
         ctx.missionModeResetLevel = String(Math.floor(n));
         ctx.missionModeEnabled = true;
       }
         if (ctx.missionModeEnabled) {
-          ctx.level20ResetEnabled = false;
+          ctx.autoModeEnabled = false;
+          ctx.currentMissionResetLevel = String(
+            ctx.missionModeResetLevel ||
+              ctx.config.missionModeResetLevel ||
+              process.env.PBP_DEFAULT_MISSION_RESET_LEVEL ||
+              ctx.runtimeDefaults?.missionResetLevel ||
+              "10",
+          );
+        } else {
+          ctx.currentMissionResetLevel = String(
+            ctx.config.missionResetLevel ||
+              process.env.PBP_DEFAULT_MISSION_RESET_LEVEL ||
+              ctx.runtimeDefaults?.missionResetLevel ||
+              "10",
+          );
         }
+        ctx.config.autoModeEnabled = ctx.autoModeEnabled;
         ctx.config.missionModeEnabled = ctx.missionModeEnabled;
         ctx.config.missionResetLevel = String(
-          ctx.currentMissionResetLevel ||
+          ctx.config.missionResetLevel ||
             process.env.PBP_DEFAULT_MISSION_RESET_LEVEL ||
             ctx.runtimeDefaults?.missionResetLevel ||
             "10",
@@ -1066,13 +1154,14 @@ function createCommandHandler(ctx, logger, actions, configApi, services = {}) {
         ctx.config.missionModeResetLevel = String(
           ctx.missionModeResetLevel ||
             ctx.config.missionModeResetLevel ||
-            ctx.currentMissionResetLevel ||
             process.env.PBP_DEFAULT_MISSION_RESET_LEVEL ||
             ctx.runtimeDefaults?.missionResetLevel ||
             "10",
         );
         ctx.config.level20ResetEnabled = ctx.level20ResetEnabled;
-        ctx.currentMode = ctx.missionModeEnabled
+        ctx.currentMode = ctx.autoModeEnabled
+          ? "auto-20"
+          : ctx.missionModeEnabled
           ? `mission-${ctx.currentMissionResetLevel}`
           : "normal";
         flushConfig(ctx, logger.logDebug);
