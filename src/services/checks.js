@@ -3849,6 +3849,8 @@ function createChecksService(ctx, logger, mcp, services = {}) {
         const missionSlot = Number(mission?.slot);
         const level = missionLevel(mission);
         const levelText = level === null ? "" : ` lvl=${level}`;
+        const autoModeThresholdFallbackOnlyLocal =
+          missionEligibleForAutoModeThresholdFallbackReset(mission);
         if (!id) {
           logDebug("assign", "candidate_missing_assigned_mission_id", {
             reason,
@@ -3880,7 +3882,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
         }
 
         logWithTimestamp(
-          `[ASSIGN] 🔢 ${name}: order=${nftAssignmentOrderMode() === "highest_level_first" ? "highest level owned → ready rental → highest level owned cooldown → rental cooldown reset → reserved owned ready → reserved owned cooldown" : "ready owned → ready rental → owned cooldown reset → rental cooldown reset → reserved owned ready → reserved owned cooldown"}.`,
+          `[ASSIGN] 🔢 ${name}: order=${autoModeThresholdFallbackOnlyLocal ? nftAssignmentOrderMode() === "highest_level_first" ? "highest level owned → highest level owned cooldown → reserved owned ready → reserved owned cooldown → reroll if none work" : "ready owned → owned cooldown reset → reserved owned ready → reserved owned cooldown → reroll if none work" : nftAssignmentOrderMode() === "highest_level_first" ? "highest level owned → ready rental → highest level owned cooldown → rental cooldown reset → reserved owned ready → reserved owned cooldown" : "ready owned → ready rental → owned cooldown reset → rental cooldown reset → reserved owned ready → reserved owned cooldown"}.`,
         );
 
         const currentMission = findMissionByAssignedMissionId(missions, id);
@@ -4027,7 +4029,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
           let rentalLookupSucceeded = false;
           let readyRentalCandidates = [];
           let cooledRentalCandidates = [];
-          if (rentalFallbackEnabled) {
+          if (rentalFallbackEnabled && !autoModeThresholdFallbackOnlyLocal) {
             try {
               let loadedRentalCandidates = [];
               logWithTimestamp(
@@ -4174,6 +4176,10 @@ function createChecksService(ctx, logger, mcp, services = {}) {
                 `[RENTAL] ❌ ${name}: failed to load rentable NFTs: ${error.message}`,
               );
             }
+          } else if (autoModeThresholdFallbackOnlyLocal) {
+            logWithTimestamp(
+              `[RENTAL] ⏭️ ${name}: level 20 auto fallback is local-only; skipping rentals entirely.`,
+            );
           } else {
             logWithTimestamp(
               `[RENTAL] ⏭️ ${name}: rental fallback disabled; skipping cooldown resets.`,
@@ -4754,6 +4760,39 @@ function createChecksService(ctx, logger, mcp, services = {}) {
             logWithTimestamp(
               `[ASSIGN] ❌ Failed assign for ${name} (missionId=${id}): ${lastError.message}`,
             );
+          }
+        }
+        if (!missionAssigned && autoModeThresholdFallbackOnlyLocal) {
+          try {
+            logWithTimestamp(
+              `[RESET] 🔁 ${name}: no local NFT could be assigned at level 20; rerolling mission.`,
+            );
+            const rerollResult = await performAutoModeMissionReroll(mission, {
+              reason: `${reason}_auto_mode_threshold_local_only_fallback`,
+            });
+            if (rerollResult?.rerolled) {
+              needsFreshMissionRefresh = true;
+              if (typeof mcp.invalidateUserMissionsSnapshot === "function") {
+                mcp.invalidateUserMissionsSnapshot(
+                  "auto_mode_threshold_local_only_fallback_reroll",
+                );
+              }
+              currentMissionResult = await mcp.getUserMissions({
+                forceFresh: true,
+                reason: `${reason}_auto_mode_threshold_local_only_fallback_refresh`,
+              });
+              missions = normalizeMissionList(currentMissionResult);
+            }
+          } catch (error) {
+            logWithTimestamp(
+              `[RESET] ❌ Auto mode local-only reroll failed for ${name}: ${error.message}`,
+            );
+            logDebug("assign", "auto_mode_local_only_fallback_reroll_failed", {
+              reason,
+              missionName: name,
+              missionId: id,
+              error: error.message,
+            });
           }
         }
       }
