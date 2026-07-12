@@ -44,6 +44,36 @@ const RENDERER_DEV_URL =
 const rendererIndexPath = path.join(ROOT_DIR, "dist", "index.html");
 const DESKTOP_DEVTOOLS_ENABLED = process.env.PBP_DESKTOP_DEVTOOLS === "1";
 
+function getWindowsAppId() {
+  if (process.platform !== "win32") return null;
+  try {
+    const packageJson = JSON.parse(
+      fs.readFileSync(path.join(ROOT_DIR, "package.json"), "utf8"),
+    );
+    const configuredAppId = String(packageJson?.build?.appId || "").trim();
+    if (configuredAppId) return configuredAppId;
+  } catch {}
+  return "com.pixelbypixel.missions-v3-mcp";
+}
+
+function getWindowsWindowIcon() {
+  if (process.platform !== "win32") return undefined;
+  const candidates = [
+    path.join(ROOT_DIR, "electron", "icons", "icon.png"),
+    path.join(ROOT_DIR, "build", "icon.ico"),
+    path.join(ROOT_DIR, "assets", "icon.ico"),
+    path.join(__dirname, "icon.ico"),
+    path.join(process.resourcesPath, "icon.ico"),
+  ];
+  return candidates.find((candidate) => fs.existsSync(candidate));
+}
+
+const WINDOWS_WINDOW_ICON = getWindowsWindowIcon();
+const WINDOWS_APP_ID = getWindowsAppId();
+if (WINDOWS_APP_ID) {
+  app.setAppUserModelId(WINDOWS_APP_ID);
+}
+
 function isDesktopDevMode() {
   if (process.env.PBP_DESKTOP_DEV_MODE === "1") return true;
   if (process.env.NODE_ENV === "development") return true;
@@ -1899,9 +1929,7 @@ function competitionRangeLockRuntimeState(config = readDesktopConfig()) {
   if (lockConfig.enabled !== true) reasons.push("disabled");
   if (config?.missionModeEnabled !== true) reasons.push("mission_mode_off");
   return {
-    enabled:
-      lockConfig.enabled === true &&
-      config?.missionModeEnabled === true,
+    enabled: lockConfig.enabled === true && config?.missionModeEnabled === true,
     lockConfig,
     reasons,
   };
@@ -4225,7 +4253,9 @@ function applyStoppedModeConfig(parsed) {
     const nextEnabled =
       parsed.mode === "toggle" ? !previous : parsed.mode === "on";
     patch.level20ResetEnabled = nextEnabled;
-    patch.autoModeEnabled = nextEnabled ? false : current.autoModeEnabled === true;
+    patch.autoModeEnabled = nextEnabled
+      ? false
+      : current.autoModeEnabled === true;
     patch.missionModeEnabled = nextEnabled
       ? false
       : current.missionModeEnabled === true;
@@ -4243,10 +4273,7 @@ function applyStoppedModeConfig(parsed) {
     }
     patch.autoModeEnabled = false;
     patch.missionModeEnabled = nextMissionEnabled;
-    if (
-      nextMissionEnabled &&
-      typeof patch.missionModeResetLevel !== "string"
-    ) {
+    if (nextMissionEnabled && typeof patch.missionModeResetLevel !== "string") {
       patch.missionModeResetLevel = String(
         current.missionModeResetLevel ||
           defaultMissionResetLevelForConfig(current),
@@ -4853,6 +4880,7 @@ async function createControlWindow() {
     maxWidth: 800,
     maxHeight: 800,
     title: "missions-v3-mcp",
+    icon: WINDOWS_WINDOW_ICON,
     backgroundColor: "#0b1116",
     autoHideMenuBar: true,
     ...desktopWindowFrameOptions(),
@@ -4905,6 +4933,7 @@ function createSplashWindow() {
     maxWidth: 800,
     maxHeight: 800,
     frame: false,
+    icon: WINDOWS_WINDOW_ICON,
     resizable: false,
     movable: true,
     minimizable: false,
@@ -5116,6 +5145,7 @@ async function createCliWindow() {
     minWidth: 720,
     minHeight: 520,
     title: "missions-v3-mcp CLI",
+    icon: WINDOWS_WINDOW_ICON,
     backgroundColor: "#061017",
     autoHideMenuBar: true,
     ...desktopWindowFrameOptions(),
@@ -5200,15 +5230,15 @@ app.whenReady().then(async () => {
     if (typeof next.level20ResetEnabled === "boolean") {
       backendStatus.level20ResetEnabled = next.level20ResetEnabled;
     }
-  if (typeof next.missionModeEnabled === "boolean") {
-    backendStatus.missionModeEnabled = next.missionModeEnabled;
-  }
-  if (typeof next.missionResetLevel === "string") {
-    backendStatus.missionResetLevel = next.missionResetLevel;
-  }
-  if (typeof next.missionModeResetLevel === "string") {
-    backendStatus.missionModeResetLevel = next.missionModeResetLevel;
-  }
+    if (typeof next.missionModeEnabled === "boolean") {
+      backendStatus.missionModeEnabled = next.missionModeEnabled;
+    }
+    if (typeof next.missionResetLevel === "string") {
+      backendStatus.missionResetLevel = next.missionResetLevel;
+    }
+    if (typeof next.missionModeResetLevel === "string") {
+      backendStatus.missionModeResetLevel = next.missionModeResetLevel;
+    }
     if (
       next.missionActionEnabledBySlot &&
       typeof next.missionActionEnabledBySlot === "object"

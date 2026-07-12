@@ -12,9 +12,7 @@ const {
   defaultResetPolicy,
   resetPolicyForMission,
 } = require("../mission-reset-policy");
-const {
-  missionActionEnabledForMission,
-} = require("../mission-slot-policy");
+const { missionActionEnabledForMission } = require("../mission-slot-policy");
 const {
   MISSION_PLAY_URL,
   openMissionPlayPage,
@@ -62,9 +60,7 @@ function createWatchService(
 
   function summarizeNamesForUser(items = [], limit = 2) {
     const list = Array.isArray(items)
-      ? items
-          .map((value) => String(value || "").trim())
-          .filter(Boolean)
+      ? items.map((value) => String(value || "").trim()).filter(Boolean)
       : [];
     if (list.length === 0) return "(none)";
     if (list.length <= limit) return list.join(", ");
@@ -278,7 +274,9 @@ function createWatchService(
     if (!Array.isArray(restoreTargets) || restoreTargets.length === 0) {
       return { restored: 0, missionResult };
     }
-    const previousPauseReason = String(ctx.pauseBackgroundMcpReason || "").trim();
+    const previousPauseReason = String(
+      ctx.pauseBackgroundMcpReason || "",
+    ).trim();
     const previousPauseStartedAt = Number(ctx.pauseBackgroundMcpStartedAt || 0);
     ctx.pauseBackgroundMcpReason = "auto_mode_restore";
     ctx.pauseBackgroundMcpStartedAt = Date.now();
@@ -511,15 +509,19 @@ function createWatchService(
     const wantedId = String(assignedMissionId || "").trim();
     const slotNumber = Number(slot);
     const cachedLookup =
-      ctx.lastAssignedMissionLookup && typeof ctx.lastAssignedMissionLookup === "object"
+      ctx.lastAssignedMissionLookup &&
+      typeof ctx.lastAssignedMissionLookup === "object"
         ? ctx.lastAssignedMissionLookup
         : {};
-    const guiSlots = Array.isArray(ctx.guiMissionSlots) ? ctx.guiMissionSlots : [];
+    const guiSlots = Array.isArray(ctx.guiMissionSlots)
+      ? ctx.guiMissionSlots
+      : [];
 
     if (wantedId) {
       const cached = cachedLookup[wantedId];
       const cachedName = missionName(cached);
-      if (cachedName && !looksLikeOpaqueMissionId(cachedName)) return cachedName;
+      if (cachedName && !looksLikeOpaqueMissionId(cachedName))
+        return cachedName;
     }
 
     if (wantedId) {
@@ -544,10 +546,12 @@ function createWatchService(
         return cachedSlotName;
       }
       const bySlot =
-        guiSlots.find((entry) => Number(entry?.slot) === Math.floor(slotNumber)) ||
-        null;
+        guiSlots.find(
+          (entry) => Number(entry?.slot) === Math.floor(slotNumber),
+        ) || null;
       const bySlotName = missionName(bySlot);
-      if (bySlotName && !looksLikeOpaqueMissionId(bySlotName)) return bySlotName;
+      if (bySlotName && !looksLikeOpaqueMissionId(bySlotName))
+        return bySlotName;
     }
 
     return "";
@@ -595,7 +599,8 @@ function createWatchService(
 
   function browserBridgeUrlFromPrepared(prepared) {
     const sc =
-      prepared?.structuredContent && typeof prepared.structuredContent === "object"
+      prepared?.structuredContent &&
+      typeof prepared.structuredContent === "object"
         ? prepared.structuredContent
         : {};
     const seen = new Set();
@@ -618,7 +623,9 @@ function createWatchService(
         const matches = value.match(/https?:\/\/[^\s"'<>]+/gi) || [];
         for (const matched of matches) {
           const clean = matched.replace(/[),.;]+$/, "");
-          if (/(sign|bridge|browser|wallet|transaction|tx)/i.test(path + clean)) {
+          if (
+            /(sign|bridge|browser|wallet|transaction|tx)/i.test(path + clean)
+          ) {
             candidates.push(clean);
           }
         }
@@ -656,7 +663,8 @@ function createWatchService(
         param: "missionSwapId",
       },
       {
-        id: sc.resetToken || sc.cooldownId || sc.nftCooldownResetId || sc.resetId,
+        id:
+          sc.resetToken || sc.cooldownId || sc.nftCooldownResetId || sc.resetId,
         path: "/mcp/sign-nft-cooldown-reset",
         param: "resetToken",
       },
@@ -709,9 +717,7 @@ function createWatchService(
       currentWalletSummaryRefreshTimer = null;
       if (ctx.pauseBackgroundMcpReason) {
         scheduleCurrentWalletSummaryRefresh(
-          currentWalletSummaryRefreshPendingReason ||
-            reason ||
-            "wallet_change",
+          currentWalletSummaryRefreshPendingReason || reason || "wallet_change",
         );
         return;
       }
@@ -1164,7 +1170,10 @@ function createWatchService(
     return {
       missionId,
       name:
-        missionName(claim) || missionName(fromLookup) || fromLookup?.name || null,
+        missionName(claim) ||
+        missionName(fromLookup) ||
+        fromLookup?.name ||
+        null,
       level:
         claim?.level ??
         claim?.missionLevel ??
@@ -1251,7 +1260,9 @@ function createWatchService(
         rewardAmount: d.reward ?? null,
         rewardToken: d.prize ?? null,
       };
-      if (!registerClaimEvent(ctx, analyticsPayload, { scope: "reward_totals" })) {
+      if (
+        !registerClaimEvent(ctx, analyticsPayload, { scope: "reward_totals" })
+      ) {
         continue;
       }
       const bucket = normalizeRewardBucket(d.prize);
@@ -1363,7 +1374,11 @@ function createWatchService(
   async function pollMissionStateChanges(
     previousState,
     reason,
-    { logInitial = false, missionResult = null, missionResultLoader = null } = {},
+    {
+      logInitial = false,
+      missionResult = null,
+      missionResultLoader = null,
+    } = {},
   ) {
     const result =
       missionResult ||
@@ -1605,7 +1620,8 @@ function createWatchService(
         after.completed === false &&
         !idChanged &&
         Boolean(after.assignedNft) &&
-        (levelUp === false || Number(after.level || 0) <= Number(before.level || 0)) &&
+        (levelUp === false ||
+          Number(after.level || 0) <= Number(before.level || 0)) &&
         startTimeChanged;
       if (before.completed === true && after.completed === false) {
         if (looksLikeResetTransition) {
@@ -1751,7 +1767,8 @@ function createWatchService(
         entry?.missionId || entry?.assignedMissionId || "",
       ).trim();
       const matchesSlot = Number.isFinite(slot) && claimedSlots.has(slot);
-      const matchesMissionId = entryMissionId && claimedMissionIds.has(entryMissionId);
+      const matchesMissionId =
+        entryMissionId && claimedMissionIds.has(entryMissionId);
       if (!matchesSlot && !matchesMissionId) return entry;
       changed = true;
       const summary = claimSummaries.find(
@@ -1863,7 +1880,10 @@ function createWatchService(
       (missionResultLoader
         ? await missionResultLoader({ reason: "selected_snapshot" })
         : await mcp.getUserMissions({ reason: "selected_snapshot" }));
-    const snapshot = await loadSelectedMissionSnapshot(result, missionResultLoader);
+    const snapshot = await loadSelectedMissionSnapshot(
+      result,
+      missionResultLoader,
+    );
     return { result, snapshot };
   }
 
@@ -2023,8 +2043,9 @@ function createWatchService(
     traceId = null,
     missionResultLoader = null,
   } = {}) {
-    const shouldLogAssignIntro =
-      !String(assignReason || "").startsWith("post_claim");
+    const shouldLogAssignIntro = !String(assignReason || "").startsWith(
+      "post_claim",
+    );
     let currentClaimed = Number(claimed || 0);
     let assigned = 0;
     let missionResult = initialMissionResult;
@@ -2234,11 +2255,15 @@ function createWatchService(
       });
       if (assigned > 0) {
         if (claimWorkPaused()) {
-          trace("watch", "claim_followup_skipped_before_assign_refetch_paused", {
-            traceId,
-            assignReason,
-            assigned,
-          });
+          trace(
+            "watch",
+            "claim_followup_skipped_before_assign_refetch_paused",
+            {
+              traceId,
+              assignReason,
+              assigned,
+            },
+          );
           return { claimed: currentClaimed, assigned, missionResult };
         }
         missionResult = missionResultLoader
@@ -2257,9 +2282,7 @@ function createWatchService(
         });
       }
     } catch (error) {
-      logWithTimestamp(
-        `[ASSIGN] ❌ Post-claim assign error: ${error.message}`,
-      );
+      logWithTimestamp(`[ASSIGN] ❌ Post-claim assign error: ${error.message}`);
       logDebug("watch", "post_claim_assign_error", {
         error: error.message,
         stack: error.stack,
@@ -2697,7 +2720,8 @@ function createWatchService(
             missionName: mission.name || null,
             level: mission.level ?? null,
             slot: mission.slot ?? null,
-            error: "Manual mode selected. Open the missions page and reset this mission there.",
+            error:
+              "Manual mode selected. Open the missions page and reset this mission there.",
             bridgeUrl: MISSION_PLAY_URL,
           });
         }
@@ -2809,13 +2833,16 @@ function createWatchService(
         ([, mission]) => !shouldDeferResetForAutoMode(mission),
       ),
     );
-    const openedFromSnapshot = await handleLevelResetIfNeeded(filteredSnapshot, {
-      reason,
-      threshold: resetPolicy.threshold,
-      label: resetPolicy.label,
-      thresholdForMission: (mission) =>
-        resetPolicyForMission(ctx, mission).threshold,
-    });
+    const openedFromSnapshot = await handleLevelResetIfNeeded(
+      filteredSnapshot,
+      {
+        reason,
+        threshold: resetPolicy.threshold,
+        label: resetPolicy.label,
+        thresholdForMission: (mission) =>
+          resetPolicyForMission(ctx, mission).threshold,
+      },
+    );
     if (openedFromSnapshot) return true;
 
     // Manual checks should never miss reset popup when threshold is present. Prime disapproves of my name. :D
@@ -2898,14 +2925,16 @@ function createWatchService(
 
   function startupMissionResult() {
     const wrapper =
-      ctx.startupAccountSnapshot && typeof ctx.startupAccountSnapshot === "object"
+      ctx.startupAccountSnapshot &&
+      typeof ctx.startupAccountSnapshot === "object"
         ? ctx.startupAccountSnapshot
         : null;
     const snapshot =
       wrapper?.snapshot && typeof wrapper.snapshot === "object"
         ? wrapper.snapshot
         : null;
-    return snapshot?.missionsResult && typeof snapshot.missionsResult === "object"
+    return snapshot?.missionsResult &&
+      typeof snapshot.missionsResult === "object"
       ? snapshot.missionsResult
       : null;
   }
@@ -2940,7 +2969,9 @@ function createWatchService(
         scheduleNftCountWarmup({
           reason: `${reason}_paused`,
           missionsResult:
-            missionsResult || ctx.lastUserMissionsResult || startupMissionResult(),
+            missionsResult ||
+            ctx.lastUserMissionsResult ||
+            startupMissionResult(),
           minDelayMs: 1000,
         });
         return;
@@ -2954,7 +2985,9 @@ function createWatchService(
         scheduleNftCountWarmup({
           reason: `${reason}_retry`,
           missionsResult:
-            missionsResult || ctx.lastUserMissionsResult || startupMissionResult(),
+            missionsResult ||
+            ctx.lastUserMissionsResult ||
+            startupMissionResult(),
           minDelayMs: retryDelayMs,
         });
         return;
@@ -2962,7 +2995,9 @@ function createWatchService(
       try {
         await checks.refreshMissionHeaderStats({
           missionsResult:
-            missionsResult || ctx.lastUserMissionsResult || startupMissionResult(),
+            missionsResult ||
+            ctx.lastUserMissionsResult ||
+            startupMissionResult(),
           refreshNftCount: true,
           hydrateAssignedMetadata: false,
         });
@@ -3271,7 +3306,10 @@ function createWatchService(
         }
         const localStartedAt = Date.now();
         await new Promise((resolve, reject) => {
-          const timer = setTimeout(resolve, Math.max(1000, opts.watchSeconds * 1000));
+          const timer = setTimeout(
+            resolve,
+            Math.max(1000, opts.watchSeconds * 1000),
+          );
           cycleAbortController.signal.addEventListener(
             "abort",
             () => {
@@ -3425,7 +3463,10 @@ function createWatchService(
       if (needsLookup) {
         try {
           const lookups = [];
-          if (preCycleMissionResult && typeof preCycleMissionResult === "object") {
+          if (
+            preCycleMissionResult &&
+            typeof preCycleMissionResult === "object"
+          ) {
             lookups.push(loadAssignedMissionLookup(preCycleMissionResult));
           }
           if (
@@ -3466,7 +3507,7 @@ function createWatchService(
         claimLookupByAssignedMissionId,
         aggregateClaimLogLine: `[WATCH] ✅ Claimed ${claimed} mission reward(s).`,
         assignReason: "post_claim",
-        claimLogLabel: "Claimed count updated",
+        claimLogLabel: "Claim count updated",
         assignIntro: "[ASSIGN] ▶ Post-claim assign check (immediate)...",
         initialMissionResult: postCycleMissionResult,
         allowStateFallback: true,
@@ -3679,7 +3720,8 @@ function createWatchService(
           available: Number(ctx.currentMissionStats?.available || 0),
           claimable: Number(ctx.currentMissionStats?.claimable || 0),
         });
-        const startupStats = initialStatsResult?.stats || ctx.currentMissionStats || {};
+        const startupStats =
+          initialStatsResult?.stats || ctx.currentMissionStats || {};
         let startupClaimable = Number(startupStats.claimable || 0);
         let startupAvailable = Number(startupStats.available || 0);
         let startupActionMissionResult = initialMissionResult;
@@ -3712,8 +3754,7 @@ function createWatchService(
           }
         }
         if (!hasActiveMcpCooldown() && startupClaimable > 0) {
-          watchStartupAssignBackoffUntil =
-            Date.now() + startupWatchBackoffMs;
+          watchStartupAssignBackoffUntil = Date.now() + startupWatchBackoffMs;
           const traceId = nextTraceId("startup");
           let beforeSnapshot = new Map();
           try {
@@ -3740,7 +3781,9 @@ function createWatchService(
               traceId,
               beforeSnapshot,
               claimed: Number(claimResult?.claimed || 0),
-              claims: Array.isArray(claimResult?.claims) ? claimResult.claims : [],
+              claims: Array.isArray(claimResult?.claims)
+                ? claimResult.claims
+                : [],
               aggregateClaimLogLine: `[WATCH] ✅ Claimed ${Number(claimResult?.claimed || 0)} mission reward(s).`,
               assignReason: "startup_post_claim",
               claimLogLabel: "Startup claimed",
@@ -3749,15 +3792,15 @@ function createWatchService(
               allowStateFallback: true,
               finalTraceAction: "startup_final_snapshot",
             });
-            initialMissionResult = followup.missionResult || initialMissionResult;
+            initialMissionResult =
+              followup.missionResult || initialMissionResult;
           }
         } else if (
           !claimWorkPaused() &&
           !hasActiveMcpCooldown() &&
           startupAvailable > 0
         ) {
-          watchStartupAssignBackoffUntil =
-            Date.now() + startupWatchBackoffMs;
+          watchStartupAssignBackoffUntil = Date.now() + startupWatchBackoffMs;
           logWithTimestamp(
             formatTaggedLog("ASSIGN", "🛠️", "Startup assign check..."),
           );
@@ -3828,7 +3871,8 @@ function createWatchService(
       }
       scheduleNftCountWarmup({
         reason: "startup",
-        missionsResult: initialMissionResult || ctx.lastUserMissionsResult || null,
+        missionsResult:
+          initialMissionResult || ctx.lastUserMissionsResult || null,
       });
     } catch (error) {
       logDebug("watch", "startup_ui_refresh_failed", {
@@ -3843,7 +3887,9 @@ function createWatchService(
           logWithTimestamp(
             `[WATCH] ⏳ MCP cooldown active. Waiting ${Math.ceil(preCycleCooldownMs / 1000)}s before next cycle.`,
           );
-          await new Promise((resolve) => setTimeout(resolve, preCycleCooldownMs));
+          await new Promise((resolve) =>
+            setTimeout(resolve, preCycleCooldownMs),
+          );
         }
         const { claimed, summary } = await runWatchCycleExclusive();
         if (ctx.debugMode && claimed > 0) {
@@ -3946,9 +3992,7 @@ function createWatchService(
           retryAfterSeconds:
             error?.rateLimited === true ? baseRetryAfterSeconds : null,
           retryDelaySeconds:
-            error?.rateLimited === true
-              ? Math.ceil(retryDelayMs / 1000)
-              : null,
+            error?.rateLimited === true ? Math.ceil(retryDelayMs / 1000) : null,
         });
         await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
       }
