@@ -58,6 +58,8 @@ function createContext() {
     lastUserMissionsFetchedAt: 0,
     lastAssignedMissionLookup: {},
     recentClaimedMissionOverrides: {},
+    pauseBackgroundMcpReason: "",
+    pauseBackgroundMcpStartedAt: 0,
     transientMissionAssignmentCache: {
       byAssignedMissionId: {},
       byStableKey: {},

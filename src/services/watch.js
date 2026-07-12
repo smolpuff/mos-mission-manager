@@ -165,6 +165,53 @@ function createWatchService(
     return RECENT_CLAIM_OVERRIDE_TTL_MS_DEFAULT;
   }
 
+  function autoModeMissionRestoreDelayMs() {
+    const configuredMs = Number(ctx.config?.autoModeMissionRestoreDelayMs);
+    if (Number.isFinite(configuredMs) && configuredMs >= 0) {
+      return Math.min(15_000, Math.floor(configuredMs));
+    }
+    const configuredSeconds = Number(
+      ctx.config?.autoModeMissionRestoreDelaySeconds,
+    );
+    if (Number.isFinite(configuredSeconds) && configuredSeconds >= 0) {
+      return Math.min(15_000, Math.floor(configuredSeconds * 1000));
+    }
+    return 3000;
+  }
+
+  function collectAutoModeMissionRestoreTargets(
+    claims,
+    lookupByAssignedMissionId = null,
+  ) {
+    if (!autoModeEnabled(ctx)) return [];
+    const restoreBySlot = new Map();
+    for (const claim of Array.isArray(claims) ? claims : []) {
+      const details = compactClaimDetails(claim, lookupByAssignedMissionId);
+      const slot = Math.floor(Number(details?.slot));
+      const claimedLevel = Number(details?.level);
+      const claimedMissionName = missionName({ missionName: details?.name });
+      if (!Number.isFinite(slot) || slot < 1) continue;
+      if (!Number.isFinite(claimedLevel) || claimedLevel < 20) continue;
+      if (!claimedMissionName) continue;
+      const missionRef = {
+        slot,
+        name: claimedMissionName,
+        level: claimedLevel,
+      };
+      if (!checks?.isConfiguredTargetMission?.(missionRef)) continue;
+      const resetPolicy = resetPolicyForMission(ctx, missionRef);
+      const threshold = Number(resetPolicy?.threshold);
+      if (resetPolicy?.enabled !== true || threshold !== 20) continue;
+      restoreBySlot.set(slot, {
+        slot,
+        missionName: claimedMissionName,
+        claimedLevel,
+        assignedMissionId: String(details?.missionId || "").trim() || null,
+      });
+    }
+    return Array.from(restoreBySlot.values());
+  }
+
   function noteRecentClaimedMissionOverrides(
     claims,
     lookupByAssignedMissionId = null,
@@ -218,6 +265,128 @@ function createWatchService(
 
     if (changed || !ctx.recentClaimedMissionOverrides) {
       ctx.recentClaimedMissionOverrides = entries;
+    }
+  }
+
+  async function restoreAutoModeClaimedMissions({
+    restoreTargets = [],
+    missionResult = null,
+    assignReason = "post_claim",
+    missionResultLoader = null,
+    traceId = null,
+  } = {}) {
+    if (!Array.isArray(restoreTargets) || restoreTargets.length === 0) {
+      return { restored: 0, missionResult };
+    }
+    const previousPauseReason = String(ctx.pauseBackgroundMcpReason || "").trim();
+    const previousPauseStartedAt = Number(ctx.pauseBackgroundMcpStartedAt || 0);
+    ctx.pauseBackgroundMcpReason = "auto_mode_restore";
+    ctx.pauseBackgroundMcpStartedAt = Date.now();
+    try {
+      const restoreDelayMs = autoModeMissionRestoreDelayMs();
+      const cooldownMs = getMcpCooldownRemainingMs();
+      const waitMs = Math.max(restoreDelayMs, cooldownMs);
+      if (waitMs > 0) {
+        logDebug("watch", "auto_mode_restore_wait", {
+          traceId,
+          assignReason,
+          restoreDelayMs,
+          cooldownMs,
+          waitMs,
+          targets: restoreTargets,
+        });
+        logWithTimestamp(
+          `[MISSION] ⏳ Waiting ${Math.ceil(waitMs / 1000)}s before restoring auto mode mission slot${restoreTargets.length === 1 ? "" : "s"}...`,
+        );
+        await sleep(waitMs);
+      }
+      let currentMissionResult = missionResult;
+      let restored = 0;
+      for (const target of restoreTargets) {
+        if (claimWorkPaused()) {
+          trace("watch", "auto_mode_restore_skipped_paused", {
+            traceId,
+            assignReason,
+            slot: target?.slot ?? null,
+          });
+          break;
+        }
+        const slot = Math.floor(Number(target?.slot));
+        const wantedName = missionName({ missionName: target?.missionName });
+        if (!Number.isFinite(slot) || slot < 1 || !wantedName) continue;
+        const missions = normalizeMissionList(currentMissionResult);
+        const currentMission =
+          missions.find((entry) => Number(entry?.slot) === slot) || null;
+        const currentName = missionName(currentMission);
+        if (
+          canonicalMissionNameKey(currentName) ===
+          canonicalMissionNameKey(wantedName)
+        ) {
+          logDebug("watch", "auto_mode_restore_skipped_same_mission", {
+            traceId,
+            assignReason,
+            slot,
+            missionName: wantedName,
+          });
+          continue;
+        }
+        logWithTimestamp(
+          `[MISSION] 🔁 Auto mode restore slot ${slot}: ${currentName || "unknown mission"} -> ${wantedName} after lvl ${target?.claimedLevel ?? "?"} claim.`,
+        );
+        try {
+          const restoreResult = await checks.applyMissionSelection({
+            slot,
+            missionName: wantedName,
+          });
+          logDebug("watch", "auto_mode_restore_result", {
+            traceId,
+            assignReason,
+            slot,
+            wantedName,
+            result: restoreResult,
+          });
+          if (restoreResult?.pending) {
+            logWithTimestamp(
+              `[MISSION] ⏸️ Auto mode restore for slot ${slot} is waiting on signing.`,
+            );
+            continue;
+          }
+          if (restoreResult?.ok !== true) {
+            logWithTimestamp(
+              `[MISSION] ❌ Auto mode restore failed for slot ${slot}: ${restoreResult?.reason || "unknown_error"}`,
+            );
+            continue;
+          }
+          if (restoreResult?.changed || restoreResult?.swapped) {
+            restored += 1;
+            currentMissionResult = missionResultLoader
+              ? await missionResultLoader({
+                  forceFresh: true,
+                  reason: `${assignReason || "post_claim"}_auto_mode_restore_slot_${slot}`,
+                })
+              : await mcp.getUserMissions({
+                  forceFresh: true,
+                  reason: `${assignReason || "post_claim"}_auto_mode_restore_slot_${slot}`,
+                });
+          }
+        } catch (error) {
+          logWithTimestamp(
+            `[MISSION] ❌ Auto mode restore error for slot ${slot}: ${error.message}`,
+          );
+          logDebug("watch", "auto_mode_restore_error", {
+            traceId,
+            assignReason,
+            slot,
+            wantedName,
+            error: error.message,
+            stack: error.stack,
+          });
+        }
+      }
+      return { restored, missionResult: currentMissionResult };
+    } finally {
+      ctx.pauseBackgroundMcpReason = previousPauseReason;
+      ctx.pauseBackgroundMcpStartedAt = previousPauseStartedAt;
     }
   }
 
@@ -317,6 +486,10 @@ function createWatchService(
         mission?.label ||
         fallback,
     ).trim();
+  }
+
+  function canonicalMissionNameKey(value = "") {
+    return missionName({ missionName: value }).trim().toLowerCase();
   }
 
   function looksLikeOpaqueMissionId(value) {
@@ -510,6 +683,12 @@ function createWatchService(
     if (walletRefreshTimer) return;
     walletRefreshTimer = setTimeout(() => {
       walletRefreshTimer = null;
+      if (ctx.pauseBackgroundMcpReason) {
+        scheduleFundingWalletRefresh(
+          walletRefreshPendingReason || reason || "token_change",
+        );
+        return;
+      }
       const pending = walletRefreshPendingReason || "token_change";
       walletRefreshPendingReason = null;
       Promise.resolve()
@@ -528,6 +707,14 @@ function createWatchService(
     if (currentWalletSummaryRefreshTimer) return;
     currentWalletSummaryRefreshTimer = setTimeout(() => {
       currentWalletSummaryRefreshTimer = null;
+      if (ctx.pauseBackgroundMcpReason) {
+        scheduleCurrentWalletSummaryRefresh(
+          currentWalletSummaryRefreshPendingReason ||
+            reason ||
+            "wallet_change",
+        );
+        return;
+      }
       const pending =
         currentWalletSummaryRefreshPendingReason || "wallet_change";
       currentWalletSummaryRefreshPendingReason = null;
@@ -1752,6 +1939,7 @@ function createWatchService(
 
     const followup = await runSharedClaimFollowup({
       claimed: currentClaimed,
+      claims,
       beforeSnapshot,
       claimLookupByAssignedMissionId,
       assignReason,
@@ -1824,6 +2012,7 @@ function createWatchService(
 
   async function runSharedClaimFollowup({
     claimed = 0,
+    claims = [],
     beforeSnapshot = new Map(),
     claimLookupByAssignedMissionId = null,
     assignReason,
@@ -1839,10 +2028,15 @@ function createWatchService(
     let currentClaimed = Number(claimed || 0);
     let assigned = 0;
     let missionResult = initialMissionResult;
+    const autoModeRestoreTargets = collectAutoModeMissionRestoreTargets(
+      claims,
+      claimLookupByAssignedMissionId,
+    );
     trace("watch", "claim_followup_start", {
       traceId,
       assignReason,
       claimed: currentClaimed,
+      autoModeRestoreTargets,
       beforeSnapshot: snapshotTraceSummary(beforeSnapshot),
       hasInitialMissionResult: Boolean(missionResult),
       allowStateFallback,
@@ -1982,6 +2176,29 @@ function createWatchService(
         claimed: currentClaimed,
       });
       return { claimed: currentClaimed, assigned, missionResult };
+    }
+    if (currentClaimed > 0 && autoModeRestoreTargets.length > 0) {
+      const restoreResult = await restoreAutoModeClaimedMissions({
+        restoreTargets: autoModeRestoreTargets,
+        missionResult,
+        assignReason,
+        missionResultLoader,
+        traceId,
+      });
+      missionResult = restoreResult.missionResult;
+      trace("watch", "claim_followup_auto_mode_restore_done", {
+        traceId,
+        assignReason,
+        restored: Number(restoreResult?.restored || 0),
+      });
+      if (claimWorkPaused()) {
+        trace("watch", "claim_followup_restore_paused", {
+          traceId,
+          assignReason,
+          claimed: currentClaimed,
+        });
+        return { claimed: currentClaimed, assigned, missionResult };
+      }
     }
     if (shouldLogAssignIntro) {
       logWithTimestamp(assignIntro);
@@ -2719,6 +2936,15 @@ function createWatchService(
     nftCountWarmTimer = setTimeout(async () => {
       nftCountWarmTimer = null;
       if (!ctx.watchLoopEnabled || !ctx.watcherRunning) return;
+      if (ctx.pauseBackgroundMcpReason) {
+        scheduleNftCountWarmup({
+          reason: `${reason}_paused`,
+          missionsResult:
+            missionsResult || ctx.lastUserMissionsResult || startupMissionResult(),
+          minDelayMs: 1000,
+        });
+        return;
+      }
       if (Number(ctx.currentMissionStats?.nftsTotal || 0) > 0) return;
       const retryDelayMs = Math.max(
         getMcpCooldownRemainingMs(),

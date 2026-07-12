@@ -277,11 +277,16 @@ async function closeCompetitionNotificationModal({
   setModal(null);
 }
 
-function MissionSlotFallback({ label, loading = false }) {
+function MissionSlotFallback({ label, loading = false, assigning = false }) {
   return (
     <div className="mission-image-placeholder">
       {loading ? (
         <span className="loading loading-spinner loading-md text-white/40" />
+      ) : assigning ? (
+        <span className="inline-flex items-center gap-2 text-white/80">
+          <span className="loading loading-spinner loading-sm text-white/50" />
+          <span>Assigning...</span>
+        </span>
       ) : (
         label
       )}
@@ -293,6 +298,7 @@ function MissionSlotImage({
   src,
   hasAssignedNft = false,
   loading = false,
+  assigning = false,
   padded = false,
   contain = false,
 }) {
@@ -357,7 +363,10 @@ function MissionSlotImage({
       ) : showSpinner ? (
         <MissionSlotFallback label={placeholderLabel} loading />
       ) : (
-        <MissionSlotFallback label={placeholderLabel} />
+        <MissionSlotFallback
+          label={placeholderLabel}
+          assigning={assigning}
+        />
       )}
       {activeSrc && imageFailed ? (
         <div className="mission-image-placeholder">No image</div>
@@ -1906,6 +1915,7 @@ function ControlView() {
   const isStarting = status.running && !isWatching;
   const [activityLabel, setActivityLabel] = useState(null);
   const [manualCheckBusy, setManualCheckBusy] = useState(false);
+  const [activeAssigningSlot, setActiveAssigningSlot] = useState(null);
   const manualCheckPendingRef = useRef(false);
   const [copiedLabel, setCopiedLabel] = useState(null);
   const [secretModalOpen, setSecretModalOpen] = useState(false);
@@ -2036,17 +2046,31 @@ function ControlView() {
       resetToWatchingMs = 2200;
     } else if (type === "assigning") {
       const state = String(lastEvent.state || "").trim();
+      const slot = Number(lastEvent.slot);
       if (state === "start") {
+        if (Number.isFinite(slot) && slot >= 1 && slot <= 4) {
+          setActiveAssigningSlot(slot);
+        }
         next = "🚀 Assigning...";
       } else if (state === "done") {
+        setActiveAssigningSlot(null);
         const count = Number(lastEvent.assigned || 0);
         next = count > 0 ? "✅ Started mission" : "Watching missions...";
         if (count > 0) resetToWatchingMs = 2200;
       } else if (state === "error") {
+        setActiveAssigningSlot(null);
         next = "❌ Start failed";
         resetToWatchingMs = 3200;
       }
     } else if (type === "assigned") {
+      const slot = Number(lastEvent.slot);
+      setActiveAssigningSlot((current) =>
+        Number.isFinite(slot) && slot >= 1 && slot <= 4
+          ? current === slot
+            ? null
+            : current
+          : null,
+      );
       next = "✅ Started mission";
       resetToWatchingMs = 2200;
     } else if (type === "claiming") {
@@ -2175,6 +2199,11 @@ function ControlView() {
       });
     }
   }, [lastEvent]);
+
+  useEffect(() => {
+    if (status.running) return;
+    setActiveAssigningSlot(null);
+  }, [status.running]);
 
   useEffect(() => {
     setIsCliActive(status.cliWindowOpen === true);
@@ -5006,6 +5035,8 @@ function ControlView() {
                         ((isStarting || status.watcherRunning === true) &&
                           hasAssignedNft &&
                           !imgSrc);
+                      const slotAssigning =
+                        Number(activeAssigningSlot) === Number(slot);
                       const slotImageSrc = slotImageLoading ? null : imgSrc;
 
                       const slotAutomationEnabled =
@@ -5066,6 +5097,7 @@ function ControlView() {
                                 src={slotImageSrc}
                                 hasAssignedNft={hasAssignedNft}
                                 loading={isStarting || slotImageLoading}
+                                assigning={slotAssigning}
                                 padded={usesKoreaTakeitArt}
                                 contain={usesKoreaTakeitArt}
                               />

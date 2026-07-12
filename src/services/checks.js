@@ -2026,6 +2026,12 @@ function createChecksService(ctx, logger, mcp, services = {}) {
     if (walletRefreshTimer) return;
     walletRefreshTimer = setTimeout(() => {
       walletRefreshTimer = null;
+      if (ctx.pauseBackgroundMcpReason) {
+        scheduleFundingWalletRefresh(
+          walletRefreshPendingReason || reason || "token_change",
+        );
+        return;
+      }
       const pending = walletRefreshPendingReason || "token_change";
       walletRefreshPendingReason = null;
       refreshFundingWalletSummary().catch((error) =>
@@ -3840,6 +3846,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
         }
         const id = assignedMissionId(mission);
         const name = missionName(mission) || "unknown mission";
+        const missionSlot = Number(mission?.slot);
         const level = missionLevel(mission);
         const levelText = level === null ? "" : ` lvl=${level}`;
         if (!id) {
@@ -3860,6 +3867,16 @@ function createChecksService(ctx, logger, mcp, services = {}) {
           });
           logDebug("assign", "missing_mission_id", { name });
           continue;
+        }
+
+        if (ctx.guiBridge?.sendEvent) {
+          ctx.guiBridge.sendEvent("assigning", {
+            state: "start",
+            reason,
+            slot: Number.isFinite(missionSlot) ? missionSlot : null,
+            missionName: name,
+            assignedMissionId: id,
+          });
         }
 
         logWithTimestamp(
