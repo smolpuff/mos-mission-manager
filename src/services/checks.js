@@ -60,6 +60,8 @@ function createChecksService(ctx, logger, mcp, services = {}) {
   let ownedMissionNftsCache = null;
   let ownedMissionNftsCacheAt = 0;
   let ownedMissionNftsPromise = null;
+  let ownedMissionNftAvailabilityTimer = null;
+  const ownedMissionNftAvailableAt = new WeakMap();
   let rentableNftsCallChain = Promise.resolve();
   const OWNED_MISSION_NFTS_CACHE_TTL_MS = 2000;
   const MCP_COOLDOWN_RESUME_BUFFER_MS = 250;
@@ -89,6 +91,10 @@ function createChecksService(ctx, logger, mcp, services = {}) {
         const key = nftAccountId(nft);
         if (key) missionNftByAccount.set(key, nft);
       }
+      publishOwnedMissionNftStats(nfts, {
+        reason: "startup_snapshot",
+        missionsResult: snapshot?.missionsResult || null,
+      });
     }
   }
 
@@ -795,6 +801,11 @@ function createChecksService(ctx, logger, mcp, services = {}) {
   }
 
   function nftIsAvailable(n) {
+    const locallyAvailableAt =
+      n && typeof n === "object" ? ownedMissionNftAvailableAt.get(n) : null;
+    if (Number.isFinite(locallyAvailableAt)) {
+      return Date.now() >= locallyAvailableAt;
+    }
     if (
       n?.onCooldown === true ||
       n?.on_cooldown === true ||
@@ -852,6 +863,125 @@ function createChecksService(ctx, logger, mcp, services = {}) {
     if (!endsAt) return true;
     const endsAtMs = new Date(endsAt).getTime();
     return !Number.isFinite(endsAtMs) || endsAtMs <= Date.now();
+  }
+
+  function nftCooldownAvailableAtMs(nft, observedAt = Date.now()) {
+    const explicitEnd =
+      nft?.cooldownEndsAt ??
+      nft?.cooldown_ends_at ??
+      nft?.cooldownEndAt ??
+      nft?.cooldown_end_at ??
+      nft?.cooldownEndDate ??
+      nft?.cooldown_end_date ??
+      nft?.cooldown?.cooldownEndDate ??
+      nft?.cooldown?.cooldown_end_date ??
+      nft?.cooldown?.endsAt ??
+      nft?.cooldown?.ends_at ??
+      nft?.cooldown?.endAt ??
+      nft?.cooldown?.end_at ??
+      nft?.cooldown?.endDate ??
+      nft?.cooldown?.end_date ??
+      nft?.nft?.cooldownEndsAt ??
+      nft?.nft?.cooldown_ends_at ??
+      nft?.nft?.cooldownEndAt ??
+      nft?.nft?.cooldown_end_at ??
+      null;
+    if (explicitEnd) {
+      const explicitMs = new Date(explicitEnd).getTime();
+      if (Number.isFinite(explicitMs)) return explicitMs;
+    }
+    const seconds = nftCooldownSeconds(nft);
+    return Number.isFinite(seconds) && seconds > 0
+      ? observedAt + seconds * 1000
+      : null;
+  }
+
+  function publishOwnedMissionNftStats(
+    nfts,
+    {
+      reason = "inventory",
+      observedAt = Date.now(),
+      missionsResult = ctx.lastUserMissionsResult,
+    } = {},
+  ) {
+    const list = Array.isArray(nfts) ? nfts : [];
+    for (const nft of list) {
+      if (!(nft && typeof nft === "object")) continue;
+      const availableAt = nftCooldownAvailableAtMs(nft, observedAt);
+      if (Number.isFinite(availableAt)) {
+        ownedMissionNftAvailableAt.set(nft, availableAt);
+      }
+    }
+
+    const assignedAccounts = assignedNftAccountSetFromMissions(
+      normalizeMissionList(missionsResult),
+      { reason: `nft_count_${reason}` },
+    );
+    const available = list.filter((nft) => {
+      const account = nftAccountId(nft);
+      return nftIsAvailable(nft) && !(account && assignedAccounts.has(account));
+    }).length;
+    ctx.currentMissionStats = {
+      ...ctx.currentMissionStats,
+      nfts: list.length,
+      nftsTotal: list.length,
+      nftsAvailable: available,
+    };
+    redrawHeaderAndLog(ctx.currentMissionStats);
+    if (ctx.guiBridge && typeof ctx.guiBridge.emitNow === "function") {
+      ctx.guiBridge.emitNow();
+    }
+    logDebug("check", "owned_nft_count_published", {
+      reason,
+      total: list.length,
+      available,
+    });
+
+    if (ownedMissionNftAvailabilityTimer) {
+      clearTimeout(ownedMissionNftAvailabilityTimer);
+      ownedMissionNftAvailabilityTimer = null;
+    }
+    const now = Date.now();
+    const nextAvailableAt = list.reduce((next, nft) => {
+      const at =
+        nft && typeof nft === "object"
+          ? ownedMissionNftAvailableAt.get(nft)
+          : null;
+      if (!Number.isFinite(at) || at <= now) return next;
+      return next === null ? at : Math.min(next, at);
+    }, null);
+    if (nextAvailableAt !== null) {
+      ownedMissionNftAvailabilityTimer = setTimeout(() => {
+        ownedMissionNftAvailabilityTimer = null;
+        publishOwnedMissionNftStats(ownedMissionNftsCache, {
+          reason: "cooldown_elapsed",
+          observedAt: ownedMissionNftsCacheAt,
+        });
+      }, Math.max(100, nextAvailableAt - now + 100));
+      if (typeof ownedMissionNftAvailabilityTimer.unref === "function") {
+        ownedMissionNftAvailabilityTimer.unref();
+      }
+    }
+  }
+
+  function applyLocalOwnedNftAssignmentCount({ source, wasAvailable }) {
+    if (source === "rental" || wasAvailable !== true) return;
+    const before = Number(ctx.currentMissionStats?.nftsAvailable);
+    if (!Number.isFinite(before) || before <= 0) return;
+    const after = Math.max(0, before - 1);
+    ctx.currentMissionStats = {
+      ...ctx.currentMissionStats,
+      nftsAvailable: after,
+    };
+    redrawHeaderAndLog(ctx.currentMissionStats);
+    if (ctx.guiBridge && typeof ctx.guiBridge.emitNow === "function") {
+      ctx.guiBridge.emitNow();
+    }
+    logDebug("assign", "owned_nft_count_updated_locally", {
+      source,
+      before,
+      after,
+    });
   }
 
   function nftCooldownSeconds(nft) {
@@ -1517,6 +1647,10 @@ function createChecksService(ctx, logger, mcp, services = {}) {
       const nfts = normalizeNftList(nftResult);
       ownedMissionNftsCache = nfts;
       ownedMissionNftsCacheAt = Date.now();
+      publishOwnedMissionNftStats(nfts, {
+        reason: "get_mission_nfts",
+        observedAt: ownedMissionNftsCacheAt,
+      });
       return nfts;
     })();
     try {
@@ -4337,6 +4471,8 @@ function createChecksService(ctx, logger, mcp, services = {}) {
           }
           const option = assignmentOptions[index];
           const nft = option.nft;
+          const ownedNftWasAvailable =
+            option.source !== "rental" && nftIsAvailable(nft);
           let account = option.account;
           try {
             if (
@@ -4510,6 +4646,10 @@ function createChecksService(ctx, logger, mcp, services = {}) {
               );
             }
             assigned += 1;
+            applyLocalOwnedNftAssignmentCount({
+              source: option.source,
+              wasAvailable: ownedNftWasAvailable,
+            });
             clearRecentClaimedMissionOverride(id);
             patchMissionResultAfterAssignment(currentMissionResult, {
               assignedMissionId: id,
