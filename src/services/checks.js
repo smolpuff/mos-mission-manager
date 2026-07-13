@@ -5173,6 +5173,46 @@ function createChecksService(ctx, logger, mcp, services = {}) {
     }
   }
 
+  async function refreshOwnedMissionNftStats({
+    forceFresh = false,
+    emit = true,
+  } = {}) {
+    let nftCount = ctx.currentMissionStats.nfts || 0;
+    let nftAvailable = ctx.currentMissionStats.nftsAvailable || 0;
+    try {
+      const nfts = await loadOwnedMissionNfts({ forceFresh });
+      missionNftByAccount.clear();
+      for (const nft of nfts) {
+        const key = nftAccountId(nft);
+        if (key) missionNftByAccount.set(key, nft);
+      }
+      nftCount = nfts.length;
+      nftAvailable = nfts.filter(nftIsAvailable).length;
+    } catch (error) {
+      logDebug("check", "nft_count_failed", { error: error.message });
+    }
+
+    ctx.currentMissionStats = {
+      ...ctx.currentMissionStats,
+      nfts: nftCount,
+      nftsTotal: nftCount,
+      nftsAvailable: nftAvailable,
+    };
+
+    if (emit) {
+      redrawHeaderAndLog(ctx.currentMissionStats);
+      if (ctx.guiBridge && typeof ctx.guiBridge.emitNow === "function") {
+        ctx.guiBridge.emitNow();
+      }
+    }
+
+    return {
+      nfts: nftCount,
+      nftsTotal: nftCount,
+      nftsAvailable: nftAvailable,
+    };
+  }
+
   async function refreshMissionHeaderStats({
     refreshNftCount = false,
     missionsResult = null,
@@ -5198,20 +5238,12 @@ function createChecksService(ctx, logger, mcp, services = {}) {
       let nftCount = ctx.currentMissionStats.nfts || 0;
       let nftAvailable = ctx.currentMissionStats.nftsAvailable || 0;
       if (refreshNftCount) {
-        try {
-          const nfts = await loadOwnedMissionNfts({
-            forceFresh: refreshNftCount === true,
-          });
-          missionNftByAccount.clear();
-          for (const nft of nfts) {
-            const key = nftAccountId(nft);
-            if (key) missionNftByAccount.set(key, nft);
-          }
-          nftCount = nfts.length;
-          nftAvailable = nfts.filter(nftIsAvailable).length;
-        } catch (error) {
-          logDebug("check", "nft_count_failed", { error: error.message });
-        }
+        const refreshedNftStats = await refreshOwnedMissionNftStats({
+          forceFresh: refreshNftCount === true,
+          emit: false,
+        });
+        nftCount = refreshedNftStats.nfts;
+        nftAvailable = refreshedNftStats.nftsAvailable;
       }
 
       if (hydrateAssignedMetadata) {
@@ -5362,6 +5394,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
     filterSelectedMissions,
     logSelectedWatchTargetsAtStartup,
     autoAssignConfiguredMissions,
+    refreshOwnedMissionNftStats,
     stopRentalFastRefresh,
     prepareUnlockSlot4,
     applyMissionSelection,

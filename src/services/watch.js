@@ -1991,6 +1991,9 @@ function createWatchService(
         assigned: followup.assigned,
         reasonSkipped: "preserve_optimistic_claim_ui_until_fresh_snapshot",
       });
+      await checks.refreshOwnedMissionNftStats({
+        forceFresh: true,
+      });
     } else {
       await checks.refreshMissionHeaderStats({
         missionsResult: followup.missionResult,
