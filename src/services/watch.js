@@ -1991,9 +1991,6 @@ function createWatchService(
         assigned: followup.assigned,
         reasonSkipped: "preserve_optimistic_claim_ui_until_fresh_snapshot",
       });
-      await checks.refreshOwnedMissionNftStats({
-        forceFresh: true,
-      });
     } else {
       await checks.refreshMissionHeaderStats({
         missionsResult: followup.missionResult,
@@ -3147,6 +3144,13 @@ function createWatchService(
         const result = await getMissionResultShared({
           forceFresh: true,
           reason,
+        });
+        // Publish the snapshot this existing poll already fetched. Explicitly
+        // disable NFT/metadata hydration so card updates add no MCP calls.
+        await checks.refreshMissionHeaderStats({
+          missionsResult: result,
+          refreshNftCount: false,
+          hydrateAssignedMetadata: false,
         });
         if (ctx.debugMode) {
           missionStateById = await pollMissionStateChanges(
