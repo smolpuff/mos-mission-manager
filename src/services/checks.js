@@ -4804,7 +4804,12 @@ function createChecksService(ctx, logger, mcp, services = {}) {
         }
         await refreshMissionHeaderStats({
           missionsResult: currentMissionResult,
-          refreshNftCount: false,
+          // A successful owned assignment changes the number shown in the
+          // control-page header. Re-read the owned NFT state here, at the
+          // shared assignment success boundary, so every assignment path
+          // (startup, watch polling, auto mode, and rental refresh) publishes
+          // the current availability instead of preserving the startup count.
+          refreshNftCount: true,
         });
         if (ctx.debugMode) {
           logWithTimestamp(
