@@ -55,7 +55,7 @@ function createWatchService(
   let walletRefreshPendingReason = null;
   let currentWalletSummaryRefreshTimer = null;
   let currentWalletSummaryRefreshPendingReason = null;
-  let nftCountWarmTimer = null;
+  let nftCountRefreshTimer = null;
   let watchStartupAssignBackoffUntil = 0;
 
   function summarizeNamesForUser(items = [], limit = 2) {
@@ -2944,29 +2944,28 @@ function createWatchService(
     return until > Date.now() ? until - Date.now() : 0;
   }
 
-  function scheduleNftCountWarmup({
+  function scheduleNftCountRefresh({
     reason = "watch",
     missionsResult = null,
     minDelayMs = 0,
   } = {}) {
-    if (nftCountWarmTimer) return;
-    if (Number(ctx.currentMissionStats?.nftsTotal || 0) > 0) return;
+    if (nftCountRefreshTimer) return;
     const delayMs = Math.max(
       8000,
       Number(minDelayMs || 0),
       getMcpCooldownRemainingMs(),
       getAutoAssignCooldownRemainingMs(),
     );
-    logDebug("watch", "nft_count_warmup_scheduled", {
+    logDebug("watch", "nft_count_refresh_scheduled", {
       reason,
       delayMs,
       hasMissionResult: Boolean(missionsResult),
     });
-    nftCountWarmTimer = setTimeout(async () => {
-      nftCountWarmTimer = null;
+    nftCountRefreshTimer = setTimeout(async () => {
+      nftCountRefreshTimer = null;
       if (!ctx.watchLoopEnabled || !ctx.watcherRunning) return;
       if (ctx.pauseBackgroundMcpReason) {
-        scheduleNftCountWarmup({
+        scheduleNftCountRefresh({
           reason: `${reason}_paused`,
           missionsResult:
             missionsResult ||
@@ -2976,13 +2975,12 @@ function createWatchService(
         });
         return;
       }
-      if (Number(ctx.currentMissionStats?.nftsTotal || 0) > 0) return;
       const retryDelayMs = Math.max(
         getMcpCooldownRemainingMs(),
         getAutoAssignCooldownRemainingMs(),
       );
       if (retryDelayMs > 0) {
-        scheduleNftCountWarmup({
+        scheduleNftCountRefresh({
           reason: `${reason}_retry`,
           missionsResult:
             missionsResult ||
@@ -3001,13 +2999,13 @@ function createWatchService(
           refreshNftCount: true,
           hydrateAssignedMetadata: false,
         });
-        logDebug("watch", "nft_count_warmup_complete", {
+        logDebug("watch", "nft_count_refresh_complete", {
           reason,
           nftsTotal: Number(ctx.currentMissionStats?.nftsTotal || 0),
           nftsAvailable: Number(ctx.currentMissionStats?.nftsAvailable || 0),
         });
       } catch (error) {
-        logDebug("watch", "nft_count_warmup_failed", {
+        logDebug("watch", "nft_count_refresh_failed", {
           reason,
           error: error.message,
         });
@@ -3876,7 +3874,7 @@ function createWatchService(
           reason: "no_startup_snapshot",
         });
       }
-      scheduleNftCountWarmup({
+    scheduleNftCountRefresh({
         reason: "startup",
         missionsResult:
           initialMissionResult || ctx.lastUserMissionsResult || null,
@@ -3908,12 +3906,10 @@ function createWatchService(
             `[WATCH] ℹ️ Cycle complete: no claims (polls=${summary.polls}, eligible=${summary.eligible}). Next check continues automatically.`,
           );
         }
-        if (Number(ctx.currentMissionStats?.nftsTotal || 0) <= 0) {
-          scheduleNftCountWarmup({
-            reason: "cycle_complete",
-            missionsResult: ctx.lastUserMissionsResult || null,
-          });
-        }
+        scheduleNftCountRefresh({
+          reason: "cycle_complete",
+          missionsResult: ctx.lastUserMissionsResult || null,
+        });
         const cooldownMs = getMcpCooldownRemainingMs();
         if (cooldownMs > 0) {
           logWithTimestamp(
