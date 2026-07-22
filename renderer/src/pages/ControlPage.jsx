@@ -363,10 +363,7 @@ function MissionSlotImage({
       ) : showSpinner ? (
         <MissionSlotFallback label={placeholderLabel} loading />
       ) : (
-        <MissionSlotFallback
-          label={placeholderLabel}
-          assigning={assigning}
-        />
+        <MissionSlotFallback label={placeholderLabel} assigning={assigning} />
       )}
       {activeSrc && imageFailed ? (
         <div className="mission-image-placeholder">No image</div>
@@ -604,9 +601,14 @@ function ControlView() {
     String(status.nftCooldownResetMaxPbp ?? 20),
   );
   const [nftAssignmentOrder, setNftAssignmentOrderState] = useState(
-    status.nftAssignmentOrder === "highest_level_first"
-      ? "highest_level_first"
-      : "normal",
+    ["highest_level_first", "lowest_level_first", "rotate_least_used", "collection_first", "normal"].includes(
+      status.nftAssignmentOrder,
+    )
+      ? status.nftAssignmentOrder
+      : "rotate_least_used",
+  );
+  const [nftAssignmentCollection, setNftAssignmentCollectionState] = useState(
+    String(status.nftAssignmentCollection || ""),
   );
   const [competitionRangeLockEnabled, setCompetitionRangeLockEnabled] =
     useState(false);
@@ -966,12 +968,20 @@ function ControlView() {
   useEffect(() => {
     if (typeof status.nftAssignmentOrder === "string") {
       setNftAssignmentOrderState(
-        status.nftAssignmentOrder === "highest_level_first"
-          ? "highest_level_first"
-          : "normal",
+        ["highest_level_first", "lowest_level_first", "rotate_least_used", "collection_first", "normal"].includes(
+          status.nftAssignmentOrder,
+        )
+          ? status.nftAssignmentOrder
+          : "rotate_least_used",
       );
     }
   }, [status.nftAssignmentOrder]);
+
+  useEffect(() => {
+    if (typeof status.nftAssignmentCollection === "string") {
+      setNftAssignmentCollectionState(status.nftAssignmentCollection);
+    }
+  }, [status.nftAssignmentCollection]);
 
   useEffect(() => {
     const maxPbp = Number(status.nftCooldownResetMaxPbp);
@@ -1039,10 +1049,15 @@ function ControlView() {
         setNftResetEnabled(config.nftCooldownResetEnabled);
       }
       setNftAssignmentOrderState(
-        config.nftAssignmentOrder === "highest_level_first"
-          ? "highest_level_first"
-          : "normal",
+        ["highest_level_first", "lowest_level_first", "rotate_least_used", "collection_first", "normal"].includes(
+          config.nftAssignmentOrder,
+        )
+          ? config.nftAssignmentOrder
+          : "rotate_least_used",
       );
+      if (typeof config.nftAssignmentCollection === "string") {
+        setNftAssignmentCollectionState(config.nftAssignmentCollection);
+      }
       if (typeof config.competitionRangeLockEnabled === "boolean") {
         setCompetitionRangeLockEnabled(config.competitionRangeLockEnabled);
       }
@@ -1371,12 +1386,23 @@ function ControlView() {
     await applyConfigPatch({ nftCooldownResetMaxPbp: next });
   };
   const setNftAssignmentOrder = async (value) => {
-    const next =
-      String(value || "").trim() === "highest_level_first"
-        ? "highest_level_first"
-        : "normal";
+    const requested = String(value || "").trim();
+    const next = [
+      "highest_level_first",
+      "lowest_level_first",
+      "rotate_least_used",
+      "collection_first",
+      "normal",
+    ].includes(requested)
+      ? requested
+      : "rotate_least_used";
     setNftAssignmentOrderState(next);
     await applyConfigPatch({ nftAssignmentOrder: next });
+  };
+  const setNftAssignmentCollection = async (value) => {
+    const next = String(value || "").trim();
+    setNftAssignmentCollectionState(next);
+    await applyConfigPatch({ nftAssignmentCollection: next });
   };
   const setMissionActionEnabled = async (slot, enabled) => {
     const key = String(slot);
@@ -3395,7 +3421,10 @@ function ControlView() {
               setReducedMotionEnabled={setReducedMotionEnabled}
               nftAssignmentOrder={nftAssignmentOrder}
               setNftAssignmentOrder={setNftAssignmentOrder}
-              debugEnabled={debugEnabled}
+              nftAssignmentCollection={nftAssignmentCollection}
+              setNftAssignmentCollection={setNftAssignmentCollection}
+              bridge={bridge}
+              isMissionMode={isMissionMode}
               onManualUpdateCheck={() => runUpdateCheck({ manual: true })}
               updateCheckBusy={updateCheckBusy}
               updateCheckMessage={updateCheckMessage}
@@ -4433,7 +4462,8 @@ function ControlView() {
                             Mission Mode
                           </div>
                           <div className="text-xs">
-                            Mission reset at level {missionModeButtonLevel}
+                            Mission reset at level {missionModeButtonLevel},
+                            rotates NFT assignment
                           </div>
                         </div>
                         <div class="mo-fire">

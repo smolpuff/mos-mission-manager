@@ -38,6 +38,11 @@ const {
   emitClaimAnalyticsEvent,
   registerClaimEvent,
 } = require("../claim-analytics");
+const {
+  loadNftAssignmentRotation,
+  normalizeUsage: normalizeNftAssignmentUsage,
+  saveNftAssignmentRotation,
+} = require("../nft-assignment-rotation");
 
 function createChecksService(ctx, logger, mcp, services = {}) {
   const { logWithTimestamp, logDebug, redrawHeaderAndLog, formatTaggedLog } =
@@ -62,10 +67,49 @@ function createChecksService(ctx, logger, mcp, services = {}) {
   let ownedMissionNftsPromise = null;
   let ownedMissionNftAvailabilityTimer = null;
   const ownedMissionNftAvailableAt = new WeakMap();
+  // Track successful assignments for the rotation policy. A random stable
+  // tie-breaker gives every new session a different traversal of the pool.
+  const nftAssignmentUsage = new Map();
+  let nftAssignmentUsageLoaded = false;
+  const nftAssignmentTieBreaker = new Map();
   let rentableNftsCallChain = Promise.resolve();
   const OWNED_MISSION_NFTS_CACHE_TTL_MS = 2000;
   const MCP_COOLDOWN_RESUME_BUFFER_MS = 250;
   const RENTAL_RESET_PREPARE_DELAY_MS = 2500;
+
+  function ensureNftAssignmentUsageLoaded() {
+    if (nftAssignmentUsageLoaded) return;
+    nftAssignmentUsageLoaded = true;
+    const diskUsage = loadNftAssignmentRotation(
+      ctx.nftAssignmentRotationPath,
+    );
+    const legacyUsage = normalizeNftAssignmentUsage(
+      ctx.config?.nftAssignmentUsage,
+    );
+    for (const [account, count] of Object.entries({
+      ...legacyUsage,
+      ...diskUsage,
+    })) {
+      nftAssignmentUsage.set(account, count);
+    }
+    if (Object.keys(legacyUsage).length > 0) {
+      saveNftAssignmentRotation(
+        ctx.nftAssignmentRotationPath,
+        Object.fromEntries(nftAssignmentUsage),
+      );
+    }
+    if (Object.prototype.hasOwnProperty.call(ctx.config || {}, "nftAssignmentUsage")) {
+      delete ctx.config.nftAssignmentUsage;
+      flushConfig(ctx, logDebug);
+    }
+  }
+
+  function persistNftAssignmentUsage() {
+    saveNftAssignmentRotation(
+      ctx.nftAssignmentRotationPath,
+      Object.fromEntries(nftAssignmentUsage),
+    );
+  }
 
   function startupAccountSnapshot() {
     const wrapper =
@@ -1248,10 +1292,22 @@ function createChecksService(ctx, logger, mcp, services = {}) {
   }
 
   function nftAssignmentOrderMode() {
+    if (
+      ctx.missionModeEnabled === true ||
+      ctx.config?.missionModeEnabled === true
+    ) {
+      return "rotate_least_used";
+    }
     const raw = String(ctx.config?.nftAssignmentOrder || ctx.nftAssignmentOrder || "")
       .trim()
       .toLowerCase();
-    return raw === "highest_level_first" ? raw : "normal";
+    return raw === "highest_level_first" ||
+      raw === "lowest_level_first" ||
+      raw === "collection_first" ||
+      raw === "rotate_least_used" ||
+      raw === "normal"
+      ? raw
+      : "rotate_least_used";
   }
 
   function nftLevelValue(nft) {
@@ -1268,12 +1324,52 @@ function createChecksService(ctx, logger, mcp, services = {}) {
   }
 
   function compareNftAssignmentOrder(a, b) {
+    if (nftAssignmentOrderMode() === "rotate_least_used") {
+      ensureNftAssignmentUsageLoaded();
+      const accountA = nftAccountId(a?.nft || a);
+      const accountB = nftAccountId(b?.nft || b);
+      if (!nftAssignmentTieBreaker.has(accountA)) {
+        nftAssignmentTieBreaker.set(accountA, Math.random());
+      }
+      if (!nftAssignmentTieBreaker.has(accountB)) {
+        nftAssignmentTieBreaker.set(accountB, Math.random());
+      }
+      return (
+        (nftAssignmentUsage.get(accountA) || 0) -
+          (nftAssignmentUsage.get(accountB) || 0) ||
+        nftAssignmentTieBreaker.get(accountA) -
+          nftAssignmentTieBreaker.get(accountB) ||
+        compareNftAccountOrder(a, b)
+      );
+    }
     if (nftAssignmentOrderMode() === "highest_level_first") {
       return (
         nftLevelValue(b?.nft || b) - nftLevelValue(a?.nft || a) ||
         nftCooldownSeconds(a?.nft || a) - nftCooldownSeconds(b?.nft || b) ||
         compareNftAccountOrder(a, b)
       );
+    }
+    if (nftAssignmentOrderMode() === "lowest_level_first") {
+      const levelA = nftLevelValue(a?.nft || a);
+      const levelB = nftLevelValue(b?.nft || b);
+      return (
+        (levelA < 0 ? Number.POSITIVE_INFINITY : levelA) -
+          (levelB < 0 ? Number.POSITIVE_INFINITY : levelB) ||
+        nftCooldownSeconds(a?.nft || a) - nftCooldownSeconds(b?.nft || b) ||
+        compareNftAccountOrder(a, b)
+      );
+    }
+    if (nftAssignmentOrderMode() === "collection_first") {
+      const selectedCollection = normalizeCollectionKey(
+        ctx.config?.nftAssignmentCollection || ctx.nftAssignmentCollection,
+      );
+      const aMatches = selectedCollection
+        ? nftCollectionKeys(a?.nft || a).includes(selectedCollection)
+        : false;
+      const bMatches = selectedCollection
+        ? nftCollectionKeys(b?.nft || b).includes(selectedCollection)
+        : false;
+      return Number(bMatches) - Number(aMatches) || compareNftAccountOrder(a, b);
     }
     return compareNftAccountOrder(a, b);
   }
@@ -1308,13 +1404,16 @@ function createChecksService(ctx, logger, mcp, services = {}) {
   }
 
   function normalizeCollectionKey(value) {
-    return String(value || "")
+    const key = String(value || "")
       .trim()
       .toLowerCase()
       .replace(/&/g, " and ")
       .replace(/\s+/g, " ")
       .replace(/[^a-z0-9 ]/g, "")
       .trim();
+    if (/^s[o0]{2}k$/.test(key)) return "500k";
+    if (/^[il1][o0]{2}k$/.test(key)) return "100k";
+    return key;
   }
 
   function nftCollectionKeys(nft) {
@@ -1340,13 +1439,11 @@ function createChecksService(ctx, logger, mcp, services = {}) {
   }
 
   const LEVEL20_RESERVED_COLLECTION_KEYS = new Set([
-    "iook",
     "100k",
     "100 k",
     "100000",
     "100 000",
     "100k club",
-    "sook",
     "500k",
     "500 k",
     "500000",
@@ -1409,8 +1506,22 @@ function createChecksService(ctx, logger, mcp, services = {}) {
     }
     const primary = [];
     const reserved = [];
+    const selectedCollection =
+      nftAssignmentOrderMode() === "collection_first"
+        ? normalizeCollectionKey(
+            ctx.config?.nftAssignmentCollection || ctx.nftAssignmentCollection,
+          )
+        : "";
     for (const entry of sortedEntries) {
-      if (isLevel20ReservedCollectionNft(entry.nft)) reserved.push(entry);
+      const isSelectedCollection =
+        selectedCollection &&
+        nftCollectionKeys(entry.nft).includes(selectedCollection);
+      if (
+        isLevel20ReservedCollectionNft(entry.nft) &&
+        !isSelectedCollection
+      ) {
+        reserved.push(entry);
+      }
       else primary.push(entry);
     }
     return { primary, reserved };
@@ -3898,6 +4009,21 @@ function createChecksService(ctx, logger, mcp, services = {}) {
         candidates,
       } = await loadAssignableCandidates(reason, resolved, missionsResult);
 
+      if (nftAssignmentOrderMode() === "rotate_least_used") {
+        ensureNftAssignmentUsageLoaded();
+        let seededRotationUsage = false;
+        for (const mission of Array.isArray(missions) ? missions : []) {
+          const account = missionAssignedNftAccount(mission);
+          if (account && !nftAssignmentUsage.has(account)) {
+            nftAssignmentUsage.set(account, 1);
+            seededRotationUsage = true;
+          }
+        }
+        if (seededRotationUsage) {
+          persistNftAssignmentUsage();
+        }
+      }
+
       if (candidates.length === 0) {
         logDebug("assign", "slot_unlock_skipped_auto", {
           reason,
@@ -4090,7 +4216,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
           .filter((entry) => !alreadyAssignedNftAccounts.has(entry.account))
           .filter((entry) => nftIsAvailable(entry.nft))
           .filter((entry) => entry.account)
-          .sort(compareNftAccountOrder);
+          .sort(compareNftAssignmentOrder);
         const {
           primary: primaryReadyOwnedCandidates,
           reserved: reservedReadyOwnedCandidates,
@@ -4414,6 +4540,16 @@ function createChecksService(ctx, logger, mcp, services = {}) {
           missionId: id,
           stage: assignmentSourceStage,
           optionCount: assignmentOptions.length,
+          rotationCandidates:
+            nftAssignmentOrderMode() === "rotate_least_used"
+              ? assignmentOptions.slice(0, 10).map((option) => ({
+                  nftAccount: option.account || nftAccountId(option.nft),
+                  priorAssignments:
+                    nftAssignmentUsage.get(
+                      option.account || nftAccountId(option.nft),
+                    ) || 0,
+                }))
+              : undefined,
         });
         if (assignmentOptions.length === 0) {
           logWithTimestamp(
@@ -4646,6 +4782,14 @@ function createChecksService(ctx, logger, mcp, services = {}) {
               );
             }
             assigned += 1;
+            if (nftAssignmentOrderMode() === "rotate_least_used") {
+              ensureNftAssignmentUsageLoaded();
+              nftAssignmentUsage.set(
+                account,
+                (nftAssignmentUsage.get(account) || 0) + 1,
+              );
+              persistNftAssignmentUsage();
+            }
             applyLocalOwnedNftAssignmentCount({
               source: option.source,
               wasAvailable: ownedNftWasAvailable,

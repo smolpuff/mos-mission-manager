@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import ToggleSwitch from "../components/ToggleSwitch/app";
 import solIcon from "../img/icon-sm__sol.svg";
 import pbpIcon from "../img/icon-sm__pbp.webp";
+import { canonicalCollectionLabel } from "../collection-images";
 
 function formatLastChecked(value) {
   const ts = Number(value || 0);
@@ -32,13 +33,18 @@ export default function SettingsPage({
   setReducedMotionEnabled,
   nftAssignmentOrder,
   setNftAssignmentOrder,
-  debugEnabled = false,
+  nftAssignmentCollection,
+  setNftAssignmentCollection,
+  bridge,
+  isMissionMode = false,
   onManualUpdateCheck,
   updateCheckBusy,
   updateCheckMessage,
 }) {
   const [copyAddressLabel, setCopyAddressLabel] = useState("Copy");
   const [showUpToDateState, setShowUpToDateState] = useState(false);
+  const [nftCollections, setNftCollections] = useState([]);
+  const [nftCollectionsLoading, setNftCollectionsLoading] = useState(false);
   const updateCheckIsUpToDate = updateCheckMessage === "You are up to date.";
   const renderUpToDateState = updateCheckIsUpToDate && showUpToDateState;
   const showInlineUpdateMessage =
@@ -61,6 +67,37 @@ export default function SettingsPage({
     }, 3500);
     return () => clearTimeout(timer);
   }, [clearUpdateCheckMessage, updateCheckIsUpToDate]);
+
+  useEffect(() => {
+    if (isMissionMode || nftAssignmentOrder !== "collection_first") return;
+    if (!bridge?.getUserNfts) return;
+    let cancelled = false;
+    setNftCollectionsLoading(true);
+    void bridge
+      .getUserNfts()
+      .then((result) => {
+        if (cancelled || !result?.ok) return;
+        const names = (Array.isArray(result.nfts) ? result.nfts : [])
+          .map((nft) => String(nft?.collection || "").trim())
+          .filter(Boolean);
+        const canonicalNames = names.map(canonicalCollectionLabel);
+        const unique = Array.from(
+          new Map(
+            canonicalNames.map((name) => [name.toLowerCase(), name]),
+          ).values(),
+        ).sort((a, b) => a.localeCompare(b));
+        setNftCollections(unique);
+      })
+      .catch(() => {
+        if (!cancelled) setNftCollections([]);
+      })
+      .finally(() => {
+        if (!cancelled) setNftCollectionsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [bridge, isMissionMode, nftAssignmentOrder]);
 
   return (
     <section>
@@ -363,32 +400,104 @@ export default function SettingsPage({
               />
             </div>
 
-            {debugEnabled ? (
-              <div className="">
-                <div className="flex flex-wrap items-center gap-5">
-                  <label
-                    htmlFor="nftAssignmentOrder"
-                    className="text-xs text-white whitespace-nowrap"
-                  >
-                    Assign By
-                  </label>
-                  <select
-                    id="nftAssignmentOrder"
-                    value={nftAssignmentOrder}
-                    onChange={(event) =>
-                      void setNftAssignmentOrder?.(event.target.value)
-                    }
-                    className="select select-sm bg-black/50 focus-within:bg-black border-white/10 text-slate-100 max-w-fit flex-1"
-                  >
-                    {" "}
-                    <option value="highest_level_first">
-                      Highest level NFT first
-                    </option>
-                    <option value="normal">Normal order</option>
-                  </select>
+            <div className="">
+              <div
+                className={`flex flex-nowrap items-start gap-5 ${isMissionMode ? "cursor-not-allowed" : ""}`}
+              >
+                <label
+                  htmlFor="nftAssignmentOrder"
+                  className={`text-xs text-white whitespace-nowrap mt-1 ${isMissionMode ? "cursor-not-allowed opacity-60" : ""}`}
+                >
+                  Assign By
+                </label>
+                <div className="flex flex-row flex-nowrap items-start gap-2">
+                  <div className="flex flex-col items-start">
+                    <select
+                      id="nftAssignmentOrder"
+                      value={
+                        isMissionMode ? "rotate_least_used" : nftAssignmentOrder
+                      }
+                      disabled={isMissionMode}
+                      title={
+                        isMissionMode
+                          ? "Mission Mode always rotates through NFTs"
+                          : "Choose how NFTs are assigned"
+                      }
+                      onChange={(event) =>
+                        void setNftAssignmentOrder?.(event.target.value)
+                      }
+                      className={`select select-sm w-52 shrink-0 bg-black/50 focus-within:bg-black border-white/10 text-slate-100 ${
+                        isMissionMode ? "cursor-not-allowed opacity-60" : ""
+                      }`}
+                    >
+                      <option value="rotate_least_used">
+                        Rotate through all NFTs
+                      </option>
+                      <option value="highest_level_first">
+                        Highest level NFT first
+                      </option>
+                      <option value="lowest_level_first">
+                        Lowest level NFT first
+                      </option>
+                      <option value="collection_first">
+                        Specific Collection first
+                      </option>
+                      <option value="normal">Normal order</option>
+                    </select>
+                    {isMissionMode ? (
+                      <span className="mt-1 text-[11px] leading-tight text-slate-400">
+                        Locked in Mission Mode — uses every eligible NFT before
+                        repeating
+                      </span>
+                    ) : (
+                      <span className="mt-1 text-[11px] leading-tight text-slate-400">
+                        {nftAssignmentOrder === "rotate_least_used"
+                          ? "Uses every eligible NFT before repeating"
+                          : "NFTs assignment order"}
+                      </span>
+                    )}
+                  </div>
+                  {!isMissionMode &&
+                  nftAssignmentOrder === "collection_first" ? (
+                    <div className="flex flex-col items-start">
+                      <select
+                        id="nftAssignmentCollection"
+                        value={nftAssignmentCollection || ""}
+                        disabled={nftCollectionsLoading}
+                        onChange={(event) =>
+                          void setNftAssignmentCollection?.(event.target.value)
+                        }
+                        className="select select-sm w-44 shrink-0 bg-black/50 focus-within:bg-black border-white/10 text-slate-100"
+                      >
+                        <option value="">
+                          {nftCollectionsLoading
+                            ? "Loading collections…"
+                            : "Choose collection"}
+                        </option>
+                        {nftAssignmentCollection &&
+                        !nftCollections.some(
+                          (name) =>
+                            name.toLowerCase() ===
+                            nftAssignmentCollection.toLowerCase(),
+                        ) ? (
+                          <option value={nftAssignmentCollection}>
+                            {nftAssignmentCollection}
+                          </option>
+                        ) : null}
+                        {nftCollections.map((name) => (
+                          <option key={name.toLowerCase()} value={name}>
+                            {name}
+                          </option>
+                        ))}
+                      </select>
+                      <span className="mt-1 text-[11px] leading-tight text-slate-400">
+                        Preferred until no usable NFTs remain
+                      </span>
+                    </div>
+                  ) : null}
                 </div>
               </div>
-            ) : null}
+            </div>
           </div>
         </div>
       </div>

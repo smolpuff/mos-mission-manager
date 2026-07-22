@@ -27,6 +27,11 @@ function createContext() {
     MCP_URL,
     MCP_PROTOCOL_VERSION,
     configPath: path.join(configDir, "config.json"),
+    nftAssignmentRotationPath: path.join(
+      configDir,
+      "data",
+      "nft-assignment-rotation.json",
+    ),
     tokenFilePath: path.join(os.homedir(), ".pbp-mcp", "token.json"),
     LOG_BUFFER_SIZE,
     LOG_BUFFER_SIZE_DEBUG,
@@ -92,7 +97,8 @@ function createContext() {
       4: Number(defaults.missionResetLevel) || 10,
     },
     nftCooldownResetEnabled: false,
-    nftAssignmentOrder: "normal",
+    nftAssignmentOrder: "rotate_least_used",
+    nftAssignmentCollection: "",
     currentMissionResetLevel:
       String(process.env.PBP_DEFAULT_MISSION_RESET_LEVEL || "").trim() ||
       defaults.missionResetLevel,

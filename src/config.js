@@ -29,6 +29,7 @@ const SALVAGE_TOP_LEVEL_KEYS = [
   "missionResetPerSlotLevelBySlot",
   "nftCooldownResetEnabled",
   "nftAssignmentOrder",
+  "nftAssignmentCollection",
   "nftCooldownResetMissionModeEnabled",
   "nftCooldownResetMaxPbp",
   "nftCooldownResetProbeLimit",
@@ -379,10 +380,28 @@ function loadConfig(ctx, logWithTimestamp) {
     .trim()
     .toLowerCase();
   ctx.config.nftAssignmentOrder =
-    nftAssignmentOrder === "highest_level_first"
-      ? "highest_level_first"
-      : "normal";
+    nftAssignmentOrder === "highest_level_first" ||
+    nftAssignmentOrder === "lowest_level_first" ||
+    nftAssignmentOrder === "collection_first" ||
+    nftAssignmentOrder === "rotate_least_used" ||
+    nftAssignmentOrder === "normal"
+      ? nftAssignmentOrder
+      : "rotate_least_used";
   ctx.nftAssignmentOrder = ctx.config.nftAssignmentOrder;
+  const nftAssignmentCollection = String(
+    ctx.config.nftAssignmentCollection || "",
+  ).trim();
+  const nftAssignmentCollectionKey = nftAssignmentCollection
+    .toLowerCase()
+    .replace(/\s+/g, "");
+  ctx.config.nftAssignmentCollection = /^s[o0]{2}k$/.test(
+    nftAssignmentCollectionKey,
+  )
+    ? "500K"
+    : /^[il1][o0]{2}k$/.test(nftAssignmentCollectionKey)
+      ? "100K"
+      : nftAssignmentCollection;
+  ctx.nftAssignmentCollection = ctx.config.nftAssignmentCollection;
   const nftCooldownResetMaxPbp = Number(ctx.config.nftCooldownResetMaxPbp);
   ctx.config.nftCooldownResetMaxPbp =
     Number.isFinite(nftCooldownResetMaxPbp) && nftCooldownResetMaxPbp >= 0

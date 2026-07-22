@@ -15,49 +15,48 @@ import imgTonya from "./img/nft/tonya.webp";
 import imgUndead from "./img/nft/undead.webp";
 
 export function normalizeCollectionKey(value) {
-  return String(value || "")
+  const key = String(value || "")
     .trim()
     .toLowerCase()
     .replace(/&/g, " and ")
     .replace(/\s+/g, " ")
     .replace(/[^a-z0-9 ]/g, "")
     .trim();
+  if (/^s[o0]{2}k$/.test(key)) return "500k";
+  if (/^[il1][o0]{2}k$/.test(key)) return "100k";
+  return key;
 }
 
 export function canonicalCollectionLabel(value) {
   const key = normalizeCollectionKey(value);
   if (
-    key === "iook" ||
     key === "100k" ||
     key === "100 k" ||
     key === "100000" ||
     key === "100 000" ||
     key === "100k club"
   ) {
-    return "100k";
+    return "100K";
   }
   if (
-    key === "sook" ||
     key === "500k" ||
     key === "500 k" ||
     key === "500000" ||
     key === "500 000" ||
     key === "500k club"
   ) {
-    return "500k";
+    return "500K";
   }
   return String(value || "").trim() || "unknown";
 }
 
 const COLLECTION_IMAGE_BY_KEY = new Map([
-  ["iook", img100k],
   ["100k", img100k],
   ["100 k", img100k],
   ["100000", img100k],
   ["100 000", img100k],
   ["100k club", img100k],
 
-  ["sook", img500k],
   ["500k", img500k],
   ["500 k", img500k],
   ["500000", img500k],

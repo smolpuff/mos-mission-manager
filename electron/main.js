@@ -223,7 +223,8 @@ const backendStatus = {
   missionResetPerSlotLevelBySlot: null,
   debugMode: null,
   nftCooldownResetEnabled: null,
-  nftAssignmentOrder: null,
+  nftAssignmentOrder: "rotate_least_used",
+  nftAssignmentCollection: "",
   nftCooldownResetMaxPbp: null,
   currentMissionResetLevel: null,
   sessionTotalsEpoch: null,
@@ -1209,7 +1210,12 @@ function updateBackendStateFromIpc(payload) {
       key === "running" ||
       key === "pid" ||
       key === "exitCode" ||
-      key === "exitSignal"
+      key === "exitSignal" ||
+      // Desktop config is authoritative for these controls. A backend state
+      // snapshot can briefly contain the value from before config sync and
+      // must not make the UI jump back to that stale selection.
+      key === "nftAssignmentOrder" ||
+      key === "nftAssignmentCollection"
     ) {
       continue;
     }
@@ -1879,6 +1885,11 @@ function normalizeDesktopCompetitionConfig(config = {}) {
     config && typeof config === "object" && !Array.isArray(config)
       ? { ...config }
       : {};
+  if (typeof next.nftAssignmentCollection === "string") {
+    next.nftAssignmentCollection = canonicalNftCollectionName(
+      next.nftAssignmentCollection,
+    );
+  }
   const popupSuppressedThroughNumber = Number(
     next.missionCompetitionPopupSuppressedThroughNumber,
   );
@@ -3174,9 +3185,16 @@ function hydrateBackendStatusFromConfig() {
     .trim()
     .toLowerCase();
   backendStatus.nftAssignmentOrder =
-    nftAssignmentOrder === "highest_level_first"
-      ? "highest_level_first"
-      : "normal";
+    nftAssignmentOrder === "highest_level_first" ||
+    nftAssignmentOrder === "lowest_level_first" ||
+    nftAssignmentOrder === "collection_first" ||
+    nftAssignmentOrder === "rotate_least_used" ||
+    nftAssignmentOrder === "normal"
+      ? nftAssignmentOrder
+      : "rotate_least_used";
+  backendStatus.nftAssignmentCollection = String(
+    config.nftAssignmentCollection || "",
+  ).trim();
   if (config.nftCooldownResetMaxPbp !== undefined) {
     const maxPbp = Number(config.nftCooldownResetMaxPbp);
     backendStatus.nftCooldownResetMaxPbp =
@@ -3734,6 +3752,14 @@ function missionRewardLabel(mission = {}) {
   return extractMissionReward(mission).label;
 }
 
+function canonicalNftCollectionName(value) {
+  const label = String(value || "").trim();
+  const key = label.toLowerCase().replace(/\s+/g, "");
+  if (/^s[o0]{2}k$/.test(key) || /^(500k|500000)$/.test(key)) return "500K";
+  if (/^[il1][o0]{2}k$/.test(key) || /^(100k|100000)$/.test(key)) return "100K";
+  return label;
+}
+
 function missionCollectionEntries(mission = {}) {
   const rawCandidates = [
     mission?.collections,
@@ -3771,7 +3797,7 @@ function missionCollectionEntries(mission = {}) {
       typeof entry === "string"
         ? entry
         : entry?.name || entry?.title || entry?.collection || entry?.symbol;
-    const s = String(name || "").trim();
+    const s = canonicalNftCollectionName(name);
     if (!s) return;
     const key = s.toLowerCase();
     if (seen.has(key)) return;
@@ -5259,7 +5285,18 @@ app.whenReady().then(async () => {
         .trim()
         .toLowerCase();
       backendStatus.nftAssignmentOrder =
-        nextOrder === "highest_level_first" ? nextOrder : "normal";
+        nextOrder === "highest_level_first" ||
+        nextOrder === "lowest_level_first" ||
+        nextOrder === "collection_first" ||
+        nextOrder === "rotate_least_used" ||
+        nextOrder === "normal"
+          ? nextOrder
+          : "rotate_least_used";
+    }
+    if (typeof next.nftAssignmentCollection === "string") {
+      backendStatus.nftAssignmentCollection = String(
+        next.nftAssignmentCollection || "",
+      ).trim();
     }
     if (typeof next.debugMode === "boolean") {
       backendStatus.debugMode = next.debugMode;
@@ -5396,6 +5433,10 @@ app.whenReady().then(async () => {
         ) ||
         Object.prototype.hasOwnProperty.call(
           requestedPatch,
+          "nftAssignmentCollection",
+        ) ||
+        Object.prototype.hasOwnProperty.call(
+          requestedPatch,
           "nftCooldownResetMaxPbp",
         ))
     ) {
@@ -5411,6 +5452,7 @@ app.whenReady().then(async () => {
         nftCooldownResetMissionModeEnabled:
           next.nftCooldownResetMissionModeEnabled,
         nftAssignmentOrder: next.nftAssignmentOrder,
+        nftAssignmentCollection: next.nftAssignmentCollection,
         nftCooldownResetMaxPbp: next.nftCooldownResetMaxPbp,
       }).catch((error) => {
         pushSystemLog(
@@ -5751,9 +5793,7 @@ app.whenReady().then(async () => {
         nft?.collection_symbol ||
         nft?.symbol ||
         null;
-      const key = String(c || "")
-        .trim()
-        .toLowerCase();
+      const key = canonicalNftCollectionName(c);
       if (key) ownedCollectionKeys.add(key);
     }
 
@@ -5892,10 +5932,11 @@ app.whenReady().then(async () => {
           entry?.offChainMetadata?.metadata?.image ||
           entry?.DASMetadata?.image ||
           null,
-        collection:
+        collection: canonicalNftCollectionName(
           entry?.offChainMetadata?.metadata?.symbol ||
           entry?.DASMetadata?.symbol ||
           null,
+        ),
         level: Number.isFinite(Number(entry?.stats?.level))
           ? Number(entry.stats.level)
           : null,
@@ -6107,7 +6148,7 @@ app.whenReady().then(async () => {
             }
             return null;
           })(),
-          collection:
+          collection: canonicalNftCollectionName(
             entry?.collection ||
             entry?.collectionName ||
             entry?.collection_name ||
@@ -6115,6 +6156,7 @@ app.whenReady().then(async () => {
             entry?.DASMetadata?.symbol ||
             entry?.symbol ||
             null,
+          ),
           level: Number.isFinite(Number(entry?.stats?.level))
             ? Number(entry.stats.level)
             : Number.isFinite(Number(entry?.level))

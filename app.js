@@ -18,6 +18,11 @@ const { createChecksService } = require("./src/services/checks");
 const { createWatchService } = require("./src/services/watch");
 const { createCommandHandler } = require("./src/commands");
 const { startStartupFx } = require("./src/ui/startup-fx");
+const {
+  loadNftAssignmentRotation,
+  normalizeUsage: normalizeNftAssignmentUsage,
+  saveNftAssignmentRotation,
+} = require("./src/nft-assignment-rotation");
 const { applyRuntimeDefaults } = require("./src/runtime-defaults");
 const {
   normalizeMissionActionEnabledBySlot,
@@ -314,8 +319,20 @@ if (process.env.PBP_GUI_BRIDGE === "1" && typeof process.send === "function") {
             .trim()
             .toLowerCase();
           ctx.nftAssignmentOrder =
-            nextOrder === "highest_level_first" ? nextOrder : "normal";
+            nextOrder === "highest_level_first" ||
+            nextOrder === "lowest_level_first" ||
+            nextOrder === "collection_first" ||
+            nextOrder === "rotate_least_used" ||
+            nextOrder === "normal"
+              ? nextOrder
+              : "rotate_least_used";
           ctx.config.nftAssignmentOrder = ctx.nftAssignmentOrder;
+        }
+        if (typeof payload.nftAssignmentCollection === "string") {
+          ctx.nftAssignmentCollection = String(
+            payload.nftAssignmentCollection || "",
+          ).trim();
+          ctx.config.nftAssignmentCollection = ctx.nftAssignmentCollection;
         }
         if (typeof payload.missionResetPerSlotModeEnabled === "boolean") {
           ctx.missionResetPerSlotModeEnabled =
@@ -383,6 +400,7 @@ if (process.env.PBP_GUI_BRIDGE === "1" && typeof process.send === "function") {
           missionResetPerSlotModeEnabled: ctx.missionResetPerSlotModeEnabled,
           nftCooldownResetEnabled: ctx.nftCooldownResetEnabled,
           nftAssignmentOrder: ctx.nftAssignmentOrder,
+          nftAssignmentCollection: ctx.nftAssignmentCollection,
           nftCooldownResetMaxPbp: Number(ctx.config.nftCooldownResetMaxPbp ?? 20),
         });
         sendGuiResponse(requestId, {
@@ -400,6 +418,7 @@ if (process.env.PBP_GUI_BRIDGE === "1" && typeof process.send === "function") {
             nftCooldownResetMissionModeEnabled:
               ctx.config.nftCooldownResetMissionModeEnabled,
             nftAssignmentOrder: ctx.nftAssignmentOrder,
+            nftAssignmentCollection: ctx.nftAssignmentCollection,
             nftCooldownResetMaxPbp: ctx.config.nftCooldownResetMaxPbp,
           },
         });
@@ -485,6 +504,20 @@ async function runStartupSequence() {
   ctx.startupFxProgress = 5;
 
   loadConfig(ctx, logger.logWithTimestamp);
+  if (Object.prototype.hasOwnProperty.call(ctx.config, "nftAssignmentUsage")) {
+    const legacyUsage = normalizeNftAssignmentUsage(
+      ctx.config.nftAssignmentUsage,
+    );
+    const diskUsage = loadNftAssignmentRotation(
+      ctx.nftAssignmentRotationPath,
+    );
+    saveNftAssignmentRotation(ctx.nftAssignmentRotationPath, {
+      ...legacyUsage,
+      ...diskUsage,
+    });
+    delete ctx.config.nftAssignmentUsage;
+    flushConfig(ctx, logger.logDebug);
+  }
   if (START_PAUSED_FOR_COMP_LOCK) {
     ctx.watchLoopEnabled = false;
     logger.logWithTimestamp(
