@@ -587,7 +587,6 @@ function ControlView() {
   const debug = debugEnabled;
   const [currentPage, setCurrentPage] = useState("missions");
   const [isCliActive, setIsCliActive] = useState(false);
-  const [reducedMotionEnabled, setReducedMotionEnabledState] = useState(true);
   const [fundingSource, setFundingSource] = useState("browser");
   const [fundingEnabled, setFundingEnabled] = useState(true);
   const [resetEnabled, setResetEnabled] = useState(
@@ -914,22 +913,6 @@ function ControlView() {
   }, [missionCompetitionCheckEnabled]);
 
   useEffect(() => {
-    const root = document.documentElement;
-    const body = document.body;
-    if (reducedMotionEnabled) {
-      root.setAttribute("data-reduced-motion", "true");
-      body?.setAttribute("data-reduced-motion", "true");
-    } else {
-      root.removeAttribute("data-reduced-motion");
-      body?.removeAttribute("data-reduced-motion");
-    }
-    return () => {
-      root.removeAttribute("data-reduced-motion");
-      body?.removeAttribute("data-reduced-motion");
-    };
-  }, [reducedMotionEnabled]);
-
-  useEffect(() => {
     setMissionActionEnabledBySlot((current) => ({
       ...current,
       ...normalizeSlotBooleanMap(status.missionActionEnabledBySlot, true),
@@ -1008,11 +991,6 @@ function ControlView() {
       );
       if (typeof config.debugMode === "boolean") {
         setDebugEnabled(config.debugMode);
-      }
-      if (typeof config.reducedMotionEnabled === "boolean") {
-        setReducedMotionEnabledState(config.reducedMotionEnabled);
-      } else {
-        setReducedMotionEnabledState(true);
       }
       if (typeof config.enableRentals === "boolean") {
         setRentalsEnabled(config.enableRentals);
@@ -1460,11 +1438,6 @@ function ControlView() {
     const next = enabled === true;
     setDebugEnabled(next);
     await applyConfigPatch({ debugMode: next });
-  };
-  const setReducedMotionEnabled = async (enabled) => {
-    const next = enabled === true;
-    setReducedMotionEnabledState(next);
-    await applyConfigPatch({ reducedMotionEnabled: next });
   };
   const setPerSlotMissionResetModeEnabled = async (enabled) => {
     const next = enabled === true;
@@ -3417,8 +3390,6 @@ function ControlView() {
               setMissionCompetitionCheckEnabled={
                 setMissionCompetitionCheckEnabled
               }
-              reducedMotionEnabled={reducedMotionEnabled}
-              setReducedMotionEnabled={setReducedMotionEnabled}
               nftAssignmentOrder={nftAssignmentOrder}
               setNftAssignmentOrder={setNftAssignmentOrder}
               nftAssignmentCollection={nftAssignmentCollection}

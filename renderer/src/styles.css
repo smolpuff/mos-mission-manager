@@ -1941,9 +1941,6 @@ button.btn.btn-gradient {
     transform-origin: 50% 100%;
     filter: drop-shadow(0 0 0 rgba(255, 80, 80, 0));
 
-    transition: opacity 220ms ease,
-      transform 420ms cubic-bezier(0.22, 0.9, 0.24, 1),
-      filter 220ms ease;
   }
 
   #svg-view {
@@ -1960,62 +1957,10 @@ button.btn.btn-gradient {
     display: block;
     transform-box: fill-box;
     transform-origin: 50% 100%;
-    will-change: transform, filter, opacity;
-  }
-
-  .flame,
-  .flame-main {
-    animation-play-state: paused;
   }
 
   .flame {
-    animation-name: flameDisappear;
-    animation-timing-function: linear;
-    animation-iteration-count: infinite;
     opacity: 0.6;
-    transform-origin: 45% 45% 0;
-  }
-
-  .flame.one {
-    animation-duration: 1.8s;
-    animation-delay: 0.1s;
-  }
-
-  .flame.two {
-    animation-duration: 2.15s;
-    animation-delay: 0.28s;
-  }
-
-  .flame-main {
-    transform-origin: 50% 100%;
-    animation-name: flameMovement;
-    animation-timing-function: ease-in-out;
-    animation-iteration-count: infinite;
-  }
-
-  .flame-main.one {
-    animation-duration: 1.85s;
-    animation-delay: 0s;
-  }
-
-  .flame-main.two {
-    animation-duration: 2.05s;
-    animation-delay: 0.08s;
-  }
-
-  .flame-main.three {
-    animation-duration: 1.95s;
-    animation-delay: 0.14s;
-  }
-
-  .flame-main.four {
-    animation-duration: 2.3s;
-    animation-delay: 0.04s;
-  }
-
-  .flame-main.five {
-    animation-duration: 2.12s;
-    animation-delay: 0.18s;
   }
 
   &.active {
@@ -2037,11 +1982,6 @@ button.btn.btn-gradient {
 
     }
 
-    .flame,
-    .flame-main {
-      animation-play-state: running;
-    }
-
     &:hover,
     &:focus-visible {
       .mo-fire {
@@ -2049,107 +1989,4 @@ button.btn.btn-gradient {
       }
     }
   }
-}
-
-@keyframes flameMovement {
-  0% {
-    transform: scaleY(1) scaleX(1) rotate(0deg);
-  }
-
-  18% {
-    transform: scaleY(1.03) scaleX(0.99) rotate(-0.35deg);
-  }
-
-  36% {
-    transform: scaleY(1.07) scaleX(0.98) rotate(0.28deg);
-  }
-
-  52% {
-    transform: scaleY(1.02) scaleX(1) rotate(-0.18deg);
-  }
-
-  68% {
-    transform: scaleY(1.08) scaleX(0.97) rotate(0.38deg);
-  }
-
-  84% {
-    transform: scaleY(1.03) scaleX(0.99) rotate(-0.24deg);
-  }
-
-  100% {
-    transform: scaleY(1) scaleX(1) rotate(0deg);
-  }
-}
-
-@keyframes flameDisappear {
-  0% {
-    transform: translate(-20px, 0) rotate(180deg);
-    opacity: 0;
-  }
-
-  25% {
-    opacity: 0.4;
-  }
-
-  50% {
-    opacity: 0.8;
-  }
-
-  100% {
-    transform: translate(-69px, -190px) rotate(180deg);
-    opacity: 0;
-  }
-}
-
-html[data-reduced-motion="true"],
-body[data-reduced-motion="true"] {
-  scroll-behavior: auto !important;
-}
-
-html[data-reduced-motion="true"] .mission-image,
-body[data-reduced-motion="true"] .mission-image {
-  will-change: auto;
-}
-
-html[data-reduced-motion="true"] .results-table .results-row--current td::after,
-html[data-reduced-motion="true"] .mission-choice-card--selected::after,
-html[data-reduced-motion="true"] .signer-type label:has(input:checked)::after,
-html[data-reduced-motion="true"] .claim-bar,
-html[data-reduced-motion="true"] .stats-live-card::before,
-html[data-reduced-motion="true"] .stats-online-link__marble,
-html[data-reduced-motion="true"] .card-mission.card-mission--error .card-mission__header,
-body[data-reduced-motion="true"] .results-table .results-row--current td::after,
-body[data-reduced-motion="true"] .mission-choice-card--selected::after,
-body[data-reduced-motion="true"] .signer-type label:has(input:checked)::after,
-body[data-reduced-motion="true"] .claim-bar,
-body[data-reduced-motion="true"] .stats-live-card::before,
-body[data-reduced-motion="true"] .stats-online-link__marble,
-body[data-reduced-motion="true"] .card-mission.card-mission--error .card-mission__header {
-  animation: none !important;
-}
-
-html[data-reduced-motion="true"] .mission-progress-mask,
-body[data-reduced-motion="true"] .mission-progress-mask {
-  transition: width 140ms linear !important;
-}
-
-html[data-reduced-motion="true"] #mission-mode-mm_button .mo-fire,
-body[data-reduced-motion="true"] #mission-mode-mm_button .mo-fire {
-  opacity: 0.6 !important;
-  transform: translateX(-50%) translateY(24px) scaleY(0.58) !important;
-  filter: drop-shadow(0 0 10px rgba(255, 80, 80, 0.35)) !important;
-}
-
-html[data-reduced-motion="true"] #mission-mode-mm_button.active .mo-fire,
-body[data-reduced-motion="true"] #mission-mode-mm_button.active .mo-fire {
-  opacity: 0.92 !important;
-  transform: translateX(-50%) translateY(14px) scaleY(0.68) !important;
-}
-
-html[data-reduced-motion="true"] #mission-mode-mm_button .flame,
-html[data-reduced-motion="true"] #mission-mode-mm_button .flame-main,
-body[data-reduced-motion="true"] #mission-mode-mm_button .flame,
-body[data-reduced-motion="true"] #mission-mode-mm_button .flame-main {
-  animation: none !important;
-  opacity: 0.7 !important;
 }

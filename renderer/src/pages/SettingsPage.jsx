@@ -29,8 +29,6 @@ export default function SettingsPage({
   clearUpdateCheckMessage,
   missionCompetitionCheckEnabled,
   setMissionCompetitionCheckEnabled,
-  reducedMotionEnabled,
-  setReducedMotionEnabled,
   nftAssignmentOrder,
   setNftAssignmentOrder,
   nftAssignmentCollection,
@@ -313,7 +311,7 @@ export default function SettingsPage({
       </div>
       <div className="mt-2">
         <div className="card gap-5">
-          <div className=" divide-white/10 divide-y space-y-2 ">
+          <div className="flex flex-col gap-2 divide-white/10 divide-y">
             <div className="flex flex-wrap items-start justify-between gap-3 pb-2 ">
               <div className="space-y-1">
                 <ToggleSwitch
@@ -386,21 +384,7 @@ export default function SettingsPage({
               />{" "}
             </div>
 
-            <div className=" pb-2">
-              {" "}
-              <ToggleSwitch
-                switchID="reducedMotionEnabledSettings"
-                checked={reducedMotionEnabled === true}
-                onChange={(e) =>
-                  void setReducedMotionEnabled(e.target.checked === true)
-                }
-                title="Reduced Motion"
-                helperText="Reduce CPU usage by disabling heavy motion effects like the mission fire animation"
-                styling="!text-base"
-              />
-            </div>
-
-            <div className="">
+            <div className="order-first border-b border-white/10 pb-2 !border-t-0">
               <div
                 className={`flex flex-nowrap items-start gap-5 ${isMissionMode ? "cursor-not-allowed" : ""}`}
               >
