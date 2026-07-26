@@ -39,6 +39,64 @@ async function scrapeLatestCompetition(opts = {}) {
   const getCompetitionSearchRoot = () =>
     document.querySelector("main") || document.body;
 
+  const competitionCardFromToggle = (toggle) => {
+    if (!toggle) return null;
+    const directCard = toggle.parentElement?.parentElement;
+    if (
+      directCard &&
+      directCard.querySelectorAll?.("[data-competition-id]").length === 1 &&
+      /^competition\\s*#?\\s*\\d{1,6}\\b/i.test(
+        coerceText(directCard.innerText || directCard.textContent || ""),
+      )
+    ) {
+      return directCard;
+    }
+    let cur = toggle.parentElement;
+    let singleCompetitionAncestor = null;
+    let depth = 0;
+    while (cur && cur !== document.body && depth < 10) {
+      const toggles = cur.querySelectorAll?.("[data-competition-id]") || [];
+      if (toggles.length > 1 && singleCompetitionAncestor) {
+        return singleCompetitionAncestor;
+      }
+      const text = coerceText(cur.innerText || cur.textContent || "");
+      if (
+        toggles.length === 1 &&
+        toggles[0] === toggle &&
+        /^competition\\s*#?\\s*\\d{1,6}\\b/i.test(text)
+      ) {
+        singleCompetitionAncestor = cur;
+        const hasSummary =
+          /(?:→|->|–|—)/.test(text) ||
+          /\\bmissions?\\b/i.test(text) ||
+          /\\bprizes?\\b/i.test(text) ||
+          Boolean(cur.querySelector("table"));
+        if (hasSummary) return cur;
+      }
+      cur = cur.parentElement;
+      depth += 1;
+    }
+    return singleCompetitionAncestor || toggle.closest("article, section, li, div");
+  };
+
+  const findCompetitionCardsFromToggles = () => {
+    const toggles = Array.from(
+      getCompetitionSearchRoot().querySelectorAll(
+        "button[data-competition-id], [role='button'][data-competition-id]",
+      ),
+    );
+    const cards = [];
+    for (const toggle of toggles) {
+      const directCard = toggle.parentElement?.parentElement;
+      const card =
+        directCard?.querySelectorAll?.("[data-competition-id]").length === 1
+          ? directCard
+          : competitionCardFromToggle(toggle);
+      if (card && !cards.includes(card)) cards.push(card);
+    }
+    return cards;
+  };
+
   const findCompetitionHeaders = () => {
     const nodes = Array.from(getCompetitionSearchRoot().querySelectorAll("*"));
     const headers = nodes
@@ -79,6 +137,16 @@ async function scrapeLatestCompetition(opts = {}) {
 
   const pickCompetitionContainerForHeader = (headerEl) => {
     if (!headerEl) return null;
+    const nearbyToggle =
+      headerEl.parentElement?.parentElement?.querySelector?.(
+        "[data-competition-id]",
+      ) ||
+      headerEl.closest("article, section, li, div")?.querySelector?.(
+        "[data-competition-id]",
+      );
+    const toggleCard = competitionCardFromToggle(nearbyToggle);
+    if (toggleCard) return toggleCard;
+
     const allHeaders = findCompetitionHeaders();
     const isOtherHeaderInside = (el) =>
       allHeaders.some((h) => h !== headerEl && el.contains(h));
@@ -174,6 +242,9 @@ async function scrapeLatestCompetition(opts = {}) {
   };
 
   const findCompetitionCards = () => {
+    const toggleCards = findCompetitionCardsFromToggles();
+    if (toggleCards.length) return toggleCards.slice(0, 10);
+
     const headers = findCompetitionHeaders();
     const cards = [];
     const seenNumbers = new Set();
@@ -546,6 +617,40 @@ async function scrapeLatestCompetition(opts = {}) {
       .slice(0, 200);
   };
 
+  const findPrizeRows = (root) => {
+    const header = findHeaderNode(root, "Prizes") || findHeaderNode(root, "Prize");
+    if (!header) return [];
+    let scope = header.parentElement;
+    let depth = 0;
+    while (scope && scope !== root && depth < 8) {
+      const text = coerceText(scope.innerText || "");
+      if (
+        text &&
+        /\\bprizes?\\b/i.test(text) &&
+        !/\\bmissions?\\b/i.test(text) &&
+        scope.children.length > 1
+      ) {
+        break;
+      }
+      scope = scope.parentElement;
+      depth += 1;
+    }
+    scope = scope || header.parentElement || root;
+    return Array.from(scope.querySelectorAll("div"))
+      .map((el) => {
+        if (el.children.length < 2) return null;
+        const parts = Array.from(el.children)
+          .map((child) => coerceText(child.innerText || child.textContent || ""))
+          .filter(Boolean);
+        if (parts.length !== 2) return null;
+        const value = coerceText(parts.join(" • "));
+        return value && !/^prizes?\\b/i.test(value) ? value : null;
+      })
+      .filter(Boolean)
+      .filter((value, index, values) => values.indexOf(value) === index)
+      .slice(0, 50);
+  };
+
   const findFallbackCompetitionRoot = () => {
     const candidates = [
       document.querySelector("main"),
@@ -620,11 +725,13 @@ async function scrapeLatestCompetition(opts = {}) {
       const text = coerceText(root?.innerText || "");
       if (!text) return false;
       return (
-        /\\bstart\\b/i.test(text) ||
-        /\\bend\\b/i.test(text) ||
-        /\\bmissions?\\b/i.test(text) ||
-        /\\bprize(s)?\\b/i.test(text) ||
-        /\\bresults?\\b/i.test(text)
+        Boolean(root?.querySelector?.("table")) ||
+        Boolean(
+          root?.querySelector?.(
+            "[data-competition-id][aria-label^='Collapse competition' i]",
+          ),
+        ) ||
+        (/\\bmissions?\\b/i.test(text) && /\\bprize(s)?\\b/i.test(text))
       );
     };
     const expandCompetitionCard = async (root) => {
@@ -816,18 +923,37 @@ async function scrapeLatestCompetition(opts = {}) {
       const pageText = coerceText(document.body?.innerText || "");
       const text = coerceText(resolvedRoot?.innerText || pageText || "");
       const challenge = looksLikeChallenge(text) ? "challenge_page" : null;
+      const dateRangeText = Array.from(
+        resolvedRoot?.querySelectorAll?.("span, div, p") || [],
+      )
+        .map((el) => coerceText(el.innerText || el.textContent || ""))
+        .filter(
+          (value) =>
+            value &&
+            value.length <= 160 &&
+            /(?:→|->|–|—)/.test(value) &&
+            /\\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\\b/i.test(
+              value,
+            ),
+        )
+        .sort((a, b) => a.length - b.length)[0] || null;
+      const dateRangeParts = dateRangeText
+        ? dateRangeText.split(/\\s*(?:→|->|–|—)\\s*/).map(coerceText)
+        : [];
 
       const startText =
         findValueNextToHeader(resolvedRoot, "Start") ||
         labelSplit(text, "Start", ["End", "Missions", "Prizes", "Results", "Finished", "ID"]) ||
         findTextAfterLabel(resolvedRoot, "Start") ||
         findTextAfterLabel(resolvedRoot, "Start date") ||
+        dateRangeParts[0] ||
         null;
       const endText =
         findValueNextToHeader(resolvedRoot, "End") ||
         labelSplit(text, "End", ["Missions", "Prizes", "Results", "Finished", "ID", "Start"]) ||
         findTextAfterLabel(resolvedRoot, "End") ||
         findTextAfterLabel(resolvedRoot, "End date") ||
+        dateRangeParts[1] ||
         null;
 
       const datesMatch =
@@ -839,7 +965,9 @@ async function scrapeLatestCompetition(opts = {}) {
       const missions = findListFollowingHeader(resolvedRoot, "Missions");
       const prizes = findListFollowingHeader(resolvedRoot, "Prizes").length
         ? findListFollowingHeader(resolvedRoot, "Prizes")
-        : findListFollowingHeader(resolvedRoot, "Prize");
+        : findListFollowingHeader(resolvedRoot, "Prize").length
+          ? findListFollowingHeader(resolvedRoot, "Prize")
+          : findPrizeRows(resolvedRoot);
 
       let resultsStatus = null;
       let userRows = [];
@@ -895,7 +1023,12 @@ async function scrapeLatestCompetition(opts = {}) {
             const rankRaw = values[rankIndex >= 0 ? rankIndex : 0] || "";
             const rankMatch = String(rankRaw).match(/\\d{1,4}/);
             const rank = rankMatch ? Number(rankMatch[0]) : null;
-            const player = values[playerIndex >= 0 ? playerIndex : 1] || "";
+            const player = coerceText(
+              (values[playerIndex >= 0 ? playerIndex : 1] || "").replace(
+                /^[^a-z0-9_]+/i,
+                "",
+              ),
+            );
             const completedRaw = values[completedIndex >= 0 ? completedIndex : 2] || "";
             const uniqueRaw = values[uniqueIndex >= 0 ? uniqueIndex : 3] || "";
             const completedMatch = String(completedRaw).match(/\\d{1,8}/);
