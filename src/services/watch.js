@@ -1279,7 +1279,9 @@ function createWatchService(
   }
 
   function watchConfig() {
-    const minCycleSeconds = watchMinCycleSeconds();
+    // The live watch_and_claim schema requires pollIntervalSeconds >= 30.
+    // Keep this transport constraint independent of runtime/debug defaults.
+    const minCycleSeconds = Math.max(30, watchMinCycleSeconds());
     const maxLimitSeconds = ctx.runtimeDefaults?.watchMaxLimitSeconds || 600;
     const configuredPoll = Number(ctx.config.watchPollIntervalSeconds);
     const rawPollIntervalSeconds =

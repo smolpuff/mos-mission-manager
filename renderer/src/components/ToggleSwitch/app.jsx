@@ -2,6 +2,7 @@ export default function ToggleSwitch({
   switchID,
   forID,
   title,
+  tooltip,
   helperText,
   defaultChecked,
   checked,
@@ -70,7 +71,13 @@ export default function ToggleSwitch({
               disabled ? "" : ""
             } ${styling}`}
           >
-            <span>{title}</span>
+            <span
+              className={tooltip ? "control-tooltip" : undefined}
+              data-tooltip={tooltip || undefined}
+              tabIndex={tooltip ? 0 : undefined}
+            >
+              {title}
+            </span>
 
             {helperText ? (
               <span className="text-[11px] text-slate-400 leading-tight font-normal">

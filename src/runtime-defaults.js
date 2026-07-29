@@ -14,8 +14,8 @@ const DEV_DEFAULTS = {
   rentalFastRefreshTickMs: 5250,
   rentalBatchLimit: 3,
   watchMaxLimitSeconds: 60,
-  watchMinCycleSeconds: 15,
-  watchDefaultPollSeconds: 15,
+  watchMinCycleSeconds: 30,
+  watchDefaultPollSeconds: 30,
 };
 
 function runtimeDefaults(devMode = false) {

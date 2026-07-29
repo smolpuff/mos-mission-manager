@@ -845,6 +845,22 @@ function createMcpClient(ctx, logger) {
       if (call.json?.error)
         throw new Error(`RPC error: ${JSON.stringify(call.json.error)}`);
       const extracted = extractToolResultPayload(call.json);
+      if (
+        extracted.result?.isError === true ||
+        call.json?.result?.isError === true
+      ) {
+        const errorPayload = extracted.result || call.json.result;
+        const text = Array.isArray(errorPayload?.content)
+          ? errorPayload.content
+              .filter((item) => item?.type === "text")
+              .map((item) => String(item.text || "").trim())
+              .filter(Boolean)
+              .join("\n")
+          : "";
+        throw new Error(
+          text || `MCP tool ${toolName} returned an error result`,
+        );
+      }
       writeRawPayloadDebugLog({
         toolName,
         phase: "tool_call_response",

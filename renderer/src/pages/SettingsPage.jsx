@@ -312,79 +312,7 @@ export default function SettingsPage({
       <div className="mt-2">
         <div className="card gap-5">
           <div className="flex flex-col gap-2 divide-white/10 divide-y">
-            <div className="flex flex-wrap items-start justify-between gap-3 pb-2 ">
-              <div className="space-y-1">
-                <ToggleSwitch
-                  switchID="autoUpdateCheckEnabled"
-                  checked={autoUpdateCheckEnabled === true}
-                  onChange={(e) =>
-                    void setAutoUpdateCheckEnabled(e.target.checked === true)
-                  }
-                  title={
-                    <span className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
-                      <span>Check for App Updates</span>
-                      <span className="text-[11px] font-normal text-slate-400">
-                        (Last checked: {formatLastChecked(lastUpdateCheckAt)})
-                      </span>
-                    </span>
-                  }
-                  helperText="Automatically checks for a new version at launch and periodically there-after"
-                  styling="!text-base"
-                />
-              </div>
-              <div className="flex items-center gap-2 ">
-                <button
-                  type="button"
-                  className={`flex items-center gap-1 text-xs px-2.5 py-1 max-w-max rounded-sm transition-colors active:translate-y-0.5 ${
-                    renderUpToDateState
-                      ? "bg-success text-slate-900 hover:bg-success/90"
-                      : "bg-[#9661E2] hover:bg-[#5F0DD5]"
-                  }`}
-                  onClick={handleManualUpdateCheck}
-                  disabled={updateCheckBusy === true}
-                >
-                  {updateCheckBusy === true ? (
-                    "Checking..."
-                  ) : renderUpToDateState ? (
-                    <>
-                      <svg
-                        xmlns="http://www.w3.org/2000/svg"
-                        viewBox="0 0 640 640"
-                        fill="currentColor"
-                        class="w-3 h-3"
-                      >
-                        <path d="M530.8 134.1C545.1 144.5 548.3 164.5 537.9 178.8L281.9 530.8C276.4 538.4 267.9 543.1 258.5 543.9C249.1 544.7 240 541.2 233.4 534.6L105.4 406.6C92.9 394.1 92.9 373.8 105.4 361.3C117.9 348.8 138.2 348.8 150.7 361.3L252.2 462.8L486.2 141.1C496.6 126.8 516.6 123.6 530.9 134z" />
-                      </svg>
-                      <span>Up to date</span>
-                    </>
-                  ) : (
-                    "Check Now"
-                  )}
-                </button>
-              </div>
-              {showInlineUpdateMessage ? (
-                <div className="w-full text-xs text-slate-300">
-                  {updateCheckMessage}
-                </div>
-              ) : null}
-            </div>
-
-            <div className=" pb-2">
-              <ToggleSwitch
-                switchID="missionCompetitionCheckEnabled"
-                checked={missionCompetitionCheckEnabled === true}
-                onChange={(e) =>
-                  void setMissionCompetitionCheckEnabled(
-                    e.target.checked === true,
-                  )
-                }
-                title="Check for Mission Competitions"
-                helperText="Periodically checks for new mission competitions"
-                styling="!text-base"
-              />{" "}
-            </div>
-
-            <div className="order-first border-b border-white/10 pb-2 !border-t-0">
+            <div className="pb-2">
               <div
                 className={`flex flex-nowrap items-start gap-5 ${isMissionMode ? "cursor-not-allowed" : ""}`}
               >
@@ -481,6 +409,78 @@ export default function SettingsPage({
                   ) : null}
                 </div>
               </div>
+            </div>
+
+            <div className="flex flex-wrap items-start justify-between gap-3 pb-2 ">
+              <div className="space-y-1">
+                <ToggleSwitch
+                  switchID="autoUpdateCheckEnabled"
+                  checked={autoUpdateCheckEnabled === true}
+                  onChange={(e) =>
+                    void setAutoUpdateCheckEnabled(e.target.checked === true)
+                  }
+                  title={
+                    <span className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                      <span>Check for App Updates</span>
+                      <span className="text-[11px] font-normal text-slate-400">
+                        (Last checked: {formatLastChecked(lastUpdateCheckAt)})
+                      </span>
+                    </span>
+                  }
+                  helperText="Automatically checks for a new version at launch and periodically there-after"
+                  styling="!text-base"
+                />
+              </div>
+              <div className="flex items-center gap-2 ">
+                <button
+                  type="button"
+                  className={`flex items-center gap-1 text-xs px-2.5 py-1 max-w-max rounded-sm transition-colors active:translate-y-0.5 ${
+                    renderUpToDateState
+                      ? "bg-success text-slate-900 hover:bg-success/90"
+                      : "bg-[#9661E2] hover:bg-[#5F0DD5]"
+                  }`}
+                  onClick={handleManualUpdateCheck}
+                  disabled={updateCheckBusy === true}
+                >
+                  {updateCheckBusy === true ? (
+                    "Checking..."
+                  ) : renderUpToDateState ? (
+                    <>
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        viewBox="0 0 640 640"
+                        fill="currentColor"
+                        class="w-3 h-3"
+                      >
+                        <path d="M530.8 134.1C545.1 144.5 548.3 164.5 537.9 178.8L281.9 530.8C276.4 538.4 267.9 543.1 258.5 543.9C249.1 544.7 240 541.2 233.4 534.6L105.4 406.6C92.9 394.1 92.9 373.8 105.4 361.3C117.9 348.8 138.2 348.8 150.7 361.3L252.2 462.8L486.2 141.1C496.6 126.8 516.6 123.6 530.9 134z" />
+                      </svg>
+                      <span>Up to date</span>
+                    </>
+                  ) : (
+                    "Check Now"
+                  )}
+                </button>
+              </div>
+              {showInlineUpdateMessage ? (
+                <div className="w-full text-xs text-slate-300">
+                  {updateCheckMessage}
+                </div>
+              ) : null}
+            </div>
+
+            <div>
+              <ToggleSwitch
+                switchID="missionCompetitionCheckEnabled"
+                checked={missionCompetitionCheckEnabled === true}
+                onChange={(e) =>
+                  void setMissionCompetitionCheckEnabled(
+                    e.target.checked === true,
+                  )
+                }
+                title="Check for Mission Competitions"
+                helperText="Periodically checks for new mission competitions"
+                styling="!text-base"
+              />{" "}
             </div>
           </div>
         </div>

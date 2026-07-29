@@ -651,6 +651,32 @@ async function scrapeLatestCompetition(opts = {}) {
       .slice(0, 50);
   };
 
+  const dedupePrizeEntries = (entries) => {
+    const unique = Array.from(
+      new Set((entries || []).map(coerceText).filter(Boolean)),
+    );
+    const comparable = (value) =>
+      String(value || "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+
+    // Some layouts expose both a wrapper div and each prize row. The wrapper's
+    // innerText is just all of its child prizes concatenated, so discard it when
+    // it contains at least two of the more specific entries.
+    return unique.filter((value, index) => {
+      const normalized = comparable(value);
+      if (!normalized) return false;
+      const containedEntries = unique.filter((other, otherIndex) => {
+        if (otherIndex === index) return false;
+        const otherNormalized = comparable(other);
+        return (
+          otherNormalized.length > 0 &&
+          otherNormalized.length < normalized.length &&
+          normalized.includes(otherNormalized)
+        );
+      });
+      return containedEntries.length < 2;
+    });
+  };
+
   const findFallbackCompetitionRoot = () => {
     const candidates = [
       document.querySelector("main"),
@@ -963,11 +989,13 @@ async function scrapeLatestCompetition(opts = {}) {
           : null;
 
       const missions = findListFollowingHeader(resolvedRoot, "Missions");
-      const prizes = findListFollowingHeader(resolvedRoot, "Prizes").length
-        ? findListFollowingHeader(resolvedRoot, "Prizes")
-        : findListFollowingHeader(resolvedRoot, "Prize").length
-          ? findListFollowingHeader(resolvedRoot, "Prize")
-          : findPrizeRows(resolvedRoot);
+      const prizes = dedupePrizeEntries(
+        findListFollowingHeader(resolvedRoot, "Prizes").length
+          ? findListFollowingHeader(resolvedRoot, "Prizes")
+          : findListFollowingHeader(resolvedRoot, "Prize").length
+            ? findListFollowingHeader(resolvedRoot, "Prize")
+            : findPrizeRows(resolvedRoot),
+      );
 
       let resultsStatus = null;
       let userRows = [];

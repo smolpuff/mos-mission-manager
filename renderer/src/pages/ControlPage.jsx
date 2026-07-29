@@ -10,6 +10,7 @@ import SettingsPage from "./SettingsPage";
 import StatsPage from "./StatsPage";
 import RentalsPage from "./RentalsPage";
 import NftsPage from "./NftsPage";
+import { competitionOptionValue } from "../competition-options";
 
 import pbpIcon from "../img/icon_pbp.webp";
 import solIcon from "../img/icon-sm__sol.svg";
@@ -1133,13 +1134,12 @@ function ControlView() {
       setLatestCompetitionList(competitions);
       setSelectedCompetitionNumber((current) => {
         if (!competitions.length) return "";
-        const optionValue = (item) =>
-          String(item?.competitionNumber || item?.scrapedAt || "");
         const stillExists = competitions.some(
-          (item) => optionValue(item) === current,
+          (item, index) =>
+            competitionOptionValue(item, index) === current,
         );
         if (stillExists) return current;
-        return optionValue(competitions[0]);
+        return competitionOptionValue(competitions[0], 0);
       });
     } catch (e) {
       setLatestCompetitionError(String(e?.message || e));
@@ -1173,13 +1173,12 @@ function ControlView() {
             ? [competition]
             : [];
         if (!competitions.length) return "";
-        const optionValue = (item) =>
-          String(item?.competitionNumber || item?.scrapedAt || "");
         const stillExists = competitions.some(
-          (item) => optionValue(item) === current,
+          (item, index) =>
+            competitionOptionValue(item, index) === current,
         );
         if (stillExists) return current;
-        return optionValue(competitions[0]);
+        return competitionOptionValue(competitions[0], 0);
       });
       if (!competition) return;
       const candidate = latestCompetitionNotificationSummary(competition);
@@ -4722,11 +4721,12 @@ function ControlView() {
                     <div
                       className={`w-full flex h-auto justify-between !p-0 items-center ${competitionRangeLockDisabled ? "hidden grayscale opacity-60" : ""}`}
                     >
-                      <div class="w-full ">
+                      <div className="relative z-20 w-full">
                         <ToggleSwitch
                           switchID="enableCompetitionRangeLock"
                           checked={competitionRangeLockEnabled}
                           title="Finish Target"
+                          tooltip="Stops claiming new missions while your competition rank is inside the target range. Mission Mode only."
                           styling="text-xs flex !flex-row"
                           disabled={competitionRangeLockDisabled}
                           onChange={(event) =>
@@ -4734,7 +4734,7 @@ function ControlView() {
                           }
                         />
                       </div>
-                      <div class="w-full m-0 flex gap-3  items-center text-xs -translate-y-0.5 ">
+                      <div className="relative z-20 w-full m-0 flex gap-3 items-center text-xs -translate-y-0.5">
                         <div class="flex items-center rounded-full border border-white/15 px-0 py-1">
                           <input
                             type="text"

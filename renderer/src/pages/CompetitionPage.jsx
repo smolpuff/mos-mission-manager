@@ -1,3 +1,8 @@
+import {
+  competitionOptionLabel,
+  competitionOptionValue,
+} from "../competition-options";
+
 export default function CompetitionPage({
   latestCompetition,
   latestCompetitionList,
@@ -15,10 +20,9 @@ export default function CompetitionPage({
       : [];
   const selectedCompetition =
     competitions.find(
-      (competition) =>
-        String(
-          competition?.competitionNumber || competition?.scrapedAt || "",
-        ) === String(selectedCompetitionNumber || ""),
+      (competition, index) =>
+        competitionOptionValue(competition, index) ===
+        String(selectedCompetitionNumber || ""),
     ) ||
     competitions[0] ||
     latestCompetition;
@@ -60,14 +64,8 @@ export default function CompetitionPage({
                 disabled={latestCompetitionBusy}
               >
                 {competitions.map((competition, index) => {
-                  const value = String(
-                    competition?.competitionNumber ||
-                      competition?.scrapedAt ||
-                      index,
-                  );
-                  const label = competition?.competitionNumber
-                    ? `Competition ${competition.competitionNumber}`
-                    : `Competition ${index + 1}`;
+                  const value = competitionOptionValue(competition, index);
+                  const label = competitionOptionLabel(competition, index);
                   return (
                     <option key={value} value={value}>
                       {label}
