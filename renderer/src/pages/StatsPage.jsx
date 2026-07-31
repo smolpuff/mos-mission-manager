@@ -358,7 +358,10 @@ export default function StatsPage({ status }) {
   const refreshKey = analyticsRefreshKey(safeStatus.analytics);
   const [rangeKey, setRangeKey] = useState("session");
   const [statsTab, setStatsTab] = useState("overview");
-  const [nftSort, setNftSort] = useState({ key: "uses", direction: "desc" });
+  const [nftSort, setNftSort] = useState({
+    key: "lastUsedAt",
+    direction: "desc",
+  });
   const [analyticsView, setAnalyticsView] = useState(null);
   const [loading, setLoading] = useState(false);
   const [actionBusy, setActionBusy] = useState(false);
@@ -494,7 +497,9 @@ export default function StatsPage({ status }) {
     const byIdentity = new Map();
     for (const event of Array.isArray(history) ? history : []) {
       const account = String(event?.nftAccount || "").trim();
-      const name = String(event?.nft || "").trim().toLowerCase();
+      const name = String(event?.nft || "")
+        .trim()
+        .toLowerCase();
       const key = account ? `account:${account}` : name ? `name:${name}` : "";
       if (!key) continue;
       const current = byIdentity.get(key) || { uses: 0, lastUsedAt: null };
@@ -515,7 +520,9 @@ export default function StatsPage({ status }) {
   );
   const nftUsage = nftInventoryUsage.map((nft) => {
     const accountKey = `account:${String(nft?.account || "").trim()}`;
-    const nameKey = `name:${String(nft?.name || "").trim().toLowerCase()}`;
+    const nameKey = `name:${String(nft?.name || "")
+      .trim()
+      .toLowerCase()}`;
     const scoped =
       scopedNftAssignments.get(accountKey) ||
       scopedNftAssignments.get(nameKey) ||
@@ -546,10 +553,7 @@ export default function StatsPage({ status }) {
         nftSort.key === "collection"
           ? canonicalCollectionLabel(entry?.collection)
           : String(entry?.name || "");
-      return (
-        multiplier *
-        valueFor(a).localeCompare(valueFor(b))
-      );
+      return multiplier * valueFor(a).localeCompare(valueFor(b));
     }
     const difference =
       asNumber(a?.[nftSort.key], 0) - asNumber(b?.[nftSort.key], 0);
