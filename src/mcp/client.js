@@ -613,12 +613,17 @@ function createMcpClient(ctx, logger) {
     body,
     timeoutMs,
     signal: externalSignal = null,
+    noStore = false,
   }) {
     const headers = {
       Accept: "application/json, text/event-stream",
       "Content-Type": "application/json",
       "mcp-protocol-version": ctx.MCP_PROTOCOL_VERSION,
     };
+    if (noStore) {
+      headers["Cache-Control"] = "no-cache, no-store, max-age=0";
+      headers.Pragma = "no-cache";
+    }
     if (token) headers.Authorization = `Bearer ${token}`;
     if (sessionId) headers["mcp-session-id"] = sessionId;
 
@@ -644,6 +649,7 @@ function createMcpClient(ctx, logger) {
         headers,
         body: JSON.stringify(body),
         signal: controller.signal,
+        ...(noStore ? { cache: "no-store" } : {}),
       });
       const text = await response.text();
       const contentType = String(response.headers.get("content-type") || "")
@@ -820,6 +826,7 @@ function createMcpClient(ctx, logger) {
         sessionId,
         timeoutMs: opts.timeoutMs,
         signal: opts.signal,
+        noStore: String(toolName || "").trim() === "get_mission_nfts",
         body: {
           jsonrpc: "2.0",
           id: 2,

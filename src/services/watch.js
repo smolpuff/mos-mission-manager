@@ -3705,6 +3705,7 @@ function createWatchService(
     ctx.watcherRunning = true;
     ctx.isIdle = false;
     redrawHeaderAndLog(ctx.currentMissionStats);
+    if (ctx.guiBridge?.emitNow) ctx.guiBridge.emitNow();
 
     const opts = watchConfig();
     logWithTimestamp(

@@ -26,6 +26,10 @@ contextBridge.exposeInMainWorld("missionsDesktop", {
     ipcRenderer.invoke("analytics:reset-range", rangeKey),
   exportAnalyticsCsv: (rangeKey) =>
     ipcRenderer.invoke("analytics:export-csv", rangeKey),
+  resetNftUsageRange: (rangeKey) =>
+    ipcRenderer.invoke("nft-usage:reset-range", rangeKey),
+  exportNftUsageCsv: (rangeKey) =>
+    ipcRenderer.invoke("nft-usage:export-csv", rangeKey),
   getConfig: () => ipcRenderer.invoke("config:get"),
   updateConfig: (patch) => ipcRenderer.invoke("config:update", patch),
   checkForUpdates: (payload) => ipcRenderer.invoke("updates:check", payload),

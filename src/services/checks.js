@@ -43,6 +43,15 @@ const {
   normalizeUsage: normalizeNftAssignmentUsage,
   saveNftAssignmentRotation,
 } = require("../nft-assignment-rotation");
+const {
+  loadNftAssignmentScan,
+  saveNftAssignmentScan,
+} = require("../nft-assignment-scan");
+const {
+  loadNftUsageStatsCache,
+  saveNftUsageStatsCache,
+} = require("../nft-usage-stats-cache");
+const { canonicalNftCollectionName } = require("../nft-collection-name");
 
 function createChecksService(ctx, logger, mcp, services = {}) {
   const { logWithTimestamp, logDebug, redrawHeaderAndLog, formatTaggedLog } =
@@ -72,8 +81,24 @@ function createChecksService(ctx, logger, mcp, services = {}) {
   const nftAssignmentUsage = new Map();
   let nftAssignmentUsageLoaded = false;
   const nftAssignmentTieBreaker = new Map();
+  const nftAssignmentSessionUsage = new Map();
+  const nftUsageNftByAccount = new Map();
+  const persistedNftUsageByAccount = new Map(
+    loadNftUsageStatsCache(
+      ctx.nftUsageStatsPath,
+      ctx.nftAssignmentRotationPath,
+    ).map((row) => [row.account, row]),
+  );
+  const nftAssignmentLastUsedAt = new Map(
+    Array.from(persistedNftUsageByAccount.entries())
+      .filter(([, row]) => Number.isFinite(Number(row?.lastUsedAt)))
+      .map(([account, row]) => [account, Number(row.lastUsedAt)]),
+  );
+  let nftAssignmentScan = loadNftAssignmentScan(ctx.nftAssignmentScanPath);
+  let autoAssignPromise = null;
   let rentableNftsCallChain = Promise.resolve();
   const OWNED_MISSION_NFTS_CACHE_TTL_MS = 2000;
+  const MISSION_NFT_PAGE_LIMIT = 200;
   const MCP_COOLDOWN_RESUME_BUFFER_MS = 250;
   const RENTAL_RESET_PREPARE_DELAY_MS = 2500;
 
@@ -109,6 +134,96 @@ function createChecksService(ctx, logger, mcp, services = {}) {
       ctx.nftAssignmentRotationPath,
       Object.fromEntries(nftAssignmentUsage),
     );
+  }
+
+  function nftImageUrl(nft) {
+    const value =
+      nft?.image ||
+      nft?.imageUrl ||
+      nft?.image_url ||
+      nft?.metadata?.image ||
+      nft?.metadata?.imageUrl ||
+      nft?.offChainMetadata?.metadata?.image ||
+      nft?.DASMetadata?.image ||
+      null;
+    return isUsableIdValue(value) ? value.trim() : null;
+  }
+
+  function publishNftUsageStats(nfts = []) {
+    ensureNftAssignmentUsageLoaded();
+    for (const nft of Array.isArray(nfts) ? nfts : []) {
+      const account = nftAccountId(nft);
+      if (account) nftUsageNftByAccount.set(account, nft);
+    }
+    const accounts = new Set([
+      ...nftAssignmentUsage.keys(),
+      ...nftAssignmentSessionUsage.keys(),
+      ...nftUsageNftByAccount.keys(),
+      ...persistedNftUsageByAccount.keys(),
+    ]);
+    ctx.nftUsageStats = Array.from(accounts)
+      .map((account) => {
+        const nft = nftUsageNftByAccount.get(account) || null;
+        const persisted = persistedNftUsageByAccount.get(account) || null;
+        return {
+        account,
+        mint:
+          nft?.mintAddress ||
+          nft?.mint_address ||
+          nft?.mint ||
+          nft?.id ||
+          persisted?.mint ||
+          account,
+        name: nft ? nftDisplayName(nft) : persisted?.name || "Unknown NFT",
+        collection: nft
+          ? nftCollectionDisplayName(nft)
+          : persisted?.collection || null,
+        imageUrl: nftImageUrl(nft) || persisted?.imageUrl || null,
+        level: nft ? nftLevelValue(nft) : persisted?.level ?? -1,
+        available: nft ? nftIsAvailable(nft) : persisted?.available ?? null,
+        uses: nftAssignmentUsage.get(account) || 0,
+        sessionUses: nftAssignmentSessionUsage.get(account) || 0,
+        lastUsedAt:
+          nftAssignmentLastUsedAt.get(account) || persisted?.lastUsedAt || null,
+        };
+      })
+      .sort(
+        (a, b) =>
+          b.uses - a.uses ||
+          b.sessionUses - a.sessionUses ||
+          a.name.localeCompare(b.name) ||
+          a.account.localeCompare(b.account),
+      );
+    for (const row of ctx.nftUsageStats) {
+      persistedNftUsageByAccount.set(row.account, row);
+    }
+    saveNftUsageStatsCache(ctx.nftUsageStatsPath, ctx.nftUsageStats);
+    if (ctx.guiBridge && typeof ctx.guiBridge.emitSoon === "function") {
+      ctx.guiBridge.emitSoon();
+    }
+  }
+
+  function advanceNftAssignmentScan(returnedCount) {
+    const count = Number(returnedCount) || 0;
+    const next =
+      count >= MISSION_NFT_PAGE_LIMIT
+        ? {
+            ...nftAssignmentScan,
+            offset: nftAssignmentScan.offset + MISSION_NFT_PAGE_LIMIT,
+          }
+        : {
+            offset: 0,
+            cycle: nftAssignmentScan.cycle + 1,
+          };
+    nftAssignmentScan = next;
+    try {
+      saveNftAssignmentScan(ctx.nftAssignmentScanPath, nftAssignmentScan);
+    } catch (error) {
+      logDebug("assign", "nft_scan_persist_failed", {
+        error: error.message,
+      });
+    }
+    return next;
   }
 
   function startupAccountSnapshot() {
@@ -269,7 +384,8 @@ function createChecksService(ctx, logger, mcp, services = {}) {
   }
 
   const AUTO_ASSIGN_RATE_LIMIT_BACKOFF_MS = 30000;
-  const AUTO_ASSIGN_MAX_STARTS_PER_PASS = 1;
+  // Keep a conservative per-pass cap to avoid assignment bursts and throttling.
+  const AUTO_ASSIGN_MAX_STARTS_PER_PASS = 2;
 
   function getAutoAssignCooldownRemainingMs() {
     const until = Number(ctx.autoAssignRateLimitedUntil || 0);
@@ -949,6 +1065,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
     } = {},
   ) {
     const list = Array.isArray(nfts) ? nfts : [];
+    publishNftUsageStats(list);
     for (const nft of list) {
       if (!(nft && typeof nft === "object")) continue;
       const availableAt = nftCooldownAvailableAtMs(nft, observedAt);
@@ -1278,13 +1395,36 @@ function createChecksService(ctx, logger, mcp, services = {}) {
   }
 
   function nftDisplayName(nft) {
-    return String(
+    return canonicalNftCollectionName(
       nft?.name ||
         nft?.nftName ||
         nft?.symbol ||
         nft?.collection ||
         "unknown nft",
-    ).trim();
+    );
+  }
+
+  function nftCollectionDisplayName(nft) {
+    const values = [
+      nft?.collection,
+      nft?.collectionName,
+      nft?.collection_name,
+      nft?.collectionSymbol,
+      nft?.collection_symbol,
+      nft?.metadata?.collection,
+      nft?.metadata?.collectionName,
+      nft?.metadata?.collection_name,
+      nft?.metadata?.symbol,
+      nft?.DASMetadata?.collection,
+      nft?.DASMetadata?.collectionName,
+      nft?.DASMetadata?.symbol,
+      nft?.offChainMetadata?.metadata?.collection,
+      nft?.offChainMetadata?.metadata?.collectionName,
+      nft?.offChainMetadata?.metadata?.symbol,
+      nft?.symbol,
+    ];
+    const value = values.find((entry) => isUsableIdValue(entry));
+    return value ? canonicalNftCollectionName(value) : null;
   }
 
   function compareNftAccountOrder(a, b) {
@@ -1754,7 +1894,10 @@ function createChecksService(ctx, logger, mcp, services = {}) {
       return pending.slice();
     }
     ownedMissionNftsPromise = (async () => {
-      const nftResult = await mcp.mcpToolCall("get_mission_nfts", {});
+      const nftResult = await mcp.mcpToolCall("get_mission_nfts", {
+        limit: 200,
+        offset: 0,
+      });
       const nfts = normalizeNftList(nftResult);
       ownedMissionNftsCache = nfts;
       ownedMissionNftsCacheAt = Date.now();
@@ -3953,7 +4096,22 @@ function createChecksService(ctx, logger, mcp, services = {}) {
     }
   }
 
-  async function autoAssignConfiguredMissions({
+  async function autoAssignConfiguredMissions(options = {}) {
+    if (autoAssignPromise) {
+      logWithTimestamp(
+        `[ASSIGN] ℹ️ Waiting for assignment already in progress reason=${options.reason || "periodic"}`,
+      );
+      return autoAssignPromise;
+    }
+    autoAssignPromise = runAutoAssignConfiguredMissions(options);
+    try {
+      return await autoAssignPromise;
+    } finally {
+      autoAssignPromise = null;
+    }
+  }
+
+  async function runAutoAssignConfiguredMissions({
     reason = "periodic",
     missionsResult = null,
     prefetchedRentalCandidates = null,
@@ -3992,13 +4150,6 @@ function createChecksService(ctx, logger, mcp, services = {}) {
     if (resolved.targetIds.size === 0 && resolved.targetNames.size === 0) {
       return { ok: true, attempted: 0, assigned: 0 };
     }
-    if (ctx.autoAssignRunning) {
-      logWithTimestamp(
-        `[ASSIGN] ℹ️ Assign check skipped (already running) reason=${reason}`,
-      );
-      return { ok: true, attempted: 0, assigned: 0, skipped: true };
-    }
-
     ctx.autoAssignRunning = true;
     let assigningStarted = false;
     let assignedCountForEvent = null;
@@ -4173,11 +4324,18 @@ function createChecksService(ctx, logger, mcp, services = {}) {
         let nfts = [];
         let assignmentOptions = [];
         let assignmentSourceStage = null;
+        let nextNftScan = nftAssignmentScan;
         try {
+          const currentNftScan = nftAssignmentScan;
+          const nftPageOffset = currentNftScan.offset;
           const nftResult = await mcp.mcpToolCall("get_mission_nfts", {
             assignedMissionId: id,
+            limit: MISSION_NFT_PAGE_LIMIT,
+            offset: nftPageOffset,
           });
           nfts = normalizeNftList(nftResult);
+          publishNftUsageStats(nfts);
+          nextNftScan = advanceNftAssignmentScan(nfts.length);
           if (nfts.length === 0 && /^startup_/.test(String(reason || ""))) {
             needsFreshMissionRefresh = true;
             logDebug("assign", "startup_empty_nfts_refresh_deferred", {
@@ -4195,6 +4353,8 @@ function createChecksService(ctx, logger, mcp, services = {}) {
             reason,
             missionName: name,
             missionId: id,
+            nftPageOffset,
+            nftScanCycle: currentNftScan.cycle,
             nftCount: nfts.length,
             eligibleCount: nfts.filter(nftIsAvailable).length,
             cooldownCount: nfts.filter((nft) => !nftIsAvailable(nft)).length,
@@ -4228,16 +4388,38 @@ function createChecksService(ctx, logger, mcp, services = {}) {
         const reservedReadyOwnedFallbackCandidates =
           reservedReadyOwnedCandidates.slice(0, 3);
 
-        if (prioritizedReadyOwnedCandidates.length > 0) {
-          assignmentOptions = prioritizedReadyOwnedCandidates.map((entry) => ({
-            ...entry,
-            source: "owned",
-            stage: "ready_owned",
-          }));
-          assignmentSourceStage = "ready_owned";
+        const selectedReadyOwnedCandidates =
+          prioritizedReadyOwnedCandidates.length > 0
+            ? prioritizedReadyOwnedCandidates
+            : nftAssignmentOrderMode() === "rotate_least_used"
+              ? reservedReadyOwnedFallbackCandidates
+              : [];
+        if (selectedReadyOwnedCandidates.length > 0) {
+          assignmentOptions = selectedReadyOwnedCandidates.map((entry) => {
+            const reserved = reservedReadyOwnedCandidates.includes(entry);
+            return {
+              ...entry,
+              source: reserved ? "owned_reserved" : "owned",
+              stage: reserved ? "reserved_ready_owned" : "ready_owned",
+            };
+          });
+          assignmentSourceStage = assignmentOptions[0].stage;
           logWithTimestamp(
-            `[ASSIGN] ✅ ${name}: found ${prioritizedReadyOwnedCandidates.length} ready owned NFT candidate(s).`,
+            `[ASSIGN] ✅ ${name}: found ${readyOwnedCandidates.length} ready owned NFT candidate(s); queued ${selectedReadyOwnedCandidates.length} least-used candidate(s) for assignment.`,
           );
+        } else if (nftAssignmentOrderMode() === "rotate_least_used") {
+          logWithTimestamp(
+            `[ASSIGN] ⏭️ ${name}: no ready NFT on this fresh inventory page; advancing to the next page on the next normal assignment pass.`,
+          );
+          logDebug("assign", "rotation_page_no_ready_nft", {
+            reason,
+            missionName: name,
+            missionId: id,
+            scannedCount: nfts.length,
+            nextOffset: nextNftScan.offset,
+            scanCycle: nextNftScan.cycle,
+          });
+          continue;
         } else {
           const cooldownOwnedEntries = nfts
             .map((nft) => ({ nft, account: nftAccountId(nft) }))
@@ -4782,14 +4964,20 @@ function createChecksService(ctx, logger, mcp, services = {}) {
               );
             }
             assigned += 1;
+            nftAssignmentLastUsedAt.set(account, Date.now());
             if (nftAssignmentOrderMode() === "rotate_least_used") {
               ensureNftAssignmentUsageLoaded();
               nftAssignmentUsage.set(
                 account,
                 (nftAssignmentUsage.get(account) || 0) + 1,
               );
+              nftAssignmentSessionUsage.set(
+                account,
+                (nftAssignmentSessionUsage.get(account) || 0) + 1,
+              );
               persistNftAssignmentUsage();
             }
+            publishNftUsageStats([nft]);
             applyLocalOwnedNftAssignmentCount({
               source: option.source,
               wasAvailable: ownedNftWasAvailable,
@@ -5639,6 +5827,10 @@ function createChecksService(ctx, logger, mcp, services = {}) {
     logWithTimestamp("[CHECK] ✅ Loading data complete.");
     return true;
   }
+
+  // Make persisted usage visible to the desktop immediately. NFT metadata is
+  // merged into these rows later as fresh inventory pages are observed.
+  publishNftUsageStats();
 
   return {
     runWhoAmICheck: runWalletSummaryCheck,

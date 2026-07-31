@@ -32,6 +32,12 @@ function createContext() {
       "data",
       "nft-assignment-rotation.json",
     ),
+    nftUsageStatsPath: path.join(configDir, "data", "nft-usage-stats.json"),
+    nftAssignmentScanPath: path.join(
+      configDir,
+      "data",
+      "nft-assignment-scan.json",
+    ),
     tokenFilePath: path.join(os.homedir(), ".pbp-mcp", "token.json"),
     LOG_BUFFER_SIZE,
     LOG_BUFFER_SIZE_DEBUG,
@@ -161,6 +167,7 @@ function createContext() {
       nftsTotal: 0,
       nftsAvailable: 0,
     },
+    nftUsageStats: [],
 
     guiMissionSlots: [],
     slotUnlockSummary: null,

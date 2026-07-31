@@ -3,6 +3,7 @@ import ccIcon from "../img/icon_cc.webp";
 import tcIcon from "../img/icon_tc.webp";
 import { useEffect, useState } from "react";
 import useDesktopBridge from "../components/useDesktopBridge";
+import { canonicalCollectionLabel } from "../collection-images";
 
 const DETAILED_STATS_URL_BASE = "https://missions.lol/missions-analytics/";
 
@@ -14,6 +15,27 @@ function formatNumber(value, max = 2) {
 function asNumber(value, fallback = 0) {
   const n = Number(value);
   return Number.isFinite(n) ? n : fallback;
+}
+
+function formatLastUsed(value) {
+  const timestamp = Number(value);
+  if (!Number.isFinite(timestamp) || timestamp <= 0) return "Never";
+  const date = new Date(timestamp);
+  const now = new Date();
+  const sameDay =
+    date.getFullYear() === now.getFullYear() &&
+    date.getMonth() === now.getMonth() &&
+    date.getDate() === now.getDate();
+  return date.toLocaleString(undefined, {
+    ...(sameDay
+      ? {}
+      : {
+          month: "short",
+          day: "numeric",
+        }),
+    hour: "numeric",
+    minute: "2-digit",
+  });
 }
 
 function historyClaimCount(entry) {
@@ -335,6 +357,8 @@ export default function StatsPage({ status }) {
   const safeStatus = status && typeof status === "object" ? status : {};
   const refreshKey = analyticsRefreshKey(safeStatus.analytics);
   const [rangeKey, setRangeKey] = useState("session");
+  const [statsTab, setStatsTab] = useState("overview");
+  const [nftSort, setNftSort] = useState({ key: "uses", direction: "desc" });
   const [analyticsView, setAnalyticsView] = useState(null);
   const [loading, setLoading] = useState(false);
   const [actionBusy, setActionBusy] = useState(false);
@@ -458,14 +482,89 @@ export default function StatsPage({ status }) {
       : rangeKey === "24h"
         ? "Last 24hrs"
         : rangeKey === "7d"
-        ? "Last 7days"
+          ? "Last 7days"
           : "All Time";
-  const currentUserWalletId = String(safeStatus.currentUserWalletId || "").trim();
+  const currentUserWalletId = String(
+    safeStatus.currentUserWalletId || "",
+  ).trim();
+  const nftInventoryUsage = Array.isArray(safeStatus.nftUsageStats)
+    ? safeStatus.nftUsageStats
+    : [];
+  const buildNftAssignmentUsage = (history) => {
+    const byIdentity = new Map();
+    for (const event of Array.isArray(history) ? history : []) {
+      const account = String(event?.nftAccount || "").trim();
+      const name = String(event?.nft || "").trim().toLowerCase();
+      const key = account ? `account:${account}` : name ? `name:${name}` : "";
+      if (!key) continue;
+      const current = byIdentity.get(key) || { uses: 0, lastUsedAt: null };
+      current.uses += 1;
+      const at = Number(event?.at);
+      if (Number.isFinite(at) && at > Number(current.lastUsedAt || 0)) {
+        current.lastUsedAt = at;
+      }
+      byIdentity.set(key, current);
+    }
+    return byIdentity;
+  };
+  const scopedNftAssignments = buildNftAssignmentUsage(
+    scopedAnalytics.assignmentHistory,
+  );
+  const sessionNftAssignments = buildNftAssignmentUsage(
+    safeStatus.analytics?.session?.assignmentHistory,
+  );
+  const nftUsage = nftInventoryUsage.map((nft) => {
+    const accountKey = `account:${String(nft?.account || "").trim()}`;
+    const nameKey = `name:${String(nft?.name || "").trim().toLowerCase()}`;
+    const scoped =
+      scopedNftAssignments.get(accountKey) ||
+      scopedNftAssignments.get(nameKey) ||
+      null;
+    const session =
+      sessionNftAssignments.get(accountKey) ||
+      sessionNftAssignments.get(nameKey) ||
+      null;
+    return {
+      ...nft,
+      uses: scoped?.uses || 0,
+      sessionUses: session?.uses || 0,
+      lastUsedAt: scoped?.lastUsedAt || null,
+    };
+  });
+  const nftLifetimeUses = nftUsage.reduce(
+    (total, nft) => total + asNumber(nft?.uses, 0),
+    0,
+  );
+  const nftSessionUses = nftUsage.reduce(
+    (total, nft) => total + asNumber(nft?.sessionUses, 0),
+    0,
+  );
+  const sortedNftUsage = nftUsage.slice().sort((a, b) => {
+    const multiplier = nftSort.direction === "asc" ? 1 : -1;
+    if (nftSort.key === "name" || nftSort.key === "collection") {
+      const valueFor = (entry) =>
+        nftSort.key === "collection"
+          ? canonicalCollectionLabel(entry?.collection)
+          : String(entry?.name || "");
+      return (
+        multiplier *
+        valueFor(a).localeCompare(valueFor(b))
+      );
+    }
+    const difference =
+      asNumber(a?.[nftSort.key], 0) - asNumber(b?.[nftSort.key], 0);
+    return (
+      difference * multiplier ||
+      String(a?.name || "").localeCompare(String(b?.name || ""))
+    );
+  });
   const detailedStatsUrl = (() => {
     const params = new URLSearchParams();
     if (currentUserWalletId) params.set("address", currentUserWalletId);
     const query = params.toString();
-    return query ? `${DETAILED_STATS_URL_BASE}?${query}` : DETAILED_STATS_URL_BASE;
+    return query
+      ? `${DETAILED_STATS_URL_BASE}?${query}`
+      : DETAILED_STATS_URL_BASE;
   })();
 
   async function handleResetSession() {
@@ -498,6 +597,36 @@ export default function StatsPage({ status }) {
     }
   }
 
+  async function handleResetNftUsage() {
+    if (actionBusy) return;
+    setActionBusy(true);
+    setError("");
+    try {
+      const next = await bridge.resetNftUsageRange(rangeKey);
+      setAnalyticsView(next);
+    } catch (resetError) {
+      setError(String(resetError?.message || resetError));
+    } finally {
+      setActionBusy(false);
+    }
+  }
+
+  async function handleExportNftUsageCsv() {
+    if (actionBusy) return;
+    setActionBusy(true);
+    setError("");
+    try {
+      const result = await bridge.exportNftUsageCsv(rangeKey);
+      if (!result?.ok && result?.canceled !== true) {
+        throw new Error(result?.error || "NFT usage CSV export failed.");
+      }
+    } catch (exportError) {
+      setError(String(exportError?.message || exportError));
+    } finally {
+      setActionBusy(false);
+    }
+  }
+
   async function openDetailedStats() {
     const target = String(detailedStatsUrl || "").trim();
     if (!target) return;
@@ -512,12 +641,249 @@ export default function StatsPage({ status }) {
     } catch {}
   }
 
+  function toggleNftSort(key) {
+    setNftSort((current) =>
+      current.key === key
+        ? { key, direction: current.direction === "asc" ? "desc" : "asc" }
+        : { key, direction: key === "name" ? "asc" : "desc" },
+    );
+  }
+
+  function nftSortLabel(key) {
+    if (nftSort.key !== key) return "";
+    return nftSort.direction === "asc" ? " ↑" : " ↓";
+  }
+
+  const statsTabs = (
+    <div className="join rounded-sm overflow-hidden border border-white/10">
+      <button
+        type="button"
+        className={`btn btn-xs join-item rounded-none border-0 px-2 font-normal ${
+          statsTab === "overview"
+            ? "bg-violet-600 text-white hover:bg-violet-500"
+            : "btn-black"
+        }`}
+        onClick={() => setStatsTab("overview")}
+      >
+        Overview
+      </button>
+      <button
+        type="button"
+        className={`btn btn-xs join-item rounded-none border-0 px-2 font-normal ${
+          statsTab === "nfts"
+            ? "bg-violet-600 text-white hover:bg-violet-500"
+            : "btn-black"
+        }`}
+        onClick={() => setStatsTab("nfts")}
+      >
+        NFT usage
+      </button>
+    </div>
+  );
+
+  if (statsTab === "nfts") {
+    return (
+      <section className="h-full min-h-0 overflow-hidden">
+        <div className="flex h-full min-h-0 flex-col gap-3">
+          <section className="card shrink-0">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                {statsTabs}
+                <button
+                  type="button"
+                  className="btn btn-xs btn-black z-10 inline-flex rounded-sm px-2 font-normal active:translate-y-0.5"
+                  onClick={() => void handleExportNftUsageCsv()}
+                  disabled={actionBusy || loading}
+                  title={`Export NFT usage for ${rangeLabel}`}
+                >
+                  Export .csv
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-xs rounded-sm border-error bg-error font-normal opacity-70 transition-all not-disabled:hover:bg-error-content hover:opacity-100 active:translate-y-0.5"
+                  onClick={() => void handleResetNftUsage()}
+                  disabled={actionBusy || loading}
+                  title={`Clear NFT usage for ${rangeLabel}`}
+                >
+                  Clear Stats
+                </button>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="text-[11px] text-slate-400">Stats Window</div>
+                <select
+                  className="select select-sm w-36 border-white/10 bg-black/50 text-slate-100 focus-within:bg-black"
+                  value={rangeKey}
+                  onChange={(event) =>
+                    setRangeKey(String(event.target.value || "session"))
+                  }
+                  disabled={loading || actionBusy}
+                >
+                  <option value="session">This session</option>
+                  <option value="24h">Last 24hrs</option>
+                  <option value="7d">Last 7days</option>
+                  <option value="all">All time</option>
+                </select>
+              </div>
+            </div>
+            <div className="mt-3 grid grid-cols-3 gap-2">
+              <div className="rounded-md border border-white/10 bg-black/20 px-3 py-2">
+                <div className="text-[11px] text-slate-400">NFTs tracked</div>
+                <div className="text-xl font-semibold text-slate-100">
+                  {formatNumber(nftUsage.length, 0)}
+                </div>
+              </div>
+              <div className="rounded-md border border-white/10 bg-black/20 px-3 py-2">
+                <div className="text-[11px] text-slate-400">Total uses</div>
+                <div className="text-xl font-semibold text-slate-100">
+                  {formatNumber(nftLifetimeUses, 0)}
+                </div>
+              </div>
+              <div className="rounded-md border border-white/10 bg-black/20 px-3 py-2">
+                <div className="text-[11px] text-slate-400">
+                  Uses this session
+                </div>
+                <div className="text-xl font-semibold text-slate-100">
+                  {formatNumber(nftSessionUses, 0)}
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section className="card flex min-h-0 flex-1 flex-col overflow-hidden p-0">
+            <div className="grid shrink-0 grid-cols-[40px_minmax(0,1fr)_minmax(76px,100px)_82px_92px_82px] gap-2 border-b border-white/10 pb-2 pr-3 text-xs text-slate-400">
+              <button
+                type="button"
+                className="col-span-2 text-left hover:text-slate-200"
+                onClick={() => toggleNftSort("name")}
+              >
+                NFT{nftSortLabel("name")}
+              </button>
+              <button
+                type="button"
+                className="truncate text-left hover:text-slate-200"
+                onClick={() => toggleNftSort("collection")}
+              >
+                Collection{nftSortLabel("collection")}
+              </button>
+              <button
+                type="button"
+                className="whitespace-nowrap text-right hover:text-slate-200"
+                onClick={() => toggleNftSort("uses")}
+              >
+                Total uses{nftSortLabel("uses")}
+              </button>
+              <button
+                type="button"
+                className="whitespace-nowrap text-right hover:text-slate-200"
+                onClick={() => toggleNftSort("sessionUses")}
+              >
+                Session uses{nftSortLabel("sessionUses")}
+              </button>
+              <button
+                type="button"
+                className="whitespace-nowrap text-right hover:text-slate-200"
+                onClick={() => toggleNftSort("lastUsedAt")}
+              >
+                Last used{nftSortLabel("lastUsedAt")}
+              </button>
+            </div>
+            <div className="min-h-0 flex-1 overflow-y-auto pb-10">
+              {sortedNftUsage.length ? (
+                sortedNftUsage.map((nft) => (
+                  <div
+                    className="grid grid-cols-[40px_minmax(0,1fr)_minmax(76px,100px)_82px_92px_82px] items-center gap-2 py-1 last:border-b-0"
+                    key={nft.account}
+                  >
+                    <div className="flex size-10 items-center justify-center overflow-hidden rounded-md border border-white/10 bg-black/30 text-xs text-slate-500">
+                      {nft.imageUrl ? (
+                        <img
+                          src={nft.imageUrl}
+                          alt=""
+                          className="h-full w-full object-cover"
+                        />
+                      ) : (
+                        "NFT"
+                      )}
+                    </div>
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-medium text-slate-100">
+                        {nft.name || "Unknown NFT"}
+                      </div>
+                      <div className="mt-0.5 flex min-w-0 items-center gap-1.5">
+                        {Number.isFinite(Number(nft.level)) &&
+                        Number(nft.level) >= 0 ? (
+                          <span
+                            className=" text-xs text-gray-400"
+                            title={`Level ${nft.level}`}
+                            aria-label={`Level ${nft.level}`}
+                          >
+                            Level {nft.level}
+                          </span>
+                        ) : null}
+                        {nft.available === true ? (
+                          <span className="inline-flex shrink-0 items-center gap-1 text-xs font-medium text-emerald-400">
+                            <span aria-hidden="true">✓</span>
+                            Ready
+                          </span>
+                        ) : nft.available === false ? (
+                          <span className="inline-flex shrink-0 items-center text-xs text-slate-400">
+                            On cooldown
+                          </span>
+                        ) : (
+                          <span className="inline-flex shrink-0 items-center text-xs text-slate-500">
+                            Status: Unknown
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <div
+                      className="truncate text-sm text-slate-300"
+                      title={canonicalCollectionLabel(
+                        nft.collection || "Unknown collection",
+                      )}
+                    >
+                      {canonicalCollectionLabel(
+                        nft.collection || "Unknown collection",
+                      )}
+                    </div>
+                    <div className="text-right text-sm font-semibold text-slate-100">
+                      {formatNumber(nft.uses, 0)}
+                    </div>
+                    <div className="text-right text-sm font-semibold text-violet-200">
+                      {formatNumber(nft.sessionUses, 0)}
+                    </div>
+                    <div
+                      className="truncate text-right text-xs text-slate-400"
+                      title={
+                        Number.isFinite(Number(nft.lastUsedAt))
+                          ? new Date(Number(nft.lastUsedAt)).toLocaleString()
+                          : "Never"
+                      }
+                    >
+                      {formatLastUsed(nft.lastUsedAt)}
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <div className="flex h-full min-h-48 items-center justify-center px-6 text-center text-sm text-slate-500">
+                  NFT usage will appear after the next inventory refresh and
+                  successful assignment.
+                </div>
+              )}
+            </div>
+          </section>
+        </div>
+      </section>
+    );
+  }
+
   return (
     <section className="h-full min-h-0 overflow-hidden">
       <div className="grid  grid-rows-[auto_200px_auto_auto] gap-3 overflow-hidden">
         <section className="card grid grid-cols-[minmax(195px,0.28fr)_minmax(0,1fr)] items-center gap-y-2 gap-x-2">
           <div className=" col-span-full flex flex-row items-center gap-3 items-center w-full  justify-between">
             <div className="flex items-center gap-2">
+              {statsTabs}
               <button
                 type="button"
                 className="btn btn-xs btn-black z-10 rounded-sm font-normal px-2 inline-flex ml-0 active:translate-y-0.5"

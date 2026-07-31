@@ -37,6 +37,12 @@ const {
   DEV_DEFAULTS,
   runtimeDefaultsForFlags,
 } = require("../src/runtime-defaults");
+const {
+  loadNftUsageStatsCache,
+} = require("../src/nft-usage-stats-cache");
+const {
+  canonicalNftCollectionName: canonicalSharedNftCollectionName,
+} = require("../src/nft-collection-name");
 
 const ROOT_DIR = path.resolve(__dirname, "..");
 const RENDERER_DEV_URL =
@@ -209,6 +215,7 @@ const backendStatus = {
   currentUserWalletId: null,
   currentUserWalletSummary: null,
   currentMissionStats: null,
+  nftUsageStats: [],
   slotUnlockSummary: null,
   currentMode: null,
   defaultMissionResetLevel: null,
@@ -704,6 +711,8 @@ function normalizeAssignmentHistory(raw) {
       );
       const usedReset = entry?.usedReset === true;
       const nft = String(entry?.nft || "").trim() || null;
+      const nftAccount =
+        String(entry?.nftAccount || entry?.account || "").trim() || null;
       return {
         at: Number.isFinite(at) ? at : null,
         source: source === "rental" ? "rental" : "owned",
@@ -714,6 +723,7 @@ function normalizeAssignmentHistory(raw) {
         missionStartedAt,
         usedReset,
         nft,
+        nftAccount,
       };
     })
     .filter((entry) => entry.at)
@@ -898,6 +908,7 @@ function clearStoppedBackendAuthState() {
   backendStatus.currentUserWalletId = null;
   backendStatus.currentUserWalletSummary = null;
   backendStatus.currentMissionStats = null;
+  backendStatus.nftUsageStats = loadPersistedNftUsageStats();
   backendStatus.guiMissionSlots = null;
   backendStatus.slotUnlockSummary = null;
   rentalsPreviewCache = null;
@@ -1438,6 +1449,25 @@ function getAnalyticsPath() {
   );
 }
 
+function getNftUsageStatsPath() {
+  return path.join(getBackendWorkingDirectory(), "data", "nft-usage-stats.json");
+}
+
+function getNftAssignmentRotationPath() {
+  return path.join(
+    getBackendWorkingDirectory(),
+    "data",
+    "nft-assignment-rotation.json",
+  );
+}
+
+function loadPersistedNftUsageStats() {
+  return loadNftUsageStatsCache(
+    getNftUsageStatsPath(),
+    getNftAssignmentRotationPath(),
+  );
+}
+
 function getAnalyticsTelemetryStatePath() {
   return path.join(
     getBackendWorkingDirectory(),
@@ -1727,15 +1757,13 @@ function requestAppQuit(reason = "user") {
   if (appQuitInFlight) return;
   appQuitInFlight = true;
   try {
-    stopBackend();
+    if (backend && backendStatus.running) {
+      backend.kill("SIGKILL");
+    }
   } catch {}
-  Promise.resolve(stopTelemetrySession(reason, { immediate: true }))
-    .catch(() => {})
-    .finally(() => {
-      try {
-        app.exit(0);
-      } catch {}
-    });
+  try {
+    app.exit(0);
+  } catch {}
 }
 
 function walletSummaryResultFromBackendStatus() {
@@ -2581,6 +2609,7 @@ function applyAnalyticsAssignmentEvent(payload = {}) {
       missionStartedAt,
       usedReset,
       nft: payload?.nft || payload?.nftName,
+      nftAccount: payload?.nftAccount || payload?.account || null,
     },
   ]);
   current.session.assignmentHistory = normalizeAssignmentHistory([
@@ -2599,6 +2628,7 @@ function applyAnalyticsAssignmentEvent(payload = {}) {
       missionStartedAt,
       usedReset,
       nft: payload?.nft || payload?.nftName,
+      nftAccount: payload?.nftAccount || payload?.account || null,
     },
   ]);
   saveAnalytics(current);
@@ -2884,6 +2914,104 @@ function resetAnalyticsRange(rangeKey = "session") {
   return analyticsView(key);
 }
 
+function resetNftUsageRange(rangeKey = "session") {
+  const current = normalizeAnalytics(
+    backendStatus.analytics || loadAnalytics(),
+  );
+  const key = ["session", "24h", "7d", "all"].includes(rangeKey)
+    ? rangeKey
+    : "session";
+  if (key === "all") {
+    current.lifetime.assignmentHistory = [];
+    current.lifetime.nftsUsed = [];
+    current.session.assignmentHistory = [];
+    current.session.nftsUsed = [];
+  } else if (key === "session") {
+    current.session.assignmentHistory = [];
+    current.session.nftsUsed = [];
+  } else {
+    const cutoff = Date.now() - (key === "24h" ? 24 : 7 * 24) * 60 * 60 * 1000;
+    current.lifetime.assignmentHistory = normalizeAssignmentHistory(
+      (current.lifetime.assignmentHistory || []).filter(
+        (entry) => Number(entry?.at) < cutoff,
+      ),
+    );
+    current.lifetime.nftsUsed = Array.from(
+      new Set(
+        current.lifetime.assignmentHistory
+          .map((entry) => String(entry?.nft || "").trim())
+          .filter(Boolean),
+      ),
+    );
+  }
+  backendStatus.analytics = normalizeAnalytics(current);
+  saveAnalytics(backendStatus.analytics);
+  publishStatus();
+  return analyticsView(key);
+}
+
+function nftUsageRowsForRange(rangeKey = "session") {
+  const view = analyticsView(rangeKey);
+  const history = Array.isArray(view?.analytics?.assignmentHistory)
+    ? view.analytics.assignmentHistory
+    : [];
+  const cachedRows =
+    Array.isArray(backendStatus.nftUsageStats) &&
+    backendStatus.nftUsageStats.length
+      ? backendStatus.nftUsageStats
+      : loadPersistedNftUsageStats();
+  const byAccount = new Map(
+    cachedRows.map((row) => [String(row?.account || "").trim(), { ...row }]),
+  );
+  const byName = new Map(
+    cachedRows
+      .filter((row) => String(row?.name || "").trim())
+      .map((row) => [String(row.name).trim().toLowerCase(), row]),
+  );
+  const usage = new Map();
+  for (const event of history) {
+    const account = String(event?.nftAccount || "").trim();
+    const name = String(event?.nft || "").trim();
+    const cached =
+      (account && byAccount.get(account)) ||
+      (name && byName.get(name.toLowerCase())) ||
+      null;
+    const key = cached?.account || account || `name:${name.toLowerCase()}`;
+    if (!key || key === "name:") continue;
+    const current = usage.get(key) || {
+      uses: 0,
+      lastUsedAt: null,
+      fallbackName: name || "Unknown NFT",
+    };
+    current.uses += 1;
+    const at = Number(event?.at);
+    if (Number.isFinite(at) && at > Number(current.lastUsedAt || 0)) {
+      current.lastUsedAt = at;
+    }
+    usage.set(key, current);
+  }
+  for (const [key, value] of usage) {
+    if (byAccount.has(key)) continue;
+    byAccount.set(key, {
+      account: key,
+      name: value.fallbackName,
+      collection: null,
+      imageUrl: null,
+      level: -1,
+      available: null,
+    });
+  }
+  return Array.from(byAccount.values()).map((row) => {
+    const stats = usage.get(String(row?.account || "").trim()) || null;
+    return {
+      ...row,
+      collection: canonicalNftCollectionName(row?.collection) || null,
+      uses: stats?.uses || 0,
+      lastUsedAt: stats?.lastUsedAt || null,
+    };
+  });
+}
+
 function csvEscape(value) {
   const text = String(value ?? "");
   if (!/[",\r\n]/.test(text)) return text;
@@ -2938,6 +3066,36 @@ function buildAnalyticsCsv(rangeKey = "session") {
     .join("\n");
 }
 
+function buildNftUsageCsv(rangeKey = "session") {
+  const rows = nftUsageRowsForRange(rangeKey);
+  return [
+    ["NFT", "Collection", "Level", "Status", "Uses", "Last Used"],
+    ...rows
+      .slice()
+      .sort(
+        (a, b) =>
+          Number(b.uses || 0) - Number(a.uses || 0) ||
+          String(a.name || "").localeCompare(String(b.name || "")),
+      )
+      .map((row) => [
+        row.name || "Unknown NFT",
+        row.collection || "Unknown collection",
+        Number(row.level) >= 0 ? Number(row.level) : "",
+        row.available === true
+          ? "Ready"
+          : row.available === false
+            ? "On cooldown"
+            : "Unknown",
+        Number(row.uses || 0),
+        Number(row.lastUsedAt) > 0
+          ? new Date(Number(row.lastUsedAt)).toISOString()
+          : "",
+      ]),
+  ]
+    .map((row) => row.map((value) => csvEscape(value)).join(","))
+    .join("\n");
+}
+
 async function exportAnalyticsCsv(rangeKey = "session") {
   const key = ["session", "24h", "7d", "all"].includes(rangeKey)
     ? rangeKey
@@ -2955,6 +3113,26 @@ async function exportAnalyticsCsv(rangeKey = "session") {
   }
   fs.mkdirSync(path.dirname(result.filePath), { recursive: true });
   fs.writeFileSync(result.filePath, buildAnalyticsCsv(key), "utf8");
+  return { ok: true, filePath: result.filePath };
+}
+
+async function exportNftUsageCsv(rangeKey = "session") {
+  const key = ["session", "24h", "7d", "all"].includes(rangeKey)
+    ? rangeKey
+    : "session";
+  const defaultName = `nft-usage-${key}-${new Date()
+    .toISOString()
+    .slice(0, 10)}.csv`;
+  const result = await dialog.showSaveDialog(controlWindow || undefined, {
+    title: "Export NFT Usage CSV",
+    defaultPath: path.join(getBackendWorkingDirectory(), "data", defaultName),
+    filters: [{ name: "CSV", extensions: ["csv"] }],
+  });
+  if (result.canceled || !result.filePath) {
+    return { ok: false, canceled: true };
+  }
+  fs.mkdirSync(path.dirname(result.filePath), { recursive: true });
+  fs.writeFileSync(result.filePath, buildNftUsageCsv(key), "utf8");
   return { ok: true, filePath: result.filePath };
 }
 
@@ -3753,11 +3931,7 @@ function missionRewardLabel(mission = {}) {
 }
 
 function canonicalNftCollectionName(value) {
-  const label = String(value || "").trim();
-  const key = label.toLowerCase().replace(/\s+/g, "");
-  if (/^s[o0]{2}k$/.test(key) || /^(500k|500000)$/.test(key)) return "500K";
-  if (/^[il1][o0]{2}k$/.test(key) || /^(100k|100000)$/.test(key)) return "100K";
-  return label;
+  return canonicalSharedNftCollectionName(value);
 }
 
 function missionCollectionEntries(mission = {}) {
@@ -4058,6 +4232,7 @@ function startBackend() {
   backendStatus.watcherRunning = null;
   backendStatus.watchLoopEnabled = null;
   backendStatus.currentMissionStats = null;
+  backendStatus.nftUsageStats = loadPersistedNftUsageStats();
   backendStatus.currentMode = null;
   backendStatus.level20ResetEnabled = null;
   backendStatus.missionModeEnabled = null;
@@ -4128,6 +4303,7 @@ function startBackend() {
     backendStatus.exitCode = code;
     backendStatus.exitSignal = signal;
     backendStatus.currentMissionStats = null;
+    backendStatus.nftUsageStats = loadPersistedNftUsageStats();
     backendStatus.throttleDebug = null;
     backendStatus.guiMissionSlots = null;
     backendStatus.slotUnlockSummary = null;
@@ -5203,16 +5379,22 @@ async function createCliWindow() {
 
 app.whenReady().then(async () => {
   installMinimalApplicationMenu();
+  backendStatus.nftUsageStats = loadPersistedNftUsageStats();
   ipcMain.handle("backend:start", async () => startBackend());
   ipcMain.handle("backend:stop", async () => stopBackend());
   ipcMain.handle("backend:restart", async () => restartBackend());
   ipcMain.handle("backend:send-command", async (_event, command) =>
     sendBackendCommand(command),
   );
-  ipcMain.handle("backend:get-state", async () => ({
-    status: { ...backendStatus },
-    logs: logHistory,
-  }));
+  ipcMain.handle("backend:get-state", async () => {
+    if (!backendStatus.running) {
+      backendStatus.nftUsageStats = loadPersistedNftUsageStats();
+    }
+    return {
+      status: { ...backendStatus },
+      logs: logHistory,
+    };
+  });
   ipcMain.handle("debug:get-throttle-log", async () => readThrottleDebugLog());
   ipcMain.handle("debug:delete-throttle-log", async () =>
     deleteThrottleDebugLog(),
@@ -5229,6 +5411,14 @@ app.whenReady().then(async () => {
   );
   ipcMain.handle("analytics:export-csv", async (_event, rangeKey = "session") =>
     exportAnalyticsCsv(rangeKey),
+  );
+  ipcMain.handle(
+    "nft-usage:reset-range",
+    async (_event, rangeKey = "session") => resetNftUsageRange(rangeKey),
+  );
+  ipcMain.handle(
+    "nft-usage:export-csv",
+    async (_event, rangeKey = "session") => exportNftUsageCsv(rangeKey),
   );
   ipcMain.handle("config:get", async () => {
     const config = readDesktopConfig();
@@ -6424,9 +6614,8 @@ app.whenReady().then(async () => {
 });
 
 app.on("window-all-closed", () => {
-  stopBackend();
   if (process.platform !== "darwin") {
-    app.quit();
+    requestAppQuit("window_all_closed");
   }
 });
 

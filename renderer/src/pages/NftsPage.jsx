@@ -141,6 +141,7 @@ export default function NftsPage({ bridge, signerMode = "" }) {
   const [loading, setLoading] = useState(false);
   const [hasLoaded, setHasLoaded] = useState(false);
   const [error, setError] = useState(null);
+  const [detailModal, setDetailModal] = useState(null);
   const [resetModal, setResetModal] = useState(null);
   const [resetBusy, setResetBusy] = useState(false);
   const [resetError, setResetError] = useState(null);
@@ -609,26 +610,25 @@ export default function NftsPage({ bridge, signerMode = "" }) {
                 return (
                   <div
                     key={item.id}
-                    className={`card-mission min-w-0 ${
-                      !isReady ? "cursor-pointer hover:border-warning/50" : ""
-                    }`}
-                    role={!isReady ? "button" : undefined}
-                    tabIndex={!isReady ? 0 : undefined}
-                    title={
-                      !isReady
-                        ? `Reset cooldown for ${item.name || "NFT"}`
-                        : undefined
-                    }
+                    className="card-mission min-w-0 cursor-pointer hover:border-accent/60"
+                    role="button"
+                    tabIndex={0}
+                    title={`View ${item.name || "NFT"} details`}
                     onClick={() =>
-                      !isReady
-                        ? void openResetModal(item, liveCooldownSeconds)
-                        : undefined
+                      setDetailModal({
+                        item,
+                        isReady,
+                        cooldownSeconds: liveCooldownSeconds,
+                      })
                     }
                     onKeyDown={(event) => {
-                      if (isReady) return;
                       if (event.key === "Enter" || event.key === " ") {
                         event.preventDefault();
-                        void openResetModal(item, liveCooldownSeconds);
+                        setDetailModal({
+                          item,
+                          isReady,
+                          cooldownSeconds: liveCooldownSeconds,
+                        });
                       }
                     }}
                   >
@@ -661,6 +661,120 @@ export default function NftsPage({ bridge, signerMode = "" }) {
           </div>
         )}
       </div>
+      {detailModal ? (
+        <div
+          className="fixed inset-0 z-60 grid place-items-center bg-black/70 p-4"
+          role="dialog"
+          aria-modal="true"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setDetailModal(null);
+          }}
+        >
+          <div
+            className="w-full max-w-xl overflow-hidden rounded-xl border-2 border-[#1D1C27] shadow-2xl shadow-black/95"
+            style={{
+              backgroundImage: `url(${backImg})`,
+              backgroundSize: "cover",
+              backgroundPosition: "center",
+            }}
+          >
+            <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
+              <div className="min-w-0">
+                <div className="truncate text-lg font-semibold text-white">
+                  {detailModal.item?.name || "Unknown NFT"}
+                </div>
+                <div className="text-xs text-slate-400">
+                  {detailModal.item?.collection || "Unknown collection"}
+                </div>
+              </div>
+              <button
+                type="button"
+                className="btn btn-clear btn-sm"
+                onClick={() => setDetailModal(null)}
+                title="Close"
+              >
+                x
+              </button>
+            </div>
+
+            <div className="grid gap-4 p-4 sm:grid-cols-[minmax(0,260px)_minmax(0,1fr)]">
+              <div className="aspect-square overflow-hidden rounded-lg border border-white/10 bg-black/30">
+                {detailModal.item?.image ? (
+                  <img
+                    src={detailModal.item.image}
+                    alt={detailModal.item?.name || "NFT"}
+                    className="h-full w-full object-cover"
+                  />
+                ) : (
+                  <div className="flex h-full items-center justify-center text-sm text-slate-500">
+                    No image available
+                  </div>
+                )}
+              </div>
+
+              <div className="min-w-0 space-y-3">
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="rounded-md border border-white/10 bg-black/25 p-2.5">
+                    <div className="text-[10px] uppercase tracking-wide text-slate-500">
+                      Level
+                    </div>
+                    <div className="mt-1 text-lg font-semibold text-slate-100">
+                      {detailModal.item?.level ?? "?"}
+                    </div>
+                  </div>
+                  <div className="rounded-md border border-white/10 bg-black/25 p-2.5">
+                    <div className="text-[10px] uppercase tracking-wide text-slate-500">
+                      Status
+                    </div>
+                    <div
+                      className={`mt-1 text-sm font-semibold ${
+                        detailModal.isReady ? "text-success" : "text-warning"
+                      }`}
+                    >
+                      {detailModal.isReady
+                        ? "Ready"
+                        : formatCooldownLabel(detailModal.cooldownSeconds)}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="rounded-md border border-white/10 bg-black/25 p-2.5">
+                  <div className="text-[10px] uppercase tracking-wide text-slate-500">
+                    NFT account / mint
+                  </div>
+                  <div
+                    className="mt-1 break-all font-mono text-xs text-slate-200"
+                    title={
+                      detailModal.item?.account ||
+                      detailModal.item?.id ||
+                      detailModal.item?.mint
+                    }
+                  >
+                    {detailModal.item?.account ||
+                      detailModal.item?.id ||
+                      detailModal.item?.mint ||
+                      "Unknown"}
+                  </div>
+                </div>
+
+                {!detailModal.isReady ? (
+                  <button
+                    type="button"
+                    className="btn btn-gradient btn-sm w-full"
+                    onClick={() => {
+                      const { item, cooldownSeconds } = detailModal;
+                      setDetailModal(null);
+                      void openResetModal(item, cooldownSeconds);
+                    }}
+                  >
+                    Reset cooldown
+                  </button>
+                ) : null}
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
       {resetModal ? (
         <div
           className="fixed inset-0 z-60 grid place-items-center bg-black/50 p-4"

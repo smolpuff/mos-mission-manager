@@ -302,6 +302,7 @@ function MissionSlotImage({
   assigning = false,
   padded = false,
   contain = false,
+  onSettled,
 }) {
   const [activeSrc, setActiveSrc] = useState(src || null);
   const [outgoingSrc, setOutgoingSrc] = useState(null);
@@ -352,10 +353,12 @@ function MissionSlotImage({
           onLoad={() => {
             setImageLoaded(true);
             setImageFailed(false);
+            onSettled?.();
           }}
           onError={() => {
             setImageLoaded(true);
             setImageFailed(true);
+            onSettled?.();
           }}
           style={{
             opacity: imageFailed ? 0 : imageLoaded ? 1 : 0,
@@ -1909,11 +1912,38 @@ function ControlView() {
       (key) => rowKey === key || rowKey.includes(key) || key.includes(rowKey),
     );
   };
-  const isWatching = status.watcherRunning === true;
-  const isStarting = status.running && !isWatching;
   const [activityLabel, setActivityLabel] = useState(null);
   const [manualCheckBusy, setManualCheckBusy] = useState(false);
   const [activeAssigningSlot, setActiveAssigningSlot] = useState(null);
+  const [settledMissionImages, setSettledMissionImages] = useState(
+    () => new Set(),
+  );
+  const assignedMissionImages = liveSlots
+    .map((entry) => {
+      const slot = Number(entry?.slot);
+      const account = String(
+        entry?.assignedNftAccount ||
+          entry?.assignedNft ||
+          entry?.assigned_nft ||
+          "",
+      ).trim();
+      const src = account ? pickSlotImage(entry) : null;
+      return {
+        account,
+        src,
+        key: account && src ? `${slot}:${account}:${src}` : null,
+      };
+    })
+    .filter((entry) => entry.account);
+  const missionImagesReady =
+    status.startupMissionSlotsLoading !== true &&
+    liveSlots.length > 0 &&
+    assignedMissionImages.every(
+      (entry) => entry.key && settledMissionImages.has(entry.key),
+    );
+  const isWatching = status.watcherRunning === true;
+  const isStarting =
+    status.running && (!isWatching || !missionImagesReady);
   const manualCheckPendingRef = useRef(false);
   const [copiedLabel, setCopiedLabel] = useState(null);
   const [secretModalOpen, setSecretModalOpen] = useState(false);
@@ -1997,16 +2027,17 @@ function ControlView() {
 
   const mainStatusLabel = manualCheckBusy
     ? "Manual check..."
-    : activityLabel
-      ? activityLabel
-      : status.running
-        ? isWatching
+    : isStarting
+      ? "Starting up..."
+      : activityLabel
+        ? activityLabel
+        : status.running
           ? "Watching missions..."
-          : "Starting up..."
-        : "Stopped";
+          : "Stopped";
 
   useEffect(() => {
     if (status.running) return;
+    setSettledMissionImages(new Set());
     setActivityLabel(null);
     setManualCheckBusy(false);
     manualCheckPendingRef.current = false;
@@ -2054,7 +2085,7 @@ function ControlView() {
         setActiveAssigningSlot(null);
         const count = Number(lastEvent.assigned || 0);
         next = count > 0 ? "✅ Started mission" : "Watching missions...";
-        if (count > 0) resetToWatchingMs = 2200;
+        if (count > 0) resetToWatchingMs = 5000;
       } else if (state === "error") {
         setActiveAssigningSlot(null);
         next = "❌ Start failed";
@@ -2070,7 +2101,7 @@ function ControlView() {
           : null,
       );
       next = "✅ Started mission";
-      resetToWatchingMs = 2200;
+      resetToWatchingMs = 5000;
     } else if (type === "claiming") {
       const state = String(lastEvent.state || "").trim();
       if (state === "start") {
@@ -2112,7 +2143,6 @@ function ControlView() {
   }, [
     lastEvent,
     isWatching,
-    activityLabel,
     status.running,
     status.watchLoopEnabled,
     status.watcherRunning,
@@ -2293,16 +2323,27 @@ function ControlView() {
       setActivityLabel("Stopped");
       return;
     }
-    if (isWatching) {
+    if (isWatching && missionImagesReady) {
       setActivityLabel((current) =>
-        !current || current === "Stopped" ? "Watching missions..." : current,
+        !current || current === "Stopped" || current === "Starting up..."
+          ? "Watching missions..."
+          : current,
       );
       return;
     }
     setActivityLabel((current) =>
-      !current || current === "Stopped" ? "Starting up..." : current,
+      !current ||
+      current === "Stopped" ||
+      current === "Watching missions..."
+        ? "Starting up..."
+        : current,
     );
-  }, [status.running, isWatching, status.watchLoopEnabled]);
+  }, [
+    status.running,
+    isWatching,
+    missionImagesReady,
+    status.watchLoopEnabled,
+  ]);
 
   useEffect(() => {
     if (!onboardingOpen) return undefined;
@@ -5101,6 +5142,22 @@ function ControlView() {
                                 assigning={slotAssigning}
                                 padded={usesKoreaTakeitArt}
                                 contain={usesKoreaTakeitArt}
+                                onSettled={() => {
+                                  if (!hasAssignedNft || !slotImageSrc) return;
+                                  const account = String(
+                                    entry?.assignedNftAccount ||
+                                      entry?.assignedNft ||
+                                      entry?.assigned_nft ||
+                                      "",
+                                  ).trim();
+                                  const key = `${slot}:${account}:${slotImageSrc}`;
+                                  setSettledMissionImages((current) => {
+                                    if (current.has(key)) return current;
+                                    const next = new Set(current);
+                                    next.add(key);
+                                    return next;
+                                  });
+                                }}
                               />
 
                               {slotError ? (

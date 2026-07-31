@@ -10,6 +10,7 @@ const {
 const {
   normalizeMissionActionEnabledBySlot,
 } = require("./mission-slot-policy");
+const { canonicalNftCollectionName } = require("./nft-collection-name");
 
 const SAVE_DEBOUNCE_MS = 350;
 const pendingSaves = new WeakMap();
@@ -391,16 +392,9 @@ function loadConfig(ctx, logWithTimestamp) {
   const nftAssignmentCollection = String(
     ctx.config.nftAssignmentCollection || "",
   ).trim();
-  const nftAssignmentCollectionKey = nftAssignmentCollection
-    .toLowerCase()
-    .replace(/\s+/g, "");
-  ctx.config.nftAssignmentCollection = /^s[o0]{2}k$/.test(
-    nftAssignmentCollectionKey,
-  )
-    ? "500K"
-    : /^[il1][o0]{2}k$/.test(nftAssignmentCollectionKey)
-      ? "100K"
-      : nftAssignmentCollection;
+  ctx.config.nftAssignmentCollection = canonicalNftCollectionName(
+    nftAssignmentCollection,
+  );
   ctx.nftAssignmentCollection = ctx.config.nftAssignmentCollection;
   const nftCooldownResetMaxPbp = Number(ctx.config.nftCooldownResetMaxPbp);
   ctx.config.nftCooldownResetMaxPbp =

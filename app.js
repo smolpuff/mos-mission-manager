@@ -88,6 +88,7 @@ function createGuiStateEmitter(ctx) {
       currentUserWalletId: ctx.currentUserWalletId,
       currentUserWalletSummary: ctx.currentUserWalletSummary,
       currentMissionStats: ctx.currentMissionStats,
+      nftUsageStats: ctx.nftUsageStats,
       guiMissionSlots: ctx.guiMissionSlots,
       slotUnlockSummary: ctx.slotUnlockSummary,
       currentMode: ctx.currentMode,

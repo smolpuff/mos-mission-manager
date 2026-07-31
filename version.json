@@ -1,5 +1,5 @@
 {
   "version": "3.2.13",
   "downloadUrl": "https://github.com/smolpuff/mos-mission-manager/releases/latest",
-  "notes": ["MCP call updates"]
+  "notes": ["Optimized startup", "Added NFT Usage stats"]
 }

@@ -1790,7 +1790,6 @@ button.btn.btn-gradient {
 
 .stats-online-link__marble {
   position: absolute;
-  left: -0.5rem;
   width: 1.75rem;
   height: 1.75rem;
   border-radius: 999px;
@@ -1798,9 +1797,6 @@ button.btn.btn-gradient {
     inset -0.45rem -0.6rem 0.85rem rgba(0, 0, 0, 0.26),
     inset 0.32rem 0.38rem 0.38rem rgba(255, 255, 255, 0.52),
     0 0.65rem 1.35rem rgba(0, 0, 0, 0.3);
-  animation-timing-function: linear;
-  animation-iteration-count: infinite;
-  will-change: transform;
 }
 
 .stats-online-link__marble::before {
@@ -1813,21 +1809,21 @@ button.btn.btn-gradient {
 }
 
 .stats-online-link__marble--gold {
-  top: calc(74% - 0.38rem);
+  top: calc(18% - 0.38rem);
+  left: 58%;
   background: radial-gradient(circle at 30% 28%, #fff8d8 0%, #ffd57b 32%, #ff9f43 68%, #de5e17 100%);
-  animation: statsMarbleRaceOne 4.4s linear infinite;
 }
 
 .stats-online-link__marble--coral {
-  display: none;
+  top: calc(46% - 0.38rem);
+  left: 72%;
   background: radial-gradient(circle at 32% 28%, #fff1ef 0%, #ffb2a0 28%, #ff784e 62%, #b82239 100%);
-  animation: statsMarbleRaceTwo 5.1s linear infinite;
 }
 
 .stats-online-link__marble--ice {
-  top: calc(46% - 0.38rem);
+  top: calc(74% - 0.38rem);
+  left: 45%;
   background: radial-gradient(circle at 32% 28%, #effdff 0%, #b9f7ff 30%, #69d4ff 64%, #2563eb 100%);
-  animation: statsMarbleRaceThree 4.75s linear infinite;
 }
 
 .stats-online-link__content,
@@ -1887,60 +1883,6 @@ button.btn.btn-gradient {
   box-shadow: 0 8px 18px rgba(0, 0, 0, 0.2);
   backdrop-filter: blur(8px);
   transition: filter 160ms linear, transform 120ms ease-out;
-}
-
-@keyframes statsMarbleRaceOne {
-  0% {
-    transform: translate3d(0, 0, 0) scale(0.96);
-  }
-
-  38% {
-    transform: translate3d(9rem, -1.9rem, 0) scale(1);
-  }
-
-  71% {
-    transform: translate3d(16rem, -3.35rem, 0) scale(0.98);
-  }
-
-  100% {
-    transform: translate3d(22rem, -4.6rem, 0) scale(1);
-  }
-}
-
-@keyframes statsMarbleRaceTwo {
-  0% {
-    transform: translate3d(0, 0, 0) scale(0.97);
-  }
-
-  34% {
-    transform: translate3d(7.4rem, -1.55rem, 0) scale(1);
-  }
-
-  69% {
-    transform: translate3d(14.8rem, -3.08rem, 0) scale(0.99);
-  }
-
-  100% {
-    transform: translate3d(22rem, -4.58rem, 0) scale(1);
-  }
-}
-
-@keyframes statsMarbleRaceThree {
-  0% {
-    transform: translate3d(0, 0, 0) scale(0.95);
-  }
-
-  41% {
-    transform: translate3d(9.8rem, -2.06rem, 0) scale(1);
-  }
-
-  76% {
-    transform: translate3d(16.8rem, -3.52rem, 0) scale(0.99);
-  }
-
-  100% {
-    transform: translate3d(22rem, -4.62rem, 0) scale(1);
-  }
 }
 
 @keyframes statsCardBreath {
