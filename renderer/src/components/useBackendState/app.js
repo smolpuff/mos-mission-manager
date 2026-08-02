@@ -1,6 +1,49 @@
 import { useEffect, useRef, useState } from "react";
 import useDesktopBridge from "../useDesktopBridge";
 
+const MAX_LOG_ENTRIES = 1200;
+const MAX_LOG_BYTES = 4 * 1024 * 1024;
+const LOG_BATCH_INTERVAL_MS = 100;
+
+function logEntryByteLength(entry) {
+  const reported = Number(entry?.byteLength);
+  return Number.isFinite(reported) && reported >= 0
+    ? reported
+    : new Blob([String(entry?.text || "")]).size + 64;
+}
+
+function appendLogEntries(current, entries) {
+  const nextEntries = Array.isArray(entries) ? entries : [];
+  if (nextEntries.length === 0) return current;
+
+  const next = [...current.entries];
+  const existingIds = new Set(
+    current.entries.map((entry) => Number(entry?.id)).filter(Number.isFinite),
+  );
+  let totalBytes = current.totalBytes;
+  for (const entry of nextEntries) {
+    const id = Number(entry?.id);
+    if (Number.isFinite(id) && existingIds.has(id)) continue;
+    if (Number.isFinite(id)) existingIds.add(id);
+    next.push(entry);
+    totalBytes += logEntryByteLength(entry);
+  }
+
+  let removeCount = 0;
+  while (
+    removeCount < next.length &&
+    (next.length - removeCount > MAX_LOG_ENTRIES ||
+      totalBytes > MAX_LOG_BYTES)
+  ) {
+    totalBytes -= logEntryByteLength(next[removeCount]);
+    removeCount += 1;
+  }
+  return {
+    entries: removeCount > 0 ? next.slice(removeCount) : next,
+    totalBytes: Math.max(0, totalBytes),
+  };
+}
+
 function normalizeTotals(raw) {
   const src = raw && typeof raw === "object" ? raw : {};
   return {
@@ -57,7 +100,10 @@ function normalizeBackendEvent(event) {
   return event;
 }
 
-export default function useBackendState() {
+export default function useBackendState({
+  includeLogs = false,
+  includeCommands = true,
+} = {}) {
   const bridge = useDesktopBridge();
   const [status, setStatus] = useState({
     running: false,
@@ -103,7 +149,8 @@ export default function useBackendState() {
     cliWindowOpen: false,
     analytics: null,
   });
-  const [logs, setLogs] = useState([]);
+  const [logState, setLogState] = useState({ entries: [], totalBytes: 0 });
+  const [lastCommand, setLastCommand] = useState(null);
   const [lastEvent, setLastEvent] = useState(null);
   const [persistentRewardTotals, setPersistentRewardTotals] = useState({
     pbp: 0,
@@ -152,18 +199,27 @@ export default function useBackendState() {
 
   useEffect(() => {
     let mounted = true;
-    bridge.getState().then((state) => {
-      if (!mounted) return;
-      setPersistentRewardTotals((current) =>
-        mergeRewardTotalsForStatus(current, state.status),
-      );
-      setPersistentSpendTotals((current) =>
-        mergeSpendTotalsForStatus(current, state.status),
-      );
-      setStatus(state.status);
-      setLogs(state.logs);
-    });
-
+    let logFlushTimer = null;
+    let pendingLogs = [];
+    const flushPendingLogs = () => {
+      logFlushTimer = null;
+      if (!mounted || pendingLogs.length === 0) return;
+      const batch = pendingLogs;
+      pendingLogs = [];
+      setLogState((current) => appendLogEntries(current, batch));
+    };
+    const offOutput = includeLogs
+      ? bridge.onBackendOutput((entry) => {
+          pendingLogs.push(entry);
+          if (!logFlushTimer) {
+            logFlushTimer = setTimeout(flushPendingLogs, LOG_BATCH_INTERVAL_MS);
+          }
+        })
+      : () => {};
+    const offCommand =
+      includeCommands && bridge.onBackendCommand
+        ? bridge.onBackendCommand((command) => setLastCommand(command))
+        : () => {};
     const offStatus = bridge.onBackendStatus((nextStatus) => {
       setPersistentRewardTotals((current) =>
         mergeRewardTotalsForStatus(current, nextStatus),
@@ -172,9 +228,6 @@ export default function useBackendState() {
         mergeSpendTotalsForStatus(current, nextStatus),
       );
       setStatus(nextStatus);
-    });
-    const offOutput = bridge.onBackendOutput((entry) => {
-      setLogs((current) => [...current, entry].slice(-1200));
     });
     const offEvent =
       bridge.onBackendEvent?.((event) => {
@@ -187,18 +240,42 @@ export default function useBackendState() {
         }
         setLastEvent(normalizedEvent);
       }) || (() => {});
+    bridge.getState({ includeLogs }).then((state) => {
+      if (!mounted) return;
+      setPersistentRewardTotals((current) =>
+        mergeRewardTotalsForStatus(current, state.status),
+      );
+      setPersistentSpendTotals((current) =>
+        mergeSpendTotalsForStatus(current, state.status),
+      );
+      setStatus(state.status);
+      if (includeLogs) {
+        const initialEntries = Array.isArray(state.logs) ? state.logs : [];
+        const initialState = {
+          entries: initialEntries,
+          totalBytes: initialEntries.reduce(
+            (total, entry) => total + logEntryByteLength(entry),
+            0,
+          ),
+        };
+        setLogState((current) => appendLogEntries(initialState, current.entries));
+      }
+    });
 
     return () => {
       mounted = false;
+      if (logFlushTimer) clearTimeout(logFlushTimer);
+      pendingLogs = [];
       offStatus();
       offOutput();
+      offCommand();
       offEvent();
     };
-  }, [bridge]);
+  }, [bridge, includeCommands, includeLogs]);
 
   useEffect(() => {
     let cancelled = false;
-    bridge.getState().then(async (state) => {
+    bridge.getState({ includeLogs: false }).then(async (state) => {
       if (cancelled) return;
       setPersistentRewardTotals((current) =>
         mergeRewardTotalsForStatus(current, state.status),
@@ -219,5 +296,11 @@ export default function useBackendState() {
     sessionSpendTotals: persistentSpendTotals,
   };
 
-  return { bridge, status: effectiveStatus, logs, lastEvent };
+  return {
+    bridge,
+    status: effectiveStatus,
+    logs: logState.entries,
+    lastCommand,
+    lastEvent,
+  };
 }

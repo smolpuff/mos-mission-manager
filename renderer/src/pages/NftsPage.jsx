@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import backImg from "../img/back.png";
 import {
   canonicalCollectionLabel,
@@ -210,10 +210,51 @@ export default function NftsPage({ bridge, signerMode = "" }) {
     }
   };
 
+  const cooldownDeadlinesMs = useMemo(
+    () =>
+      data.nfts
+        .map((item) =>
+          item?.cooldownEndsAt
+            ? new Date(item.cooldownEndsAt).getTime()
+            : NaN,
+        )
+        .filter(Number.isFinite)
+        .sort((a, b) => a - b),
+    [data.nfts],
+  );
+
   useEffect(() => {
-    const timer = setInterval(() => setNowMs(Date.now()), 1000);
-    return () => clearInterval(timer);
-  }, []);
+    let timer = null;
+    const scheduleNextTick = () => {
+      if (timer) {
+        clearTimeout(timer);
+        timer = null;
+      }
+      if (document.visibilityState === "hidden") return;
+      const currentNowMs = Date.now();
+      setNowMs(currentNowMs);
+      const nextDeadlineMs = cooldownDeadlinesMs.find(
+        (deadlineMs) => deadlineMs > currentNowMs,
+      );
+      if (!nextDeadlineMs) return;
+      const remainingMs = nextDeadlineMs - currentNowMs;
+      const oneHourMs = 60 * 60 * 1000;
+      const updateIntervalMs =
+        remainingMs > oneHourMs
+          ? Math.min(30_000, Math.max(250, remainingMs - oneHourMs))
+          : 1_000;
+      timer = setTimeout(
+        scheduleNextTick,
+        Math.min(updateIntervalMs, Math.max(250, remainingMs)),
+      );
+    };
+    scheduleNextTick();
+    document.addEventListener("visibilitychange", scheduleNextTick);
+    return () => {
+      if (timer) clearTimeout(timer);
+      document.removeEventListener("visibilitychange", scheduleNextTick);
+    };
+  }, [cooldownDeadlinesMs]);
 
   const openResetModal = async (item, cooldownSeconds) => {
     if (!item || Number(cooldownSeconds || 0) <= 0) return;
@@ -407,55 +448,67 @@ export default function NftsPage({ bridge, signerMode = "" }) {
     }
   };
 
-  const collectionOptions = [];
-  const collectionSeen = new Set();
-  for (const item of data.nfts) {
-    const rawCollection =
-      String(item?.collection || "unknown").trim() || "unknown";
-    const key = canonicalCollectionLabel(rawCollection);
-    if (collectionSeen.has(key)) continue;
-    collectionSeen.add(key);
-    collectionOptions.push({
-      key,
-      label: key,
-      image:
-        localCollectionImage(rawCollection) ||
-        localCollectionImage(key) ||
-        null,
-      count: data.nfts.filter(
-        (entry) =>
+  const collectionOptions = useMemo(() => {
+    const byCollection = new Map();
+    for (const item of data.nfts) {
+      const rawCollection =
+        String(item?.collection || "unknown").trim() || "unknown";
+      const key = canonicalCollectionLabel(rawCollection);
+      const current = byCollection.get(key);
+      if (current) {
+        current.count += 1;
+        continue;
+      }
+      byCollection.set(key, {
+        key,
+        label: key,
+        image:
+          localCollectionImage(rawCollection) ||
+          localCollectionImage(key) ||
+          null,
+        count: 1,
+      });
+    }
+    return Array.from(byCollection.values()).sort((a, b) =>
+      a.label.localeCompare(b.label),
+    );
+  }, [data.nfts]);
+
+  const filteredNfts = useMemo(
+    () =>
+      data.nfts.filter((item) => {
+        if (selectedCollection === "all") return true;
+        return (
           canonicalCollectionLabel(
-            String(entry?.collection || "unknown").trim() || "unknown",
-          ) === key,
-      ).length,
-    });
-  }
-  collectionOptions.sort((a, b) => a.label.localeCompare(b.label));
+            String(item?.collection || "unknown").trim() || "unknown",
+          ) === selectedCollection
+        );
+      }),
+    [data.nfts, selectedCollection],
+  );
+  const visibleNfts = useMemo(
+    () => {
+      return filteredNfts.slice().sort((a, b) => {
+        const cooldownA = remainingCooldownSeconds(a, nowMs);
+        const cooldownB = remainingCooldownSeconds(b, nowMs);
+        const levelA = Number(a?.level || 0);
+        const levelB = Number(b?.level || 0);
+        if (sortBy === "cooldown_largest")
+          return cooldownB - cooldownA || levelB - levelA;
+        if (sortBy === "level_highest")
+          return levelB - levelA || cooldownA - cooldownB;
+        if (sortBy === "level_lowest")
+          return levelA - levelB || cooldownA - cooldownB;
+        return cooldownA - cooldownB || levelB - levelA;
+      });
+    },
+    [filteredNfts, nowMs, sortBy],
+  );
 
-  const visibleNfts = data.nfts
-    .filter((item) => {
-      if (selectedCollection === "all") return true;
-      return (
-        canonicalCollectionLabel(
-          String(item?.collection || "unknown").trim() || "unknown",
-        ) === selectedCollection
-      );
-    })
-    .sort((a, b) => {
-      const cooldownA = remainingCooldownSeconds(a, nowMs);
-      const cooldownB = remainingCooldownSeconds(b, nowMs);
-      const levelA = Number(a?.level || 0);
-      const levelB = Number(b?.level || 0);
-      if (sortBy === "cooldown_largest")
-        return cooldownB - cooldownA || levelB - levelA;
-      if (sortBy === "level_highest")
-        return levelB - levelA || cooldownA - cooldownB;
-      if (sortBy === "level_lowest")
-        return levelA - levelB || cooldownA - cooldownB;
-      return cooldownA - cooldownB || levelB - levelA;
-    });
-
-  const readyNftCount = data.nfts.filter((item) => isNftReady(item)).length;
+  const readyNftCount = useMemo(
+    () => data.nfts.filter((item) => isNftReady(item)).length,
+    [data.nfts],
+  );
 
   return (
     <section className="h-full min-h-0 flex flex-col gap-4 overflow-hidden">

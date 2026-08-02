@@ -304,8 +304,10 @@ if (process.env.PBP_GUI_BRIDGE === "1" && typeof process.send === "function") {
         if (typeof payload.missionResetLevel === "string") {
           const nextLevel = String(payload.missionResetLevel || "").trim();
           if (nextLevel) {
-            ctx.currentMissionResetLevel = nextLevel;
             ctx.config.missionResetLevel = nextLevel;
+            if (!ctx.autoModeEnabled && !ctx.missionModeEnabled) {
+              ctx.currentMissionResetLevel = nextLevel;
+            }
           }
         }
         if (typeof payload.missionModeResetLevel === "string") {
@@ -313,6 +315,9 @@ if (process.env.PBP_GUI_BRIDGE === "1" && typeof process.send === "function") {
           if (nextLevel) {
             ctx.missionModeResetLevel = nextLevel;
             ctx.config.missionModeResetLevel = nextLevel;
+            if (!ctx.autoModeEnabled && ctx.missionModeEnabled) {
+              ctx.currentMissionResetLevel = nextLevel;
+            }
           }
         }
         if (typeof payload.nftAssignmentOrder === "string") {

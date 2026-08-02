@@ -139,8 +139,11 @@ let splashProgressTarget = 0;
 let splashProgressTimer = null;
 let stopTimer = null;
 let logHistory = [];
+let logHistoryBytes = 0;
+let nextLogId = 1;
 const pendingBackendRequests = new Map();
 const maxLogHistory = 1200;
+const maxLogHistoryBytes = 4 * 1024 * 1024;
 let fundingWalletSummaryRefreshPromise = null;
 let fundingWalletSummaryLastAttemptAt = 0;
 let bootstrapWalletSummaryPromise = null;
@@ -880,17 +883,48 @@ function publish(channel, payload) {
   }
 }
 
+function publishOutput(payload) {
+  if (cliWindow && !cliWindow.isDestroyed()) {
+    cliWindow.webContents.send("backend:output", payload);
+  }
+}
+
+function publishCommand(payload) {
+  if (controlWindow && !controlWindow.isDestroyed()) {
+    controlWindow.webContents.send("backend:command", payload);
+  }
+}
+
+function logEntryByteLength(entry) {
+  return Buffer.byteLength(String(entry?.text || ""), "utf8") + 64;
+}
+
+function appendLogHistory(entry) {
+  logHistory.push(entry);
+  logHistoryBytes += logEntryByteLength(entry);
+  while (
+    logHistory.length > 0 &&
+    (logHistory.length > maxLogHistory ||
+      logHistoryBytes > maxLogHistoryBytes)
+  ) {
+    logHistoryBytes -= logEntryByteLength(logHistory.shift());
+  }
+}
+
 function pushOutput(stream, text) {
   const payload = {
+    id: nextLogId,
     stream,
     text,
     at: Date.now(),
   };
-  logHistory.push(payload);
-  if (logHistory.length > maxLogHistory) {
-    logHistory = logHistory.slice(-maxLogHistory);
+  nextLogId += 1;
+  payload.byteLength = logEntryByteLength(payload);
+  appendLogHistory(payload);
+  publishOutput(payload);
+  if (stream === "stdin") {
+    publishCommand({ id: payload.id, command: String(text || "").trim() });
   }
-  publish("backend:output", payload);
   if (stream === "stdout" || stream === "stderr") {
     applyAnalyticsFromChunk(stream, text);
   }
@@ -2952,6 +2986,7 @@ function resetNftUsageRange(rangeKey = "session") {
 
 function nftUsageRowsForRange(rangeKey = "session") {
   const view = analyticsView(rangeKey);
+  const isAllTime = view.rangeKey === "all";
   const history = Array.isArray(view?.analytics?.assignmentHistory)
     ? view.analytics.assignmentHistory
     : [];
@@ -3006,8 +3041,9 @@ function nftUsageRowsForRange(rangeKey = "session") {
     return {
       ...row,
       collection: canonicalNftCollectionName(row?.collection) || null,
-      uses: stats?.uses || 0,
-      lastUsedAt: stats?.lastUsedAt || null,
+      uses: isAllTime ? Number(row?.uses) || 0 : stats?.uses || 0,
+      lastUsedAt:
+        (isAllTime ? row?.lastUsedAt : stats?.lastUsedAt) || null,
     };
   });
 }
@@ -4189,6 +4225,7 @@ function startBackend() {
   }
 
   logHistory = [];
+  logHistoryBytes = 0;
   const currentConfig = readDesktopConfig();
   if (typeof currentConfig?.competitionRangeLockEnabled === "boolean") {
     competitionRangeLockLiveEnabled = currentConfig.competitionRangeLockEnabled;
@@ -5386,13 +5423,15 @@ app.whenReady().then(async () => {
   ipcMain.handle("backend:send-command", async (_event, command) =>
     sendBackendCommand(command),
   );
-  ipcMain.handle("backend:get-state", async () => {
+  ipcMain.handle("backend:get-state", async (_event, options) => {
     if (!backendStatus.running) {
       backendStatus.nftUsageStats = loadPersistedNftUsageStats();
     }
+    const includeLogs =
+      options === undefined ? true : options?.includeLogs === true;
     return {
       status: { ...backendStatus },
-      logs: logHistory,
+      logs: includeLogs ? logHistory : [],
     };
   });
   ipcMain.handle("debug:get-throttle-log", async () => readThrottleDebugLog());
@@ -5439,6 +5478,13 @@ app.whenReady().then(async () => {
   ipcMain.handle("config:update", async (_event, patch) => {
     const requestedPatch =
       patch && typeof patch === "object" ? { ...patch } : {};
+    const previousConfig = readDesktopConfig();
+    const previousThresholdStatus = {
+      missionResetLevel: backendStatus.missionResetLevel,
+      missionModeResetLevel: backendStatus.missionModeResetLevel,
+      currentMissionResetLevel: backendStatus.currentMissionResetLevel,
+      currentMode: backendStatus.currentMode,
+    };
     const next = applyDesktopConfigPatch(patch || {});
     if (typeof next.autoModeEnabled === "boolean") {
       backendStatus.autoModeEnabled = next.autoModeEnabled;
@@ -5630,7 +5676,7 @@ app.whenReady().then(async () => {
           "nftCooldownResetMaxPbp",
         ))
     ) {
-      requestBackend("update_runtime_config", {
+      const runtimeSync = requestBackend("update_runtime_config", {
         debugMode: next.debugMode,
         missionActionEnabledBySlot: next.missionActionEnabledBySlot,
         missionResetPerSlotModeEnabled: next.missionResetPerSlotModeEnabled,
@@ -5644,11 +5690,55 @@ app.whenReady().then(async () => {
         nftAssignmentOrder: next.nftAssignmentOrder,
         nftAssignmentCollection: next.nftAssignmentCollection,
         nftCooldownResetMaxPbp: next.nftCooldownResetMaxPbp,
-      }).catch((error) => {
-        pushSystemLog(
-          `Runtime config sync failed: ${String(error?.message || error)}`,
-        );
       });
+      const changesResetThreshold =
+        Object.prototype.hasOwnProperty.call(
+          requestedPatch,
+          "missionResetLevel",
+        ) ||
+        Object.prototype.hasOwnProperty.call(
+          requestedPatch,
+          "missionModeResetLevel",
+        );
+      if (changesResetThreshold) {
+        try {
+          await runtimeSync;
+        } catch (error) {
+          const rollbackPatch = {};
+          if (
+            Object.prototype.hasOwnProperty.call(
+              requestedPatch,
+              "missionResetLevel",
+            )
+          ) {
+            rollbackPatch.missionResetLevel = previousConfig.missionResetLevel;
+          }
+          if (
+            Object.prototype.hasOwnProperty.call(
+              requestedPatch,
+              "missionModeResetLevel",
+            )
+          ) {
+            rollbackPatch.missionModeResetLevel =
+              previousConfig.missionModeResetLevel;
+          }
+          try {
+            applyDesktopConfigPatch(rollbackPatch);
+          } catch {}
+          Object.assign(backendStatus, previousThresholdStatus);
+          publishStatus();
+          pushSystemLog(
+            `Runtime config sync failed: ${String(error?.message || error)}`,
+          );
+          throw error;
+        }
+      } else {
+        runtimeSync.catch((error) => {
+          pushSystemLog(
+            `Runtime config sync failed: ${String(error?.message || error)}`,
+          );
+        });
+      }
     }
     return { config: next, status: { ...backendStatus } };
   });

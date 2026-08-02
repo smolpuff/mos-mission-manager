@@ -117,6 +117,21 @@ function createChecksService(ctx, logger, mcp, services = {}) {
     })) {
       nftAssignmentUsage.set(account, count);
     }
+    let recoveredPersistedUsage = false;
+    for (const [account, row] of persistedNftUsageByAccount) {
+      if (nftAssignmentUsage.has(account)) continue;
+      const uses = Number(row?.uses);
+      if (Number.isFinite(uses) && uses > 0) {
+        nftAssignmentUsage.set(account, Math.floor(uses));
+        recoveredPersistedUsage = true;
+      }
+    }
+    if (recoveredPersistedUsage) {
+      saveNftAssignmentRotation(
+        ctx.nftAssignmentRotationPath,
+        Object.fromEntries(nftAssignmentUsage),
+      );
+    }
     if (Object.keys(legacyUsage).length > 0) {
       saveNftAssignmentRotation(
         ctx.nftAssignmentRotationPath,
@@ -181,7 +196,10 @@ function createChecksService(ctx, logger, mcp, services = {}) {
         imageUrl: nftImageUrl(nft) || persisted?.imageUrl || null,
         level: nft ? nftLevelValue(nft) : persisted?.level ?? -1,
         available: nft ? nftIsAvailable(nft) : persisted?.available ?? null,
-        uses: nftAssignmentUsage.get(account) || 0,
+        uses:
+          nftAssignmentUsage.get(account) ??
+          persisted?.uses ??
+          0,
         sessionUses: nftAssignmentSessionUsage.get(account) || 0,
         lastUsedAt:
           nftAssignmentLastUsedAt.get(account) || persisted?.lastUsedAt || null,
@@ -4772,7 +4790,26 @@ function createChecksService(ctx, logger, mcp, services = {}) {
 
         const slot = mission?.slot ?? null;
         let missionAssigned = false;
+        let missionHeldForReset = false;
         let lastError = null;
+        const assignmentNowBlockedByReset = (stage) => {
+          const latestMission =
+            findMissionByAssignedMissionId(missions, id) || mission;
+          if (!missionBlockedByResetThreshold(latestMission)) return false;
+          const currentLevel = missionLevel(latestMission);
+          missionHeldForReset = true;
+          logWithTimestamp(
+            `[ASSIGN] ⏸️ Stopping assignment because reset threshold is now active: ${name}${currentLevel === null ? "" : ` lvl=${currentLevel}`}`,
+          );
+          logDebug("assign", "assignment_cancelled_by_live_reset_threshold", {
+            reason,
+            stage,
+            missionName: name,
+            missionId: id,
+            level: currentLevel,
+          });
+          return true;
+        };
         logWithTimestamp(`[ASSIGN] 🚀 Starting mission: ${name}${levelText}`);
         for (let index = 0; index < assignmentOptions.length; index += 1) {
           if (hasActiveMcpCooldown()) {
@@ -4787,6 +4824,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
             });
             break;
           }
+          if (assignmentNowBlockedByReset("attempt_start")) break;
           const option = assignmentOptions[index];
           const nft = option.nft;
           const ownedNftWasAvailable =
@@ -4797,6 +4835,9 @@ function createChecksService(ctx, logger, mcp, services = {}) {
               option.source === "owned_cooldown" ||
               option.source === "owned_reserved_cooldown"
             ) {
+              if (assignmentNowBlockedByReset("before_owned_cooldown_reset")) {
+                break;
+              }
               const maxPbp = autoNftCooldownResetMaxPbp();
               logWithTimestamp(
                 `[RESET] 🔎 ${name}: checking owned cooldown NFT before rental cooldown fallback (max=${maxPbp} PBP).`,
@@ -4862,6 +4903,9 @@ function createChecksService(ctx, logger, mcp, services = {}) {
                   );
                 }
                 const maxPbp = autoNftCooldownResetMaxPbp();
+                if (assignmentNowBlockedByReset("before_rental_cooldown_reset")) {
+                  break;
+                }
                 logWithTimestamp(
                   `[RESET] 🔎 ${name}: rental NFT is on cooldown; checking reset cost before lease (max=${maxPbp} PBP).`,
                 );
@@ -4913,6 +4957,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
                 maxAttempts: assignmentOptions.length,
               });
             }
+            if (assignmentNowBlockedByReset("before_assign_call")) break;
             logDebug("assign", "assign_call_start", {
               reason,
               missionName: name,
@@ -4965,18 +5010,16 @@ function createChecksService(ctx, logger, mcp, services = {}) {
             }
             assigned += 1;
             nftAssignmentLastUsedAt.set(account, Date.now());
-            if (nftAssignmentOrderMode() === "rotate_least_used") {
-              ensureNftAssignmentUsageLoaded();
-              nftAssignmentUsage.set(
-                account,
-                (nftAssignmentUsage.get(account) || 0) + 1,
-              );
-              nftAssignmentSessionUsage.set(
-                account,
-                (nftAssignmentSessionUsage.get(account) || 0) + 1,
-              );
-              persistNftAssignmentUsage();
-            }
+            ensureNftAssignmentUsageLoaded();
+            nftAssignmentUsage.set(
+              account,
+              (nftAssignmentUsage.get(account) || 0) + 1,
+            );
+            nftAssignmentSessionUsage.set(
+              account,
+              (nftAssignmentSessionUsage.get(account) || 0) + 1,
+            );
+            persistNftAssignmentUsage();
             publishNftUsageStats([nft]);
             applyLocalOwnedNftAssignmentCount({
               source: option.source,
@@ -5213,6 +5256,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
             break;
           }
         }
+        if (missionHeldForReset) continue;
         if (abortedForRateLimit) break;
         if (missionAssigned && assigned >= AUTO_ASSIGN_MAX_STARTS_PER_PASS) {
           logDebug("assign", "pass_limit_reached", {

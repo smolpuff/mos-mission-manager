@@ -2,35 +2,6 @@
 
 const { BrowserWindow, session } = require("electron");
 
-function destroyHeadlessWindow(win, timeoutMs = 2_000) {
-  return new Promise((resolve) => {
-    if (!win || win.isDestroyed()) {
-      resolve();
-      return;
-    }
-
-    let settled = false;
-    const finish = () => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      resolve();
-    };
-    const timer = setTimeout(finish, timeoutMs);
-
-    win.once("closed", finish);
-    try {
-      win.webContents.stop();
-    } catch {}
-    try {
-      win.destroy();
-    } catch {
-      finish();
-    }
-    if (win.isDestroyed()) finish();
-  });
-}
-
 function waitForNavigationDone(win, timeoutMs) {
   return new Promise((resolve, reject) => {
     let settled = false;
@@ -134,12 +105,12 @@ async function withHeadlessWindow(
     return await fn(win);
   } finally {
     try {
+      if (!win.isDestroyed()) win.close();
+    } catch {}
+    try {
       if (blockResources) {
         winSession.webRequest.onBeforeRequest(null);
       }
-    } catch {}
-    await destroyHeadlessWindow(win);
-    try {
       if (!preserveStorage) {
         await winSession.clearStorageData();
         await winSession.clearCache();

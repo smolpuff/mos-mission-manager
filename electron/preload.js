@@ -17,7 +17,7 @@ contextBridge.exposeInMainWorld("missionsDesktop", {
   stopBackend: () => ipcRenderer.invoke("backend:stop"),
   restartBackend: () => ipcRenderer.invoke("backend:restart"),
   sendCommand: (command) => ipcRenderer.invoke("backend:send-command", command),
-  getState: () => ipcRenderer.invoke("backend:get-state"),
+  getState: (options) => ipcRenderer.invoke("backend:get-state", options),
   getThrottleDebugLog: () => ipcRenderer.invoke("debug:get-throttle-log"),
   deleteThrottleDebugLog: () => ipcRenderer.invoke("debug:delete-throttle-log"),
   getResourceUsage: () => ipcRenderer.invoke("debug:get-resource-usage"),
@@ -68,6 +68,11 @@ contextBridge.exposeInMainWorld("missionsDesktop", {
     const listener = (_event, payload) => callback(payload);
     ipcRenderer.on("backend:output", listener);
     return () => ipcRenderer.removeListener("backend:output", listener);
+  },
+  onBackendCommand: (callback) => {
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on("backend:command", listener);
+    return () => ipcRenderer.removeListener("backend:command", listener);
   },
   onBackendEvent: (callback) => {
     const listener = (_event, payload) => callback(payload);

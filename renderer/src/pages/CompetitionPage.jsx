@@ -27,6 +27,11 @@ export default function CompetitionPage({
     competitions[0] ||
     latestCompetition;
   const hasCompetitionData = Boolean(selectedCompetition);
+  const competitionMissions = Array.isArray(selectedCompetition?.missions)
+    ? selectedCompetition.missions
+    : [];
+  const missionColumnClass =
+    competitionMissions.length > 4 ? "basis-1/3" : "basis-1/2";
   const showPageLoading =
     latestCompetitionBusy || (!latestCompetitionError && !hasCompetitionData);
 
@@ -42,7 +47,7 @@ export default function CompetitionPage({
   }
 
   return (
-    <section className="h-160 flex flex-col gap-3">
+    <section className="h-170 flex flex-col gap-3">
       <div className="competition__header grid gap-4 grid-cols-2 items-center">
         <div className="-mt-6">
           <h1 className="text-2xl font-normal competition__h leading-tight flex gap-2">
@@ -113,11 +118,10 @@ export default function CompetitionPage({
 
       <div className="card gap-4 competition__missions">
         <div className="text-sm text-slate-400 hidden">Missions</div>
-        {Array.isArray(selectedCompetition?.missions) &&
-        selectedCompetition.missions.length ? (
+        {competitionMissions.length ? (
           <ul className="text-sm list-disc pl-5 space-y-0.5 flex flex-wrap">
-            {selectedCompetition.missions.map((m, idx) => (
-              <li className=" basis-1/2" key={`${idx}_${m}`}>
+            {competitionMissions.map((m, idx) => (
+              <li className={missionColumnClass} key={`${idx}_${m}`}>
                 {m}
               </li>
             ))}
@@ -127,7 +131,7 @@ export default function CompetitionPage({
         )}
       </div>
 
-      <div className="flex gap-4 h-108 overflow-x-visible overflow-y-hidden">
+      <div className="flex gap-4 h-120   overflow-x-visible overflow-y-hidden">
         <div className="gap-4 rounded-lg w-full h-full min-h-0 flex flex-col">
           {latestCompetitionError ? (
             <div className="text-sm text-red-300">{latestCompetitionError}</div>
@@ -137,8 +141,8 @@ export default function CompetitionPage({
               <div className="text-sm text-amber-200">
                 Headless scrape looks blocked (
                 {selectedCompetition.debug.challenge}
-                ). Try again after opening the competitions page once in-app,
-                or disable bot protection.
+                ). Try again after opening the competitions page once in-app, or
+                disable bot protection.
               </div>
             ) : null}
 

@@ -586,7 +586,7 @@ function normalizeSlotLevelMap(raw, fallback = 10) {
 }
 
 function ControlView() {
-  const { bridge, status, logs, lastEvent } = useBackendState();
+  const { bridge, status, lastCommand, lastEvent } = useBackendState();
   const [debugEnabled, setDebugEnabled] = useState(status?.debugMode === true);
   const debug = debugEnabled;
   const [currentPage, setCurrentPage] = useState("missions");
@@ -661,6 +661,7 @@ function ControlView() {
         ? "mission"
         : "normal",
   );
+  const [modeTransitionBusy, setModeTransitionBusy] = useState(false);
   const [manualModeResetLevel, setManualModeResetLevelState] = useState(
     resolveResetLevelInput(status, "normal"),
   );
@@ -742,6 +743,13 @@ function ControlView() {
   const competitionNotificationCeilingNumberRef = useRef(null);
   const lastThrottleModalKeyRef = useRef(null);
   const pendingModeSelectionRef = useRef(null);
+  const pendingModeReleaseTimerRef = useRef(null);
+  const resetLevelCommitTimerRef = useRef(null);
+  const resetLevelEditGenerationRef = useRef(0);
+  const lastResetLevelCommitRef = useRef(null);
+  const currentModeSelectionRef = useRef(modeSelection);
+  const modeTransitionActiveRef = useRef(false);
+  const latestBackendModeRef = useRef("normal");
   const isMissionMode = modeSelection === "mission";
   const isAutoMode = modeSelection === "auto";
   const isMissionLikeMode = isMissionMode || isAutoMode;
@@ -838,6 +846,63 @@ function ControlView() {
       await bridge.sendCommand(command);
     }
   };
+  latestBackendModeRef.current =
+    status.autoModeEnabled === true
+      ? "auto"
+      : status.missionModeEnabled === true
+        ? "mission"
+        : "normal";
+  currentModeSelectionRef.current = modeSelection;
+  const beginModeTransition = (selection) => {
+    if (modeTransitionActiveRef.current) return false;
+    if (resetLevelCommitTimerRef.current) {
+      clearTimeout(resetLevelCommitTimerRef.current);
+      resetLevelCommitTimerRef.current = null;
+    }
+    resetLevelEditGenerationRef.current += 1;
+    modeTransitionActiveRef.current = true;
+    pendingModeSelectionRef.current = selection;
+    if (pendingModeReleaseTimerRef.current) {
+      clearTimeout(pendingModeReleaseTimerRef.current);
+      pendingModeReleaseTimerRef.current = null;
+    }
+    setModeTransitionBusy(true);
+    setModeSelection(selection);
+    return true;
+  };
+  const finishModeTransition = (selection, succeeded) => {
+    if (pendingModeSelectionRef.current !== selection) return;
+    if (pendingModeReleaseTimerRef.current) {
+      clearTimeout(pendingModeReleaseTimerRef.current);
+    }
+    if (!succeeded) {
+      pendingModeSelectionRef.current = null;
+      modeTransitionActiveRef.current = false;
+      setModeTransitionBusy(false);
+      setModeSelection(latestBackendModeRef.current);
+      return;
+    }
+    pendingModeReleaseTimerRef.current = setTimeout(() => {
+      pendingModeReleaseTimerRef.current = null;
+      if (pendingModeSelectionRef.current === selection) {
+        pendingModeSelectionRef.current = null;
+        modeTransitionActiveRef.current = false;
+        setModeTransitionBusy(false);
+        setModeSelection(latestBackendModeRef.current);
+      }
+    }, 500);
+  };
+  useEffect(
+    () => () => {
+      if (pendingModeReleaseTimerRef.current) {
+        clearTimeout(pendingModeReleaseTimerRef.current);
+      }
+      if (resetLevelCommitTimerRef.current) {
+        clearTimeout(resetLevelCommitTimerRef.current);
+      }
+    },
+    [],
+  );
   useEffect(() => {
     if (typeof status.level20ResetEnabled === "boolean") {
       setResetEnabled(status.level20ResetEnabled);
@@ -856,9 +921,6 @@ function ControlView() {
       pendingModeSelectionRef.current !== backendModeSelection
     ) {
       return;
-    }
-    if (pendingModeSelectionRef.current === backendModeSelection) {
-      pendingModeSelectionRef.current = null;
     }
     setModeSelection(backendModeSelection);
   }, [status.autoModeEnabled, status.missionModeEnabled]);
@@ -1302,49 +1364,92 @@ function ControlView() {
     await applyConfigPatch({ level20ResetEnabled: enabled });
     await runModeCommand(enabled ? "20r on" : "20r off");
   };
-  const commitResetLevel = async (value) => {
-    setMissionModeButtonLevelEditing(false);
+  useEffect(() => {
+    resetLevelEditGenerationRef.current += 1;
+    if (resetLevelCommitTimerRef.current) {
+      clearTimeout(resetLevelCommitTimerRef.current);
+      resetLevelCommitTimerRef.current = null;
+    }
+  }, [modeSelection]);
+
+  const commitResetLevel = async (
+    value,
+    {
+      finishEditing = true,
+      expectedMode = currentModeSelectionRef.current,
+      generation = resetLevelEditGenerationRef.current,
+    } = {},
+  ) => {
+    if (resetLevelCommitTimerRef.current) {
+      clearTimeout(resetLevelCommitTimerRef.current);
+      resetLevelCommitTimerRef.current = null;
+    }
+    if (
+      generation !== resetLevelEditGenerationRef.current ||
+      expectedMode !== currentModeSelectionRef.current
+    ) {
+      return;
+    }
     const raw = String(value ?? "")
       .replace(/[^\d]/g, "")
       .trim();
     if (!raw) {
-      setResetLevelInput(
-        resolveResetLevelInput(status, isMissionMode ? "mission" : "normal"),
-      );
+      if (finishEditing) {
+        setMissionModeButtonLevelEditing(false);
+        setResetLevelInput(resolveResetLevelInput(status, expectedMode));
+      }
       return;
     }
-    if (isMissionMode) {
-      await setMissionModeResetLevel(raw);
+    const nextLevel = String(Math.floor(Number(raw)));
+    if (!Number.isFinite(Number(nextLevel)) || Number(nextLevel) <= 0) return;
+    const commitKey = `${expectedMode}:${nextLevel}`;
+    if (lastResetLevelCommitRef.current === commitKey) {
+      if (finishEditing) setMissionModeButtonLevelEditing(false);
       return;
     }
-    if (isNormalMode) {
-      await setManualModeResetLevel(raw);
+    lastResetLevelCommitRef.current = commitKey;
+    try {
+      if (expectedMode === "mission") {
+        setMissionModeButtonLevel(nextLevel);
+        setResetLevelInput(nextLevel);
+        await applyConfigPatch({ missionModeResetLevel: nextLevel });
+        if (
+          generation === resetLevelEditGenerationRef.current &&
+          currentModeSelectionRef.current === "mission"
+        ) {
+          await runModeCommand(`mm ${nextLevel}`);
+        }
+      } else if (expectedMode === "normal") {
+        setManualModeResetLevelState(nextLevel);
+        setResetLevelInput(nextLevel);
+        await applyConfigPatch({ missionResetLevel: nextLevel });
+      }
+    } catch (error) {
+      if (lastResetLevelCommitRef.current === commitKey) {
+        lastResetLevelCommitRef.current = null;
+      }
+      setResetLevelInput(resolveResetLevelInput(status, expectedMode));
+      throw error;
+    } finally {
+      if (finishEditing) setMissionModeButtonLevelEditing(false);
     }
   };
-  const setManualModeResetLevel = async (value) => {
-    const raw = String(value ?? "").trim();
-    const parsed = Number(raw);
-    if (!Number.isFinite(parsed) || parsed <= 0) return;
-    const nextLevel = String(Math.floor(parsed));
-    setManualModeResetLevelState(nextLevel);
-    setResetLevelInput(nextLevel);
-    await applyConfigPatch({
-      missionResetLevel: nextLevel,
-    });
-  };
-  const setMissionModeResetLevel = async (value) => {
-    const raw = String(value ?? "").trim();
-    const parsed = Number(raw);
-    if (!Number.isFinite(parsed) || parsed <= 0) return;
-    const nextLevel = String(Math.floor(parsed));
-    setMissionModeButtonLevel(nextLevel);
-    setResetLevelInput(nextLevel);
-    setModeSelection("mission");
-    await applyConfigPatch({
-      missionModeEnabled: true,
-      missionModeResetLevel: nextLevel,
-    });
-    await runModeCommand([`mm ${nextLevel}`]);
+  const scheduleResetLevelCommit = (value) => {
+    if (resetLevelCommitTimerRef.current) {
+      clearTimeout(resetLevelCommitTimerRef.current);
+    }
+    const expectedMode = currentModeSelectionRef.current;
+    const generation = resetLevelEditGenerationRef.current;
+    resetLevelCommitTimerRef.current = setTimeout(() => {
+      resetLevelCommitTimerRef.current = null;
+      void commitResetLevel(value, {
+        finishEditing: false,
+        expectedMode,
+        generation,
+      }).catch((error) => {
+        console.error("Reset level update failed", error);
+      });
+    }, 600);
   };
   const setRentalsFallbackEnabled = async (enabled) => {
     if (isMissionLikeMode) return;
@@ -1560,48 +1665,60 @@ function ControlView() {
     };
   }, [autoUpdateCheckEnabled, bridge, runUpdateCheck]);
   const activateNormalMode = async () => {
+    if (!beginModeTransition("normal")) return;
+    let succeeded = false;
     const missionModeNftResetEnabled = isMissionLikeMode
       ? nftResetEnabled
       : undefined;
     const nextManualResetLevel = String(
       manualModeResetLevel || resolveResetLevelInput(status, "normal") || "20",
     ).trim();
-    pendingModeSelectionRef.current = "normal";
-    setModeSelection("normal");
     setResetLevelInput(nextManualResetLevel);
     setRentalsEnabled(true);
     setNftResetEnabled(false);
-    await applyConfigPatch({
-      autoModeEnabled: false,
-      missionModeEnabled: false,
-      missionModeResetLevel: String(
-        status.missionModeResetLevel ||
-          resolveResetLevelInput(status, "mission") ||
-          "10",
-      ).trim(),
-      enableRentals: true,
-      missionResetLevel: nextManualResetLevel,
-      level20ResetEnabled: resetEnabled === true,
-      nftCooldownResetEnabled: false,
-      ...(typeof missionModeNftResetEnabled === "boolean"
-        ? { nftCooldownResetMissionModeEnabled: missionModeNftResetEnabled }
-        : {}),
-    });
-    await runModeCommand(["mm off", resetEnabled ? "20r on" : "20r off"]);
+    try {
+      await applyConfigPatch({
+        autoModeEnabled: false,
+        missionModeEnabled: false,
+        missionModeResetLevel: String(
+          status.missionModeResetLevel ||
+            resolveResetLevelInput(status, "mission") ||
+            "10",
+        ).trim(),
+        enableRentals: true,
+        missionResetLevel: nextManualResetLevel,
+        level20ResetEnabled: resetEnabled === true,
+        nftCooldownResetEnabled: false,
+        ...(typeof missionModeNftResetEnabled === "boolean"
+          ? { nftCooldownResetMissionModeEnabled: missionModeNftResetEnabled }
+          : {}),
+      });
+      await runModeCommand(["mm off", resetEnabled ? "20r on" : "20r off"]);
+      succeeded = true;
+    } finally {
+      finishModeTransition("normal", succeeded);
+    }
   };
   const activateAutoMode = async () => {
-    pendingModeSelectionRef.current = "auto";
-    setModeSelection("auto");
+    if (!beginModeTransition("auto")) return;
+    let succeeded = false;
     setResetLevelInput("20");
     setRentalsEnabled(true);
-    await applyConfigPatch({
-      autoModeEnabled: true,
-      missionModeEnabled: false,
-      enableRentals: true,
-    });
-    await runModeCommand(["am on"]);
+    try {
+      await applyConfigPatch({
+        autoModeEnabled: true,
+        missionModeEnabled: false,
+        enableRentals: true,
+      });
+      await runModeCommand(["am on"]);
+      succeeded = true;
+    } finally {
+      finishModeTransition("auto", succeeded);
+    }
   };
   const activateMissionMode = async () => {
+    if (!beginModeTransition("mission")) return;
+    let succeeded = false;
     const resetLevel = String(
       missionModeButtonLevel ||
         resolveResetLevelInput(status, "mission") ||
@@ -1616,21 +1733,24 @@ function ControlView() {
       const stored = response?.config?.nftCooldownResetMissionModeEnabled;
       if (typeof stored === "boolean") restoredNftResetEnabled = stored;
     } catch {}
-    pendingModeSelectionRef.current = "mission";
-    setModeSelection("mission");
     setNftResetEnabled(restoredNftResetEnabled);
-    await applyConfigPatch({
-      autoModeEnabled: false,
-      missionModeEnabled: true,
-      missionModeResetLevel: resetLevel,
-      nftCooldownResetEnabled: restoredNftResetEnabled,
-      nftCooldownResetMissionModeEnabled: restoredNftResetEnabled,
-      nftCooldownResetMaxPbp:
-        Number.isFinite(cooldownMaxPbp) && cooldownMaxPbp >= 0
-          ? cooldownMaxPbp
-          : 20,
-    });
-    await runModeCommand([`mm ${resetLevel}`]);
+    try {
+      await applyConfigPatch({
+        autoModeEnabled: false,
+        missionModeEnabled: true,
+        missionModeResetLevel: resetLevel,
+        nftCooldownResetEnabled: restoredNftResetEnabled,
+        nftCooldownResetMissionModeEnabled: restoredNftResetEnabled,
+        nftCooldownResetMaxPbp:
+          Number.isFinite(cooldownMaxPbp) && cooldownMaxPbp >= 0
+            ? cooldownMaxPbp
+            : 20,
+      });
+      await runModeCommand([`mm ${resetLevel}`]);
+      succeeded = true;
+    } finally {
+      finishModeTransition("mission", succeeded);
+    }
   };
   const normalizeImageUrl = (raw) => {
     const value = String(raw || "").trim();
@@ -1676,15 +1796,8 @@ function ControlView() {
     }
     return null;
   };
-  const latestLog = useMemo(() => {
-    for (let i = logs.length - 1; i >= 0; i -= 1) {
-      if (typeof logs[i]?.text === "string" && logs[i].text.trim())
-        return logs[i];
-    }
-    return null;
-  }, [logs]);
   useEffect(() => {
-    const text = String(latestLog?.text || "").trim();
+    const text = String(lastCommand?.command || "").trim();
     const match = text.match(/^>\s*mm(?:\s+(.+))?$/i);
     if (!match) return;
     if (missionModeButtonLevelEditing) return;
@@ -1695,7 +1808,7 @@ function ControlView() {
     const next = Number(arg);
     if (!Number.isFinite(next) || next <= 0) return;
     setMissionModeButtonLevel(String(Math.floor(next)));
-  }, [latestLog, missionModeButtonLevelEditing]);
+  }, [lastCommand, missionModeButtonLevelEditing]);
   const walletTiles = useMemo(() => {
     const balances = Array.isArray(status.currentUserWalletSummary?.balances)
       ? status.currentUserWalletSummary.balances
@@ -4356,7 +4469,6 @@ function ControlView() {
           {currentPage === "stats" ? (
             <StatsPage
               status={status}
-              logs={logs}
               missionStats={missionStats}
               sessionStartedAtMs={sessionStartedAtRef.current}
             />
@@ -4435,6 +4547,7 @@ function ControlView() {
                       <button
                         className={` w-full card  h-auto flex-1 @container items-center justify-center overflow-hidden transition-all transition-size !p-4 ${isAutoMode ? "active" : ""}`}
                         onClick={() => void activateAutoMode()}
+                        disabled={modeTransitionBusy}
                         type="button"
                       >
                         <div className="mission-mode-copy space-y-1">
@@ -4449,6 +4562,7 @@ function ControlView() {
                       <button
                         className={` card flex-1  h-auto items-center w-full justify-center transition-all !p-4 ${isNormalMode ? "active" : ""}`}
                         onClick={() => void activateNormalMode()}
+                        disabled={modeTransitionBusy}
                         type="button"
                       >
                         <div className="space-y-1 text-shadow-md text-shadow-black/15">
@@ -4465,6 +4579,7 @@ function ControlView() {
                       <button
                         className={` w-full card h-auto @container items-center justify-center overflow-hidden transition-all !p-4  ${isMissionMode ? "active" : ""}`}
                         onClick={() => void activateMissionMode()}
+                        disabled={modeTransitionBusy}
                         type="button"
                         id="mission-mode-mm_button"
                       >
@@ -4859,19 +4974,29 @@ function ControlView() {
                                   )
                                 }
                                 value={resetLevelInput}
-                                onFocus={() =>
+                                onFocus={() => {
+                                  lastResetLevelCommitRef.current = null;
                                   setMissionModeButtonLevelEditing(true)
-                                }
+                                }}
                                 onChange={(event) => {
                                   const nextValue = event.target.value.replace(
                                     /[^\d]/g,
                                     "",
                                   );
+                                  setMissionModeButtonLevelEditing(true);
                                   setResetLevelInput(nextValue);
+                                  scheduleResetLevelCommit(nextValue);
                                 }}
-                                onBlur={(event) =>
-                                  void commitResetLevel(event.target.value)
-                                }
+                                onBlur={(event) => {
+                                  void commitResetLevel(event.target.value).catch(
+                                    (error) => {
+                                      console.error(
+                                        "Reset level update failed",
+                                        error,
+                                      );
+                                    },
+                                  );
+                                }}
                                 onKeyDown={(event) => {
                                   if (event.key === "Enter") {
                                     event.currentTarget.blur();
@@ -6432,7 +6557,10 @@ function ControlView() {
 }
 
 function CliView() {
-  const { bridge, status, logs } = useBackendState();
+  const { bridge, status, logs } = useBackendState({
+    includeLogs: true,
+    includeCommands: false,
+  });
   const [command, setCommand] = useState("");
   const outputRef = useRef(null);
 

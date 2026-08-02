@@ -356,8 +356,12 @@ export default function StatsPage({ status }) {
   const bridge = useDesktopBridge();
   const safeStatus = status && typeof status === "object" ? status : {};
   const refreshKey = analyticsRefreshKey(safeStatus.analytics);
-  const [rangeKey, setRangeKey] = useState("session");
   const [statsTab, setStatsTab] = useState("overview");
+  const [overviewRangeKey, setOverviewRangeKey] = useState("session");
+  const [nftRangeKey, setNftRangeKey] = useState("all");
+  const rangeKey = statsTab === "nfts" ? nftRangeKey : overviewRangeKey;
+  const setRangeKey =
+    statsTab === "nfts" ? setNftRangeKey : setOverviewRangeKey;
   const [nftSort, setNftSort] = useState({
     key: "lastUsedAt",
     direction: "desc",
@@ -531,11 +535,17 @@ export default function StatsPage({ status }) {
       sessionNftAssignments.get(accountKey) ||
       sessionNftAssignments.get(nameKey) ||
       null;
+    const isAllTime = rangeKey === "all";
     return {
       ...nft,
-      uses: scoped?.uses || 0,
+      // The backend's NFT usage cache/rotation file is the durable source of
+      // truth for lifetime counts. Analytics history is still used for the
+      // timestamp-bounded views, but it may be shorter-lived than the cache
+      // (and older installs have no history for already-persisted uses).
+      uses: isAllTime ? asNumber(nft?.uses, 0) : scoped?.uses || 0,
       sessionUses: session?.uses || 0,
-      lastUsedAt: scoped?.lastUsedAt || null,
+      lastUsedAt:
+        (isAllTime ? nft?.lastUsedAt : scoped?.lastUsedAt) || null,
     };
   });
   const nftLifetimeUses = nftUsage.reduce(

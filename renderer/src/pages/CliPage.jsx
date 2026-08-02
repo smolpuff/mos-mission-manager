@@ -19,7 +19,10 @@ function renderLogText(text) {
 }
 
 export default function CliPage() {
-  const { bridge, status, logs } = useBackendState();
+  const { bridge, status, logs } = useBackendState({
+    includeLogs: true,
+    includeCommands: false,
+  });
   const [command, setCommand] = useState("");
   const outputRef = useRef(null);
   const pinnedToBottomRef = useRef(true);
