@@ -56,6 +56,7 @@ function createWatchService(
   let currentWalletSummaryRefreshTimer = null;
   let currentWalletSummaryRefreshPendingReason = null;
   let nftCountRefreshTimer = null;
+  let startupMissionRefreshTimer = null;
   let watchStartupAssignBackoffUntil = 0;
 
   function summarizeNamesForUser(items = [], limit = 2) {
@@ -175,11 +176,19 @@ function createWatchService(
     return 3000;
   }
 
-  function collectAutoModeMissionRestoreTargets(
+  function missionModeEnabled() {
+    return (
+      ctx.missionModeEnabled === true ||
+      ctx.config?.missionModeEnabled === true
+    );
+  }
+
+  function collectMissionRestoreTargets(
     claims,
     lookupByAssignedMissionId = null,
   ) {
-    if (!autoModeEnabled(ctx)) return [];
+    const isAutoMode = autoModeEnabled(ctx);
+    if (!isAutoMode && !missionModeEnabled()) return [];
     const restoreBySlot = new Map();
     for (const claim of Array.isArray(claims) ? claims : []) {
       const details = compactClaimDetails(claim, lookupByAssignedMissionId);
@@ -195,9 +204,14 @@ function createWatchService(
         level: claimedLevel,
       };
       if (!checks?.isConfiguredTargetMission?.(missionRef)) continue;
-      const resetPolicy = resetPolicyForMission(ctx, missionRef);
-      const threshold = Number(resetPolicy?.threshold);
-      if (resetPolicy?.enabled !== true || threshold !== 20) continue;
+      // Auto mode only owns level-20 missions. Mission mode must restore any
+      // configured mission after its natural level-20 completion, even when
+      // its custom reset level was accidentally configured above 20.
+      if (isAutoMode) {
+        const resetPolicy = resetPolicyForMission(ctx, missionRef);
+        const threshold = Number(resetPolicy?.threshold);
+        if (resetPolicy?.enabled !== true || threshold !== 20) continue;
+      }
       restoreBySlot.set(slot, {
         slot,
         missionName: claimedMissionName,
@@ -264,7 +278,7 @@ function createWatchService(
     }
   }
 
-  async function restoreAutoModeClaimedMissions({
+  async function restoreClaimedMissions({
     restoreTargets = [],
     missionResult = null,
     assignReason = "post_claim",
@@ -294,7 +308,7 @@ function createWatchService(
           targets: restoreTargets,
         });
         logWithTimestamp(
-          `[MISSION] ⏳ Waiting ${Math.ceil(waitMs / 1000)}s before restoring auto mode mission slot${restoreTargets.length === 1 ? "" : "s"}...`,
+          `[MISSION] ⏳ Waiting ${Math.ceil(waitMs / 1000)}s before restoring completed mission slot${restoreTargets.length === 1 ? "" : "s"}...`,
         );
         await sleep(waitMs);
       }
@@ -329,7 +343,7 @@ function createWatchService(
           continue;
         }
         logWithTimestamp(
-          `[MISSION] 🔁 Auto mode restore slot ${slot}: ${currentName || "unknown mission"} -> ${wantedName} after lvl ${target?.claimedLevel ?? "?"} claim.`,
+          `[MISSION] 🔁 Restoring slot ${slot}: ${currentName || "unknown mission"} -> ${wantedName} after lvl ${target?.claimedLevel ?? "?"} claim.`,
         );
         try {
           const restoreResult = await checks.applyMissionSelection({
@@ -345,13 +359,13 @@ function createWatchService(
           });
           if (restoreResult?.pending) {
             logWithTimestamp(
-              `[MISSION] ⏸️ Auto mode restore for slot ${slot} is waiting on signing.`,
+              `[MISSION] ⏸️ Mission restore for slot ${slot} is waiting on signing.`,
             );
             continue;
           }
           if (restoreResult?.ok !== true) {
             logWithTimestamp(
-              `[MISSION] ❌ Auto mode restore failed for slot ${slot}: ${restoreResult?.reason || "unknown_error"}`,
+              `[MISSION] ❌ Mission restore failed for slot ${slot}: ${restoreResult?.reason || "unknown_error"}`,
             );
             continue;
           }
@@ -369,7 +383,7 @@ function createWatchService(
           }
         } catch (error) {
           logWithTimestamp(
-            `[MISSION] ❌ Auto mode restore error for slot ${slot}: ${error.message}`,
+            `[MISSION] ❌ Mission restore error for slot ${slot}: ${error.message}`,
           );
           logDebug("watch", "auto_mode_restore_error", {
             traceId,
@@ -1279,9 +1293,9 @@ function createWatchService(
   }
 
   function watchConfig() {
-    // The live watch_and_claim schema requires pollIntervalSeconds >= 30.
+    // The live watch_and_claim schema requires pollIntervalSeconds >= 60.
     // Keep this transport constraint independent of runtime/debug defaults.
-    const minCycleSeconds = Math.max(30, watchMinCycleSeconds());
+    const minCycleSeconds = Math.max(60, watchMinCycleSeconds());
     const maxLimitSeconds = ctx.runtimeDefaults?.watchMaxLimitSeconds || 600;
     const configuredPoll = Number(ctx.config.watchPollIntervalSeconds);
     const rawPollIntervalSeconds =
@@ -2051,7 +2065,7 @@ function createWatchService(
     let currentClaimed = Number(claimed || 0);
     let assigned = 0;
     let missionResult = initialMissionResult;
-    const autoModeRestoreTargets = collectAutoModeMissionRestoreTargets(
+    const missionRestoreTargets = collectMissionRestoreTargets(
       claims,
       claimLookupByAssignedMissionId,
     );
@@ -2059,13 +2073,19 @@ function createWatchService(
       traceId,
       assignReason,
       claimed: currentClaimed,
-      autoModeRestoreTargets,
+      missionRestoreTargets,
       beforeSnapshot: snapshotTraceSummary(beforeSnapshot),
       hasInitialMissionResult: Boolean(missionResult),
       allowStateFallback,
     });
 
-    if (!(missionResult && typeof missionResult === "object")) {
+    // With no claim, one authoritative mission response is enough to drive
+    // assignment. After a claim, defer the only refresh until settlement
+    // below instead of spending get_user_missions twice in the same minute.
+    if (
+      currentClaimed === 0 &&
+      !(missionResult && typeof missionResult === "object")
+    ) {
       if (claimWorkPaused()) {
         trace("watch", "claim_followup_skipped_before_load_paused", {
           traceId,
@@ -2163,7 +2183,7 @@ function createWatchService(
           error: error.message,
         });
       }
-    } else {
+    } else if (!(missionResult && typeof missionResult === "object")) {
       try {
         if (claimWorkPaused()) {
           trace("watch", "claim_followup_skipped_before_refetch_paused", {
@@ -2191,6 +2211,12 @@ function createWatchService(
           error: error.message,
         });
       }
+    } else {
+      trace("watch", "claim_followup_reused_initial_missions", {
+        traceId,
+        assignReason,
+        reason: "no_claims_and_authoritative_result_available",
+      });
     }
     if (claimWorkPaused()) {
       trace("watch", "claim_followup_skipped_before_assign_paused", {
@@ -2200,9 +2226,9 @@ function createWatchService(
       });
       return { claimed: currentClaimed, assigned, missionResult };
     }
-    if (currentClaimed > 0 && autoModeRestoreTargets.length > 0) {
-      const restoreResult = await restoreAutoModeClaimedMissions({
-        restoreTargets: autoModeRestoreTargets,
+    if (currentClaimed > 0 && missionRestoreTargets.length > 0) {
+      const restoreResult = await restoreClaimedMissions({
+        restoreTargets: missionRestoreTargets,
         missionResult,
         assignReason,
         missionResultLoader,
@@ -2992,8 +3018,24 @@ function createWatchService(
         });
         return;
       }
+      const latestMissionResult =
+        ctx.lastUserMissionsResult || missionsResult || startupMissionResult();
+      const hasUnassignedSelectedMission = checks
+        .filterSelectedMissions(normalizeMissionList(latestMissionResult || {}))
+        .some((mission) => !missionHasAssignedNft(mission));
+      if (hasUnassignedSelectedMission) {
+        logDebug("watch", "nft_count_refresh_deferred_for_assignment", {
+          reason,
+        });
+        scheduleNftCountRefresh({
+          reason: `${reason}_assignment_priority`,
+          missionsResult: latestMissionResult,
+          minDelayMs: 65_000,
+        });
+        return;
+      }
       try {
-        await checks.refreshMissionHeaderStats({
+        const refreshResult = await checks.refreshMissionHeaderStats({
           missionsResult:
             missionsResult ||
             ctx.lastUserMissionsResult ||
@@ -3001,6 +3043,28 @@ function createWatchService(
           refreshNftCount: true,
           hydrateAssignedMetadata: false,
         });
+        if (refreshResult?.nftRefreshDeferred) {
+          const retryMs = Math.max(
+            5000,
+            Number(
+              refreshResult.nftRefreshDeferred.retryAfterSeconds || 60,
+            ) * 1000 + 250,
+          );
+          logDebug("watch", "nft_count_refresh_deferred", {
+            reason,
+            retryMs,
+            error: refreshResult.nftRefreshDeferred.error,
+          });
+          scheduleNftCountRefresh({
+            reason: `${reason}_cooldown_retry`,
+            missionsResult:
+              missionsResult ||
+              ctx.lastUserMissionsResult ||
+              startupMissionResult(),
+            minDelayMs: retryMs,
+          });
+          return;
+        }
         logDebug("watch", "nft_count_refresh_complete", {
           reason,
           nftsTotal: Number(ctx.currentMissionStats?.nftsTotal || 0),
@@ -3013,6 +3077,50 @@ function createWatchService(
         });
       }
     }, delayMs);
+  }
+
+  function scheduleStartupMissionRefresh({ delayMs = 1000 } = {}) {
+    if (startupMissionRefreshTimer) return;
+    const safeDelayMs = Math.max(1000, Number(delayMs || 0));
+    logDebug("watch", "startup_mission_refresh_scheduled", {
+      delayMs: safeDelayMs,
+    });
+    startupMissionRefreshTimer = setTimeout(async () => {
+      startupMissionRefreshTimer = null;
+      if (!ctx.watchLoopEnabled || !ctx.watcherRunning) return;
+      try {
+        const result = await mcp.getUserMissions({
+          forceFresh: true,
+          reason: "startup_background_mission_refresh",
+        });
+        await checks.refreshMissionHeaderStats({
+          missionsResult: result,
+          refreshNftCount: false,
+          hydrateAssignedMetadata: false,
+        });
+        ctx.missionDataLoading = false;
+        if (ctx.guiBridge?.emitNow) ctx.guiBridge.emitNow();
+        logWithTimestamp(
+          `[WATCH] ✅ Mission data loaded (${normalizeMissionList(result).length} missions).`,
+        );
+        await checks.autoAssignConfiguredMissions({
+          reason: "startup_background_unassigned_check",
+          missionsResult: result,
+        });
+      } catch (error) {
+        ctx.missionDataLoading = false;
+        if (ctx.guiBridge?.emitNow) ctx.guiBridge.emitNow();
+        const retryMs = Math.max(
+          5000,
+          Number(error?.retryAfterSeconds || 60) * 1000 + 250,
+        );
+        logDebug("watch", "startup_mission_refresh_deferred", {
+          error: error.message,
+          retryMs,
+        });
+        scheduleStartupMissionRefresh({ delayMs: retryMs });
+      }
+    }, safeDelayMs);
   }
 
   async function runWatchCycle() {
@@ -3130,12 +3238,15 @@ function createWatchService(
             Math.floor(clientConfiguredPollSeconds),
           )
         : 0;
+    // Debug logging must not add a second polling client beside
+    // watch_and_claim. Only local-safe mode or an explicit user interval may
+    // enable client-side mission polling.
     const clientPollingEnabled =
-      watchSafeLocalMode || ctx.debugMode || clientPollIntervalSeconds > 0;
+      watchSafeLocalMode || clientPollIntervalSeconds > 0;
 
     const runLiveMissionCheck = (reason) => {
       if (missionStatePollRunning || claimFollowupRunning) {
-        refreshKickPending = true;
+        logDebug("watch", "mission_state_poll_coalesced", { reason });
         return;
       }
       missionStatePollRunning = true;
@@ -3221,10 +3332,7 @@ function createWatchService(
               });
           }
           missionStatePollRunning = false;
-          if (refreshKickPending) {
-            refreshKickPending = false;
-            runLiveMissionCheck(`${reason}_refresh_kick`);
-          }
+          refreshKickPending = false;
         });
     };
     const previousAuthRefreshHandler = ctx.onAuthRefresh;
@@ -3409,6 +3517,7 @@ function createWatchService(
       });
     }
     let fallbackClaims = [];
+    let fallbackMissionResult = null;
     if (claimed === 0 && opts.fallbackClaims && !hasActiveMcpCooldown()) {
       logDebug("watch", "fallback_claim_start", {
         reason: "watch_reported_zero",
@@ -3424,6 +3533,10 @@ function createWatchService(
       });
       claimed += Number(fallback?.claimed || 0);
       fallbackClaims = Array.isArray(fallback?.claims) ? fallback.claims : [];
+      fallbackMissionResult =
+        fallback?.missionResult && typeof fallback.missionResult === "object"
+          ? fallback.missionResult
+          : null;
     }
     if (claimWorkPaused()) {
       logDebug("watch", "cycle_followup_skipped_paused", { claimed });
@@ -3452,7 +3565,7 @@ function createWatchService(
       claims: summary.claims.map((c) => compactClaimDetails(c)),
       rawSummary: compactStructuredSummary(result?.structuredContent || result),
     });
-    let postCycleMissionResult = null;
+    let postCycleMissionResult = fallbackMissionResult;
     const hasClaimActivity = claimed > 0 || summary.claims.length > 0;
 
     let claimLookupByAssignedMissionId = null;
@@ -3716,6 +3829,7 @@ function createWatchService(
       let initialMissionResult = startupMissionResult();
       let startupDidClaimOrAssign = false;
       if (initialMissionResult) {
+        ctx.missionDataLoading = false;
         const initialStatsResult = await checks.refreshMissionHeaderStats({
           missionsResult: initialMissionResult,
           refreshNftCount: false,
@@ -3732,35 +3846,37 @@ function createWatchService(
           initialStatsResult?.stats || ctx.currentMissionStats || {};
         let startupClaimable = Number(startupStats.claimable || 0);
         let startupAvailable = Number(startupStats.available || 0);
+        const startupSnapshotAgeMs = Math.max(
+          0,
+          Date.now() - Number(ctx.startupAccountSnapshot?.cachedAt || 0),
+        );
+        const startupSnapshotFreshForAssignment =
+          Number(ctx.startupAccountSnapshot?.cachedAt || 0) > 0 &&
+          startupSnapshotAgeMs <= 15_000;
         let startupActionMissionResult = initialMissionResult;
         let startupHandledByClaimLifecycle = false;
         const startupWatchBackoffMs = Math.max(
           15000,
           opts.pollIntervalSeconds * 1000,
         );
-        if (!hasActiveMcpCooldown()) {
-          try {
-            startupActionMissionResult = await mcp.getUserMissions({
-              forceFresh: true,
-              reason: "startup_action_refresh",
-            });
-            initialMissionResult =
-              startupActionMissionResult || initialMissionResult;
-            const freshStartupStatsResult =
-              await checks.refreshMissionHeaderStats({
-                missionsResult: startupActionMissionResult,
-                refreshNftCount: false,
-              });
-            const freshStartupStats =
-              freshStartupStatsResult?.stats || ctx.currentMissionStats || {};
-            startupClaimable = Number(freshStartupStats.claimable || 0);
-            startupAvailable = Number(freshStartupStats.available || 0);
-          } catch (error) {
-            logDebug("watch", "startup_action_state_refresh_failed", {
-              error: error.message,
-            });
-          }
-        }
+        // Startup snapshots are display-only. Even a recent snapshot can be
+        // invalidated by another client between capture and runner startup, so
+        // it must never authorize claims, resets, unlocks, or assignments.
+        logDebug("watch", "startup_snapshot_actions_disabled", {
+          source: "startup_snapshot",
+          total: Number(startupStats.total || 0),
+          active: Number(startupStats.active || 0),
+          reportedAvailable: startupAvailable,
+          reportedClaimable: startupClaimable,
+          ageMs: startupSnapshotAgeMs,
+          freshForAssignment: startupSnapshotFreshForAssignment,
+          claimsAllowed: false,
+        });
+        // Cached completion flags never authorize claims. A newly captured
+        // snapshot may authorize assignment because assign_nft_to_mission
+        // validates both the empty slot and NFT availability server-side.
+        startupClaimable = 0;
+        if (!startupSnapshotFreshForAssignment) startupAvailable = 0;
         if (!hasActiveMcpCooldown() && startupClaimable > 0) {
           watchStartupAssignBackoffUntil = Date.now() + startupWatchBackoffMs;
           const traceId = nextTraceId("startup");
@@ -3873,16 +3989,38 @@ function createWatchService(
           }
         }
       } else {
-        logDebug("watch", "startup_ui_refresh_skipped", {
-          reason: "no_startup_snapshot",
-        });
+        // Missing startup data must not hold the application in a loading
+        // state. Attempt once now and defer a rate-limited retry in the
+        // background while the watch loop starts normally.
+        ctx.missionDataLoading = false;
+        if (ctx.guiBridge?.emitNow) ctx.guiBridge.emitNow();
+        try {
+          initialMissionResult = await mcp.getUserMissions({
+            forceFresh: true,
+            reason: "startup_missing_snapshot_refresh",
+          });
+          await checks.refreshMissionHeaderStats({
+            missionsResult: initialMissionResult,
+            refreshNftCount: false,
+            hydrateAssignedMetadata: false,
+          });
+          logWithTimestamp(
+            `[WATCH] ✅ Mission data loaded (${normalizeMissionList(initialMissionResult).length} missions).`,
+          );
+        } catch (error) {
+          const retryMs = Math.max(
+            1000,
+            Number(error?.retryAfterSeconds || 60) * 1000 + 250,
+          );
+          logWithTimestamp(
+            `[WATCH] ⏳ Mission data sync deferred for ${Math.ceil(retryMs / 1000)}s; watcher remains running.`,
+          );
+          scheduleStartupMissionRefresh({ delayMs: retryMs });
+        }
       }
-    scheduleNftCountRefresh({
-        reason: "startup",
-        missionsResult:
-          initialMissionResult || ctx.lastUserMissionsResult || null,
-      });
     } catch (error) {
+      ctx.missionDataLoading = false;
+      if (ctx.guiBridge?.emitNow) ctx.guiBridge.emitNow();
       logDebug("watch", "startup_ui_refresh_failed", {
         error: error.message,
       });

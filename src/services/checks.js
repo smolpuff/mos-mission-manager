@@ -3253,9 +3253,23 @@ function createChecksService(ctx, logger, mcp, services = {}) {
   }
 
   async function prepareUnlockSlot4({ reason = "ui_manual_unlock" } = {}) {
-    const missionsResult = await mcp.getUserMissions({
-      forceFresh: true,
+    const cachedMissionsResult =
+      ctx.lastUserMissionsResult &&
+      typeof ctx.lastUserMissionsResult === "object"
+        ? ctx.lastUserMissionsResult
+        : null;
+    const missionsResult =
+      cachedMissionsResult ||
+      (await mcp.getUserMissions({
+        forceFresh: true,
+        reason,
+      }));
+    logDebug("assign", "slot_unlock_mission_state", {
       reason,
+      source: cachedMissionsResult ? "existing_ui_snapshot" : "mcp_refresh",
+      ageMs: cachedMissionsResult
+        ? Math.max(0, Date.now() - Number(ctx.lastUserMissionsFetchedAt || 0))
+        : 0,
     });
     if (ctx.signerMode === "manual") {
       const summary = extractSlotUnlockSummary(missionsResult);
@@ -3283,7 +3297,58 @@ function createChecksService(ctx, logger, mcp, services = {}) {
     }
     const result = await tryUnlockNextMissionSlot({ reason, missionsResult });
     if (result?.unlocked) {
-      await refreshMissionHeaderStats({ refreshNftCount: true });
+      ctx.slotUnlockSummary = {
+        ...(ctx.slotUnlockSummary && typeof ctx.slotUnlockSummary === "object"
+          ? ctx.slotUnlockSummary
+          : {}),
+        canUnlockMore: false,
+        nextUnlockSlot: null,
+        availableSlots: Math.max(
+          TARGET_UNLOCK_SLOT,
+          Number(ctx.slotUnlockSummary?.availableSlots || 0),
+        ),
+      };
+      if (ctx.guiBridge?.emitNow) ctx.guiBridge.emitNow();
+
+      let postUnlockMissions = null;
+      for (let attempt = 1; attempt <= 2; attempt += 1) {
+        try {
+          postUnlockMissions = await mcp.getUserMissions({
+            forceFresh: true,
+            reason: "post_slot4_unlock_refresh",
+          });
+          break;
+        } catch (error) {
+          if (error?.rateLimited !== true || attempt >= 2) throw error;
+          const waitMs = Math.max(
+            1000,
+            Number(error.retryAfterSeconds || 60) * 1000 + 250,
+          );
+          logWithTimestamp(
+            `[UNLOCK] ⏳ Post-unlock mission refresh queued for ${Math.ceil(waitMs / 1000)}s; not retrying early.`,
+          );
+          await new Promise((resolve) => setTimeout(resolve, waitMs));
+        }
+      }
+      await refreshMissionHeaderStats({
+        missionsResult: postUnlockMissions,
+        refreshNftCount: false,
+        hydrateAssignedMetadata: false,
+      });
+      const assignResult = await autoAssignConfiguredMissions({
+        reason: "post_slot4_unlock",
+        missionsResult: postUnlockMissions,
+      });
+      logDebug("assign", "slot_unlock_followup_complete", {
+        reason,
+        missions: normalizeMissionList(postUnlockMissions).length,
+        attempted: Number(assignResult?.attempted || 0),
+        assigned: Number(assignResult?.assigned || 0),
+      });
+      return {
+        ...result,
+        assigned: Number(assignResult?.assigned || 0),
+      };
     }
     return result;
   }
@@ -3380,6 +3445,8 @@ function createChecksService(ctx, logger, mcp, services = {}) {
     slot,
     missionName: selectedMissionName = "",
     missionId: selectedMissionId = "",
+    currentAssignedMissionId: suppliedAssignedMissionId = "",
+    currentMissionName: suppliedCurrentMissionName = "",
     prepareOnly = false,
   } = {}) {
     const slotNumber = Number(slot);
@@ -3389,25 +3456,53 @@ function createChecksService(ctx, logger, mcp, services = {}) {
     if (!missionActionEnabledForSlot(ctx, slotNumber)) {
       return { ok: false, reason: "slot_disabled", slot: slotNumber };
     }
-    if (!Array.isArray(ctx.missionCatalogEntries) || ctx.missionCatalogEntries.length === 0) {
+    const hasDirectSelectedMission =
+      isUsableIdValue(selectedMissionId) &&
+      String(selectedMissionName || "").trim().length > 0;
+    if (
+      !hasDirectSelectedMission &&
+      (!Array.isArray(ctx.missionCatalogEntries) ||
+        ctx.missionCatalogEntries.length === 0)
+    ) {
       await refreshMissionCatalog();
     }
 
-    const missionsResult = await mcp.getUserMissions({
-      forceFresh: true,
-      reason: `apply_selection_slot_${slotNumber}`,
-    });
-    const summary = normalizeSlotUnlockSummary(missionsResult);
+    let missionsResult =
+      ctx.lastUserMissionsResult ||
+      startupAccountSnapshot()?.missionsResult ||
+      null;
+    let missions = normalizeMissionList(missionsResult || {});
+    if (missions.length === 0 && Array.isArray(ctx.guiMissionSlots)) {
+      missions = ctx.guiMissionSlots
+        .filter((entry) => entry && entry.missionName)
+        .map((entry) => ({
+          slot: entry.slot,
+          assigned_mission_id:
+            entry.assignedMissionId || entry.missionId || null,
+          name: entry.missionName,
+          current_level: entry.missionLevel ?? null,
+          assigned_nft: entry.assignedNftAccount || null,
+        }));
+    }
+    const summary =
+      normalizeSlotUnlockSummary(missionsResult) || ctx.slotUnlockSummary;
     ctx.slotUnlockSummary = summary;
     if (missionBlockedByLockedSlot({ slot: slotNumber }, summary)) {
       return { ok: false, reason: "slot_locked", slot: slotNumber, summary };
     }
 
-    const missions = normalizeMissionList(missionsResult);
-    const selected = findCatalogMission({
-      missionId: selectedMissionId,
-      missionName: selectedMissionName,
-    });
+    const selected =
+      findCatalogMission({
+        missionId: selectedMissionId,
+        missionName: selectedMissionName,
+      }) ||
+      (hasDirectSelectedMission
+        ? {
+            id: String(selectedMissionId).trim(),
+            mission_id: String(selectedMissionId).trim(),
+            name: String(selectedMissionName).trim(),
+          }
+        : null);
     if (!selected) {
       return { ok: false, reason: "mission_not_found", slot: slotNumber };
     }
@@ -3418,7 +3513,14 @@ function createChecksService(ctx, logger, mcp, services = {}) {
     }
 
     const currentMission =
-      missions.find((mission) => Number(mission?.slot) === slotNumber) || null;
+      missions.find((mission) => Number(mission?.slot) === slotNumber) ||
+      (isUsableIdValue(suppliedAssignedMissionId)
+        ? {
+            slot: slotNumber,
+            assigned_mission_id: String(suppliedAssignedMissionId).trim(),
+            name: String(suppliedCurrentMissionName || "").trim(),
+          }
+        : null);
     const currentAssignedMissionId = assignedMissionId(currentMission);
     const currentCatalogMissionId = catalogMissionId(currentMission);
     const previewTargets = Array.from(
@@ -3548,9 +3650,15 @@ function createChecksService(ctx, logger, mcp, services = {}) {
         signingUrl,
         bridgeUrl: signingUrl,
       };
-    }
+      }
       const targets = applyTargetMissionForSlot(slotNumber, selectedName, missions);
-      await refreshMissionHeaderStats({ refreshNftCount: true });
+      if (missionsResult) {
+        await refreshMissionHeaderStats({
+          missionsResult,
+          refreshNftCount: false,
+          hydrateAssignedMetadata: false,
+        });
+      }
       return {
         ok: true,
         changed: true,
@@ -3566,7 +3674,14 @@ function createChecksService(ctx, logger, mcp, services = {}) {
       reason: "ui_mission_selection",
       missionsResult,
     });
-    await refreshMissionHeaderStats({ refreshNftCount: true });
+    const assignmentMissionResult = assignResult?.missionResult || missionsResult;
+    if (assignmentMissionResult) {
+      await refreshMissionHeaderStats({
+        missionsResult: assignmentMissionResult,
+        refreshNftCount: false,
+        hydrateAssignedMetadata: false,
+      });
+    }
     return {
       ok: true,
       changed: true,
@@ -4343,50 +4458,73 @@ function createChecksService(ctx, logger, mcp, services = {}) {
         let assignmentOptions = [];
         let assignmentSourceStage = null;
         let nextNftScan = nftAssignmentScan;
-        try {
-          const currentNftScan = nftAssignmentScan;
-          const nftPageOffset = currentNftScan.offset;
-          const nftResult = await mcp.mcpToolCall("get_mission_nfts", {
-            assignedMissionId: id,
-            limit: MISSION_NFT_PAGE_LIMIT,
-            offset: nftPageOffset,
-          });
-          nfts = normalizeNftList(nftResult);
-          publishNftUsageStats(nfts);
-          nextNftScan = advanceNftAssignmentScan(nfts.length);
-          if (nfts.length === 0 && /^startup_/.test(String(reason || ""))) {
-            needsFreshMissionRefresh = true;
-            logDebug("assign", "startup_empty_nfts_refresh_deferred", {
+        let nftListLoaded = false;
+        for (let nftLoadAttempt = 1; nftLoadAttempt <= 2; nftLoadAttempt += 1) {
+          try {
+            const currentNftScan = nftAssignmentScan;
+            const nftPageOffset = currentNftScan.offset;
+            const nftResult = await mcp.mcpToolCall("get_mission_nfts", {
+              assignedMissionId: id,
+              limit: MISSION_NFT_PAGE_LIMIT,
+              offset: nftPageOffset,
+            });
+            nfts = normalizeNftList(nftResult);
+            publishNftUsageStats(nfts);
+            nextNftScan = advanceNftAssignmentScan(nfts.length);
+            nftListLoaded = true;
+            logDebug("assign", "eligible_nfts_loaded", {
               reason,
               missionName: name,
               missionId: id,
-              slot: mission?.slot ?? null,
+              nftPageOffset,
+              nftScanCycle: currentNftScan.cycle,
+              nftCount: nfts.length,
+              eligibleCount: nfts.filter(nftIsAvailable).length,
+              cooldownCount: nfts.filter((nft) => !nftIsAvailable(nft)).length,
+              assignedElsewhereCount: nfts
+                .map((nft) => nftAccountId(nft))
+                .filter(
+                  (account) => account && alreadyAssignedNftAccounts.has(account),
+                ).length,
             });
-            logWithTimestamp(
-              `[ASSIGN] ⏳ ${name}: startup mission snapshot looks stale; retrying on next pass.`,
-            );
-            continue;
+            break;
+          } catch (error) {
+            if (isRateLimitError(error) && nftLoadAttempt === 1) {
+              const waitMs = Math.max(
+                1000,
+                Number(error?.retryAfterSeconds || 60) * 1000 + 250,
+              );
+              logWithTimestamp(
+                `[ASSIGN] ⏳ ${name}: NFT lookup cooldown has ${Math.ceil(waitMs / 1000)}s remaining; assignment will retry automatically.`,
+              );
+              await new Promise((resolve) => setTimeout(resolve, waitMs));
+              continue;
+            }
+            if (isRateLimitError(error)) abortedForRateLimit = true;
+            logDebug("assign", "nft_list_failed", {
+              missionId: id,
+              name,
+              attempt: nftLoadAttempt,
+              error: error.message,
+            });
+            break;
           }
-          logDebug("assign", "eligible_nfts_loaded", {
+        }
+        if (!nftListLoaded) {
+          if (abortedForRateLimit) break;
+          continue;
+        }
+        if (nfts.length === 0 && /^startup_/.test(String(reason || ""))) {
+          needsFreshMissionRefresh = true;
+          logDebug("assign", "startup_empty_nfts_refresh_deferred", {
             reason,
             missionName: name,
             missionId: id,
-            nftPageOffset,
-            nftScanCycle: currentNftScan.cycle,
-            nftCount: nfts.length,
-            eligibleCount: nfts.filter(nftIsAvailable).length,
-            cooldownCount: nfts.filter((nft) => !nftIsAvailable(nft)).length,
-            assignedElsewhereCount: nfts
-              .map((nft) => nftAccountId(nft))
-              .filter((account) => account && alreadyAssignedNftAccounts.has(account))
-              .length,
+            slot: mission?.slot ?? null,
           });
-        } catch (error) {
-          logDebug("assign", "nft_list_failed", {
-            missionId: id,
-            name,
-            error: error.message,
-          });
+          logWithTimestamp(
+            `[ASSIGN] ⏳ ${name}: startup mission snapshot looks stale; retrying on next pass.`,
+          );
           continue;
         }
         const readyOwnedCandidates = nfts
@@ -5455,7 +5593,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
           });
         }
         if (ctx.guiBridge?.emitNow) ctx.guiBridge.emitNow();
-        return { ok: true, claimed: 0, claims: [] };
+        return { ok: true, claimed: 0, claims: [], missionResult: result };
       }
       if (ctx.guiBridge?.sendEvent) {
         ctx.guiBridge.sendEvent("claiming", {
@@ -5613,14 +5751,9 @@ function createChecksService(ctx, logger, mcp, services = {}) {
         }
       }
       if (claimed > 0) {
-        try {
-          await runWalletSummaryCheck();
-        } catch (error) {
-          logDebug("check", "current_wallet_summary_refresh_failed", {
-            reason: "claim_fallback",
-            error: error.message,
-          });
-        }
+        // The watch lifecycle owns the debounced current-wallet refresh.
+        // Calling it here as well produced two get_wallet_summary requests
+        // within milliseconds and restarted the server's rolling cooldown.
         scheduleFundingWalletRefresh("claim_fallback");
       }
       if (ctx.guiBridge?.sendEvent) {
@@ -5631,7 +5764,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
         });
       }
       if (ctx.guiBridge?.emitNow) ctx.guiBridge.emitNow();
-      return { ok: true, claimed, claims: claimEvents };
+      return { ok: true, claimed, claims: claimEvents, missionResult: result };
     } catch (error) {
       logDebug("watch", "fallback_claim_scan_failed", {
         reason,
@@ -5645,13 +5778,23 @@ function createChecksService(ctx, logger, mcp, services = {}) {
         });
       }
       if (ctx.guiBridge?.emitNow) ctx.guiBridge.emitNow();
-      return { ok: false, claimed: 0, claims: [] };
+      return {
+        ok: false,
+        claimed: 0,
+        claims: [],
+        missionResult:
+          missionsResult || ctx.lastUserMissionsResult || null,
+      };
     }
   }
 
   async function runWalletSummaryCheck({ includeWalletSummary = true } = {}) {
     try {
-      const json = await mcp.mcpToolCall("get_wallet_summary", {});
+      const json = await mcp.mcpToolCall(
+        "get_wallet_summary",
+        {},
+        { reason: "wallet_summary_check" },
+      );
       const info = json?.structuredContent || {};
       const parsedWalletSummary = parseWalletSummary(json, info.walletId || info.wallet_id || "");
       const displayName =
@@ -5692,7 +5835,13 @@ function createChecksService(ctx, logger, mcp, services = {}) {
       logDebug("check", "wallet_summary_failed", { error: error.message });
       // Keep the last known wallet summary to avoid UI balance flicker when
       // wallet summary calls fail transiently.
-      return { ok: false, displayName: "unknown", walletId: "unknown" };
+      return {
+        ok: false,
+        displayName: "unknown",
+        walletId: "unknown",
+        rateLimited: error?.rateLimited === true,
+        retryAfterSeconds: Number(error?.retryAfterSeconds || 0) || null,
+      };
     }
   }
 
@@ -5720,6 +5869,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
 
       let nftCount = ctx.currentMissionStats.nfts || 0;
       let nftAvailable = ctx.currentMissionStats.nftsAvailable || 0;
+      let nftRefreshDeferred = null;
       if (refreshNftCount) {
         try {
           const nfts = await loadOwnedMissionNfts({
@@ -5734,6 +5884,12 @@ function createChecksService(ctx, logger, mcp, services = {}) {
           nftAvailable = nfts.filter(nftIsAvailable).length;
         } catch (error) {
           logDebug("check", "nft_count_failed", { error: error.message });
+          nftRefreshDeferred = {
+            rateLimited: error?.rateLimited === true,
+            retryAfterSeconds:
+              Number(error?.retryAfterSeconds || 0) || null,
+            error: error.message,
+          };
         }
       }
 
@@ -5811,6 +5967,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
       });
       return {
         ok: true,
+        nftRefreshDeferred,
         stats: {
           ...computed,
           nfts: nftCount,
@@ -5846,13 +6003,22 @@ function createChecksService(ctx, logger, mcp, services = {}) {
       (await runWalletSummaryCheck({ includeWalletSummary: false }));
     markStep("wallet_summary", stepStartedAt);
     if (!walletIdentity.ok) {
-      logWithTimestamp("[CHECK] ❌ Loading data failed (not authenticated).");
-      return false;
+      if (walletIdentity.rateLimited && mcp.bearerToken()) {
+        ctx.isAuthenticated = true;
+        logWithTimestamp(
+          `[CHECK] ⏳ Wallet data deferred by MCP cooldown (${walletIdentity.retryAfterSeconds || "?"}s); saved authenticated session retained.`,
+        );
+      } else {
+        logWithTimestamp("[CHECK] ❌ Loading data failed (not authenticated).");
+        return false;
+      }
     }
 
     ctx.isAuthenticated = true;
-    ctx.currentUserDisplayName = walletIdentity.displayName || "unknown";
-    ctx.currentUserWalletId = walletIdentity.walletId || "unknown";
+    if (walletIdentity.ok) {
+      ctx.currentUserDisplayName = walletIdentity.displayName || "unknown";
+      ctx.currentUserWalletId = walletIdentity.walletId || "unknown";
+    }
 
     stepStartedAt = Date.now();
     validateConfiguredTargets();

@@ -218,6 +218,7 @@ const backendStatus = {
   currentUserWalletId: null,
   currentUserWalletSummary: null,
   currentMissionStats: null,
+  missionDataLoading: false,
   nftUsageStats: [],
   slotUnlockSummary: null,
   currentMode: null,
@@ -255,8 +256,14 @@ const desktopMcpCtx = {
   MCP_URL: "https://pixelbypixel.studio/mcp",
   MCP_PROTOCOL_VERSION: "2025-03-26",
   tokenFilePath: path.join(os.homedir(), ".pbp-mcp", "token.json"),
+  mcpCooldownStatePath: path.join(
+    getBackendWorkingDirectory(),
+    "data",
+    "mcp-cooldowns.json",
+  ),
   interactiveAuth: true,
   debugMode: isDesktopDevMode(),
+  mcpStartupTraceActive: false,
   isAuthenticated: false,
   authRefreshSignal: 0,
   onAuthRefresh: null,
@@ -279,13 +286,14 @@ const desktopMcpLogger = {
     pushSystemLog(String(message || ""));
   },
   logDebug(scope, event, meta = {}) {
-    if (!isDesktopDevMode()) return;
+    if (!isDesktopDevMode() && desktopMcpCtx.mcpStartupTraceActive !== true)
+      return;
     const detail =
       meta && typeof meta === "object" && Object.keys(meta).length > 0
         ? ` ${JSON.stringify(meta)}`
         : "";
     pushSystemLog(
-      `[DEBUG:${String(scope || "mcp")}] ${String(event || "event")}${detail}`,
+      `[${desktopMcpCtx.mcpStartupTraceActive ? "MCP STARTUP" : "DEBUG"}:${String(scope || "mcp")}] ${String(event || "event")}${detail}`,
     );
   },
 };
@@ -1133,6 +1141,7 @@ async function bootstrapStartupMissionSlots() {
   if (backendStatus.running) return { ok: true, skipped: "backend_running" };
   if (startupMissionBootstrapPromise) return startupMissionBootstrapPromise;
   startupMissionBootstrapPromise = (async () => {
+    desktopMcpCtx.mcpStartupTraceActive = true;
     pushSystemLog("Startup wallet bootstrap: fetching wallet summary.");
     backendStatus.startupMissionSlotsLoading = true;
     publishStatus();
@@ -1188,6 +1197,11 @@ async function bootstrapStartupMissionSlots() {
             : {}),
           missionsResult,
         };
+        // Do not fetch the general NFT inventory here. Auto-assignment needs
+        // get_mission_nfts with an assignedMissionId, and the server applies a
+        // per-tool cooldown regardless of arguments. Consuming that call for
+        // UI enrichment here prevents empty mission slots from being assigned.
+        delete accountSnapshotCache.nftResult;
         accountSnapshotCacheAt = Date.now();
         syncDesktopTargetMissionsFromAssignedMissions(
           missionList,
@@ -1222,6 +1236,7 @@ async function bootstrapStartupMissionSlots() {
       );
       return { ok: false, error: String(error?.message || error) };
     } finally {
+      desktopMcpCtx.mcpStartupTraceActive = false;
       backendStatus.startupMissionSlotsLoading = false;
       startupMissionBootstrapPromise = null;
       publishStatus();
@@ -1287,6 +1302,18 @@ function updateBackendStateFromIpc(payload) {
         ) {
           continue;
         }
+      }
+      if (
+        key === "guiMissionSlots" &&
+        Array.isArray(backendStatus.guiMissionSlots) &&
+        backendStatus.guiMissionSlots.some((slot) =>
+          Boolean(slot && (slot.missionName || slot.assignedNftAccount)),
+        ) &&
+        (!Array.isArray(next[key]) || next[key].length === 0)
+      ) {
+        // Do not erase already-rendered desktop mission data while a freshly
+        // started backend is waiting for its first rate-limited mission read.
+        continue;
       }
       backendStatus[key] = next[key];
       changed = true;
@@ -1835,6 +1862,16 @@ function walletSummaryResultFromBackendStatus() {
 }
 
 function writeStartupSnapshotFile() {
+  const snapshotAgeMs = Math.max(
+    0,
+    Date.now() - Number(accountSnapshotCacheAt || 0),
+  );
+  if (!accountSnapshotCacheAt || snapshotAgeMs > 15_000) {
+    pushSystemLog(
+      `Startup snapshot skipped: cache is ${Math.ceil(snapshotAgeMs / 1000)}s old; backend must fetch live state.`,
+    );
+    return null;
+  }
   const snapshotBase =
     accountSnapshotCache && typeof accountSnapshotCache === "object"
       ? { ...accountSnapshotCache }
@@ -2115,6 +2152,10 @@ function invalidateMissionRelatedCaches() {
 }
 
 async function getAccountSnapshotCached({ includeNfts = false } = {}) {
+  if (startupMissionBootstrapPromise) {
+    pushSystemLog("Account snapshot waiting for startup sync.");
+    await startupMissionBootstrapPromise;
+  }
   if (
     accountSnapshotCache &&
     (!includeNfts || accountSnapshotCache?.nftResult)
@@ -2127,26 +2168,29 @@ async function getAccountSnapshotCached({ includeNfts = false } = {}) {
     return accountSnapshotPromise;
   }
   accountSnapshotPromise = (async () => {
-    const snapshot = {
-      walletSummaryResult: await mcpCallTool(
+    const snapshot =
+      accountSnapshotCache && typeof accountSnapshotCache === "object"
+        ? { ...accountSnapshotCache }
+        : {};
+    if (!snapshot.walletSummaryResult) {
+      snapshot.walletSummaryResult = await mcpCallTool(
         "get_wallet_summary",
         {},
-        { url: "https://pixelbypixel.studio/mcp" },
-      ),
-      missionsResult: await desktopMcp.getUserMissions({
-        url: "https://pixelbypixel.studio/mcp",
-        reason: "account_snapshot",
-      }),
-      ...(includeNfts
-        ? {
-            nftResult: await mcpCallTool(
-              "get_mission_nfts",
-              {},
-              { url: "https://pixelbypixel.studio/mcp" },
-            ),
-          }
-        : {}),
-    };
+        { reason: "account_snapshot_wallet" },
+      );
+    }
+    if (!snapshot.missionsResult) {
+      snapshot.missionsResult = await desktopMcp.getUserMissions({
+        reason: "account_snapshot_missions",
+      });
+    }
+    if (includeNfts && !snapshot.nftResult) {
+      snapshot.nftResult = await mcpCallTool(
+        "get_mission_nfts",
+        {},
+        { reason: "account_snapshot_nfts" },
+      );
+    }
     accountSnapshotCache = snapshot;
     accountSnapshotCacheAt = Date.now();
     return snapshot;
@@ -6109,6 +6153,113 @@ app.whenReady().then(async () => {
       ownedCollections: Array.from(ownedCollectionKeys),
     };
   });
+
+  ipcMain.handle("missions:picker-data", async () => {
+    // The mission picker only needs the catalog and already-known slot state.
+    // Never route this through onboarding:fetch-account: that endpoint also
+    // loads wallet and NFT inventory and makes this unrelated UI depend on
+    // their per-tool cooldowns.
+    const catalogResult = await getMissionCatalogCached();
+    const cachedMissionsResult =
+      accountSnapshotCache?.missionsResult ||
+      desktopMcpCtx.lastUserMissionsResult ||
+      null;
+    let missions = normalizeMissionList(cachedMissionsResult || {}).map(
+      (mission, index) => ({
+        id:
+          mission?.assignedMissionId ||
+          mission?.assigned_mission_id ||
+          mission?.id ||
+          `${index}`,
+        catalogMissionId:
+          mission?.missionId ||
+          mission?.mission_id ||
+          mission?.catalogMissionId ||
+          null,
+        name: missionDisplayName(mission),
+        currentLevel: Number.isFinite(Number(mission?.current_level))
+          ? Number(mission.current_level)
+          : Number.isFinite(Number(mission?.level))
+            ? Number(mission.level)
+            : null,
+        slot: Number.isFinite(Number(mission?.slot))
+          ? Number(mission.slot)
+          : null,
+        hasAssignedNft: missionHasAssignedNft(mission),
+        isActive: missionIsActive(mission),
+      }),
+    );
+    if (missions.length === 0) {
+      missions = (Array.isArray(backendStatus.guiMissionSlots)
+        ? backendStatus.guiMissionSlots
+        : []
+      )
+        .filter((mission) => mission && mission.missionName)
+        .map((mission, index) => ({
+          id: mission.assignedMissionId || `slot-${mission.slot || index + 1}`,
+          catalogMissionId: mission.missionId || null,
+          name: mission.missionName || mission.name || "",
+          currentLevel:
+            mission.missionLevel ?? mission.currentLevel ?? mission.level ?? null,
+          slot: Number.isFinite(Number(mission.slot))
+            ? Number(mission.slot)
+            : index + 1,
+          hasAssignedNft: Boolean(
+            mission.assignedNftAccount || mission.assignedNft,
+          ),
+          isActive: mission.active !== false,
+        }));
+    }
+
+    const rawCatalog = normalizeMissionCatalogList(catalogResult || {});
+    const dedup = new Map();
+    for (let index = 0; index < rawCatalog.length; index += 1) {
+      const mission = rawCatalog[index] || {};
+      const name = missionDisplayName(mission);
+      const key = name.toLowerCase().trim();
+      if (!key || dedup.has(key)) continue;
+      dedup.set(key, {
+        id:
+          mission?.id ||
+          mission?.missionId ||
+          mission?.mission_id ||
+          mission?.name ||
+          `${index}`,
+        name,
+        description: String(
+          mission?.description ||
+            mission?.summary ||
+            mission?.taskDescription ||
+            mission?.task_description ||
+            "",
+        ).trim(),
+        reward: missionRewardLabel(mission),
+        collections: missionCollectionEntries(mission),
+      });
+    }
+
+    // Collection ownership is optional decoration in this dialog. Reuse it
+    // only if inventory was loaded elsewhere; never make an MCP inventory call.
+    const ownedCollectionKeys = new Set();
+    for (const nft of normalizeNftList(accountSnapshotCache?.nftResult || {})) {
+      const key = canonicalNftCollectionName(
+        nft?.collection ||
+          nft?.collectionName ||
+          nft?.collection_name ||
+          nft?.collectionSymbol ||
+          nft?.collection_symbol ||
+          nft?.symbol ||
+          null,
+      );
+      if (key) ownedCollectionKeys.add(key);
+    }
+    return {
+      ok: true,
+      missions,
+      missionCatalog: Array.from(dedup.values()),
+      ownedCollections: Array.from(ownedCollectionKeys),
+    };
+  });
   ipcMain.handle("onboarding:apply-selection", async (_event, payload = {}) => {
     const nextTargets = Array.isArray(payload?.targetMissions)
       ? Array.from(
@@ -6138,6 +6289,12 @@ app.whenReady().then(async () => {
       payload?.missionName || payload?.name || "",
     ).trim();
     const missionId = String(payload?.missionId || "").trim();
+    const currentAssignedMissionId = String(
+      payload?.currentAssignedMissionId || "",
+    ).trim();
+    const currentMissionName = String(
+      payload?.currentMissionName || "",
+    ).trim();
     if (!Number.isFinite(slot) || slot < 1 || slot > 4) {
       return { ok: false, error: "Invalid mission slot." };
     }
@@ -6146,7 +6303,13 @@ app.whenReady().then(async () => {
     }
     const response = await requestBackend(
       "apply_mission_selection",
-      { slot: Math.floor(slot), missionName, missionId },
+      {
+        slot: Math.floor(slot),
+        missionName,
+        missionId,
+        currentAssignedMissionId,
+        currentMissionName,
+      },
       {
         ensureRunning: true,
         timeoutMs: 90000,
@@ -6161,6 +6324,12 @@ app.whenReady().then(async () => {
       payload?.missionName || payload?.name || "",
     ).trim();
     const missionId = String(payload?.missionId || "").trim();
+    const currentAssignedMissionId = String(
+      payload?.currentAssignedMissionId || "",
+    ).trim();
+    const currentMissionName = String(
+      payload?.currentMissionName || "",
+    ).trim();
     if (!Number.isFinite(slot) || slot < 1 || slot > 4) {
       return { ok: false, error: "Invalid mission slot." };
     }
@@ -6169,7 +6338,13 @@ app.whenReady().then(async () => {
     }
     const response = await requestBackend(
       "preview_mission_selection",
-      { slot: Math.floor(slot), missionName, missionId },
+      {
+        slot: Math.floor(slot),
+        missionName,
+        missionId,
+        currentAssignedMissionId,
+        currentMissionName,
+      },
       {
         ensureRunning: true,
         timeoutMs: 90000,
@@ -6571,7 +6746,7 @@ app.whenReady().then(async () => {
       {},
       {
         ensureRunning: true,
-        timeoutMs: 15000,
+        timeoutMs: 150000,
       },
     );
     return payload;

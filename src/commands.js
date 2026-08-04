@@ -497,8 +497,8 @@ function createCommandHandler(ctx, logger, actions, configApi, services = {}) {
         if (
           await runLoginFlow({ forceInteractive: true })
         ) {
-          await runInitialChecks();
-          await startWatchLoopWithDelay({ reason: "login" });
+          const checksOk = await runInitialChecks();
+          if (checksOk) await startWatchLoopWithDelay({ reason: "login" });
         }
       },
       logout: async () => {

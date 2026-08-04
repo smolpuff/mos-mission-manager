@@ -88,6 +88,7 @@ function createGuiStateEmitter(ctx) {
       currentUserWalletId: ctx.currentUserWalletId,
       currentUserWalletSummary: ctx.currentUserWalletSummary,
       currentMissionStats: ctx.currentMissionStats,
+      missionDataLoading: ctx.missionDataLoading,
       nftUsageStats: ctx.nftUsageStats,
       guiMissionSlots: ctx.guiMissionSlots,
       slotUnlockSummary: ctx.slotUnlockSummary,
@@ -177,6 +178,51 @@ function wrapSyncMethod(obj, name) {
   };
 }
 
+async function runWithWatcherYield(reason, action) {
+  const shouldResume = ctx.watchLoopEnabled === true || ctx.watcherRunning === true;
+  if (!shouldResume) return action();
+
+  const previousPauseReason = String(ctx.pauseBackgroundMcpReason || "");
+  const previousPauseStartedAt = Number(ctx.pauseBackgroundMcpStartedAt || 0);
+  ctx.pauseBackgroundMcpReason = reason;
+  ctx.pauseBackgroundMcpStartedAt = Date.now();
+  logger.logWithTimestamp(
+    `[WATCH] ⏸️ Yielding active watcher for ${reason}...`,
+  );
+  await watch.stopWatchLoop({ persist: false, waitForCycle: false });
+  const stopDeadline = Date.now() + 5000;
+  while (ctx.watcherRunning && Date.now() < stopDeadline) {
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  // Give the aborted streamable HTTP request a moment to close server-side
+  // before opening the interactive action's MCP session.
+  await new Promise((resolve) => setTimeout(resolve, 250));
+  const cooldownMs = Math.max(
+    0,
+    Number(ctx.mcpRateLimitedUntil || 0) - Date.now(),
+  );
+  if (cooldownMs > 0) {
+    logger.logWithTimestamp(
+      `[MCP] ⏳ ${reason} queued; continuing automatically after the ${Math.ceil(cooldownMs / 1000)}s cooldown.`,
+    );
+    await new Promise((resolve) => setTimeout(resolve, cooldownMs));
+  }
+
+  try {
+    return await action();
+  } finally {
+    ctx.pauseBackgroundMcpReason = previousPauseReason;
+    ctx.pauseBackgroundMcpStartedAt = previousPauseStartedAt;
+    if (ctx.config?.watchLoopEnabled !== false) {
+      ctx.watchLoopEnabled = true;
+      logger.logWithTimestamp(
+        `[WATCH] ▶️ Resuming after ${reason}.`,
+      );
+      void watch.startWatchLoop();
+    }
+  }
+}
+
 if (process.env.PBP_GUI_BRIDGE === "1" && typeof process.send === "function") {
   ctx.guiBridge = {
     emitNow: emitGuiState,
@@ -226,9 +272,11 @@ if (process.env.PBP_GUI_BRIDGE === "1" && typeof process.send === "function") {
         if (!checks || typeof checks.prepareUnlockSlot4 !== "function") {
           throw new Error("Slot unlock service unavailable.");
         }
-        const prepared = await checks.prepareUnlockSlot4({
-          reason: "ui_slot4_unlock",
-        });
+        const prepared = await runWithWatcherYield("slot 4 unlock", () =>
+          checks.prepareUnlockSlot4({
+            reason: "ui_slot4_unlock",
+          }),
+        );
         sendGuiResponse(requestId, { ok: true, prepared });
         return;
       }

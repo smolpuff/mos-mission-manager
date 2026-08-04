@@ -2028,35 +2028,11 @@ function ControlView() {
   const [activityLabel, setActivityLabel] = useState(null);
   const [manualCheckBusy, setManualCheckBusy] = useState(false);
   const [activeAssigningSlot, setActiveAssigningSlot] = useState(null);
-  const [settledMissionImages, setSettledMissionImages] = useState(
-    () => new Set(),
-  );
-  const assignedMissionImages = liveSlots
-    .map((entry) => {
-      const slot = Number(entry?.slot);
-      const account = String(
-        entry?.assignedNftAccount ||
-          entry?.assignedNft ||
-          entry?.assigned_nft ||
-          "",
-      ).trim();
-      const src = account ? pickSlotImage(entry) : null;
-      return {
-        account,
-        src,
-        key: account && src ? `${slot}:${account}:${src}` : null,
-      };
-    })
-    .filter((entry) => entry.account);
-  const missionImagesReady =
-    status.startupMissionSlotsLoading !== true &&
-    liveSlots.length > 0 &&
-    assignedMissionImages.every(
-      (entry) => entry.key && settledMissionImages.has(entry.key),
-    );
   const isWatching = status.watcherRunning === true;
-  const isStarting =
-    status.running && (!isWatching || !missionImagesReady);
+  // Missing or slow NFT artwork must not hold the entire runner in the
+  // "Starting up" state. Mission state is usable as soon as the watcher is up;
+  // individual images keep their own loading/fallback behavior.
+  const isStarting = status.running && !isWatching;
   const manualCheckPendingRef = useRef(false);
   const [copiedLabel, setCopiedLabel] = useState(null);
   const [secretModalOpen, setSecretModalOpen] = useState(false);
@@ -2150,7 +2126,6 @@ function ControlView() {
 
   useEffect(() => {
     if (status.running) return;
-    setSettledMissionImages(new Set());
     setActivityLabel(null);
     setManualCheckBusy(false);
     manualCheckPendingRef.current = false;
@@ -2436,7 +2411,7 @@ function ControlView() {
       setActivityLabel("Stopped");
       return;
     }
-    if (isWatching && missionImagesReady) {
+    if (isWatching) {
       setActivityLabel((current) =>
         !current || current === "Stopped" || current === "Starting up..."
           ? "Watching missions..."
@@ -2451,12 +2426,7 @@ function ControlView() {
         ? "Starting up..."
         : current,
     );
-  }, [
-    status.running,
-    isWatching,
-    missionImagesReady,
-    status.watchLoopEnabled,
-  ]);
+  }, [status.running, isWatching, status.watchLoopEnabled]);
 
   useEffect(() => {
     if (!onboardingOpen) return undefined;
@@ -2875,10 +2845,10 @@ function ControlView() {
     setMissionPickerError(null);
     try {
       if (!onboardingMissionCatalog.length) {
-        if (!bridge?.fetchOnboardingAccount) {
+        if (!bridge?.fetchMissionPickerData) {
           throw new Error("Mission catalog is not available in this build.");
         }
-        const accountResponse = await bridge.fetchOnboardingAccount();
+        const accountResponse = await bridge.fetchMissionPickerData();
         if (!accountResponse?.ok) {
           throw new Error(
             accountResponse?.error || "Failed to load mission catalog.",
@@ -2956,11 +2926,19 @@ function ControlView() {
     setMissionPickerApplying(true);
     setMissionPickerError(null);
     try {
+      const currentSlotEntry =
+        slots.find((entry) => Number(entry?.slot) === slotNumber) || null;
       const response = await bridge.applyMissionSelection({
         slot: slotNumber,
         missionName: selectedName,
         missionId:
           mission?.id || mission?.missionId || mission?.mission_id || "",
+        currentAssignedMissionId:
+          currentSlotEntry?.assignedMissionId ||
+          currentSlotEntry?.missionId ||
+          "",
+        currentMissionName:
+          currentSlotEntry?.missionName || currentSlotEntry?.name || "",
       });
       if (!response?.ok) {
         throw new Error(response?.error || "Mission change failed.");
@@ -3081,11 +3059,19 @@ function ControlView() {
     setMissionPickerError(null);
     const run = async () => {
       try {
+        const currentSlotEntry =
+          slots.find((entry) => Number(entry?.slot) === slotNumber) || null;
         const response = await bridge.previewMissionSelection({
           slot: slotNumber,
           missionName: selectedName,
           missionId:
             mission?.id || mission?.missionId || mission?.mission_id || "",
+          currentAssignedMissionId:
+            currentSlotEntry?.assignedMissionId ||
+            currentSlotEntry?.missionId ||
+            "",
+          currentMissionName:
+            currentSlotEntry?.missionName || currentSlotEntry?.name || "",
         });
         if (cancelled) return;
         if (!response?.ok) {
@@ -5199,9 +5185,7 @@ function ControlView() {
                         (status.startupMissionSlotsLoading === true &&
                           Boolean(status.running) &&
                           (!entry || !imgSrc)) ||
-                        ((isStarting || status.watcherRunning === true) &&
-                          hasAssignedNft &&
-                          !imgSrc);
+                        (isStarting && hasAssignedNft && !imgSrc);
                       const slotAssigning =
                         Number(activeAssigningSlot) === Number(slot);
                       const slotImageSrc = slotImageLoading ? null : imgSrc;
@@ -5263,26 +5247,10 @@ function ControlView() {
                               <MissionSlotImage
                                 src={slotImageSrc}
                                 hasAssignedNft={hasAssignedNft}
-                                loading={isStarting || slotImageLoading}
+                                loading={slotImageLoading}
                                 assigning={slotAssigning}
                                 padded={usesKoreaTakeitArt}
                                 contain={usesKoreaTakeitArt}
-                                onSettled={() => {
-                                  if (!hasAssignedNft || !slotImageSrc) return;
-                                  const account = String(
-                                    entry?.assignedNftAccount ||
-                                      entry?.assignedNft ||
-                                      entry?.assigned_nft ||
-                                      "",
-                                  ).trim();
-                                  const key = `${slot}:${account}:${slotImageSrc}`;
-                                  setSettledMissionImages((current) => {
-                                    if (current.has(key)) return current;
-                                    const next = new Set(current);
-                                    next.add(key);
-                                    return next;
-                                  });
-                                }}
                               />
 
                               {slotError ? (

@@ -123,6 +123,7 @@ export default function useBackendState({
     currentUserWalletId: null,
     currentUserWalletSummary: null,
     currentMissionStats: null,
+    missionDataLoading: false,
     nftUsageStats: [],
     currentMode: null,
     defaultMissionResetLevel: null,

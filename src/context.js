@@ -39,6 +39,7 @@ function createContext() {
       "nft-assignment-scan.json",
     ),
     tokenFilePath: path.join(os.homedir(), ".pbp-mcp", "token.json"),
+    mcpCooldownStatePath: path.join(configDir, "data", "mcp-cooldowns.json"),
     LOG_BUFFER_SIZE,
     LOG_BUFFER_SIZE_DEBUG,
     runtimeDefaults: defaults,
@@ -168,6 +169,7 @@ function createContext() {
       nftsAvailable: 0,
     },
     nftUsageStats: [],
+    missionDataLoading: false,
 
     guiMissionSlots: [],
     slotUnlockSummary: null,

@@ -25,7 +25,14 @@ function createMcpClient(ctx, logger) {
     "watch_and_claim",
     "claim_mission_reward",
   ]);
+  const TOOL_MIN_INTERVAL_MS = new Map([
+    ["get_wallet_summary", 60_000],
+    ["get_user_missions", 60_000],
+    ["get_mission_nfts", 60_000],
+    ["claim_mission_reward", 60_000],
+  ]);
   let throttleDebugSequence = 0;
+  let logicalToolCallSequence = 0;
   const recentToolCalls = [];
   let userMissionsInflight = null;
   let userMissionsInflightForceFresh = false;
@@ -490,21 +497,82 @@ function createMcpClient(ctx, logger) {
     return Math.max(0, Math.ceil((when - Date.now()) / 1000));
   }
 
-  function rateLimitWaitMs() {
+  function cooldownStatePath() {
+    if (ctx.mcpCooldownStatePath) return String(ctx.mcpCooldownStatePath);
+    const configDir = path.dirname(String(ctx.configPath || process.cwd()));
+    return path.join(configDir, "data", "mcp-cooldowns.json");
+  }
+
+  function readSharedCooldowns() {
+    try {
+      const parsed = JSON.parse(fs.readFileSync(cooldownStatePath(), "utf8"));
+      return parsed && typeof parsed === "object" ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+
+  function sharedToolCooldownWaitMs(toolName) {
+    const retryAt = Number(readSharedCooldowns()?.tools?.[toolName] || 0);
+    return Number.isFinite(retryAt) ? Math.max(0, retryAt - Date.now()) : 0;
+  }
+
+  function persistToolCooldown(toolName, retryAt) {
+    const name = String(toolName || "unknown_tool").trim() || "unknown_tool";
+    const current = readSharedCooldowns();
+    const next = {
+      ...current,
+      updatedAt: Date.now(),
+      tools: {
+        ...(current.tools && typeof current.tools === "object"
+          ? current.tools
+          : {}),
+        [name]: Number(retryAt || 0),
+      },
+    };
+    try {
+      fs.mkdirSync(path.dirname(cooldownStatePath()), { recursive: true });
+      const tempPath = `${cooldownStatePath()}.${process.pid}.tmp`;
+      fs.writeFileSync(tempPath, JSON.stringify(next, null, 2));
+      fs.renameSync(tempPath, cooldownStatePath());
+    } catch (error) {
+      logDebug("mcp", "cooldown_state_write_failed", {
+        error: error.message,
+        file: cooldownStatePath(),
+      });
+    }
+  }
+
+  function rateLimitWaitMs(toolName = null) {
+    const requestedTool = String(toolName || "").trim();
+    if (requestedTool) {
+      const sharedWaitMs = sharedToolCooldownWaitMs(requestedTool);
+      const localWaitMs =
+        String(ctx.mcpRateLimitReason || "") === requestedTool
+          ? Math.max(0, Number(ctx.mcpRateLimitedUntil || 0) - Date.now())
+          : 0;
+      return Math.max(sharedWaitMs, localWaitMs);
+    }
     const until = Number(ctx.mcpRateLimitedUntil || 0);
     return Number.isFinite(until) ? Math.max(0, until - Date.now()) : 0;
   }
 
-  function buildActiveRateLimitError(reason = "pre_call") {
-    const waitMs = rateLimitWaitMs();
+  function buildActiveRateLimitError(
+    reason = "pre_call",
+    toolName = null,
+    waitMsOverride = null,
+  ) {
+    const waitMs = Number.isFinite(Number(waitMsOverride))
+      ? Math.max(0, Number(waitMsOverride))
+      : rateLimitWaitMs(toolName);
     const waitSeconds = Math.max(1, Math.ceil(waitMs / 1000));
     const error = new Error(
       `rate limited; retry in ${waitSeconds}s`,
     );
     error.rateLimited = true;
     error.retryAfterSeconds = waitSeconds;
-    error.retryAt = Number(ctx.mcpRateLimitedUntil || 0);
-    error.toolName = ctx.mcpRateLimitReason || null;
+    error.retryAt = Date.now() + waitMs;
+    error.toolName = toolName || ctx.mcpRateLimitReason || null;
     error.cooldownActive = true;
     error.reason = reason;
     return error;
@@ -513,8 +581,14 @@ function createMcpClient(ctx, logger) {
   function buildRateLimitError({ status = 429, retryAfterSeconds = 30, toolName = null, bodyError = null } = {}) {
     const waitSeconds = Math.max(1, Math.ceil(Number(retryAfterSeconds) || 30));
     const retryAt = Date.now() + waitSeconds * 1000;
-    ctx.mcpRateLimitedUntil = retryAt;
-    ctx.mcpRateLimitReason = toolName || "unknown_tool";
+    // The server reports cooldowns for a specific tool. Only watch_and_claim
+    // controls the watch loop's global wait; a read-tool cooldown must not
+    // prevent assignment/signing tools from running with data already loaded.
+    if (!toolName || toolName === "watch_and_claim") {
+      ctx.mcpRateLimitedUntil = retryAt;
+      ctx.mcpRateLimitReason = toolName || "unknown_tool";
+    }
+    persistToolCooldown(toolName, retryAt);
     const error = new Error(
       `tool call failed: HTTP ${status} (rate limited, retry in ${waitSeconds}s)`,
     );
@@ -684,8 +758,13 @@ function createMcpClient(ctx, logger) {
     }
   }
 
-  async function mcpInitialize(token) {
-    logDebug("mcp", "initialize_start");
+  async function mcpInitialize(token, callTrace = null) {
+    if (callTrace) callTrace.httpRequests += 1;
+    logDebug("mcp", "initialize_start", {
+      callId: callTrace?.callId || null,
+      toolName: callTrace?.toolName || null,
+      httpRequest: callTrace?.httpRequests || 1,
+    });
     const init = await mcpPost({
       token,
       body: {
@@ -717,10 +796,17 @@ function createMcpClient(ctx, logger) {
     }
 
     if (!init.sessionId) {
-      logDebug("mcp", "initialize_ok", { sessionId: null, streamableHttp: true });
+      logDebug("mcp", "initialize_ok", {
+        callId: callTrace?.callId || null,
+        toolName: callTrace?.toolName || null,
+        sessionId: null,
+        streamableHttp: true,
+        httpRequests: callTrace?.httpRequests || 1,
+      });
       return null;
     }
 
+    if (callTrace) callTrace.httpRequests += 1;
     await mcpPost({
       token,
       sessionId: init.sessionId,
@@ -731,7 +817,12 @@ function createMcpClient(ctx, logger) {
       },
     });
 
-    logDebug("mcp", "initialize_ok", { sessionId: init.sessionId });
+    logDebug("mcp", "initialize_ok", {
+      callId: callTrace?.callId || null,
+      toolName: callTrace?.toolName || null,
+      sessionId: init.sessionId,
+      httpRequests: callTrace?.httpRequests || 2,
+    });
     return init.sessionId;
   }
 
@@ -794,7 +885,21 @@ function createMcpClient(ctx, logger) {
       });
     }
 
-    logDebug("tool", "call_start", { toolName, args });
+    const callTrace = {
+      callId: ++logicalToolCallSequence,
+      toolName,
+      reason: String(opts?.reason || "").trim() || "unspecified",
+      forceFresh: opts?.forceFresh === true,
+      httpRequests: 0,
+      startedAt: Date.now(),
+    };
+    logDebug("tool", "call_start", {
+      callId: callTrace.callId,
+      toolName,
+      reason: callTrace.reason,
+      forceFresh: callTrace.forceFresh,
+      args,
+    });
     const toolCallEntry = recordToolCallStart(toolName, args);
     const record = tokenRecord();
     if (!record?.access_token) {
@@ -812,15 +917,30 @@ function createMcpClient(ctx, logger) {
     }
 
     const runOnce = async () => {
-      if (rateLimitWaitMs() > 0) {
-        throw buildActiveRateLimitError(toolName);
+      const sharedWaitMs = sharedToolCooldownWaitMs(toolName);
+      if (sharedWaitMs > 0) {
+        throw buildActiveRateLimitError(
+          "shared_per_tool_cooldown",
+          toolName,
+          sharedWaitMs,
+        );
+      }
+      if (rateLimitWaitMs(toolName) > 0) {
+        throw buildActiveRateLimitError("per_tool_cooldown", toolName);
       }
       const token = bearerToken();
       if (!token) {
         setMcpConnection("expired", { error: "missing_token" });
         throw new Error("Missing token. Run login.");
       }
-      const sessionId = await mcpInitialize(token);
+      const sessionId = await mcpInitialize(token, callTrace);
+      callTrace.httpRequests += 1;
+      logDebug("mcp", "tool_http_start", {
+        callId: callTrace.callId,
+        toolName,
+        reason: callTrace.reason,
+        httpRequest: callTrace.httpRequests,
+      });
       const call = await mcpPost({
         token,
         sessionId,
@@ -933,7 +1053,17 @@ function createMcpClient(ctx, logger) {
           invalidateUserMissionsSnapshot(toolName);
         }
         finalizeToolCallEntry(toolCallEntry, "ok");
-        logDebug("tool", "call_ok", { toolName });
+        const minIntervalMs = Number(TOOL_MIN_INTERVAL_MS.get(toolName) || 0);
+        if (minIntervalMs > 0) {
+          persistToolCooldown(toolName, Date.now() + minIntervalMs);
+        }
+        logDebug("tool", "call_ok", {
+          callId: callTrace.callId,
+          toolName,
+          reason: callTrace.reason,
+          httpRequests: callTrace.httpRequests,
+          durationMs: Math.max(0, Date.now() - callTrace.startedAt),
+        });
         ctx.mcpRateLimitReason = null;
         setMcpConnection("connected");
         return result;
@@ -944,7 +1074,9 @@ function createMcpClient(ctx, logger) {
             error.cooldownActive === true ? "cooldown_blocked" : "rate_limited",
             error,
           );
-          setMcpConnection("disconnected", { error: error.message });
+          if (error.cooldownActive !== true) {
+            setMcpConnection("disconnected", { error: error.message });
+          }
           if (error.cooldownActive === true) {
             logDebug("tool", "call_rate_limited_active", {
               toolName,
@@ -1001,9 +1133,25 @@ function createMcpClient(ctx, logger) {
                   : null,
             });
           }
+          logDebug("tool", "call_failed_summary", {
+            callId: callTrace.callId,
+            toolName,
+            reason: callTrace.reason,
+            httpRequests: callTrace.httpRequests,
+            durationMs: Math.max(0, Date.now() - callTrace.startedAt),
+            error: error.message,
+          });
           throw error;
         }
         finalizeToolCallEntry(toolCallEntry, "error", error);
+        logDebug("tool", "call_failed_summary", {
+          callId: callTrace.callId,
+          toolName,
+          reason: callTrace.reason,
+          httpRequests: callTrace.httpRequests,
+          durationMs: Math.max(0, Date.now() - callTrace.startedAt),
+          error: error.message,
+        });
         if (!isAuthHttpError(error?.message || "")) {
           setMcpConnection("disconnected", { error: error.message });
           throw error;
@@ -1100,6 +1248,7 @@ function createMcpClient(ctx, logger) {
         },
       });
       logWithTimestamp("[AUTH] ✅ Login completed.");
+      ctx.isAuthenticated = true;
       setMcpConnection("connected");
       return true;
     } catch (error) {
@@ -1108,6 +1257,7 @@ function createMcpClient(ctx, logger) {
         error: error.message,
         stack: error.stack,
       });
+      ctx.isAuthenticated = false;
       setMcpConnection("expired", { error: error.message });
       return false;
     }
