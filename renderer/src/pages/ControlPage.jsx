@@ -298,6 +298,7 @@ function MissionSlotFallback({ label, loading = false, assigning = false }) {
 function MissionSlotImage({
   src,
   hasAssignedNft = false,
+  missionActive = false,
   loading = false,
   assigning = false,
   padded = false,
@@ -328,7 +329,12 @@ function MissionSlotImage({
 
   const showSpinner =
     loading || (Boolean(activeSrc) && !imageLoaded && !imageFailed);
-  const placeholderLabel = hasAssignedNft ? "No image" : "No available NFTs";
+  const placeholderLabel =
+    missionActive && hasAssignedNft
+      ? "ACTIVE — NFT IMAGE UNAVAILABLE"
+      : hasAssignedNft
+        ? "NFT ASSIGNED — IMAGE UNAVAILABLE"
+        : "NO NFT ASSIGNED";
 
   return (
     <>
@@ -370,7 +376,7 @@ function MissionSlotImage({
         <MissionSlotFallback label={placeholderLabel} assigning={assigning} />
       )}
       {activeSrc && imageFailed ? (
-        <div className="mission-image-placeholder">No image</div>
+        <div className="mission-image-placeholder">{placeholderLabel}</div>
       ) : null}
       {showSpinner && activeSrc ? (
         <span className="loading loading-spinner loading-xs text-white/30 absolute top-2 right-2 z-20" />
@@ -5171,6 +5177,9 @@ function ControlView() {
                             "",
                         ).trim(),
                       );
+                      const missionActive = Boolean(
+                        hasAssignedNft && entry?.missionActive !== false,
+                      );
                       const hasSlotInfo = Boolean(
                         entry &&
                         (String(entry?.missionName || "").trim() ||
@@ -5247,6 +5256,7 @@ function ControlView() {
                               <MissionSlotImage
                                 src={slotImageSrc}
                                 hasAssignedNft={hasAssignedNft}
+                                missionActive={missionActive}
                                 loading={slotImageLoading}
                                 assigning={slotAssigning}
                                 padded={usesKoreaTakeitArt}

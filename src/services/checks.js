@@ -168,7 +168,12 @@ function createChecksService(ctx, logger, mcp, services = {}) {
     ensureNftAssignmentUsageLoaded();
     for (const nft of Array.isArray(nfts) ? nfts : []) {
       const account = nftAccountId(nft);
-      if (account) nftUsageNftByAccount.set(account, nft);
+      if (account) {
+        nftUsageNftByAccount.set(account, nft);
+        // Assignment already fetched the full NFT record. Reuse it for the
+        // mission card instead of making another MCP call just for artwork.
+        assignedNftMetadataByAccount.set(account, nft);
+      }
     }
     const accounts = new Set([
       ...nftAssignmentUsage.keys(),
@@ -364,7 +369,9 @@ function createChecksService(ctx, logger, mcp, services = {}) {
   const SOLANA_RPC_URL = "https://api.mainnet-beta.solana.com";
   const PBP_MINT = "3f7wfg9yHLtGKvy75MmqsVT1ueTFoqyySQbusrX1YAQ4";
   const missionNftByAccount = new Map();
-  const assignedNftMetadataByAccount = new Map();
+  // Cached usage rows retain the NFT image URL. Seed mission-card metadata
+  // from disk so artwork survives restart without an inventory/image request.
+  const assignedNftMetadataByAccount = new Map(persistedNftUsageByAccount);
   const DEFAULT_REWARD_TOTALS = {
     pbp: 0,
     tc: 0,

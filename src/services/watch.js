@@ -55,7 +55,6 @@ function createWatchService(
   let walletRefreshPendingReason = null;
   let currentWalletSummaryRefreshTimer = null;
   let currentWalletSummaryRefreshPendingReason = null;
-  let nftCountRefreshTimer = null;
   let startupMissionRefreshTimer = null;
   let watchStartupAssignBackoffUntil = 0;
 
@@ -2967,118 +2966,6 @@ function createWatchService(
       : null;
   }
 
-  function getAutoAssignCooldownRemainingMs() {
-    const until = Number(ctx.autoAssignRateLimitedUntil || 0);
-    return until > Date.now() ? until - Date.now() : 0;
-  }
-
-  function scheduleNftCountRefresh({
-    reason = "watch",
-    missionsResult = null,
-    minDelayMs = 0,
-  } = {}) {
-    if (nftCountRefreshTimer) return;
-    const delayMs = Math.max(
-      8000,
-      Number(minDelayMs || 0),
-      getMcpCooldownRemainingMs(),
-      getAutoAssignCooldownRemainingMs(),
-    );
-    logDebug("watch", "nft_count_refresh_scheduled", {
-      reason,
-      delayMs,
-      hasMissionResult: Boolean(missionsResult),
-    });
-    nftCountRefreshTimer = setTimeout(async () => {
-      nftCountRefreshTimer = null;
-      if (!ctx.watchLoopEnabled || !ctx.watcherRunning) return;
-      if (ctx.pauseBackgroundMcpReason) {
-        scheduleNftCountRefresh({
-          reason: `${reason}_paused`,
-          missionsResult:
-            missionsResult ||
-            ctx.lastUserMissionsResult ||
-            startupMissionResult(),
-          minDelayMs: 1000,
-        });
-        return;
-      }
-      const retryDelayMs = Math.max(
-        getMcpCooldownRemainingMs(),
-        getAutoAssignCooldownRemainingMs(),
-      );
-      if (retryDelayMs > 0) {
-        scheduleNftCountRefresh({
-          reason: `${reason}_retry`,
-          missionsResult:
-            missionsResult ||
-            ctx.lastUserMissionsResult ||
-            startupMissionResult(),
-          minDelayMs: retryDelayMs,
-        });
-        return;
-      }
-      const latestMissionResult =
-        ctx.lastUserMissionsResult || missionsResult || startupMissionResult();
-      const hasUnassignedSelectedMission = checks
-        .filterSelectedMissions(normalizeMissionList(latestMissionResult || {}))
-        .some((mission) => !missionHasAssignedNft(mission));
-      if (hasUnassignedSelectedMission) {
-        logDebug("watch", "nft_count_refresh_deferred_for_assignment", {
-          reason,
-        });
-        scheduleNftCountRefresh({
-          reason: `${reason}_assignment_priority`,
-          missionsResult: latestMissionResult,
-          minDelayMs: 65_000,
-        });
-        return;
-      }
-      try {
-        const refreshResult = await checks.refreshMissionHeaderStats({
-          missionsResult:
-            missionsResult ||
-            ctx.lastUserMissionsResult ||
-            startupMissionResult(),
-          refreshNftCount: true,
-          hydrateAssignedMetadata: false,
-        });
-        if (refreshResult?.nftRefreshDeferred) {
-          const retryMs = Math.max(
-            5000,
-            Number(
-              refreshResult.nftRefreshDeferred.retryAfterSeconds || 60,
-            ) * 1000 + 250,
-          );
-          logDebug("watch", "nft_count_refresh_deferred", {
-            reason,
-            retryMs,
-            error: refreshResult.nftRefreshDeferred.error,
-          });
-          scheduleNftCountRefresh({
-            reason: `${reason}_cooldown_retry`,
-            missionsResult:
-              missionsResult ||
-              ctx.lastUserMissionsResult ||
-              startupMissionResult(),
-            minDelayMs: retryMs,
-          });
-          return;
-        }
-        logDebug("watch", "nft_count_refresh_complete", {
-          reason,
-          nftsTotal: Number(ctx.currentMissionStats?.nftsTotal || 0),
-          nftsAvailable: Number(ctx.currentMissionStats?.nftsAvailable || 0),
-        });
-      } catch (error) {
-        logDebug("watch", "nft_count_refresh_failed", {
-          reason,
-          error: error.message,
-        });
-      }
-    }, delayMs);
-  }
-
   function scheduleStartupMissionRefresh({ delayMs = 1000 } = {}) {
     if (startupMissionRefreshTimer) return;
     const safeDelayMs = Math.max(1000, Number(delayMs || 0));
@@ -4047,10 +3934,8 @@ function createWatchService(
             `[WATCH] ℹ️ Cycle complete: no claims (polls=${summary.polls}, eligible=${summary.eligible}). Next check continues automatically.`,
           );
         }
-        scheduleNftCountRefresh({
-          reason: "cycle_complete",
-          missionsResult: ctx.lastUserMissionsResult || null,
-        });
+        // A completed watch cycle does not justify an inventory call. NFT
+        // inventory is loaded only by assignment or explicit NFT UI actions.
         const cooldownMs = getMcpCooldownRemainingMs();
         if (cooldownMs > 0) {
           logWithTimestamp(

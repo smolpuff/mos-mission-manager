@@ -293,6 +293,11 @@ function computeGuiMissionSlots(
       slot,
       missionId: mission?.assignedMissionId || mission?.assigned_mission_id || null,
       missionName: missionName(mission) || null,
+      missionActive: Boolean(
+        mission &&
+          mission?.active !== false &&
+          mission?.assigned_mission_active !== false,
+      ),
       missionLevel: missionLvl,
       progress,
       goal,
