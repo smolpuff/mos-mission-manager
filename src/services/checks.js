@@ -409,8 +409,8 @@ function createChecksService(ctx, logger, mcp, services = {}) {
   }
 
   const AUTO_ASSIGN_RATE_LIMIT_BACKOFF_MS = 30000;
-  // Keep a conservative per-pass cap to avoid assignment bursts and throttling.
-  const AUTO_ASSIGN_MAX_STARTS_PER_PASS = 2;
+  // There are four mission slots and assignment permits ten mutations/minute.
+  const AUTO_ASSIGN_MAX_STARTS_PER_PASS = 4;
 
   function getAutoAssignCooldownRemainingMs() {
     const until = Number(ctx.autoAssignRateLimitedUntil || 0);
@@ -4350,6 +4350,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
         `[ASSIGN] 🚀 Attempting to start ${candidates.length} mission(s) via NFT assignment...`,
       );
       let assigned = 0;
+      let assignmentMissionStateAuthoritative = true;
       let needsFreshMissionRefresh = false;
       const startedMissionNames = [];
       const startedMissionDetails = [];
@@ -5125,9 +5126,6 @@ function createChecksService(ctx, logger, mcp, services = {}) {
                       nftSource: "rental",
                     }
                   : {}),
-                ...(usesBrowserBridgeSigning()
-                  ? { signingMode: "browser_bridge" }
-                  : { signingMode: "agent_managed" }),
               },
             );
             logWithTimestamp(
@@ -5171,14 +5169,24 @@ function createChecksService(ctx, logger, mcp, services = {}) {
               wasAvailable: ownedNftWasAvailable,
             });
             clearRecentClaimedMissionOverride(id);
-            patchMissionResultAfterAssignment(currentMissionResult, {
-              assignedMissionId: id,
-              slot,
-              missionName: name,
-              missionLevel: level,
-              nftAccount: account,
-              nft,
-            });
+            const responseMissions = normalizeMissionList(assignResult);
+            if (responseMissions.length > 0) {
+              currentMissionResult = assignResult;
+              missions = responseMissions;
+            } else {
+              assignmentMissionStateAuthoritative = false;
+              // Compatibility fallback for an older server response. The
+              // deployed workflow returns authoritative missions here.
+              patchMissionResultAfterAssignment(currentMissionResult, {
+                assignedMissionId: id,
+                slot,
+                missionName: name,
+                missionLevel: level,
+                nftAccount: account,
+                nft,
+              });
+              missions = normalizeMissionList(currentMissionResult);
+            }
             if (account) alreadyAssignedNftAccounts.add(account);
             missionAssigned = true;
             startedMissionNames.push(name);
@@ -5507,6 +5515,8 @@ function createChecksService(ctx, logger, mcp, services = {}) {
         attempted: candidates.length,
         assigned,
         missionResult: currentMissionResult,
+        missionStateAuthoritative:
+          assigned > 0 ? assignmentMissionStateAuthoritative : false,
         startedMissionNames,
         startedMissionDetails,
       };
@@ -5612,6 +5622,8 @@ function createChecksService(ctx, logger, mcp, services = {}) {
       if (ctx.guiBridge?.emitNow) ctx.guiBridge.emitNow();
 
       let claimed = 0;
+      let authoritativeMissionResult = result;
+      let claimMissionStateAuthoritative = false;
       const claimEvents = [];
       for (const mission of candidates) {
         if (claimsPaused()) {
@@ -5638,6 +5650,12 @@ function createChecksService(ctx, logger, mcp, services = {}) {
               claimResult?.content?.[0]?.text ||
               "claim_mission_reward failed";
             throw new Error(message);
+          }
+          const claimResponseHasMissions =
+            normalizeMissionList(claimResult).length > 0;
+          claimMissionStateAuthoritative = claimResponseHasMissions;
+          if (claimResponseHasMissions) {
+            authoritativeMissionResult = claimResult;
           }
           claimed += 1;
           const levelText =
@@ -5771,7 +5789,14 @@ function createChecksService(ctx, logger, mcp, services = {}) {
         });
       }
       if (ctx.guiBridge?.emitNow) ctx.guiBridge.emitNow();
-      return { ok: true, claimed, claims: claimEvents, missionResult: result };
+      return {
+        ok: true,
+        claimed,
+        claims: claimEvents,
+        missionResult: authoritativeMissionResult,
+        missionStateAuthoritative:
+          claimed > 0 ? claimMissionStateAuthoritative : false,
+      };
     } catch (error) {
       logDebug("watch", "fallback_claim_scan_failed", {
         reason,

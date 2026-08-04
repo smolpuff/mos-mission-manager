@@ -16,7 +16,8 @@ function createMcpClient(ctx, logger) {
   const MCP_REQUEST_TIMEOUT_MS = 30000;
   const REFRESH_RETRY_ATTEMPTS = 3;
   const REFRESH_RETRY_DELAY_MS = 1000;
-  const USER_MISSIONS_CACHE_TTL_MS = 4000;
+  // The deployed service refreshes passive mission data once per minute.
+  const USER_MISSIONS_CACHE_TTL_MS = 60_000;
   const THROTTLE_DEBUG_WINDOW_MS = 5000;
   const THROTTLE_DEBUG_MAX_EVENTS = 200;
   const THROTTLE_DEBUG_BEFORE_COUNT = 5;
@@ -28,9 +29,13 @@ function createMcpClient(ctx, logger) {
   const TOOL_MIN_INTERVAL_MS = new Map([
     ["get_wallet_summary", 60_000],
     ["get_user_missions", 60_000],
-    ["get_mission_nfts", 60_000],
-    ["claim_mission_reward", 60_000],
   ]);
+  const TOOL_WINDOW_LIMITS = new Map([
+    ["get_mission_nfts", { limit: 10, windowMs: 60_000 }],
+    ["claim_mission_reward", { limit: 10, windowMs: 60_000 }],
+    ["assign_nft_to_mission", { limit: 10, windowMs: 60_000 }],
+  ]);
+  const toolWindowCalls = new Map();
   let throttleDebugSequence = 0;
   let logicalToolCallSequence = 0;
   const recentToolCalls = [];
@@ -475,6 +480,46 @@ function createMcpClient(ctx, logger) {
       "submit_signed_mission_swap",
       "submit_signed_nft_cooldown_reset",
     ]).has(String(toolName || "").trim());
+  }
+
+  function mutationIncludesMissionState(result) {
+    return normalizeMissionList(result).length > 0;
+  }
+
+  function adoptMutationMissionState(result, toolName) {
+    if (!mutationIncludesMissionState(result)) return false;
+    // Prevent an older in-flight passive read from overwriting this newer
+    // mutation response when it eventually resolves.
+    userMissionsGeneration += 1;
+    userMissionsInflight = null;
+    userMissionsInflightForceFresh = false;
+    updateMissionLookupCache(result);
+    logDebug("mcp", "mutation_mission_snapshot_adopted", {
+      toolName,
+      missionCount: normalizeMissionList(result).length,
+    });
+    return true;
+  }
+
+  function toolWindowWaitMs(toolName, now = Date.now()) {
+    const normalizedToolName = String(toolName || "").trim();
+    const config = TOOL_WINDOW_LIMITS.get(normalizedToolName);
+    if (!config) return 0;
+    const cutoff = now - config.windowMs;
+    const recent = (toolWindowCalls.get(normalizedToolName) || []).filter(
+      (timestamp) => timestamp > cutoff,
+    );
+    toolWindowCalls.set(normalizedToolName, recent);
+    if (recent.length < config.limit) return 0;
+    return Math.max(0, recent[0] + config.windowMs - now);
+  }
+
+  function recordToolWindowCall(toolName, now = Date.now()) {
+    const normalizedToolName = String(toolName || "").trim();
+    if (!TOOL_WINDOW_LIMITS.has(normalizedToolName)) return;
+    const recent = toolWindowCalls.get(normalizedToolName) || [];
+    recent.push(now);
+    toolWindowCalls.set(normalizedToolName, recent);
   }
 
   function shouldUseUserMissionsSnapshot(toolName, args) {
@@ -928,6 +973,14 @@ function createMcpClient(ctx, logger) {
       if (rateLimitWaitMs(toolName) > 0) {
         throw buildActiveRateLimitError("per_tool_cooldown", toolName);
       }
+      const windowWaitMs = toolWindowWaitMs(toolName);
+      if (windowWaitMs > 0) {
+        throw buildActiveRateLimitError(
+          "local_per_tool_window",
+          toolName,
+          windowWaitMs,
+        );
+      }
       const token = bearerToken();
       if (!token) {
         setMcpConnection("expired", { error: "missing_token" });
@@ -935,6 +988,7 @@ function createMcpClient(ctx, logger) {
       }
       const sessionId = await mcpInitialize(token, callTrace);
       callTrace.httpRequests += 1;
+      recordToolWindowCall(toolName);
       logDebug("mcp", "tool_http_start", {
         callId: callTrace.callId,
         toolName,
@@ -1050,7 +1104,9 @@ function createMcpClient(ctx, logger) {
             reason: String(opts?.reason || "").trim() || null,
           });
         } else if (shouldInvalidateUserMissionsSnapshot(toolName)) {
-          invalidateUserMissionsSnapshot(toolName);
+          if (!adoptMutationMissionState(result, toolName)) {
+            invalidateUserMissionsSnapshot(toolName);
+          }
         }
         finalizeToolCallEntry(toolCallEntry, "ok");
         const minIntervalMs = Number(TOOL_MIN_INTERVAL_MS.get(toolName) || 0);
@@ -1180,7 +1236,9 @@ function createMcpClient(ctx, logger) {
             });
           }
         } else if (shouldInvalidateUserMissionsSnapshot(toolName)) {
-          invalidateUserMissionsSnapshot(`${toolName}:auth_refresh`);
+          if (!adoptMutationMissionState(result, toolName)) {
+            invalidateUserMissionsSnapshot(`${toolName}:auth_refresh`);
+          }
         }
         finalizeToolCallEntry(toolCallEntry, "ok_after_refresh");
         logDebug("tool", "call_ok_after_refresh", { toolName });
