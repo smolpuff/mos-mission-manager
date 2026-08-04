@@ -28,6 +28,24 @@ function normalizeMissionList(result) {
   return [];
 }
 
+function latestMissionResultFromClaims(claims) {
+  const entries = Array.isArray(claims) ? claims : [];
+  for (let index = entries.length - 1; index >= 0; index -= 1) {
+    const claim = entries[index];
+    const candidates = [
+      claim,
+      claim?.result,
+      claim?.claimResult,
+      claim?.claim_result,
+      claim?.response,
+    ];
+    for (const candidate of candidates) {
+      if (normalizeMissionList(candidate).length > 0) return candidate;
+    }
+  }
+  return null;
+}
+
 function normalizeNftList(result) {
   const sc = result?.structuredContent;
   if (Array.isArray(sc)) return sc;
@@ -327,6 +345,7 @@ function computeMissionStats(missions, sessionClaimedCount) {
 
 module.exports = {
   normalizeMissionList,
+  latestMissionResultFromClaims,
   normalizeNftList,
   normalizeMissionCatalogList,
   normalizeRewardToken,

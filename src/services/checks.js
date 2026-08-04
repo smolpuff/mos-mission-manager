@@ -1,6 +1,21 @@
 // because... i wanna be teej. i wanna code. i wanna code. I wanna dance, i dont wanna go home.
 "use strict";
 
+function shouldRetryAssignmentOption({
+  abortedForRateLimit = false,
+  abortedForMutationState = false,
+  inactiveMissionError = false,
+  rentalRefreshEmpty = false,
+  source = "",
+  hasNext = false,
+  retryable = false,
+} = {}) {
+  if (abortedForRateLimit || abortedForMutationState) return false;
+  if (inactiveMissionError || rentalRefreshEmpty) return false;
+  if (source === "rental" || source === "owned_cooldown") return hasNext;
+  return retryable && hasNext;
+}
+
 const {
   normalizeMissionList,
   normalizeNftList,
@@ -4273,6 +4288,19 @@ function createChecksService(ctx, logger, mcp, services = {}) {
       prefetchedRentalCandidates: initialPrefetchedRentalCandidates.length,
       usePrefetchedRentalOnly,
     });
+    const mutationStateBlockedUntil = Number(
+      ctx.missionMutationStateBlockedUntil || 0,
+    );
+    if (mutationStateBlockedUntil > Date.now()) {
+      return {
+        ok: false,
+        attempted: 0,
+        assigned: 0,
+        skipped: true,
+        mutationStateMissing: true,
+        retryAfterMs: mutationStateBlockedUntil - Date.now(),
+      };
+    }
     if (hasActiveAutoAssignCooldown()) {
       logDebug("assign", "⏳ check_skipped_assign_backoff", {
         reason,
@@ -4355,6 +4383,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
       const startedMissionNames = [];
       const startedMissionDetails = [];
       let abortedForRateLimit = false;
+      let abortedForMutationState = false;
       const alreadyAssignedNftAccounts = assignedNftAccountSetFromMissions(
         missions,
         { reason },
@@ -5151,6 +5180,16 @@ function createChecksService(ctx, logger, mcp, services = {}) {
                   : message,
               );
             }
+            const responseMissions = normalizeMissionList(assignResult);
+            if (responseMissions.length === 0) {
+              assignmentMissionStateAuthoritative = false;
+              ctx.missionMutationStateBlockedUntil = Date.now() + 60_000;
+              const protocolError = new Error(
+                "assign_nft_to_mission succeeded without authoritative missions state",
+              );
+              protocolError.mutationStateMissing = true;
+              throw protocolError;
+            }
             assigned += 1;
             nftAssignmentLastUsedAt.set(account, Date.now());
             ensureNftAssignmentUsageLoaded();
@@ -5169,24 +5208,8 @@ function createChecksService(ctx, logger, mcp, services = {}) {
               wasAvailable: ownedNftWasAvailable,
             });
             clearRecentClaimedMissionOverride(id);
-            const responseMissions = normalizeMissionList(assignResult);
-            if (responseMissions.length > 0) {
-              currentMissionResult = assignResult;
-              missions = responseMissions;
-            } else {
-              assignmentMissionStateAuthoritative = false;
-              // Compatibility fallback for an older server response. The
-              // deployed workflow returns authoritative missions here.
-              patchMissionResultAfterAssignment(currentMissionResult, {
-                assignedMissionId: id,
-                slot,
-                missionName: name,
-                missionLevel: level,
-                nftAccount: account,
-                nft,
-              });
-              missions = normalizeMissionList(currentMissionResult);
-            }
+            currentMissionResult = assignResult;
+            missions = responseMissions;
             if (account) alreadyAssignedNftAccounts.add(account);
             missionAssigned = true;
             startedMissionNames.push(name);
@@ -5289,6 +5312,15 @@ function createChecksService(ctx, logger, mcp, services = {}) {
             break;
           } catch (error) {
             lastError = error;
+            if (error?.mutationStateMissing === true) {
+              abortedForMutationState = true;
+              logDebug("assign", "mutation_state_missing", {
+                reason,
+                missionName: name,
+                missionId: id,
+                toolName: "assign_nft_to_mission",
+              });
+            }
             if (isMissionNoLongerActiveError(error.message)) {
               needsFreshMissionRefresh = true;
               try {
@@ -5356,17 +5388,15 @@ function createChecksService(ctx, logger, mcp, services = {}) {
               error.message,
             );
             const hasNext = index + 1 < assignmentOptions.length;
-            const shouldTryNext =
-              abortedForRateLimit
-                ? false
-                : inactiveMissionError
-                  ? false
-                : error.rentalRefreshEmpty === true
-                  ? false
-                  : option.source === "rental" ||
-                      option.source === "owned_cooldown"
-                    ? hasNext
-                    : retryable && hasNext;
+            const shouldTryNext = shouldRetryAssignmentOption({
+              abortedForRateLimit,
+              abortedForMutationState,
+              inactiveMissionError,
+              rentalRefreshEmpty: error.rentalRefreshEmpty === true,
+              source: option.source,
+              hasNext,
+              retryable,
+            });
             logDebug("assign", "❌ assign_failed", {
               missionName: name,
               missionId: id,
@@ -5411,6 +5441,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
         }
         if (missionHeldForReset) continue;
         if (abortedForRateLimit) break;
+        if (abortedForMutationState) break;
         if (missionAssigned && assigned >= AUTO_ASSIGN_MAX_STARTS_PER_PASS) {
           logDebug("assign", "pass_limit_reached", {
             reason,
@@ -5495,6 +5526,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
         attempted: candidates.length,
         assigned,
         abortedForRateLimit,
+        abortedForMutationState,
         startedMissionNames,
         startedMissionDetails,
       });
@@ -5517,6 +5549,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
         missionResult: currentMissionResult,
         missionStateAuthoritative:
           assigned > 0 ? assignmentMissionStateAuthoritative : false,
+        mutationStateMissing: abortedForMutationState,
         startedMissionNames,
         startedMissionDetails,
       };
@@ -5624,6 +5657,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
       let claimed = 0;
       let authoritativeMissionResult = result;
       let claimMissionStateAuthoritative = false;
+      let claimMutationStateMissing = false;
       const claimEvents = [];
       for (const mission of candidates) {
         if (claimsPaused()) {
@@ -5653,6 +5687,15 @@ function createChecksService(ctx, logger, mcp, services = {}) {
           }
           const claimResponseHasMissions =
             normalizeMissionList(claimResult).length > 0;
+          if (!claimResponseHasMissions) {
+            claimMutationStateMissing = true;
+            ctx.missionMutationStateBlockedUntil = Date.now() + 60_000;
+            const protocolError = new Error(
+              "claim_mission_reward succeeded without authoritative missions state",
+            );
+            protocolError.mutationStateMissing = true;
+            throw protocolError;
+          }
           claimMissionStateAuthoritative = claimResponseHasMissions;
           if (claimResponseHasMissions) {
             authoritativeMissionResult = claimResult;
@@ -5769,6 +5812,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
             missionId: mission.id,
             error: error.message,
           });
+          if (error?.mutationStateMissing === true) break;
         } finally {
           if (ctx.activeClaimAbortController === claimAbortController) {
             ctx.activeClaimAbortController = null;
@@ -5796,6 +5840,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
         missionResult: authoritativeMissionResult,
         missionStateAuthoritative:
           claimed > 0 ? claimMissionStateAuthoritative : false,
+        mutationStateMissing: claimMutationStateMissing,
       };
     } catch (error) {
       logDebug("watch", "fallback_claim_scan_failed", {
@@ -5814,6 +5859,9 @@ function createChecksService(ctx, logger, mcp, services = {}) {
         ok: false,
         claimed: 0,
         claims: [],
+        rateLimited: error?.rateLimited === true,
+        rateLimitedTool: String(error?.toolName || "").trim() || null,
+        retryAfterSeconds: Number(error?.retryAfterSeconds || 0) || null,
         missionResult:
           missionsResult || ctx.lastUserMissionsResult || null,
       };
@@ -6099,4 +6147,5 @@ function createChecksService(ctx, logger, mcp, services = {}) {
 
 module.exports = {
   createChecksService,
+  shouldRetryAssignmentOption,
 };

@@ -3,6 +3,7 @@
   "version": "3.2.14b",
   "main": "electron/main.js",
   "scripts": {
+    "test": "node --test tests/*.test.js",
     "dev": "nodemon app.js",
     "dev:debug": "nodemon app.js --debug",
     "start": "node app.js",

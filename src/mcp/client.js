@@ -18,6 +18,7 @@ function createMcpClient(ctx, logger) {
   const REFRESH_RETRY_DELAY_MS = 1000;
   // The deployed service refreshes passive mission data once per minute.
   const USER_MISSIONS_CACHE_TTL_MS = 60_000;
+  const THROTTLE_SAFETY_BUFFER_MS = 2_000;
   const THROTTLE_DEBUG_WINDOW_MS = 5000;
   const THROTTLE_DEBUG_MAX_EVENTS = 200;
   const THROTTLE_DEBUG_BEFORE_COUNT = 5;
@@ -31,6 +32,7 @@ function createMcpClient(ctx, logger) {
     ["get_user_missions", 60_000],
   ]);
   const TOOL_WINDOW_LIMITS = new Map([
+    ["watch_and_claim", { limit: 1, windowMs: 60_000 }],
     ["get_mission_nfts", { limit: 10, windowMs: 60_000 }],
     ["claim_mission_reward", { limit: 10, windowMs: 60_000 }],
     ["assign_nft_to_mission", { limit: 10, windowMs: 60_000 }],
@@ -511,7 +513,10 @@ function createMcpClient(ctx, logger) {
     );
     toolWindowCalls.set(normalizedToolName, recent);
     if (recent.length < config.limit) return 0;
-    return Math.max(0, recent[0] + config.windowMs - now);
+    return Math.max(
+      0,
+      recent[0] + config.windowMs + THROTTLE_SAFETY_BUFFER_MS - now,
+    );
   }
 
   function recordToolWindowCall(toolName, now = Date.now()) {
@@ -624,7 +629,13 @@ function createMcpClient(ctx, logger) {
   }
 
   function buildRateLimitError({ status = 429, retryAfterSeconds = 30, toolName = null, bodyError = null } = {}) {
-    const waitSeconds = Math.max(1, Math.ceil(Number(retryAfterSeconds) || 30));
+    const waitSeconds = Math.max(
+      1,
+      Math.ceil(
+        (Number(retryAfterSeconds) || 30) +
+          THROTTLE_SAFETY_BUFFER_MS / 1000,
+      ),
+    );
     const retryAt = Date.now() + waitSeconds * 1000;
     // The server reports cooldowns for a specific tool. Only watch_and_claim
     // controls the watch loop's global wait; a read-tool cooldown must not
@@ -1111,7 +1122,10 @@ function createMcpClient(ctx, logger) {
         finalizeToolCallEntry(toolCallEntry, "ok");
         const minIntervalMs = Number(TOOL_MIN_INTERVAL_MS.get(toolName) || 0);
         if (minIntervalMs > 0) {
-          persistToolCooldown(toolName, Date.now() + minIntervalMs);
+          persistToolCooldown(
+            toolName,
+            Date.now() + minIntervalMs + THROTTLE_SAFETY_BUFFER_MS,
+          );
         }
         logDebug("tool", "call_ok", {
           callId: callTrace.callId,
