@@ -1,5 +1,7 @@
 {
   "version": "3.2.14",
   "downloadUrl": "https://github.com/smolpuff/mos-mission-manager/releases/latest",
-  "notes": ["Optimized startup", "Added NFT Usage stats"]
+  "notes": [
+    "Partial MCP throttling update. You will still get throttled, just about 85% less. Ignore and let the app do it's thing. Assining is slower thanks to throttling, blame spamming clowns."
+  ]
 }

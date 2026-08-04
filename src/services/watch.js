@@ -3372,6 +3372,7 @@ function createWatchService(
               mode: "local_safe",
             },
             missionSnapshot: {},
+            claims: [],
           },
         };
       } else {
