@@ -43,6 +43,7 @@ function createWatchService(
   );
   const WATCH_MAX_CLAIMS = 4;
   const WATCH_FALLBACK_CLAIMS = true;
+  const WATCH_START_INTERVAL_MS = 60_250;
   const POST_CLAIM_SETTLE_DELAY_MS_DEFAULT = 3000;
   const RECENT_CLAIM_OVERRIDE_TTL_MS_DEFAULT = 45_000;
   const RESET_PROMPT_REOPEN_COOLDOWN_MS = 60_000;
@@ -1293,8 +1294,9 @@ function createWatchService(
 
   function watchConfig() {
     // The live watch_and_claim schema requires pollIntervalSeconds >= 60.
-    // Keep this transport constraint independent of runtime/debug defaults.
-    const minCycleSeconds = Math.max(60, watchMinCycleSeconds());
+    // Its watch duration is independent and should return promptly after the
+    // initial poll so claim follow-up is not trapped inside a minute-long RPC.
+    const minPollIntervalSeconds = 60;
     const maxLimitSeconds = Math.min(
       240,
       Math.max(1, Number(ctx.runtimeDefaults?.watchMaxLimitSeconds) || 240),
@@ -1307,23 +1309,21 @@ function createWatchService(
     // Server-facing poll interval: keep this conservative by default.
     const pollIntervalSeconds = Math.min(
       600,
-      Math.max(minCycleSeconds, Math.floor(rawPollIntervalSeconds)),
+      Math.max(minPollIntervalSeconds, Math.floor(rawPollIntervalSeconds)),
     );
     const maxClaims = WATCH_MAX_CLAIMS;
     const fallbackClaims = WATCH_FALLBACK_CLAIMS;
-    const configuredCycleSeconds = Number(ctx.config.watchCycleSeconds);
-    const derivedCycleSeconds = Math.max(
-      minCycleSeconds,
-      Math.ceil(pollIntervalSeconds),
+    const configuredWatchSeconds = Number(ctx.config.watchRequestSeconds);
+    const defaultWatchSeconds = Math.max(
+      1,
+      Number(ctx.runtimeDefaults?.watchRequestSeconds) || 5,
     );
     const watchSeconds = Math.min(
       240,
-      Number.isFinite(configuredCycleSeconds) && configuredCycleSeconds > 0
-        ? Math.max(
-            minCycleSeconds,
-            Math.min(maxLimitSeconds, configuredCycleSeconds),
-          )
-        : Math.min(maxLimitSeconds, derivedCycleSeconds),
+      maxLimitSeconds,
+      Number.isFinite(configuredWatchSeconds) && configuredWatchSeconds > 0
+        ? Math.max(1, Math.floor(configuredWatchSeconds))
+        : defaultWatchSeconds,
     );
     return {
       maxLimitSeconds,
@@ -3051,6 +3051,7 @@ function createWatchService(
   async function runWatchCycle() {
     const traceId = nextTraceId("cycle");
     const opts = watchConfig();
+    const cycleStartedAtMs = Date.now();
     const watchSafeLocalMode = hasDisabledMissionSlots();
     logDebug("watch", "cycle_start", opts);
     trace("watch", "cycle_start", { traceId, opts, watchSafeLocalMode });
@@ -3654,7 +3655,7 @@ function createWatchService(
       windowEnded: summary.windowEnded,
       elapsedMs: summary.elapsedMs,
     });
-    return { claimed, opts, summary };
+    return { claimed, opts, summary, cycleStartedAtMs };
   }
 
   async function runWatchCycleExclusive() {
@@ -3972,7 +3973,8 @@ function createWatchService(
             setTimeout(resolve, preCycleCooldownMs),
           );
         }
-        const { claimed, summary } = await runWatchCycleExclusive();
+        const { claimed, summary, cycleStartedAtMs } =
+          await runWatchCycleExclusive();
         if (ctx.debugMode && claimed > 0) {
           logWithTimestamp(
             `[WATCH] ✅ Cycle complete: claimed ${claimed} (polls=${summary.polls}, eligible=${summary.eligible}).`,
@@ -3990,6 +3992,19 @@ function createWatchService(
             `[WATCH] ⏳ MCP cooldown active. Waiting ${Math.ceil(cooldownMs / 1000)}s before next cycle.`,
           );
           await new Promise((resolve) => setTimeout(resolve, cooldownMs));
+        }
+        const nextWatchStartDelayMs = Math.max(
+          0,
+          Number(cycleStartedAtMs || 0) + WATCH_START_INTERVAL_MS - Date.now(),
+        );
+        if (nextWatchStartDelayMs > 0 && ctx.watchLoopEnabled) {
+          logDebug("watch", "next_start_wait", {
+            waitMs: nextWatchStartDelayMs,
+            cadenceMs: WATCH_START_INTERVAL_MS,
+          });
+          await new Promise((resolve) =>
+            setTimeout(resolve, nextWatchStartDelayMs),
+          );
         }
       } catch (error) {
         const msg = String(error?.message || "");

@@ -7,6 +7,7 @@ const NORMAL_DEFAULTS = {
   watchMaxLimitSeconds: 60,
   watchMinCycleSeconds: 30,
   watchDefaultPollSeconds: 30,
+  watchRequestSeconds: 5,
 };
 
 const DEV_DEFAULTS = {
@@ -16,6 +17,7 @@ const DEV_DEFAULTS = {
   watchMaxLimitSeconds: 60,
   watchMinCycleSeconds: 30,
   watchDefaultPollSeconds: 30,
+  watchRequestSeconds: 5,
 };
 
 function runtimeDefaults(devMode = false) {
