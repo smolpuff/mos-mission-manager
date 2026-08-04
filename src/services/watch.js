@@ -3740,6 +3740,12 @@ function createWatchService(
         const startupSnapshotFreshForAssignment =
           Number(ctx.startupAccountSnapshot?.cachedAt || 0) > 0 &&
           startupSnapshotAgeMs <= 15_000;
+        if (!startupSnapshotFreshForAssignment) {
+          // The persisted snapshot makes startup non-blocking, but it may show
+          // old progress. Refresh mission state in the background as soon as
+          // the get_user_missions cooldown permits.
+          scheduleStartupMissionRefresh({ delayMs: 1000 });
+        }
         let startupActionMissionResult = initialMissionResult;
         let startupHandledByClaimLifecycle = false;
         const startupWatchBackoffMs = Math.max(
@@ -4002,16 +4008,19 @@ function createWatchService(
             ) || 3,
           ),
         );
-        const repeatedRateLimit =
-          error?.rateLimited === true &&
-          String(error?.toolName || "") === "watch_and_claim";
         const retryDelayMs =
           error?.rateLimited === true
-            ? Math.max(
-                baseRetryAfterSeconds * 1000,
-                repeatedRateLimit ? opts.pollIntervalSeconds * 2000 : 0,
-              )
+            ? baseRetryAfterSeconds * 1000 + 250
             : 3000;
+        if (
+          error?.rateLimited === true &&
+          String(error?.toolName || "") === "watch_and_claim"
+        ) {
+          // watch_and_claim and get_user_missions have separate tool
+          // cooldowns. Keep progress moving while the watcher itself cools
+          // down instead of leaving the UI frozen for the entire backoff.
+          scheduleStartupMissionRefresh({ delayMs: 1000 });
+        }
         logWithTimestamp(
           `[WATCH] ❌ Cycle failed: ${displayMessage}. Retrying in ${Math.ceil(retryDelayMs / 1000)}s.`,
         );
