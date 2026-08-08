@@ -24,6 +24,7 @@ const {
   emitClaimAnalyticsEvent,
   registerClaimEvent,
 } = require("../claim-analytics");
+const { applyWalletBalanceDeltas } = require("../wallet/balance-delta");
 
 function createWatchService(
   ctx,
@@ -55,10 +56,10 @@ function createWatchService(
   let traceSequence = 0;
   let walletRefreshTimer = null;
   let walletRefreshPendingReason = null;
-  let currentWalletSummaryRefreshTimer = null;
-  let currentWalletSummaryRefreshPendingReason = null;
   let startupMissionRefreshTimer = null;
+  let nftCountRefreshTimer = null;
   let watchStartupAssignBackoffUntil = 0;
+  const pendingClaimedMissionIds = new Set();
 
   function summarizeNamesForUser(items = [], limit = 2) {
     const list = Array.isArray(items)
@@ -174,7 +175,7 @@ function createWatchService(
     if (Number.isFinite(configuredSeconds) && configuredSeconds >= 0) {
       return Math.min(15_000, Math.floor(configuredSeconds * 1000));
     }
-    return 3000;
+    return 0;
   }
 
   function missionModeEnabled() {
@@ -297,14 +298,12 @@ function createWatchService(
     ctx.pauseBackgroundMcpStartedAt = Date.now();
     try {
       const restoreDelayMs = autoModeMissionRestoreDelayMs();
-      const cooldownMs = getMcpCooldownRemainingMs();
-      const waitMs = Math.max(restoreDelayMs, cooldownMs);
+      const waitMs = restoreDelayMs;
       if (waitMs > 0) {
         logDebug("watch", "auto_mode_restore_wait", {
           traceId,
           assignReason,
           restoreDelayMs,
-          cooldownMs,
           waitMs,
           targets: restoreTargets,
         });
@@ -315,6 +314,9 @@ function createWatchService(
       }
       let currentMissionResult = missionResult;
       let restored = 0;
+      let restoreBlocked = false;
+      let mutationStateMissing = false;
+      let pending = false;
       for (const target of restoreTargets) {
         if (claimWorkPaused()) {
           trace("watch", "auto_mode_restore_skipped_paused", {
@@ -322,11 +324,15 @@ function createWatchService(
             assignReason,
             slot: target?.slot ?? null,
           });
+          restoreBlocked = true;
           break;
         }
         const slot = Math.floor(Number(target?.slot));
         const wantedName = missionName({ missionName: target?.missionName });
-        if (!Number.isFinite(slot) || slot < 1 || !wantedName) continue;
+        if (!Number.isFinite(slot) || slot < 1 || !wantedName) {
+          restoreBlocked = true;
+          continue;
+        }
         const missions = normalizeMissionList(currentMissionResult);
         const currentMission =
           missions.find((entry) => Number(entry?.slot) === slot) || null;
@@ -350,6 +356,12 @@ function createWatchService(
           const restoreResult = await checks.applyMissionSelection({
             slot,
             missionName: wantedName,
+            currentAssignedMissionId:
+              currentMission?.assignedMissionId ||
+              currentMission?.assigned_mission_id ||
+              null,
+            currentMissionName: currentName,
+            missionsResult: currentMissionResult,
           });
           logDebug("watch", "auto_mode_restore_result", {
             traceId,
@@ -359,12 +371,15 @@ function createWatchService(
             result: restoreResult,
           });
           if (restoreResult?.pending) {
+            restoreBlocked = true;
+            pending = true;
             logWithTimestamp(
               `[MISSION] ⏸️ Mission restore for slot ${slot} is waiting on signing.`,
             );
             continue;
           }
           if (restoreResult?.ok !== true) {
+            restoreBlocked = true;
             logWithTimestamp(
               `[MISSION] ❌ Mission restore failed for slot ${slot}: ${restoreResult?.reason || "unknown_error"}`,
             );
@@ -372,17 +387,25 @@ function createWatchService(
           }
           if (restoreResult?.changed || restoreResult?.swapped) {
             restored += 1;
-            currentMissionResult = missionResultLoader
-              ? await missionResultLoader({
-                  forceFresh: true,
-                  reason: `${assignReason || "post_claim"}_auto_mode_restore_slot_${slot}`,
-                })
-              : await mcp.getUserMissions({
-                  forceFresh: true,
-                  reason: `${assignReason || "post_claim"}_auto_mode_restore_slot_${slot}`,
-                });
+            const mutationMissionResult =
+              restoreResult?.missionStateAuthoritative === true &&
+              normalizeMissionList(restoreResult?.missionResult).length > 0
+                ? restoreResult.missionResult
+                : null;
+            if (mutationMissionResult) {
+              currentMissionResult = mutationMissionResult;
+            } else {
+              restoreBlocked = true;
+              mutationStateMissing = true;
+              logWithTimestamp(
+                `[MISSION] ⚠️ Mission restore for slot ${slot} returned no updated missions; assignment is blocked until the normal mission poll.`,
+              );
+            }
+          } else {
+            restoreBlocked = true;
           }
         } catch (error) {
+          restoreBlocked = true;
           logWithTimestamp(
             `[MISSION] ❌ Mission restore error for slot ${slot}: ${error.message}`,
           );
@@ -396,7 +419,16 @@ function createWatchService(
           });
         }
       }
-      return { restored, missionResult: currentMissionResult };
+      return {
+        restored,
+        missionResult: currentMissionResult,
+        missionStateAuthoritative:
+          !restoreBlocked &&
+          normalizeMissionList(currentMissionResult).length > 0,
+        restoreBlocked,
+        mutationStateMissing,
+        pending,
+      };
     } finally {
       ctx.pauseBackgroundMcpReason = previousPauseReason;
       ctx.pauseBackgroundMcpStartedAt = previousPauseStartedAt;
@@ -725,38 +757,6 @@ function createWatchService(
     }, 250);
   }
 
-  function scheduleCurrentWalletSummaryRefresh(reason = "wallet_change") {
-    currentWalletSummaryRefreshPendingReason = reason;
-    if (currentWalletSummaryRefreshTimer) return;
-    currentWalletSummaryRefreshTimer = setTimeout(() => {
-      currentWalletSummaryRefreshTimer = null;
-      if (ctx.pauseBackgroundMcpReason) {
-        scheduleCurrentWalletSummaryRefresh(
-          currentWalletSummaryRefreshPendingReason || reason || "wallet_change",
-        );
-        return;
-      }
-      const pending =
-        currentWalletSummaryRefreshPendingReason || "wallet_change";
-      currentWalletSummaryRefreshPendingReason = null;
-      if (!checks || typeof checks.runWhoAmICheck !== "function") return;
-      Promise.resolve()
-        .then(() => checks.runWhoAmICheck())
-        .then(() => {
-          logDebug("watch", "current_wallet_summary_refreshed", {
-            reason: pending,
-          });
-          if (ctx.guiBridge?.emitNow) ctx.guiBridge.emitNow();
-        })
-        .catch((error) =>
-          logDebug("watch", "current_wallet_summary_refresh_failed", {
-            reason: pending,
-            error: error.message,
-          }),
-        );
-    }, 350);
-  }
-
   function nextTraceId(kind = "cycle") {
     traceSequence += 1;
     return `${kind}_${traceSequence}`;
@@ -952,14 +952,15 @@ function createWatchService(
       changed = true;
     }
     if (changed) {
+      ctx.currentUserWalletSummary = applyWalletBalanceDeltas(
+        ctx.currentUserWalletSummary,
+        deltas,
+      );
       logDebug("watch", "session_reward_totals_updated", {
         logLabel,
         totals: { ...totals },
       });
       if (ctx.guiBridge?.emitNow) ctx.guiBridge.emitNow();
-      scheduleFundingWalletRefresh(
-        `reward_${String(logLabel || "claim").toLowerCase()}`,
-      );
     }
     return totals;
   }
@@ -1095,19 +1096,11 @@ function createWatchService(
         entry?.current_level ??
         null,
     );
-    const rewardToken = String(
-      entry?.rewardToken ?? entry?.prize ?? entry?.token ?? "",
-    )
+    const parsedReward = extractMissionReward(entry);
+    const rewardToken = String(parsedReward.token || "")
       .trim()
       .toLowerCase();
-    const rewardAmount = Number(
-      entry?.rewardAmount ??
-        entry?.reward_amount ??
-        entry?.amount ??
-        entry?.prizeAmount ??
-        entry?.prize_amount ??
-        null,
-    );
+    const rewardAmount = Number(parsedReward.amount);
     const success = entry?.success === false ? "failed" : "ok";
     const parts = ["claim", success];
     if (missionId) parts.push(`mission-id:${missionId}`);
@@ -1186,6 +1179,7 @@ function createWatchService(
         ? ctx.lastAssignedMissionLookup[missionId] || null
         : null;
     const fromLookup = fromLookupMap || fromCachedLookup || null;
+    const parsedReward = extractMissionReward(claim);
     return {
       missionId,
       name:
@@ -1195,6 +1189,7 @@ function createWatchService(
         null,
       level:
         claim?.level ??
+        claim?.fromLevel ??
         claim?.missionLevel ??
         claim?.mission_level ??
         claim?.currentLevel ??
@@ -1209,15 +1204,8 @@ function createWatchService(
         claim?.start_time ??
         fromLookup?.startTime ??
         null,
-      reward:
-        claim?.rewardAmount ??
-        claim?.reward_amount ??
-        claim?.amount ??
-        claim?.prize_amount ??
-        claim?.reward ??
-        fromLookup?.reward ??
-        null,
-      prize: claim?.prize ?? claim?.rewardToken ?? fromLookup?.prize ?? null,
+      reward: parsedReward.amount ?? fromLookup?.reward ?? null,
+      prize: parsedReward.token ?? fromLookup?.prize ?? null,
       raw: claim,
     };
   }
@@ -1753,16 +1741,12 @@ function createWatchService(
       totalAfter: Number(ctx.config.totalClaimed || 0),
       logLabel,
     });
-    logWithTimestamp(
-      `[WATCH] ✅ ${logLabel}: +${claimed} (session ${safeBefore} -> ${ctx.sessionClaimedCount}, total ${safeTotalBefore} -> ${ctx.config.totalClaimed})`,
-    );
     if (ctx.guiBridge && typeof ctx.guiBridge.sendEvent === "function") {
-      ctx.guiBridge.sendEvent("claimed", { claimed, logLabel });
+      ctx.guiBridge.sendEvent("claimed", { claimed });
     }
     if (ctx.guiBridge && typeof ctx.guiBridge.emitNow === "function") {
       ctx.guiBridge.emitNow();
     }
-    scheduleCurrentWalletSummaryRefresh("claim");
     return claimed;
   }
 
@@ -2086,7 +2070,7 @@ function createWatchService(
     let missionStateAuthoritative =
       initialMissionStateAuthoritative === true &&
       normalizeMissionList(initialMissionResult).length > 0;
-    const missionRestoreTargets = collectMissionRestoreTargets(
+    let missionRestoreTargets = collectMissionRestoreTargets(
       claims,
       claimLookupByAssignedMissionId,
     );
@@ -2135,6 +2119,66 @@ function createWatchService(
       }
     }
 
+    if (
+      allowStateFallback &&
+      currentClaimed === 0 &&
+      beforeSnapshot.size > 0 &&
+      missionResult &&
+      typeof missionResult === "object"
+    ) {
+      try {
+        const afterSnapshot = await loadSelectedMissionSnapshot(
+          missionResult,
+          missionResultLoader,
+        );
+        const transitions = deriveStateTransitions(
+          beforeSnapshot,
+          afterSnapshot,
+        );
+        trace("watch", "claim_followup_state_compare", {
+          traceId,
+          assignReason,
+          afterSnapshot: snapshotTraceSummary(afterSnapshot),
+          transitions,
+        });
+        if (transitions.claimedTransitions > 0) {
+          currentClaimed = transitions.claimedTransitions;
+          missionRestoreTargets = collectMissionRestoreTargets(
+            transitions.claimed,
+            claimLookupByAssignedMissionId,
+          );
+          logClaimTransitionDetails(
+            transitions.claimed,
+            "[WATCH] ✅ Claimed (state fallback)",
+            claimLookupByAssignedMissionId,
+          );
+          noteRecentClaimedMissionOverrides(
+            transitions.claimed,
+            claimLookupByAssignedMissionId,
+          );
+          addSessionRewardTotals(
+            collectClaimRewardDeltas(
+              transitions.claimed,
+              claimLookupByAssignedMissionId,
+            ),
+            { logLabel: claimLogLabel },
+          );
+          logWithTimestamp(
+            `[WATCH] ✅ Claim detected from mission state: ${currentClaimed}`,
+          );
+          applyOptimisticClaimSlotRefresh(
+            transitions.claimed,
+            claimLookupByAssignedMissionId,
+          );
+        }
+      } catch (error) {
+        logDebug("watch", "state_fallback_failed", {
+          error: error.message,
+          stack: error.stack,
+        });
+      }
+    }
+
     if (currentClaimed > 0) {
       try {
         applyClaimCountUpdate(currentClaimed, { logLabel: claimLogLabel });
@@ -2153,7 +2197,6 @@ function createWatchService(
     if (currentClaimed > 0 && !missionStateAuthoritative) {
       // Successful claim mutations return their updated mission state. A
       // passive read here is both unnecessary and stale for up to 60 seconds.
-      ctx.missionMutationStateBlockedUntil = Date.now() + 60_000;
       logDebug("watch", "post_claim_mutation_state_missing", {
         traceId,
         assignReason,
@@ -2212,6 +2255,31 @@ function createWatchService(
       });
       return { claimed: currentClaimed, assigned, missionResult };
     }
+    const resetPreparation = await prepareMissionStateForAssignment(
+      missionResult,
+      `${assignReason || "claim_followup"}_pre_assign`,
+    );
+    missionResult = resetPreparation.missionResult;
+    if (resetPreparation.resetResult?.missionStateAuthoritative === true) {
+      missionStateAuthoritative = true;
+    }
+    if (!resetPreparation.canAssign) {
+      trace("watch", "claim_followup_assignment_blocked_for_reset", {
+        traceId,
+        assignReason,
+        claimed: currentClaimed,
+        resetCompleted:
+          resetPreparation.resetResult?.completed === true,
+        resetPending: resetPreparation.resetResult?.pending === true,
+      });
+      return {
+        claimed: currentClaimed,
+        assigned,
+        missionResult,
+        missionStateAuthoritative,
+        resetPending: true,
+      };
+    }
     if (currentClaimed > 0 && missionRestoreTargets.length > 0) {
       const restoreResult = await restoreClaimedMissions({
         restoreTargets: missionRestoreTargets,
@@ -2221,6 +2289,32 @@ function createWatchService(
         traceId,
       });
       missionResult = restoreResult.missionResult;
+      if (restoreResult?.restoreBlocked === true) {
+        trace("watch", "claim_followup_auto_mode_restore_blocked", {
+          traceId,
+          assignReason,
+          restored: Number(restoreResult?.restored || 0),
+          pending: restoreResult?.pending === true,
+          mutationStateMissing:
+            restoreResult?.mutationStateMissing === true,
+        });
+        return {
+          claimed: currentClaimed,
+          assigned,
+          missionResult:
+            restoreResult?.mutationStateMissing === true
+              ? null
+              : missionResult,
+          missionStateAuthoritative: false,
+          mutationStateMissing:
+            restoreResult?.mutationStateMissing === true,
+          restorePending: restoreResult?.pending === true,
+          restoreBlocked: true,
+        };
+      }
+      if (restoreResult?.missionStateAuthoritative === true) {
+        missionStateAuthoritative = true;
+      }
       trace("watch", "claim_followup_auto_mode_restore_done", {
         traceId,
         assignReason,
@@ -2296,124 +2390,6 @@ function createWatchService(
         error: error.message,
         stack: error.stack,
       });
-    }
-
-    if (allowStateFallback && currentClaimed === 0 && beforeSnapshot.size > 0) {
-      try {
-        if (claimWorkPaused()) {
-          trace("watch", "claim_followup_state_fallback_skipped_paused", {
-            traceId,
-            assignReason,
-          });
-          return { claimed: currentClaimed, assigned, missionResult };
-        }
-        const afterSnapshot = await loadSelectedMissionSnapshot(
-          missionResult,
-          missionResultLoader,
-        );
-        const transitions = deriveStateTransitions(
-          beforeSnapshot,
-          afterSnapshot,
-        );
-        trace("watch", "claim_followup_state_compare", {
-          traceId,
-          assignReason,
-          afterSnapshot: snapshotTraceSummary(afterSnapshot),
-          transitions,
-        });
-        if (transitions.claimedTransitions > 0) {
-          currentClaimed = transitions.claimedTransitions;
-          logClaimTransitionDetails(
-            transitions.claimed,
-            "[WATCH] ✅ Claimed (state fallback)",
-            claimLookupByAssignedMissionId,
-          );
-          noteRecentClaimedMissionOverrides(
-            transitions.claimed,
-            claimLookupByAssignedMissionId,
-          );
-          addSessionRewardTotals(
-            collectClaimRewardDeltas(
-              transitions.claimed,
-              claimLookupByAssignedMissionId,
-            ),
-            { logLabel: claimLogLabel },
-          );
-          logWithTimestamp(
-            `[WATCH] ✅ Claim detected from mission state: ${currentClaimed}`,
-          );
-          applyOptimisticClaimSlotRefresh(
-            transitions.claimed,
-            claimLookupByAssignedMissionId,
-          );
-          applyClaimCountUpdate(currentClaimed, { logLabel: claimLogLabel });
-          if (assigned === 0) {
-            if (claimWorkPaused()) {
-              trace("watch", "claim_followup_fallback_assign_skipped_paused", {
-                traceId,
-                assignReason,
-                claimed: currentClaimed,
-              });
-              return { claimed: currentClaimed, assigned, missionResult };
-            }
-            logWithTimestamp(
-              "[ASSIGN] ▶ Post-claim assign check (state fallback)...",
-            );
-            const fallbackAssign = await checks.autoAssignConfiguredMissions({
-              reason: "post_claim_state_fallback",
-              missionsResult: missionResult,
-            });
-            logDebug("watch", "assign_check_done", {
-              reason: "post_claim_state_fallback",
-              attempted: Number(fallbackAssign?.attempted || 0),
-              assigned: Number(fallbackAssign?.assigned || 0),
-              skipped: fallbackAssign?.skipped === true,
-            });
-            logAssignCheckResult(fallbackAssign);
-            if (fallbackAssign?.mutationStateMissing === true) {
-              return {
-                claimed: currentClaimed,
-                assigned: Number(fallbackAssign?.assigned || 0),
-                missionResult: null,
-                missionStateAuthoritative: false,
-                mutationStateMissing: true,
-              };
-            }
-            assigned = Math.max(
-              assigned,
-              Number(fallbackAssign?.assigned || 0),
-            );
-            if (fallbackAssign?.missionResult) {
-              missionResult = fallbackAssign.missionResult;
-            }
-            const fallbackMissionStateAuthoritative =
-              Number(fallbackAssign?.assigned || 0) > 0 &&
-              fallbackAssign?.missionStateAuthoritative === true;
-            trace("watch", "claim_followup_fallback_assign_done", {
-              traceId,
-              attempted: Number(fallbackAssign?.attempted || 0),
-              assigned: Number(fallbackAssign?.assigned || 0),
-              skipped: fallbackAssign?.skipped === true,
-            });
-            if (
-              Number(fallbackAssign?.assigned || 0) > 0 &&
-              !fallbackMissionStateAuthoritative
-            ) {
-              logDebug("watch", "post_assign_mutation_state_missing", {
-                traceId,
-                assignReason,
-                assigned,
-                path: "state_fallback",
-              });
-            }
-          }
-        }
-      } catch (error) {
-        logDebug("watch", "state_fallback_failed", {
-          error: error.message,
-          stack: error.stack,
-        });
-      }
     }
 
     trace("watch", "claim_followup_complete", {
@@ -2577,7 +2553,15 @@ function createWatchService(
         slot,
       });
     }
-    return true;
+    const missionResult =
+      normalizeMissionList(actionResult?.submitted).length > 0
+        ? actionResult.submitted
+        : null;
+    return {
+      ok: true,
+      missionResult,
+      missionStateAuthoritative: Boolean(missionResult),
+    };
   }
 
   function getResetPolicy() {
@@ -2603,8 +2587,12 @@ function createWatchService(
       threshold = 20,
       label = "reset",
       thresholdForMission = null,
+      assignAfterReset = true,
+      returnDetails = false,
     } = {},
   ) {
+    const finish = (details) =>
+      returnDetails === true ? details : details.triggered === true;
     const { ready: thresholdHits, blocked: blockedHits } =
       evaluateResetCandidates(
         snapshotMap,
@@ -2664,7 +2652,13 @@ function createWatchService(
     if (resetHits.length === 0) {
       ctx.lastResetPromptKey = "";
       ctx.lastResetPromptAt = 0;
-      return false;
+      return finish({
+        triggered: false,
+        completed: false,
+        missionResult: null,
+        missionStateAuthoritative: false,
+        assigned: 0,
+      });
     }
     const resetPromptKey = resetHits
       .map(
@@ -2681,14 +2675,21 @@ function createWatchService(
       Number.isFinite(Number(ctx.lastResetPromptAt || 0)) &&
       now - Number(ctx.lastResetPromptAt || 0) <
         RESET_PROMPT_REOPEN_COOLDOWN_MS;
-    if (withinReopenCooldown) {
+    if (withinReopenCooldown && ctx.signerMode === "manual") {
       logDebug("watch", "reset_prompt_suppressed", {
         reason,
         label,
         resetPromptKey,
         cooldownMs: RESET_PROMPT_REOPEN_COOLDOWN_MS,
       });
-      return true;
+      return finish({
+        triggered: true,
+        completed: false,
+        missionResult: null,
+        missionStateAuthoritative: false,
+        assigned: 0,
+        pending: true,
+      });
     }
     const names = summarizeNamesForUser(
       resetHits.map((m) => `${m.name} lvl=${Number(m.level || 0)}`),
@@ -2741,9 +2742,17 @@ function createWatchService(
           });
         }
       }
-      return true;
+      return finish({
+        triggered: true,
+        completed: false,
+        missionResult: null,
+        missionStateAuthoritative: false,
+        assigned: 0,
+        pending: true,
+      });
     }
     let rerolledCount = 0;
+    let failedCount = 0;
     let postRerollMissionResult = null;
     for (const mission of resetHits) {
       try {
@@ -2751,12 +2760,16 @@ function createWatchService(
           throw new Error("Signer service unavailable.");
         }
         signer.ensureMissionActionSupported("mission_reroll");
-        await performMissionReroll(mission, { reason, label });
+        const rerollResult = await performMissionReroll(mission, {
+          reason,
+          label,
+        });
         rerolledCount += 1;
-        if (normalizeMissionList(ctx.lastUserMissionsResult).length > 0) {
-          postRerollMissionResult = ctx.lastUserMissionsResult;
+        if (normalizeMissionList(rerollResult?.missionResult).length > 0) {
+          postRerollMissionResult = rerollResult.missionResult;
         }
       } catch (error) {
+        failedCount += 1;
         const clearedSlot = clearGuiMissionSlot(mission?.slot);
         logWithTimestamp(
           `[RESET] ❌ Reroll blocked for ${mission.name}: ${error.message}`,
@@ -2787,54 +2800,74 @@ function createWatchService(
         }
       }
     }
-    if (rerolledCount > 0) {
+    let assigned = 0;
+    let assignmentMissionResult = postRerollMissionResult;
+    let mutationStateMissing = false;
+    if (
+      rerolledCount > 0 &&
+      !assignAfterReset &&
+      normalizeMissionList(postRerollMissionResult).length > 0
+    ) {
+      await checks.refreshMissionHeaderStats({
+        missionsResult: postRerollMissionResult,
+        refreshNftCount: false,
+        hydrateAssignedMetadata: false,
+      });
+    }
+    if (rerolledCount > 0 && assignAfterReset) {
       logWithTimestamp(
         `[ASSIGN] ▶ Post-reset assign check (rerolled=${rerolledCount})...`,
       );
       try {
         const usingRerollMissionState =
           normalizeMissionList(postRerollMissionResult).length > 0;
-        let latestMissionResult = usingRerollMissionState
-          ? postRerollMissionResult
-          : await mcp.getUserMissions({
-              forceFresh: true,
-              reason: `post_reset_${reason}_initial`,
-            });
-        if (usingRerollMissionState) {
-          logDebug("watch", "post_reset_assign_using_reroll_state", {
+        if (!usingRerollMissionState) {
+          logDebug("watch", "post_reset_mutation_state_missing", {
             reason,
             label,
             rerolledCount,
-            missionCount: normalizeMissionList(latestMissionResult).length,
+          });
+          return finish({
+            triggered: true,
+            completed: failedCount === 0,
+            rerolledCount,
+            failedCount,
+            missionResult: null,
+            missionStateAuthoritative: false,
+            assigned: 0,
+            mutationStateMissing: true,
           });
         }
+        let latestMissionResult = postRerollMissionResult;
+        logDebug("watch", "post_reset_assign_using_reroll_state", {
+          reason,
+          label,
+          rerolledCount,
+          missionCount: normalizeMissionList(latestMissionResult).length,
+        });
         let assignResult = await checks.autoAssignConfiguredMissions({
           reason: `post_reset_${reason}`,
           missionsResult: latestMissionResult,
         });
         logAssignCheckResult(assignResult);
-        if (assignResult?.mutationStateMissing === true) return true;
+        if (assignResult?.mutationStateMissing === true) {
+          mutationStateMissing = true;
+          return finish({
+            triggered: true,
+            completed: failedCount === 0,
+            rerolledCount,
+            failedCount,
+            missionResult: null,
+            missionStateAuthoritative: false,
+            assigned: Number(assignResult?.assigned || 0),
+            mutationStateMissing: true,
+          });
+        }
+        assigned = Number(assignResult?.assigned || 0);
         if (assignResult?.missionResult) {
           latestMissionResult = assignResult.missionResult;
         }
-        if (
-          Number(assignResult?.assigned || 0) === 0 &&
-          !usingRerollMissionState
-        ) {
-          await sleep(1200);
-          latestMissionResult = await mcp.getUserMissions({
-            forceFresh: true,
-            reason: `post_reset_${reason}_retry_after_wait`,
-          });
-          assignResult = await checks.autoAssignConfiguredMissions({
-            reason: `post_reset_${reason}_retry`,
-            missionsResult: latestMissionResult,
-          });
-          logAssignCheckResult(assignResult);
-          if (assignResult?.missionResult) {
-            latestMissionResult = assignResult.missionResult;
-          }
-        }
+        assignmentMissionResult = latestMissionResult;
         await checks.refreshMissionHeaderStats({
           missionsResult: latestMissionResult,
         });
@@ -2851,20 +2884,49 @@ function createWatchService(
         });
       }
     }
-    return true;
+    const authoritativeMissionResult =
+      normalizeMissionList(assignmentMissionResult).length > 0
+        ? assignmentMissionResult
+        : null;
+    return finish({
+      triggered: true,
+      completed: failedCount === 0 && rerolledCount === resetHits.length,
+      rerolledCount,
+      failedCount,
+      missionResult: authoritativeMissionResult,
+      missionStateAuthoritative: Boolean(authoritativeMissionResult),
+      assigned,
+      mutationStateMissing,
+    });
   }
 
-  async function runResetCheckIfEnabled(reason, missionResult = null) {
+  async function runResetCheckIfEnabled(
+    reason,
+    missionResult = null,
+    options = {},
+  ) {
+    const returnDetails = options?.returnDetails === true;
+    const notTriggered = () =>
+      returnDetails
+        ? {
+            triggered: false,
+            completed: false,
+            missionResult,
+            missionStateAuthoritative:
+              normalizeMissionList(missionResult).length > 0,
+            assigned: 0,
+          }
+        : false;
     if (Number(ctx.missionMutationStateBlockedUntil || 0) > Date.now()) {
       logDebug("watch", "reset_check_skipped_missing_mutation_state", {
         reason,
         retryAfterMs:
           Number(ctx.missionMutationStateBlockedUntil || 0) - Date.now(),
       });
-      return false;
+      return notTriggered();
     }
     const resetPolicy = getResetPolicy();
-    if (!resetPolicy.enabled) return false;
+    if (!resetPolicy.enabled) return notTriggered();
     const resolvedMissionResult =
       missionResult ||
       (await mcp.getUserMissions({ reason: `reset_check_${reason}` }));
@@ -2884,16 +2946,23 @@ function createWatchService(
         label: resetPolicy.label,
         thresholdForMission: (mission) =>
           resetPolicyForMission(ctx, mission).threshold,
+        assignAfterReset: options?.assignAfterReset !== false,
+        returnDetails,
       },
     );
-    if (openedFromSnapshot) return true;
+    if (
+      openedFromSnapshot === true ||
+      openedFromSnapshot?.triggered === true
+    ) {
+      return openedFromSnapshot;
+    }
 
     // Manual checks should never miss reset popup when threshold is present. Prime disapproves of my name. :D
     const isManualReason =
       reason === "manual" ||
       reason === "manual_pre" ||
       reason === "manual_post";
-    if (!isManualReason) return false;
+    if (!isManualReason) return notTriggered();
 
     const missions = checks.filterSelectedMissions(
       normalizeMissionList(resolvedMissionResult),
@@ -2917,7 +2986,7 @@ function createWatchService(
           m.level >= Number(resetPolicyForMission(ctx, m).threshold) &&
           !m.assignedNft,
       );
-    if (hits.length === 0) return false;
+    if (hits.length === 0) return notTriggered();
 
     const fallbackSnapshot = new Map(hits.map((m) => [m.assignedMissionId, m]));
     return handleLevelResetIfNeeded(fallbackSnapshot, {
@@ -2926,19 +2995,101 @@ function createWatchService(
       label: resetPolicy.label,
       thresholdForMission: (mission) =>
         resetPolicyForMission(ctx, mission).threshold,
+      assignAfterReset: options?.assignAfterReset !== false,
+      returnDetails,
     });
   }
 
-  async function runResetCheckSafely(reason, missionResult, debugAction) {
+  async function runResetCheckSafely(
+    reason,
+    missionResult,
+    debugAction,
+    options = {},
+  ) {
     try {
-      return await runResetCheckIfEnabled(reason, missionResult);
+      return await runResetCheckIfEnabled(reason, missionResult, options);
     } catch (error) {
       logDebug("watch", debugAction, {
         error: error.message,
         stack: error.stack,
       });
-      return false;
+      return options?.returnDetails === true
+        ? {
+            triggered: true,
+            completed: false,
+            missionResult,
+            missionStateAuthoritative:
+              normalizeMissionList(missionResult).length > 0,
+            assigned: 0,
+            error: String(error?.message || error || "Reset failed"),
+          }
+        : false;
     }
+  }
+
+  async function prepareMissionStateForAssignment(
+    missionResult,
+    reason = "pre_assign",
+  ) {
+    const resetResult = await runResetCheckSafely(
+      reason,
+      missionResult,
+      "pre_assignment_reset_check_failed",
+      { assignAfterReset: false, returnDetails: true },
+    );
+    if (resetResult?.triggered !== true) {
+      return { canAssign: true, missionResult, resetResult };
+    }
+    const resetMissionResult = resetResult?.missionResult || null;
+    const resetCompleted = resetResult?.completed === true;
+    const resetStateAuthoritative =
+      resetResult?.missionStateAuthoritative === true &&
+      normalizeMissionList(resetMissionResult).length > 0;
+    if (!resetCompleted || !resetStateAuthoritative) {
+      logDebug("watch", "assignment_blocked_for_required_reset", {
+        reason,
+        completed: resetCompleted,
+        missionStateAuthoritative: resetStateAuthoritative,
+        rerolledCount: Number(resetResult?.rerolledCount || 0),
+        failedCount: Number(resetResult?.failedCount || 0),
+        pending: resetResult?.pending === true,
+      });
+      return {
+        canAssign: false,
+        missionResult: resetMissionResult || missionResult,
+        resetResult,
+      };
+    }
+    return {
+      canAssign: true,
+      missionResult: resetMissionResult,
+      resetResult,
+    };
+  }
+
+  async function autoAssignConfiguredMissionsResetFirst({
+    reason,
+    missionsResult,
+  } = {}) {
+    const prepared = await prepareMissionStateForAssignment(
+      missionsResult,
+      `${reason || "auto_assign"}_pre_assign`,
+    );
+    if (!prepared.canAssign) {
+      return {
+        attempted: 0,
+        assigned: 0,
+        skipped: true,
+        resetBlocked: true,
+        missionResult: prepared.missionResult,
+        missionStateAuthoritative:
+          prepared.resetResult?.missionStateAuthoritative === true,
+      };
+    }
+    return checks.autoAssignConfiguredMissions({
+      reason,
+      missionsResult: prepared.missionResult,
+    });
   }
 
   function getMcpCooldownRemainingMs() {
@@ -3000,18 +3151,19 @@ function createWatchService(
           missionsResult: result,
           refreshNftCount: false,
           hydrateAssignedMetadata: false,
+          syncTargetsFromAssigned: true,
+          syncReason: "startup_background_mission_refresh",
         });
         ctx.missionDataLoading = false;
         if (ctx.guiBridge?.emitNow) ctx.guiBridge.emitNow();
-        logWithTimestamp(
-          `[WATCH] ✅ Mission data loaded (${normalizeMissionList(result).length} missions).`,
-        );
-        await checks.autoAssignConfiguredMissions({
-          reason: "startup_background_unassigned_check",
-          missionsResult: result,
+        logDebug("watch", "startup_mission_refresh_ok", {
+          total: Number(ctx.currentMissionStats?.total || 0),
+          active: Number(ctx.currentMissionStats?.active || 0),
+          available: Number(ctx.currentMissionStats?.available || 0),
+          claimable: Number(ctx.currentMissionStats?.claimable || 0),
         });
       } catch (error) {
-        ctx.missionDataLoading = false;
+        ctx.missionDataLoading = true;
         if (ctx.guiBridge?.emitNow) ctx.guiBridge.emitNow();
         const retryMs = Math.max(
           5000,
@@ -3024,6 +3176,96 @@ function createWatchService(
         scheduleStartupMissionRefresh({ delayMs: retryMs });
       }
     }, safeDelayMs);
+  }
+
+  function scheduleNftCountRefresh({
+    reason = "watch",
+    missionsResult = null,
+    minDelayMs = 0,
+  } = {}) {
+    if (nftCountRefreshTimer) return;
+    const delayMs = Math.max(
+      1000,
+      Number(minDelayMs || 0),
+      getMcpCooldownRemainingMs(),
+    );
+    nftCountRefreshTimer = setTimeout(async () => {
+      nftCountRefreshTimer = null;
+      if (!ctx.watchLoopEnabled || !ctx.watcherRunning) return;
+      if (pendingClaimedMissionIds.size > 0) {
+        logDebug("watch", "nft_count_refresh_deferred_for_claim_state", {
+          reason,
+          claimedMissionIds: Array.from(pendingClaimedMissionIds),
+        });
+        scheduleNftCountRefresh({
+          reason: `${reason}_claim_state_pending`,
+          minDelayMs: 5000,
+        });
+        return;
+      }
+      if (ctx.pauseBackgroundMcpReason) {
+        scheduleNftCountRefresh({
+          reason: `${reason}_paused`,
+          missionsResult: ctx.lastUserMissionsResult || missionsResult,
+          minDelayMs: 1000,
+        });
+        return;
+      }
+      try {
+        const latestMissionResult =
+          ctx.lastUserMissionsResult || missionsResult || startupMissionResult();
+        if (!(latestMissionResult && typeof latestMissionResult === "object")) {
+          scheduleNftCountRefresh({
+            reason: `${reason}_waiting_for_missions`,
+            minDelayMs: 5000,
+          });
+          return;
+        }
+        const assignmentNeedsInventory =
+          ctx.autoAssignRunning === true ||
+          checks.hasAssignableConfiguredMissions?.(
+            latestMissionResult,
+            "post_claim",
+          ) === true;
+        if (assignmentNeedsInventory) {
+          logDebug("watch", "nft_count_refresh_deferred_for_assignment", {
+            reason,
+            autoAssignRunning: ctx.autoAssignRunning === true,
+          });
+          scheduleNftCountRefresh({
+            reason: `${reason}_assignment_priority`,
+            missionsResult: latestMissionResult,
+            minDelayMs: 5000,
+          });
+          return;
+        }
+        const refreshResult = await checks.refreshMissionHeaderStats({
+          missionsResult: latestMissionResult,
+          refreshNftCount: true,
+          hydrateAssignedMetadata: false,
+        });
+        if (refreshResult?.nftRefreshDeferred) {
+          scheduleNftCountRefresh({
+            reason: `${reason}_retry`,
+            missionsResult: ctx.lastUserMissionsResult || missionsResult,
+            minDelayMs: Math.max(
+              5000,
+              Number(refreshResult.nftRefreshDeferred.retryAfterSeconds || 60) *
+                1000 +
+                250,
+            ),
+          });
+        }
+      } catch (error) {
+        logDebug("watch", "nft_count_refresh_failed", {
+          reason,
+          error: error.message,
+        });
+      }
+    }, delayMs);
+    if (typeof nftCountRefreshTimer.unref === "function") {
+      nftCountRefreshTimer.unref();
+    }
   }
 
   async function runWatchCycle() {
@@ -3069,9 +3311,26 @@ function createWatchService(
     const getMissionResultShared = (options = {}) =>
       missionResultCoordinator.get(options);
     const seedMissionResult = (result) => missionResultCoordinator.seed(result);
+    preCycleMissionResult =
+      ctx.lastUserMissionsResult || startupMissionResult() || null;
+    if (
+      preCycleMissionResult &&
+      typeof preCycleMissionResult === "object" &&
+      normalizeMissionList(preCycleMissionResult).length > 0
+    ) {
+      seedMissionResult(preCycleMissionResult);
+      beforeSnapshot = await loadSelectedMissionSnapshot(
+        preCycleMissionResult,
+      );
+      liveSelectedSnapshot = beforeSnapshot;
+    }
     const maybeRunLiveStateRecovery = async (missionResult, reason) => {
-      if (liveStateRecoveryRunning) return;
-      if (!(missionResult && typeof missionResult === "object")) return;
+      if (liveStateRecoveryRunning) {
+        return { assignmentHandled: false, missionResult };
+      }
+      if (!(missionResult && typeof missionResult === "object")) {
+        return { assignmentHandled: false, missionResult };
+      }
       seedMissionResult(missionResult);
       try {
         const afterSnapshot = await loadSelectedMissionSnapshot(
@@ -3090,54 +3349,55 @@ function createWatchService(
         });
         if (transitions.claimedTransitions > 0) {
           liveStateRecoveryRunning = true;
-          const liveClaimLookup = await loadAssignedMissionLookup(
-            missionResult,
-            getMissionResultShared,
-          );
           logClaimTransitionDetails(
             transitions.claimed,
             "[WATCH] ✅ Claimed (live state)",
-            liveClaimLookup,
+            null,
           );
           logWithTimestamp(
             "[ASSIGN] ▶ Post-claim assign check (live state)...",
           );
-          const assignResult = await checks.autoAssignConfiguredMissions({
-            reason: "post_claim_live_state",
-            missionsResult: missionResult,
+          const followup = await runSharedClaimFollowup({
+            claimed: transitions.claimedTransitions,
+            claims: transitions.claimed,
+            beforeSnapshot: liveSelectedSnapshot,
+            claimLookupByAssignedMissionId: null,
+            assignReason: "post_claim_live_state",
+            claimLogLabel: "Claimed",
+            initialMissionResult: missionResult,
+            initialMissionStateAuthoritative: true,
+            allowStateFallback: false,
+            traceId: nextTraceId("live_claim"),
+            missionResultLoader: getMissionResultShared,
           });
-          logAssignCheckResult(assignResult);
-          if (assignResult?.mutationStateMissing === true) {
+          liveStateClaimedApplied += Number(followup?.claimed || 0);
+          if (followup?.mutationStateMissing === true) {
             postClaimMutationStateMissing = true;
-            return;
+            return { assignmentHandled: true, missionResult: null };
           }
-          const assigned = Number(assignResult?.assigned || 0);
+          const assigned = Number(followup?.assigned || 0);
           if (assigned > 0) {
             postClaimAssignRan = true;
             postClaimAssigned = Math.max(postClaimAssigned, assigned);
-            if (assignResult?.missionResult) {
-              missionResult = assignResult.missionResult;
-              seedMissionResult(missionResult);
-            } else {
-              logDebug("watch", "post_assign_mutation_state_missing", {
-                reason,
-                assigned,
-                path: "live_state_recovery",
-              });
-            }
+          }
+          if (followup?.missionResult) {
+            missionResult = followup.missionResult;
+            seedMissionResult(missionResult);
           }
           liveSelectedSnapshot = await loadSelectedMissionSnapshot(
             missionResult,
             getMissionResultShared,
           );
-          return;
+          return { assignmentHandled: true, missionResult };
         }
         liveSelectedSnapshot = afterSnapshot;
+        return { assignmentHandled: false, missionResult };
       } catch (error) {
         logDebug("watch", "live_state_recovery_failed", {
           reason,
           error: error.message,
         });
+        return { assignmentHandled: false, missionResult };
       } finally {
         liveStateRecoveryRunning = false;
       }
@@ -3166,6 +3426,7 @@ function createWatchService(
       }
       missionStatePollRunning = true;
       let updatedMissionResult = null;
+      let assignmentHandledDuringRecovery = false;
       const pollPromise = (async () => {
         const result = await getMissionResultShared({
           forceFresh: true,
@@ -3192,16 +3453,16 @@ function createWatchService(
         return result;
       })();
       pollPromise
-        .then((updated) => {
-          return Promise.resolve()
-            .then(() =>
-              runResetCheckSafely(
-                reason,
-                updated,
-                "poll_tick_reset_check_failed",
-              ),
-            )
-            .then(() => maybeRunLiveStateRecovery(updated, reason));
+        .then(async (updated) => {
+          const recoveryResult = await maybeRunLiveStateRecovery(
+            updated,
+            reason,
+          );
+          assignmentHandledDuringRecovery =
+            recoveryResult?.assignmentHandled === true;
+          if (recoveryResult?.missionResult) {
+            updatedMissionResult = recoveryResult.missionResult;
+          }
         })
         .catch((error) => {
           logDebug("watch", "poll_tick_check_failed", {
@@ -3211,17 +3472,18 @@ function createWatchService(
         })
         .finally(() => {
           const shouldRecheckAssign =
+            !assignmentHandledDuringRecovery &&
             !liveStateRecoveryRunning &&
             Number(ctx.missionMutationStateBlockedUntil || 0) <= Date.now() &&
             Date.now() >= nextAssignRecheckAtMs &&
             Number(ctx.currentMissionStats?.available || 0) > 0;
           if (shouldRecheckAssign) {
             nextAssignRecheckAtMs = Date.now() + ASSIGN_RECHECK_COOLDOWN_MS;
-            checks
-              .autoAssignConfiguredMissions({
+            Promise.resolve()
+              .then(() => autoAssignConfiguredMissionsResetFirst({
                 reason: "poll_tick_available_recheck",
                 missionsResult: updatedMissionResult,
-              })
+              }))
               .then((assignResult) => {
                 if (assignResult?.mutationStateMissing === true) {
                   postClaimMutationStateMissing = true;
@@ -3442,70 +3704,40 @@ function createWatchService(
         afterAdjustment: claimed,
       });
     }
-    let fallbackClaims = [];
-    let fallbackMissionResult = null;
-    let fallbackMissionStateAuthoritative = false;
-    let fallbackMutationStateMissing = false;
-    if (claimed === 0 && opts.fallbackClaims && !hasActiveMcpCooldown()) {
-      logDebug("watch", "fallback_claim_start", {
-        reason: "watch_reported_zero",
-        maxClaims: opts.maxClaims,
-      });
-      const fallback = await checks.claimClaimableMissions({
-        maxClaims: opts.maxClaims,
-        reason: "watch_reported_zero",
-      });
-      logDebug("watch", "fallback_claim_done", {
-        claimed: fallback?.claimed || 0,
-        ok: fallback?.ok,
-      });
-      if (
-        fallback?.rateLimited === true &&
-        fallback?.rateLimitedTool === "get_user_missions"
-      ) {
-        const retryMs = Math.max(
-          1000,
-          Number(fallback?.retryAfterSeconds || 1) * 1000 + 250,
-        );
-        logDebug("watch", "mission_ui_refresh_deferred", {
-          reason: "watch_reported_zero",
-          retryMs,
-        });
-        scheduleStartupMissionRefresh({ delayMs: retryMs });
-      }
-      claimed += Number(fallback?.claimed || 0);
-      fallbackClaims = Array.isArray(fallback?.claims) ? fallback.claims : [];
-      fallbackMissionResult =
-        fallback?.missionResult && typeof fallback.missionResult === "object"
-          ? fallback.missionResult
-          : null;
-      fallbackMissionStateAuthoritative =
-        fallback?.missionStateAuthoritative === true;
-      fallbackMutationStateMissing = fallback?.mutationStateMissing === true;
+    const hasClaimActivity = claimed > 0 || summary.claims.length > 0;
+    for (const entry of summary.claims) {
+      if (entry?.success === false) continue;
+      const claimedMissionId = String(
+        entry?.assignedMissionId ||
+          entry?.assigned_mission_id ||
+          entry?.missionId ||
+          "",
+      ).trim();
+      if (claimedMissionId) pendingClaimedMissionIds.add(claimedMissionId);
     }
-    if (fallbackMutationStateMissing) {
-      logDebug("watch", "cycle_stopped_missing_claim_mutation_state", {
-        traceId,
-      });
-      return { claimed, opts, summary, mutationStateMissing: true };
-    }
-    if (claimWorkPaused()) {
-      logDebug("watch", "cycle_followup_skipped_paused", { claimed });
-      return { claimed, opts, summary };
-    }
-    if (claimed === 0 && opts.fallbackClaims && hasActiveMcpCooldown()) {
-      logDebug("watch", "⏳ fallback_claim_skipped_rate_limited", {
-        retryAfterMs: getMcpCooldownRemainingMs(),
-      });
-    }
-    if (ctx.guiBridge?.sendEvent) {
+    if (hasClaimActivity && ctx.guiBridge?.sendEvent) {
       ctx.guiBridge.sendEvent("claiming", {
-        state: "done",
+        state: "start",
         reason: "watch",
         claimed,
       });
+      if (ctx.guiBridge?.emitNow) ctx.guiBridge.emitNow();
     }
-    if (ctx.guiBridge?.emitNow) ctx.guiBridge.emitNow();
+    let fallbackClaims = [];
+    let fallbackMissionResult = null;
+    let fallbackMissionStateAuthoritative = false;
+    if (claimWorkPaused()) {
+      logDebug("watch", "cycle_followup_skipped_paused", { claimed });
+      if (hasClaimActivity && ctx.guiBridge?.sendEvent) {
+        ctx.guiBridge.sendEvent("claiming", {
+          state: "done",
+          reason: "watch_paused",
+          claimed,
+        });
+        if (ctx.guiBridge?.emitNow) ctx.guiBridge.emitNow();
+      }
+      return { claimed, opts, summary };
+    }
     logDebug("watch", "cycle_result", {
       watch: result?.structuredContent?.watch || {},
       watchWindowEnded: summary.windowEnded,
@@ -3521,15 +3753,154 @@ function createWatchService(
       claimMutationMissionResult ||
       (normalizeMissionList(result).length > 0 ? result : null);
     const watchMissionStateAuthoritative = Boolean(watchMissionResult);
+    if (watchMissionStateAuthoritative) {
+      pendingClaimedMissionIds.clear();
+      await checks.refreshMissionHeaderStats({
+        missionsResult: watchMissionResult,
+        refreshNftCount: false,
+        hydrateAssignedMetadata: false,
+      });
+    }
+    let polledMissionResult = null;
+    let polledMissionStateAuthoritative = false;
+    let resolvedPendingClaimState = false;
+    if (!watchMissionResult && !hasClaimActivity) {
+      try {
+        // This is the normal passive mission-state poll for a cycle with no
+        // claim mutation. Successful claims must supply updated missions and
+        // never trigger a confirmation read here.
+        const coordinatedMissionResult = missionResultCoordinator.peek();
+        const cachedStartupMissionResult = startupMissionResult();
+        const lastMissionReadAt = Math.max(
+          0,
+          Number(ctx.lastUserMissionsFetchedAt || 0),
+          cachedStartupMissionResult
+            ? Number(ctx.startupAccountSnapshot?.cachedAt || 0)
+            : 0,
+        );
+        const normalMissionPollMs = Math.max(
+          watchMinCycleSeconds() * 1000,
+          opts.pollIntervalSeconds * 1000,
+        );
+        const normalMissionPollNotDue =
+          pendingClaimedMissionIds.size === 0 &&
+          lastMissionReadAt > 0 &&
+          Date.now() - lastMissionReadAt < normalMissionPollMs;
+        const missionReadCooldownMs =
+          typeof mcp.getToolCooldownRemainingMs === "function"
+            ? Math.max(
+                0,
+                Number(
+                  mcp.getToolCooldownRemainingMs("get_user_missions") || 0,
+                ),
+              )
+            : 0;
+        if (normalMissionPollNotDue && coordinatedMissionResult) {
+          polledMissionResult = coordinatedMissionResult;
+          logDebug("watch", "cycle_mission_state_poll_reused_fresh_state", {
+            ageMs: Date.now() - lastMissionReadAt,
+            normalMissionPollMs,
+          });
+        } else if (normalMissionPollNotDue) {
+          logDebug("watch", "cycle_mission_state_poll_not_due", {
+            ageMs: Date.now() - lastMissionReadAt,
+            normalMissionPollMs,
+          });
+        } else if (missionReadCooldownMs > 0) {
+          if (pendingClaimedMissionIds.size > 0) {
+            // This is already the normal mission poll for this cycle. Do not
+            // discard it at the cooldown boundary and then wait another full
+            // 62-second watch cycle. Wait only for this tool's remaining
+            // cooldown and use the same coordinated poll result immediately.
+            logDebug("watch", "cycle_mission_state_poll_deferred_cooldown", {
+              retryAfterMs: missionReadCooldownMs,
+              claimedMissionIds: Array.from(pendingClaimedMissionIds),
+            });
+            await sleep(missionReadCooldownMs + 25);
+            if (ctx.watchLoopEnabled && !claimWorkPaused()) {
+              polledMissionResult = await getMissionResultShared({
+                forceFresh: true,
+                reason: "cycle_mission_state_poll",
+              });
+            }
+          } else {
+            logDebug("watch", "cycle_mission_state_poll_skipped_cooldown", {
+              retryAfterMs: missionReadCooldownMs,
+            });
+          }
+        } else {
+          polledMissionResult = await getMissionResultShared({
+            forceFresh: true,
+            reason: "cycle_mission_state_poll",
+          });
+        }
+        const claimedMissionIds = new Set(pendingClaimedMissionIds);
+        const returnedMissionIds = new Set(
+          normalizeMissionList(polledMissionResult)
+            .map((entry) =>
+              String(
+                entry?.assigned_mission_id ||
+                  entry?.assignedMissionId ||
+                  entry?.id ||
+                  "",
+              ).trim(),
+            )
+            .filter(Boolean),
+        );
+        const retainedClaimedMissionIds = Array.from(claimedMissionIds).filter(
+          (id) => returnedMissionIds.has(id),
+        );
+        polledMissionStateAuthoritative =
+          returnedMissionIds.size > 0 && retainedClaimedMissionIds.length === 0;
+        if (claimedMissionIds.size === 0 || polledMissionStateAuthoritative) {
+          if (polledMissionStateAuthoritative) {
+            resolvedPendingClaimState = claimedMissionIds.size > 0;
+            pendingClaimedMissionIds.clear();
+          }
+          await checks.refreshMissionHeaderStats({
+            missionsResult: polledMissionResult,
+            refreshNftCount: false,
+            hydrateAssignedMetadata: false,
+          });
+        } else {
+          logDebug("watch", "cycle_mission_state_poll_rejected_stale", {
+            claimedMissionIds: Array.from(claimedMissionIds),
+            retainedClaimedMissionIds,
+          });
+          if (typeof mcp.invalidateUserMissionsSnapshot === "function") {
+            mcp.invalidateUserMissionsSnapshot(
+              "cycle_mission_state_poll_rejected_stale",
+            );
+          }
+          polledMissionResult = null;
+        }
+      } catch (error) {
+        logDebug("watch", "cycle_mission_state_poll_failed", {
+          error: error.message,
+          rateLimited: error?.rateLimited === true,
+          retryAfterSeconds: Number(error?.retryAfterSeconds || 0) || null,
+        });
+      }
+    } else if (!watchMissionResult && hasClaimActivity) {
+      logDebug("watch", "claim_mutation_state_missing_no_confirmation_read", {
+        claimed,
+        claimEvents: summary.claims.length,
+      });
+    }
+    if (hasClaimActivity && ctx.guiBridge?.sendEvent) {
+      ctx.guiBridge.sendEvent("claiming", {
+        state: "done",
+        reason: "watch",
+        claimed,
+      });
+      if (ctx.guiBridge?.emitNow) ctx.guiBridge.emitNow();
+    }
     const selectedFallbackMissionResult = Boolean(fallbackMissionResult);
     let postCycleMissionResult =
-      fallbackMissionResult ||
-      watchMissionResult;
+      fallbackMissionResult || watchMissionResult || polledMissionResult;
     const postCycleMissionStateAuthoritative = selectedFallbackMissionResult
       ? fallbackMissionStateAuthoritative
-      : watchMissionStateAuthoritative;
-    const hasClaimActivity = claimed > 0 || summary.claims.length > 0;
-
+      : watchMissionStateAuthoritative || polledMissionStateAuthoritative;
     let claimLookupByAssignedMissionId = null;
     if (summary.claims.length > 0) {
       const needsLookup = summary.claims.some((c) => {
@@ -3594,7 +3965,7 @@ function createWatchService(
         claimLookupByAssignedMissionId,
         aggregateClaimLogLine: `[WATCH] ✅ Claimed ${claimed} mission reward(s).`,
         assignReason: "post_claim",
-        claimLogLabel: "Claim count updated",
+        claimLogLabel: "Claimed",
         assignIntro: "[ASSIGN] ▶ Post-claim assign check (immediate)...",
         initialMissionResult: postCycleMissionResult,
         initialMissionStateAuthoritative:
@@ -3609,7 +3980,7 @@ function createWatchService(
       postClaimAssigned = claimFollowup.assigned;
       postClaimMutationStateMissing =
         claimFollowup.mutationStateMissing === true;
-      postClaimAssignRan = claimed > 0;
+      postClaimAssignRan = claimed > 0 || resolvedPendingClaimState;
       postCycleMissionResult = claimFollowup.missionResult;
       if (postClaimMutationStateMissing) {
         logDebug("watch", "cycle_end_checks_skipped_missing_claim_state", {
@@ -3621,11 +3992,6 @@ function createWatchService(
           retryAfterMs: getMcpCooldownRemainingMs(),
         });
       } else {
-        await runResetCheckSafely(
-          "cycle_end",
-          postCycleMissionResult,
-          "cycle_end_reset_check_failed",
-        );
         if (postClaimAssignRan && postClaimAssigned > 0) {
           logDebug("watch", "cycle_end_assign_skipped", {
             reason: "post_claim_assign_succeeded",
@@ -3637,7 +4003,7 @@ function createWatchService(
               formatTaggedLog("ASSIGN", "🛠️", "Cycle-end assign check..."),
             );
           try {
-            const assignResult = await checks.autoAssignConfiguredMissions({
+            const assignResult = await autoAssignConfiguredMissionsResetFirst({
               reason: "cycle_end_unassigned_check",
               missionsResult: postCycleMissionResult,
             });
@@ -3795,6 +4161,7 @@ function createWatchService(
     resetSessionRewardTotals();
     resetSessionSpendTotals();
     ctx.watcherRunning = true;
+    ctx.missionDataLoading = true;
     ctx.isIdle = false;
     redrawHeaderAndLog(ctx.currentMissionStats);
     if (ctx.guiBridge?.emitNow) ctx.guiBridge.emitNow();
@@ -3813,6 +4180,12 @@ function createWatchService(
           missionsResult: initialMissionResult,
           refreshNftCount: false,
           hydrateAssignedMetadata: false,
+          syncTargetsFromAssigned: true,
+          syncReason: "startup_snapshot",
+        });
+        scheduleNftCountRefresh({
+          reason: "startup",
+          missionsResult: initialMissionResult,
         });
         logDebug("watch", "startup_ui_refresh_ok", {
           source: "startup_snapshot",
@@ -3916,7 +4289,7 @@ function createWatchService(
           logWithTimestamp(
             formatTaggedLog("ASSIGN", "🛠️", "Startup assign check..."),
           );
-          const assignResult = await checks.autoAssignConfiguredMissions({
+          const assignResult = await autoAssignConfiguredMissionsResetFirst({
             reason: "startup_unassigned_check",
             missionsResult: startupActionMissionResult,
           });
@@ -3946,10 +4319,10 @@ function createWatchService(
           }
         }
       } else {
-        // Missing startup data must not hold the application in a loading
-        // state. Attempt once now and defer a rate-limited retry in the
-        // background while the watch loop starts normally.
-        ctx.missionDataLoading = false;
+        // No mission snapshot exists yet. Keep the cards in their running
+        // sync state until a real mission result arrives; an empty card must
+        // not be presented as a genuinely unassigned mission.
+        ctx.missionDataLoading = true;
         if (ctx.guiBridge?.emitNow) ctx.guiBridge.emitNow();
         try {
           initialMissionResult = await mcp.getUserMissions({
@@ -3960,6 +4333,8 @@ function createWatchService(
             missionsResult: initialMissionResult,
             refreshNftCount: false,
             hydrateAssignedMetadata: false,
+            syncTargetsFromAssigned: true,
+            syncReason: "startup_missing_snapshot_refresh",
           });
           logWithTimestamp(
             `[WATCH] ✅ Mission data loaded (${normalizeMissionList(initialMissionResult).length} missions).`,
@@ -3976,7 +4351,6 @@ function createWatchService(
         }
       }
     } catch (error) {
-      ctx.missionDataLoading = false;
       if (ctx.guiBridge?.emitNow) ctx.guiBridge.emitNow();
       logDebug("watch", "startup_ui_refresh_failed", {
         error: error.message,
@@ -4005,8 +4379,10 @@ function createWatchService(
             `[WATCH] ℹ️ Cycle complete: no claims (polls=${summary.polls}, eligible=${summary.eligible}). Next check continues automatically.`,
           );
         }
-        // A completed watch cycle does not justify an inventory call. NFT
-        // inventory is loaded only by assignment or explicit NFT UI actions.
+        scheduleNftCountRefresh({
+          reason: "cycle_complete",
+          missionsResult: ctx.lastUserMissionsResult || null,
+        });
         const cooldownMs = getMcpCooldownRemainingMs();
         if (cooldownMs > 0) {
           logWithTimestamp(

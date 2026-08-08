@@ -1,5 +1,7 @@
 "use strict";
 
+const { extractMissionReward } = require("./missions/normalize");
+
 const CLAIM_ANALYTICS_DEDUP_TTL_MS = 15000;
 
 function normalizeTimestampMs(value) {
@@ -43,17 +45,11 @@ function dedupeKeyFromPayload(payload = {}) {
   const missionName = String(payload?.missionName || payload?.mission || "")
     .trim()
     .toLowerCase();
-  const rewardToken = String(payload?.rewardToken || payload?.prize || "")
+  const parsedReward = extractMissionReward(payload);
+  const rewardToken = String(parsedReward.token || "")
     .trim()
     .toLowerCase();
-  const rewardAmount = Number(
-    payload?.rewardAmount ??
-      payload?.reward_amount ??
-      payload?.amount ??
-      payload?.prizeAmount ??
-      payload?.prize_amount ??
-      null,
-  );
+  const rewardAmount = Number(parsedReward.amount);
   const parts = ["claim"];
   if (assignedMissionId) parts.push(`mission-id:${assignedMissionId}`);
   if (Number.isFinite(missionStartedAt) && missionStartedAt > 0) {

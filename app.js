@@ -65,6 +65,8 @@ const STARTUP_FX_FRAME_MS = 95;
 const STARTUP_PROGRESS_PULSE_MS = 220;
 const START_PAUSED_FOR_COMP_LOCK =
   process.env.PBP_START_PAUSED_FOR_COMP_LOCK === "1";
+const START_PAUSED = process.env.PBP_START_PAUSED === "1";
+const LOCAL_ACTION_ONLY = process.env.PBP_LOCAL_ACTION_ONLY === "1";
 
 function createGuiStateEmitter(ctx) {
   let last = null;
@@ -572,13 +574,15 @@ async function runStartupSequence() {
     delete ctx.config.nftAssignmentUsage;
     flushConfig(ctx, logger.logDebug);
   }
-  if (START_PAUSED_FOR_COMP_LOCK) {
+  if (START_PAUSED || START_PAUSED_FOR_COMP_LOCK) {
     ctx.watchLoopEnabled = false;
     logger.logWithTimestamp(
       logger.formatTaggedLog(
-        "COMP LOCK",
+        START_PAUSED_FOR_COMP_LOCK ? "COMP LOCK" : "STARTUP",
         "🔒",
-        "Startup watch auto-start held until initial finish target check completes.",
+        START_PAUSED_FOR_COMP_LOCK
+          ? "Startup watch auto-start held until initial finish target check completes."
+          : "Startup watch held for a non-runner desktop action.",
       ),
     );
   }
@@ -603,6 +607,20 @@ async function runStartupSequence() {
       signerStatus: ctx.signerStatus,
     });
     signer.logModeSelected("startup");
+
+    if (LOCAL_ACTION_ONLY) {
+      ctx.isIdle = true;
+      ctx.startupComplete = true;
+      ctx.startupFxProgress = 100;
+      logger.logWithTimestamp(
+        logger.formatTaggedLog(
+          "READY",
+          "✅",
+          "Local signer action backend ready; MCP startup checks skipped.",
+        ),
+      );
+      return;
+    }
 
     let loginOk = false;
 
@@ -751,7 +769,9 @@ async function main() {
   commands.setupCommandHandler();
   logger.redrawHeaderAndLog(ctx.currentMissionStats);
   await runStartupSequence();
-  await commands.maybeRunFirstTimeSignerSetup();
+  if (!LOCAL_ACTION_ONLY) {
+    await commands.maybeRunFirstTimeSignerSetup();
+  }
 }
 
 process.on("SIGINT", () => {

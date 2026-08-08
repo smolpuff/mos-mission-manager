@@ -13,7 +13,7 @@ function isDesktopDevMode() {
 contextBridge.exposeInMainWorld("missionsDesktop", {
   platform: process.platform,
   desktopDevMode: isDesktopDevMode(),
-  startBackend: () => ipcRenderer.invoke("backend:start"),
+  startBackend: (options) => ipcRenderer.invoke("backend:start", options),
   stopBackend: () => ipcRenderer.invoke("backend:stop"),
   restartBackend: () => ipcRenderer.invoke("backend:restart"),
   sendCommand: (command) => ipcRenderer.invoke("backend:send-command", command),

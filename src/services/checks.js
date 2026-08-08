@@ -12,8 +12,10 @@ function shouldRetryAssignmentOption({
 } = {}) {
   if (abortedForRateLimit || abortedForMutationState) return false;
   if (inactiveMissionError || rentalRefreshEmpty) return false;
-  if (source === "rental" || source === "owned_cooldown") return hasNext;
-  return retryable && hasNext;
+  // A rejected NFT candidate must not abandon the mission, and a rejected
+  // mission must not prevent the outer pass from filling the other slots.
+  // Only pass-wide/protocol failures stop retries.
+  return hasNext;
 }
 
 const {
@@ -67,6 +69,7 @@ const {
   saveNftUsageStatsCache,
 } = require("../nft-usage-stats-cache");
 const { canonicalNftCollectionName } = require("../nft-collection-name");
+const { applyWalletBalanceDeltas } = require("../wallet/balance-delta");
 
 function createChecksService(ctx, logger, mcp, services = {}) {
   const { logWithTimestamp, logDebug, redrawHeaderAndLog, formatTaggedLog } =
@@ -97,6 +100,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
   let nftAssignmentUsageLoaded = false;
   const nftAssignmentTieBreaker = new Map();
   const nftAssignmentSessionUsage = new Map();
+  const rejectedOwnedNftUntil = new Map();
   const nftUsageNftByAccount = new Map();
   const persistedNftUsageByAccount = new Map(
     loadNftUsageStatsCache(
@@ -116,6 +120,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
   const MISSION_NFT_PAGE_LIMIT = 200;
   const MCP_COOLDOWN_RESUME_BUFFER_MS = 250;
   const RENTAL_RESET_PREPARE_DELAY_MS = 2500;
+  const OWNERSHIP_REJECTION_TTL_MS = 5 * 60_000;
 
   function ensureNftAssignmentUsageLoaded() {
     if (nftAssignmentUsageLoaded) return;
@@ -1286,8 +1291,8 @@ function createChecksService(ctx, logger, mcp, services = {}) {
         changed = true;
       }
     }
-    ctx.lastUserMissionsResult = result;
-    ctx.lastUserMissionsFetchedAt = Date.now();
+    // Rendering or reusing a mission snapshot must not make the transport
+    // cache fresh again. Only the MCP client may advance its fetched-at time.
     if (changed || !ctx.lastAssignedMissionLookup) {
       ctx.lastAssignedMissionLookup = nextLookup;
     }
@@ -1719,6 +1724,32 @@ function createChecksService(ctx, logger, mcp, services = {}) {
     return assignResult?.structuredContent?.details || null;
   }
 
+  function isNftOwnershipError(message) {
+    const text = String(message || "").trim().toLowerCase();
+    return (
+      /no longer owned by (?:the )?user/.test(text) ||
+      /not owned by (?:the )?user/.test(text) ||
+      /user (?:does not|doesn't) own/.test(text) ||
+      /wallet (?:does not|doesn't) own/.test(text) ||
+      /not (?:the )?owner of (?:this |the )?nft/.test(text)
+    );
+  }
+
+  function ownedNftRejectedForOwnership(account) {
+    const key = String(account || "").trim();
+    if (!key) return false;
+    const until = Number(rejectedOwnedNftUntil.get(key) || 0);
+    if (until > Date.now()) return true;
+    rejectedOwnedNftUntil.delete(key);
+    return false;
+  }
+
+  function rejectOwnedNftForOwnership(account) {
+    const key = String(account || "").trim();
+    if (!key) return;
+    rejectedOwnedNftUntil.set(key, Date.now() + OWNERSHIP_REJECTION_TTL_MS);
+  }
+
   function browserBridgeUrlFromPrepared(prepared) {
     const sc =
       prepared?.structuredContent && typeof prepared.structuredContent === "object"
@@ -1916,7 +1947,10 @@ function createChecksService(ctx, logger, mcp, services = {}) {
 
   const ASSIGNED_NFT_METADATA_FETCH_DELAY_MS = 3000;
 
-  async function loadOwnedMissionNfts({ forceFresh = false } = {}) {
+  async function loadOwnedMissionNfts({
+    forceFresh = false,
+    missionsResult = ctx.lastUserMissionsResult,
+  } = {}) {
     const cacheFresh =
       !forceFresh &&
       ownedMissionNftsCache &&
@@ -1944,6 +1978,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
       publishOwnedMissionNftStats(nfts, {
         reason: "get_mission_nfts",
         observedAt: ownedMissionNftsCacheAt,
+        missionsResult,
       });
       return nfts;
     })();
@@ -2407,14 +2442,15 @@ function createChecksService(ctx, logger, mcp, services = {}) {
       changed = true;
     }
     if (changed) {
+      ctx.currentUserWalletSummary = applyWalletBalanceDeltas(
+        ctx.currentUserWalletSummary,
+        deltas,
+      );
       logDebug("check", "session_reward_totals_updated", {
         logLabel,
         totals: { ...totals },
       });
       if (ctx.guiBridge?.emitNow) ctx.guiBridge.emitNow();
-      scheduleFundingWalletRefresh(
-        `reward_${String(logLabel || "claim").toLowerCase()}`,
-      );
     }
     return totals;
   }
@@ -2922,7 +2958,17 @@ function createChecksService(ctx, logger, mcp, services = {}) {
     logWithTimestamp(
       `[RESET] ✅ Auto mode fallback rerolled: ${name}${level === null ? "" : ` lvl=${level}`}`,
     );
-    return { ok: true, rerolled: true, reason: "rerolled" };
+    const missionResult =
+      normalizeMissionList(actionResult?.submitted).length > 0
+        ? actionResult.submitted
+        : null;
+    return {
+      ok: true,
+      rerolled: true,
+      reason: "rerolled",
+      missionResult,
+      missionStateAuthoritative: Boolean(missionResult),
+    };
   }
 
   async function prepareCooldownResetNftFromUi({
@@ -3469,6 +3515,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
     missionId: selectedMissionId = "",
     currentAssignedMissionId: suppliedAssignedMissionId = "",
     currentMissionName: suppliedCurrentMissionName = "",
+    missionsResult: suppliedMissionsResult = null,
     prepareOnly = false,
   } = {}) {
     const slotNumber = Number(slot);
@@ -3490,6 +3537,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
     }
 
     let missionsResult =
+      suppliedMissionsResult ||
       ctx.lastUserMissionsResult ||
       startupAccountSnapshot()?.missionsResult ||
       null;
@@ -3657,6 +3705,10 @@ function createChecksService(ctx, logger, mcp, services = {}) {
         );
         scheduleFundingWalletRefresh("mission_swap");
       }
+      const mutationMissionResult =
+        normalizeMissionList(actionResult?.submitted).length > 0
+          ? actionResult.submitted
+          : null;
       if (usesBrowserBridgeSigning() && !actionResult?.submitted) {
         const signingUrl =
           actionResult?.signed?.signingUrl || browserBridgeUrlFromPrepared(prepared);
@@ -3674,9 +3726,9 @@ function createChecksService(ctx, logger, mcp, services = {}) {
       };
       }
       const targets = applyTargetMissionForSlot(slotNumber, selectedName, missions);
-      if (missionsResult) {
+      if (mutationMissionResult) {
         await refreshMissionHeaderStats({
-          missionsResult,
+          missionsResult: mutationMissionResult,
           refreshNftCount: false,
           hydrateAssignedMetadata: false,
         });
@@ -3688,6 +3740,9 @@ function createChecksService(ctx, logger, mcp, services = {}) {
         slot: slotNumber,
         missionName: selectedName,
         targetMissions: targets,
+        missionResult: mutationMissionResult,
+        missionStateAuthoritative: Boolean(mutationMissionResult),
+        mutationStateMissing: !mutationMissionResult,
       };
     }
 
@@ -3712,6 +3767,9 @@ function createChecksService(ctx, logger, mcp, services = {}) {
       slot: slotNumber,
       missionName: selectedName,
       targetMissions: targets,
+      missionResult: assignmentMissionResult,
+      missionStateAuthoritative:
+        assignResult?.missionStateAuthoritative === true,
     };
   }
 
@@ -4007,6 +4065,23 @@ function createChecksService(ctx, logger, mcp, services = {}) {
     if (resolved.targetIds.size === 0 && resolved.targetNames.size === 0)
       return missions;
     return missions.filter((m) => isConfiguredTargetMission(m, resolved));
+  }
+
+  function hasAssignableConfiguredMissions(
+    missionsResult,
+    reason = "post_claim",
+  ) {
+    if (!(missionsResult && typeof missionsResult === "object")) return false;
+    const missions = normalizeMissionList(missionsResult);
+    if (missions.length === 0) return false;
+    return (
+      buildAssignCandidates(
+        missions,
+        resolveConfiguredTargets(),
+        extractSlotUnlockSummary(missionsResult),
+        reason,
+      ).length > 0
+    );
   }
 
   function findMissionByAssignedMissionId(missions = [], assignedId = "") {
@@ -4384,6 +4459,12 @@ function createChecksService(ctx, logger, mcp, services = {}) {
       const startedMissionDetails = [];
       let abortedForRateLimit = false;
       let abortedForMutationState = false;
+      const assignmentPassNftScan =
+        candidates.length > 1
+          ? { ...nftAssignmentScan, offset: 0 }
+          : { ...nftAssignmentScan };
+      let assignmentPassLoadedNftPage = false;
+      let assignmentPassMaxNftPageCount = 0;
       const alreadyAssignedNftAccounts = assignedNftAccountSetFromMissions(
         missions,
         { reason },
@@ -4496,9 +4577,12 @@ function createChecksService(ctx, logger, mcp, services = {}) {
         let assignmentSourceStage = null;
         let nextNftScan = nftAssignmentScan;
         let nftListLoaded = false;
-        for (let nftLoadAttempt = 1; nftLoadAttempt <= 2; nftLoadAttempt += 1) {
+        for (let nftLoadAttempt = 1; nftLoadAttempt <= 1; nftLoadAttempt += 1) {
           try {
-            const currentNftScan = nftAssignmentScan;
+            // Every open mission in this pass must inspect the same inventory
+            // page. Advancing the shared cursor after the first slot caused
+            // slot 2+ to jump to the next page and appear to have no NFTs.
+            const currentNftScan = assignmentPassNftScan;
             const nftPageOffset = currentNftScan.offset;
             const nftResult = await mcp.mcpToolCall("get_mission_nfts", {
               assignedMissionId: id,
@@ -4507,7 +4591,22 @@ function createChecksService(ctx, logger, mcp, services = {}) {
             });
             nfts = normalizeNftList(nftResult);
             publishNftUsageStats(nfts);
-            nextNftScan = advanceNftAssignmentScan(nfts.length);
+            assignmentPassLoadedNftPage = true;
+            assignmentPassMaxNftPageCount = Math.max(
+              assignmentPassMaxNftPageCount,
+              nfts.length,
+            );
+            nextNftScan =
+              nfts.length >= MISSION_NFT_PAGE_LIMIT
+                ? {
+                    ...assignmentPassNftScan,
+                    offset:
+                      assignmentPassNftScan.offset + MISSION_NFT_PAGE_LIMIT,
+                  }
+                : {
+                    offset: 0,
+                    cycle: assignmentPassNftScan.cycle + 1,
+                  };
             nftListLoaded = true;
             logDebug("assign", "eligible_nfts_loaded", {
               reason,
@@ -4526,17 +4625,6 @@ function createChecksService(ctx, logger, mcp, services = {}) {
             });
             break;
           } catch (error) {
-            if (isRateLimitError(error) && nftLoadAttempt === 1) {
-              const waitMs = Math.max(
-                1000,
-                Number(error?.retryAfterSeconds || 60) * 1000 + 250,
-              );
-              logWithTimestamp(
-                `[ASSIGN] ⏳ ${name}: NFT lookup cooldown has ${Math.ceil(waitMs / 1000)}s remaining; assignment will retry automatically.`,
-              );
-              await new Promise((resolve) => setTimeout(resolve, waitMs));
-              continue;
-            }
             if (isRateLimitError(error)) abortedForRateLimit = true;
             logDebug("assign", "nft_list_failed", {
               missionId: id,
@@ -4567,6 +4655,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
         const readyOwnedCandidates = nfts
           .map((nft) => ({ nft, account: nftAccountId(nft) }))
           .filter((entry) => !alreadyAssignedNftAccounts.has(entry.account))
+          .filter((entry) => !ownedNftRejectedForOwnership(entry.account))
           .filter((entry) => nftIsAvailable(entry.nft))
           .filter((entry) => entry.account)
           .sort(compareNftAssignmentOrder);
@@ -4600,7 +4689,10 @@ function createChecksService(ctx, logger, mcp, services = {}) {
           logWithTimestamp(
             `[ASSIGN] ✅ ${name}: found ${readyOwnedCandidates.length} ready owned NFT candidate(s); queued ${selectedReadyOwnedCandidates.length} least-used candidate(s) for assignment.`,
           );
-        } else if (nftAssignmentOrderMode() === "rotate_least_used") {
+        } else if (
+          nftAssignmentOrderMode() === "rotate_least_used" &&
+          !autoModeThresholdFallbackOnlyLocal
+        ) {
           logWithTimestamp(
             `[ASSIGN] ⏭️ ${name}: no ready NFT on this fresh inventory page; advancing to the next page on the next normal assignment pass.`,
           );
@@ -4618,6 +4710,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
             .map((nft) => ({ nft, account: nftAccountId(nft) }))
             .filter((entry) => entry.account)
             .filter((entry) => !alreadyAssignedNftAccounts.has(entry.account))
+            .filter((entry) => !ownedNftRejectedForOwnership(entry.account))
             .filter((entry) => !nftIsAvailable(entry.nft))
             .sort(
               (a, b) =>
@@ -4936,17 +5029,19 @@ function createChecksService(ctx, logger, mcp, services = {}) {
                 reason: `${reason}_auto_mode_threshold_fallback`,
               });
               if (rerollResult?.rerolled) {
-                needsFreshMissionRefresh = true;
-                if (typeof mcp.invalidateUserMissionsSnapshot === "function") {
-                  mcp.invalidateUserMissionsSnapshot(
-                    "auto_mode_threshold_fallback_reroll",
+                const rerolledMissions = normalizeMissionList(
+                  rerollResult.missionResult,
+                );
+                if (rerolledMissions.length > 0) {
+                  currentMissionResult = rerollResult.missionResult;
+                  missions = rerolledMissions;
+                  needsFreshMissionRefresh = true;
+                } else {
+                  abortedForMutationState = true;
+                  logWithTimestamp(
+                    `[RESET] ⚠️ ${name}: reroll succeeded but returned no updated missions; waiting for the normal mission poll.`,
                   );
                 }
-                currentMissionResult = await mcp.getUserMissions({
-                  forceFresh: true,
-                  reason: `${reason}_auto_mode_threshold_fallback_refresh`,
-                });
-                missions = normalizeMissionList(currentMissionResult);
               }
             } catch (error) {
               logWithTimestamp(
@@ -5183,7 +5278,6 @@ function createChecksService(ctx, logger, mcp, services = {}) {
             const responseMissions = normalizeMissionList(assignResult);
             if (responseMissions.length === 0) {
               assignmentMissionStateAuthoritative = false;
-              ctx.missionMutationStateBlockedUntil = Date.now() + 60_000;
               const protocolError = new Error(
                 "assign_nft_to_mission succeeded without authoritative missions state",
               );
@@ -5312,6 +5406,20 @@ function createChecksService(ctx, logger, mcp, services = {}) {
             break;
           } catch (error) {
             lastError = error;
+            const ownershipRejected =
+              option.source !== "rental" &&
+              isNftOwnershipError(error?.message);
+            if (ownershipRejected) {
+              rejectOwnedNftForOwnership(account);
+              logDebug("assign", "owned_nft_rejected_for_ownership", {
+                reason,
+                missionName: name,
+                missionId: id,
+                nftAccount: account,
+                attempt: index + 1,
+                maxAttempts: assignmentOptions.length,
+              });
+            }
             if (error?.mutationStateMissing === true) {
               abortedForMutationState = true;
               logDebug("assign", "mutation_state_missing", {
@@ -5471,17 +5579,19 @@ function createChecksService(ctx, logger, mcp, services = {}) {
               reason: `${reason}_auto_mode_threshold_local_only_fallback`,
             });
             if (rerollResult?.rerolled) {
-              needsFreshMissionRefresh = true;
-              if (typeof mcp.invalidateUserMissionsSnapshot === "function") {
-                mcp.invalidateUserMissionsSnapshot(
-                  "auto_mode_threshold_local_only_fallback_reroll",
+              const rerolledMissions = normalizeMissionList(
+                rerollResult.missionResult,
+              );
+              if (rerolledMissions.length > 0) {
+                currentMissionResult = rerollResult.missionResult;
+                missions = rerolledMissions;
+                needsFreshMissionRefresh = true;
+              } else {
+                abortedForMutationState = true;
+                logWithTimestamp(
+                  `[RESET] ⚠️ ${name}: reroll succeeded but returned no updated missions; waiting for the normal mission poll.`,
                 );
               }
-              currentMissionResult = await mcp.getUserMissions({
-                forceFresh: true,
-                reason: `${reason}_auto_mode_threshold_local_only_fallback_refresh`,
-              });
-              missions = normalizeMissionList(currentMissionResult);
             }
           } catch (error) {
             logWithTimestamp(
@@ -5495,6 +5605,9 @@ function createChecksService(ctx, logger, mcp, services = {}) {
             });
           }
         }
+      }
+      if (assignmentPassLoadedNftPage) {
+        advanceNftAssignmentScan(assignmentPassMaxNftPageCount);
       }
       assignedCountForEvent = assigned;
 
@@ -5689,7 +5802,6 @@ function createChecksService(ctx, logger, mcp, services = {}) {
             normalizeMissionList(claimResult).length > 0;
           if (!claimResponseHasMissions) {
             claimMutationStateMissing = true;
-            ctx.missionMutationStateBlockedUntil = Date.now() + 60_000;
             const protocolError = new Error(
               "claim_mission_reward succeeded without authoritative missions state",
             );
@@ -5818,12 +5930,6 @@ function createChecksService(ctx, logger, mcp, services = {}) {
             ctx.activeClaimAbortController = null;
           }
         }
-      }
-      if (claimed > 0) {
-        // The watch lifecycle owns the debounced current-wallet refresh.
-        // Calling it here as well produced two get_wallet_summary requests
-        // within milliseconds and restarted the server's rolling cooldown.
-        scheduleFundingWalletRefresh("claim_fallback");
       }
       if (ctx.guiBridge?.sendEvent) {
         ctx.guiBridge.sendEvent("claiming", {
@@ -5954,14 +6060,15 @@ function createChecksService(ctx, logger, mcp, services = {}) {
         try {
           const nfts = await loadOwnedMissionNfts({
             forceFresh: refreshNftCount === true,
+            missionsResult: result,
           });
           missionNftByAccount.clear();
           for (const nft of nfts) {
             const key = nftAccountId(nft);
             if (key) missionNftByAccount.set(key, nft);
           }
-          nftCount = nfts.length;
-          nftAvailable = nfts.filter(nftIsAvailable).length;
+          nftCount = Number(ctx.currentMissionStats?.nftsTotal || nfts.length);
+          nftAvailable = Number(ctx.currentMissionStats?.nftsAvailable || 0);
         } catch (error) {
           logDebug("check", "nft_count_failed", { error: error.message });
           nftRefreshDeferred = {
@@ -6032,6 +6139,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
         nftsAvailable: nftAvailable,
         totalClaimed: Number(ctx.config.totalClaimed || 0),
       };
+      ctx.missionDataLoading = false;
       redrawHeaderAndLog(ctx.currentMissionStats);
       if (ctx.guiBridge && typeof ctx.guiBridge.emitNow === "function") {
         ctx.guiBridge.emitNow();
@@ -6133,6 +6241,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
     claimClaimableMissions,
     isConfiguredTargetMission,
     filterSelectedMissions,
+    hasAssignableConfiguredMissions,
     logSelectedWatchTargetsAtStartup,
     autoAssignConfiguredMissions,
     stopRentalFastRefresh,

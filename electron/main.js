@@ -43,6 +43,9 @@ const {
 const {
   canonicalNftCollectionName: canonicalSharedNftCollectionName,
 } = require("../src/nft-collection-name");
+const {
+  normalizeMissionActionEnabledBySlot,
+} = require("../src/mission-slot-policy");
 
 const ROOT_DIR = path.resolve(__dirname, "..");
 const RENDERER_DEV_URL =
@@ -1181,53 +1184,17 @@ async function bootstrapStartupMissionSlots() {
         trackTelemetryEvent("heartbeat", { event_name: "identity_refresh" });
       }
 
-      pushSystemLog("Startup mission sync: fetching user missions.");
-      try {
-        const missionsResult = await desktopMcp.getUserMissions({
-          url: "https://pixelbypixel.studio/mcp",
-          reason: "startup_mission_sync",
-        });
-        const hydratedMissions = hydrateMissionListWithCachedCatalog(
-          normalizeMissionList(missionsResult || {}),
-        );
-        const missionList = hydratedMissions.missions;
-        accountSnapshotCache = {
-          ...(accountSnapshotCache && typeof accountSnapshotCache === "object"
-            ? accountSnapshotCache
-            : {}),
-          missionsResult,
-        };
-        // Do not fetch the general NFT inventory here. Auto-assignment needs
-        // get_mission_nfts with an assignedMissionId, and the server applies a
-        // per-tool cooldown regardless of arguments. Consuming that call for
-        // UI enrichment here prevents empty mission slots from being assigned.
-        delete accountSnapshotCache.nftResult;
-        accountSnapshotCacheAt = Date.now();
-        syncDesktopTargetMissionsFromAssignedMissions(
-          missionList,
-          "Startup mission sync",
-        );
-        backendStatus.guiMissionSlots =
-          computeGuiMissionSlotsShared(missionList);
-        if (hydratedMissions.hydrated) {
-          pushSystemLog(
-            `Startup mission metadata hydration complete (${Number(hydratedMissions.hydratedCount || 0)}).`,
-          );
-        } else {
-          pushSystemLog("Startup mission metadata hydration skipped.");
-        }
-        backendStatus.startupMissionSlotsLoading = false;
-        publishStatus();
-        pushSystemLog("Startup mission sync complete.");
-        return { ok: true };
-      } catch (error) {
-        backendStatus.startupMissionSlotsLoading = false;
-        publishStatus();
-        pushSystemLog(
-          `Startup mission sync failed: ${String(error?.message || error)}`,
-        );
-        return { ok: false, error: String(error?.message || error) };
-      }
+      // Startup owns identity and wallet balances only. Mission state belongs
+      // to the backend's normal polling lifecycle; fetching it here consumes
+      // the same strict cooldown immediately before the watcher starts.
+      delete accountSnapshotCache.missionsResult;
+      delete accountSnapshotCache.nftResult;
+      backendStatus.guiMissionSlots = null;
+      backendStatus.missionDataLoading = true;
+      backendStatus.startupMissionSlotsLoading = false;
+      publishStatus();
+      pushSystemLog("Startup wallet bootstrap complete.");
+      return { ok: true };
     } catch (error) {
       backendStatus.startupMissionSlotsLoading = false;
       publishStatus();
@@ -2151,7 +2118,47 @@ function invalidateMissionRelatedCaches() {
   invalidateRentalsPreviewCache();
 }
 
-async function getAccountSnapshotCached({ includeNfts = false } = {}) {
+async function waitForDesktopMcpToolCooldown(toolName, onCooldown = null) {
+  let lastReportedSecond = null;
+  while (true) {
+    const remainingMs = Math.max(
+      0,
+      Number(desktopMcp.getToolCooldownRemainingMs(toolName) || 0),
+    );
+    if (remainingMs <= 0) return;
+    const remainingSeconds = Math.max(1, Math.ceil(remainingMs / 1000));
+    if (remainingSeconds !== lastReportedSecond) {
+      lastReportedSecond = remainingSeconds;
+      if (typeof onCooldown === "function") {
+        onCooldown({ toolName, remainingSeconds });
+      }
+    }
+    await new Promise((resolve) =>
+      setTimeout(resolve, Math.min(1000, remainingMs)),
+    );
+  }
+}
+
+async function callDesktopMcpForOnboarding(toolName, call, onCooldown = null) {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    await waitForDesktopMcpToolCooldown(toolName, onCooldown);
+    try {
+      return await call();
+    } catch (error) {
+      if (error?.rateLimited !== true || attempt >= 1) throw error;
+      // The MCP client persisted the server-provided retry boundary. Wait for
+      // that same owner to become eligible, then retry once without creating a
+      // second polling path.
+    }
+  }
+  return null;
+}
+
+async function getAccountSnapshotCached({
+  includeNfts = false,
+  waitForCooldown = false,
+  onCooldown = null,
+} = {}) {
   if (startupMissionBootstrapPromise) {
     pushSystemLog("Account snapshot waiting for startup sync.");
     await startupMissionBootstrapPromise;
@@ -2173,23 +2180,51 @@ async function getAccountSnapshotCached({ includeNfts = false } = {}) {
         ? { ...accountSnapshotCache }
         : {};
     if (!snapshot.walletSummaryResult) {
-      snapshot.walletSummaryResult = await mcpCallTool(
-        "get_wallet_summary",
-        {},
-        { reason: "account_snapshot_wallet" },
-      );
+      const loadWallet = () =>
+        mcpCallTool(
+          "get_wallet_summary",
+          {},
+          { reason: "account_snapshot_wallet" },
+        );
+      snapshot.walletSummaryResult = waitForCooldown
+        ? await callDesktopMcpForOnboarding(
+            "get_wallet_summary",
+            loadWallet,
+            onCooldown,
+          )
+        : await loadWallet();
+      accountSnapshotCache = { ...snapshot };
+      accountSnapshotCacheAt = Date.now();
     }
     if (!snapshot.missionsResult) {
-      snapshot.missionsResult = await desktopMcp.getUserMissions({
-        reason: "account_snapshot_missions",
-      });
+      const loadMissions = () =>
+        desktopMcp.getUserMissions({ reason: "account_snapshot_missions" });
+      snapshot.missionsResult = waitForCooldown
+        ? await callDesktopMcpForOnboarding(
+            "get_user_missions",
+            loadMissions,
+            onCooldown,
+          )
+        : await loadMissions();
+      accountSnapshotCache = { ...snapshot };
+      accountSnapshotCacheAt = Date.now();
     }
     if (includeNfts && !snapshot.nftResult) {
-      snapshot.nftResult = await mcpCallTool(
-        "get_mission_nfts",
-        {},
-        { reason: "account_snapshot_nfts" },
-      );
+      const loadNfts = () =>
+        mcpCallTool(
+          "get_mission_nfts",
+          {},
+          { reason: "account_snapshot_nfts" },
+        );
+      snapshot.nftResult = waitForCooldown
+        ? await callDesktopMcpForOnboarding(
+            "get_mission_nfts",
+            loadNfts,
+            onCooldown,
+          )
+        : await loadNfts();
+      accountSnapshotCache = { ...snapshot };
+      accountSnapshotCacheAt = Date.now();
     }
     accountSnapshotCache = snapshot;
     accountSnapshotCacheAt = Date.now();
@@ -2365,6 +2400,13 @@ function buildAnalyticsEventRows(bucket = {}) {
 }
 
 function rewardFromStatsPayload(payload = {}) {
+  const parsedReward = extractMissionReward(payload);
+  if (parsedReward.amount !== null && parsedReward.token) {
+    return {
+      amount: Number(parsedReward.amount),
+      token: normalizeRewardToken(parsedReward.token),
+    };
+  }
   const reward =
     payload?.reward && typeof payload.reward === "object" ? payload.reward : {};
   const directAmount =
@@ -4263,7 +4305,7 @@ function hardenWindow(win) {
   }
 }
 
-function startBackend() {
+function startBackend(options = {}) {
   if (backendStatus.running && backend) {
     return { ...backendStatus };
   }
@@ -4277,6 +4319,7 @@ function startBackend() {
   const startPausedForCompLock =
     shouldRunCompetitionRangeLock(currentConfig) &&
     currentConfig?.watchLoopEnabled === true;
+  const startPausedForOnboarding = options?.startPaused === true;
   const startupSnapshotPath = writeStartupSnapshotFile();
   backend = fork(path.join(ROOT_DIR, "app.js"), ["--plain-output"], {
     cwd: getBackendWorkingDirectory(),
@@ -4292,6 +4335,8 @@ function startBackend() {
       ...(startPausedForCompLock
         ? { PBP_START_PAUSED_FOR_COMP_LOCK: "1" }
         : {}),
+      ...(startPausedForOnboarding ? { PBP_START_PAUSED: "1" } : {}),
+      ...(startPausedForOnboarding ? { PBP_LOCAL_ACTION_ONLY: "1" } : {}),
       ...(startupSnapshotPath
         ? { PBP_STARTUP_SNAPSHOT_PATH: startupSnapshotPath }
         : {}),
@@ -5461,7 +5506,9 @@ async function createCliWindow() {
 app.whenReady().then(async () => {
   installMinimalApplicationMenu();
   backendStatus.nftUsageStats = loadPersistedNftUsageStats();
-  ipcMain.handle("backend:start", async () => startBackend());
+  ipcMain.handle("backend:start", async (_event, options = {}) =>
+    startBackend(options),
+  );
   ipcMain.handle("backend:stop", async () => stopBackend());
   ipcMain.handle("backend:restart", async () => restartBackend());
   ipcMain.handle("backend:send-command", async (_event, command) =>
@@ -6273,6 +6320,9 @@ app.whenReady().then(async () => {
     const configPatch = {
       signerMode: String(payload?.signerMode || "").trim() || undefined,
       targetMissions: nextTargets,
+      missionActionEnabledBySlot: normalizeMissionActionEnabledBySlot(
+        payload?.missionActionEnabledBySlot,
+      ),
       firstRunOnboardingCompleted: true,
     };
     const next = applyDesktopConfigPatch(configPatch);

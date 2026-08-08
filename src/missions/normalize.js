@@ -22,6 +22,7 @@ function normalizeMissionList(result) {
   if (Array.isArray(sc)) return sc;
   if (Array.isArray(sc?.missions?.missions)) return sc.missions.missions;
   if (Array.isArray(sc?.missions)) return sc.missions;
+  if (Array.isArray(sc?.result?.missions)) return sc.result.missions;
   if (Array.isArray(result?.missions?.missions)) return result.missions.missions;
   if (Array.isArray(result?.missions)) return result.missions;
   if (Array.isArray(result)) return result;
@@ -159,14 +160,22 @@ function buildRewardDetails(amount, token, fallbackLabel = null) {
 function rewardDetailsFromObject(entry) {
   if (!entry || typeof entry !== "object") return null;
   return buildRewardDetails(
-    entry?.amount ??
+    entry?.balanceChange?.amount ??
+      entry?.balance_change?.amount ??
+      entry?.claimantRewardAmount ??
+      entry?.claimant_reward_amount ??
+      entry?.missionRewardAmount ??
+      entry?.mission_reward_amount ??
+      entry?.amount ??
       entry?.value ??
       entry?.rewardAmount ??
       entry?.reward_amount ??
       entry?.prizeAmount ??
       entry?.prize_amount ??
       null,
-    entry?.symbol ??
+    entry?.balanceChange?.currency ??
+      entry?.balance_change?.currency ??
+      entry?.symbol ??
       entry?.token ??
       entry?.currency ??
       entry?.rewardSymbol ??

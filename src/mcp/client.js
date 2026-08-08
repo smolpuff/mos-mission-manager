@@ -1349,6 +1349,7 @@ function createMcpClient(ctx, logger) {
   return {
     bearerToken,
     getUserMissions,
+    getToolCooldownRemainingMs: rateLimitWaitMs,
     invalidateUserMissionsSnapshot,
     mcpToolCall,
     runLoginFlow,

@@ -282,7 +282,10 @@ function MissionSlotFallback({ label, loading = false, assigning = false }) {
   return (
     <div className="mission-image-placeholder">
       {loading ? (
-        <span className="loading loading-spinner loading-md text-white/40" />
+        <span className="inline-flex flex-col items-center gap-2 text-center text-white/70">
+          <span className="loading loading-spinner loading-md text-white/40" />
+          {label ? <span>{label}</span> : null}
+        </span>
       ) : assigning ? (
         <span className="inline-flex items-center gap-2 text-white/80">
           <span className="loading loading-spinner loading-sm text-white/50" />
@@ -765,8 +768,12 @@ function ControlView() {
   const competitionRangeLockInputsDisabled =
     competitionRangeLockDisabled || !competitionRangeLockEnabled;
   const nftResetInputsDisabled = !isMissionLikeMode || !nftResetEnabled;
-  const perSlotMissionResetControlsVisible = missionResetPerSlotModeEnabled;
-  const perSlotMissionResetControlsDisabled = !missionResetPerSlotModeEnabled;
+  // The old Debug-page switch that enabled per-slot reset mode was removed,
+  // but the mission-card controls remained hidden behind that flag. Keep the
+  // existing per-slot controls available on every hydrated mission card; the
+  // first enabled override turns on the existing reset mode automatically.
+  const perSlotMissionResetControlsVisible = true;
+  const perSlotMissionResetControlsDisabled = false;
   const normalizePositiveIntegerString = (value, fallback) => {
     const next = Number(value);
     return Number.isFinite(next) && next > 0
@@ -1073,6 +1080,9 @@ function ControlView() {
         setModeSelection(config.missionModeEnabled ? "mission" : "normal");
       }
       setMissionActionEnabledBySlot(
+        normalizeSlotBooleanMap(config.missionActionEnabledBySlot, true),
+      );
+      setOnboardingMissionActionEnabledBySlot(
         normalizeSlotBooleanMap(config.missionActionEnabledBySlot, true),
       );
       if (typeof config.missionResetPerSlotModeEnabled === "boolean") {
@@ -1508,12 +1518,16 @@ function ControlView() {
   };
   const setPerSlotMissionResetEnabled = async (slot, enabled) => {
     const key = String(slot);
+    const nextPerSlotModeEnabled =
+      missionResetPerSlotModeEnabled === true || enabled === true;
     const nextEnabledBySlot = {
       ...missionResetPerSlotEnabledBySlot,
       [key]: enabled === true,
     };
+    setMissionResetPerSlotModeEnabled(nextPerSlotModeEnabled);
     setMissionResetPerSlotEnabledBySlot(nextEnabledBySlot);
     await applyConfigPatch({
+      missionResetPerSlotModeEnabled: nextPerSlotModeEnabled,
       missionResetPerSlotEnabledBySlot: nextEnabledBySlot,
     });
   };
@@ -2032,6 +2046,8 @@ function ControlView() {
     );
   };
   const [activityLabel, setActivityLabel] = useState(null);
+  const activityStatusRef = useRef(status);
+  activityStatusRef.current = status;
   const [manualCheckBusy, setManualCheckBusy] = useState(false);
   const [activeAssigningSlot, setActiveAssigningSlot] = useState(null);
   const isWatching = status.watcherRunning === true;
@@ -2068,6 +2084,12 @@ function ControlView() {
     new Set(),
   );
   const [onboardingSlotSelections, setOnboardingSlotSelections] = useState({});
+  const [
+    onboardingMissionActionEnabledBySlot,
+    setOnboardingMissionActionEnabledBySlot,
+  ] = useState(
+    normalizeSlotBooleanMap(status.missionActionEnabledBySlot, true),
+  );
   const [onboardingMissionPickerSlot, setOnboardingMissionPickerSlot] =
     useState(null);
   const [
@@ -2076,6 +2098,8 @@ function ControlView() {
   ] = useState("");
   const [onboardingPreviewOnly, setOnboardingPreviewOnly] = useState(false);
   const [onboardingDataLoading, setOnboardingDataLoading] = useState(false);
+  const [onboardingMissionStateReady, setOnboardingMissionStateReady] =
+    useState(false);
   const [missionPickerSlot, setMissionPickerSlot] = useState(null);
   const [missionPickerPendingName, setMissionPickerPendingName] = useState("");
   const [missionPickerBusy, setMissionPickerBusy] = useState(false);
@@ -2162,11 +2186,9 @@ function ControlView() {
       setManualCheckBusy(false);
     }
     let next = null;
-    let resetToWatchingMs = null;
+    let resetToWatchingMs = 5000;
     if (type === "claimed") {
-      const logLabel = String(lastEvent.logLabel || "").trim();
-      next = logLabel ? `✅ ${logLabel}` : "✅ Claimed mission";
-      resetToWatchingMs = 2200;
+      next = "✅ Claimed mission";
     } else if (type === "assigning") {
       const state = String(lastEvent.state || "").trim();
       const slot = Number(lastEvent.slot);
@@ -2179,11 +2201,10 @@ function ControlView() {
         setActiveAssigningSlot(null);
         const count = Number(lastEvent.assigned || 0);
         next = count > 0 ? "✅ Started mission" : "Watching missions...";
-        if (count > 0) resetToWatchingMs = 5000;
+        if (count <= 0) resetToWatchingMs = null;
       } else if (state === "error") {
         setActiveAssigningSlot(null);
         next = "❌ Start failed";
-        resetToWatchingMs = 3200;
       }
     } else if (type === "assigned") {
       const slot = Number(lastEvent.slot);
@@ -2195,7 +2216,6 @@ function ControlView() {
           : null,
       );
       next = "✅ Started mission";
-      resetToWatchingMs = 5000;
     } else if (type === "claiming") {
       const state = String(lastEvent.state || "").trim();
       if (state === "start") {
@@ -2203,10 +2223,9 @@ function ControlView() {
       } else if (state === "done") {
         const count = Number(lastEvent.claimed || 0);
         next = count > 0 ? `✅ Claimed ${count}` : "Watching missions...";
-        if (count > 0) resetToWatchingMs = 2200;
+        if (count <= 0) resetToWatchingMs = null;
       } else if (state === "error") {
         next = "❌ Claim failed";
-        resetToWatchingMs = 3200;
       }
     } else if (type === "tick" && isWatching) {
       const current = String(activityLabel || "").toLowerCase();
@@ -2215,6 +2234,7 @@ function ControlView() {
         current.includes("assigning")
       ) {
         next = "Watching missions...";
+        resetToWatchingMs = null;
       }
     }
     if (!next) return;
@@ -2227,20 +2247,16 @@ function ControlView() {
     }
     const timer = setTimeout(() => {
       setActivityLabel((current) => {
-        if (!status.running) return null;
-        if (status.watchLoopEnabled === false) return "Stopped";
-        if (status.watcherRunning === true) return "Watching missions...";
+        const latestStatus = activityStatusRef.current || {};
+        if (!latestStatus.running) return null;
+        if (latestStatus.watchLoopEnabled === false) return "Stopped";
+        if (latestStatus.watcherRunning === true)
+          return "Watching missions...";
         return current === next ? null : current;
       });
     }, Number(resetToWatchingMs));
     return () => clearTimeout(timer);
-  }, [
-    lastEvent,
-    isWatching,
-    status.running,
-    status.watchLoopEnabled,
-    status.watcherRunning,
-  ]);
+  }, [lastEvent]);
 
   useEffect(() => {
     if (!lastEvent || typeof lastEvent !== "object") return;
@@ -3234,9 +3250,11 @@ function ControlView() {
     setOnboardingBusy(true);
     setOnboardingAppWalletBusy(true);
     setOnboardingAppWalletError(null);
+    let startedBackendForWallet = false;
     try {
       if (!status.running && bridge?.startBackend) {
-        await bridge.startBackend();
+        await bridge.startBackend({ startPaused: true });
+        startedBackendForWallet = true;
       }
       const created = await bridge.createGeneratedWallet();
       if (!created?.ok) {
@@ -3254,6 +3272,11 @@ function ControlView() {
       setOnboardingAppWalletError(String(error?.message || error));
       return false;
     } finally {
+      if (startedBackendForWallet && bridge?.stopBackend) {
+        try {
+          await bridge.stopBackend();
+        } catch {}
+      }
       setOnboardingBusy(false);
       setOnboardingAppWalletBusy(false);
     }
@@ -3279,6 +3302,7 @@ function ControlView() {
         setOnboardingOwnedCollections(new Set());
         setOnboardingSelectedMissions(new Set());
         setOnboardingSlotSelections({});
+        setOnboardingMissionStateReady(false);
         setOnboardingStep(2);
       }
       if (onboardingStep === 1 || onboardingStep === 2) {
@@ -3326,8 +3350,10 @@ function ControlView() {
             ),
           );
           setOnboardingSelectionState(missions);
+          setOnboardingMissionStateReady(missions.length > 0);
           setOnboardingStep(2);
         } catch (error) {
+          setOnboardingMissionStateReady(false);
           setOnboardingError(String(error?.message || error));
           setOnboardingStep(2);
         } finally {
@@ -3347,6 +3373,7 @@ function ControlView() {
     setOnboardingOwnedCollections(new Set());
     setOnboardingSelectedMissions(new Set());
     setOnboardingSlotSelections({});
+    setOnboardingMissionStateReady(false);
     setOnboardingStep(2);
     setOnboardingBusy(true);
     setOnboardingDataLoading(true);
@@ -3384,8 +3411,10 @@ function ControlView() {
         ),
       );
       setOnboardingSelectionState(missions);
+      setOnboardingMissionStateReady(missions.length > 0);
       setOnboardingStep(2);
     } catch (error) {
+      setOnboardingMissionStateReady(false);
       setOnboardingError(String(error?.message || error));
       setOnboardingStep(2);
     } finally {
@@ -3398,6 +3427,12 @@ function ControlView() {
     if (onboardingPreviewOnly) {
       await applyConfigPatch({ firstRunOnboardingCompleted: true });
       setOnboardingOpen(false);
+      return;
+    }
+    if (!onboardingMissionStateReady) {
+      setOnboardingError(
+        "Wait for mission status to finish syncing before applying onboarding.",
+      );
       return;
     }
     const shouldRestartRunner = status.running === true;
@@ -3440,13 +3475,20 @@ function ControlView() {
       await applyConfigPatch({
         signerMode: onboardingSignerMode,
         targetMissions: targetMissions.length > 0 ? targetMissions : undefined,
+        missionActionEnabledBySlot:
+          onboardingMissionActionEnabledBySlot,
         firstRunOnboardingCompleted: true,
+      });
+      setMissionActionEnabledBySlot({
+        ...onboardingMissionActionEnabledBySlot,
       });
       if (bridge?.applyOnboardingSelection) {
         const response = await bridge.applyOnboardingSelection({
           signerMode: onboardingSignerMode,
           targetMissions:
             targetMissions.length > 0 ? targetMissions : undefined,
+          missionActionEnabledBySlot:
+            onboardingMissionActionEnabledBySlot,
         });
         if (!response?.ok) {
           throw new Error(response?.error || "Failed to apply onboarding.");
@@ -3795,27 +3837,69 @@ function ControlView() {
                             const loadingSlot =
                               onboardingDataLoading ||
                               (!assigned && onboardingMissions.length === 0);
+                            const slotAutomationEnabled =
+                              onboardingMissionActionEnabledBySlot[
+                                String(slot)
+                              ] !== false;
                             return (
-                              <button
-                                type="button"
+                              <div
                                 key={`onboarding-slot-${slot}`}
-                                className="rounded-md border border-white/10 bg-black/20 p-3 h-full flex flex-col gap-2 aspect-square"
-                                onClick={() =>
-                                  setOnboardingMissionPickerSlot(slot)
+                                className={`rounded-md border border-white/10 bg-black/20 p-3 h-full flex flex-col gap-2 aspect-square ${
+                                  loadingSlot || onboardingBusy
+                                    ? "opacity-70"
+                                    : "cursor-pointer"
+                                }`}
+                                role="button"
+                                tabIndex={
+                                  loadingSlot || onboardingBusy ? -1 : 0
                                 }
-                                disabled={loadingSlot || onboardingBusy}
+                                aria-disabled={loadingSlot || onboardingBusy}
+                                onClick={() => {
+                                  if (loadingSlot || onboardingBusy) return;
+                                  setOnboardingMissionPickerSlot(slot);
+                                }}
+                                onKeyDown={(event) => {
+                                  if (loadingSlot || onboardingBusy) return;
+                                  if (
+                                    event.key === "Enter" ||
+                                    event.key === " "
+                                  ) {
+                                    event.preventDefault();
+                                    setOnboardingMissionPickerSlot(slot);
+                                  }
+                                }}
                               >
                                 <div className="flex gap-2 justify-between">
                                   <div
-                                    className={`${assigned && assigned.isActive ? "badge badge-success" : "badge"} px-2 h-auto text-[11px] text-slate-900`}
+                                    onClick={(event) =>
+                                      event.stopPropagation()
+                                    }
+                                    onMouseDown={(event) =>
+                                      event.stopPropagation()
+                                    }
+                                    onKeyDown={(event) =>
+                                      event.stopPropagation()
+                                    }
                                   >
-                                    {selectedName
-                                      ? assigned?.isActive
-                                        ? "Active"
-                                        : assigned
-                                          ? "Assigned"
-                                          : "Selected"
-                                      : "No mission"}
+                                    <ToggleSwitch
+                                      switchID={`onboarding-slot-action-enabled-${slot}`}
+                                      checked={slotAutomationEnabled}
+                                      title=""
+                                      styling="hidden"
+                                      size="tiny"
+                                      tinyStateText
+                                      switchWrapClassName="slot-card-toggle-muted"
+                                      disabled={onboardingBusy}
+                                      onChange={(event) =>
+                                        setOnboardingMissionActionEnabledBySlot(
+                                          (current) => ({
+                                            ...current,
+                                            [String(slot)]:
+                                              event.target.checked,
+                                          }),
+                                        )
+                                      }
+                                    />
                                   </div>
                                   <div className="flex gap flex-row justify-between items-center">
                                     <div className="text-[11px] text-slate-400">
@@ -3846,7 +3930,7 @@ function ControlView() {
                                     </div>
                                   </div>
                                 )}
-                              </button>
+                              </div>
                             );
                           })}
                         </div>
@@ -3887,7 +3971,11 @@ function ControlView() {
                               type="button"
                               className="btn btn-gradient btn-sm text-shadow-sm text-shadow-black/40"
                               onClick={() => void applyOnboarding()}
-                              disabled={onboardingBusy}
+                              disabled={
+                                onboardingBusy ||
+                                onboardingDataLoading ||
+                                !onboardingMissionStateReady
+                              }
                             >
                               {onboardingPreviewOnly
                                 ? "Done"
@@ -5187,6 +5275,15 @@ function ControlView() {
                           hasProgress ||
                           hasAssignedNft),
                       );
+                      const missionStateNotSynced =
+                        status.running !== true &&
+                        !entry &&
+                        !showRealLockedSlot4;
+                      const missionStateSyncing =
+                        status.running === true &&
+                        status.missionDataLoading === true &&
+                        !entry &&
+                        !showRealLockedSlot4;
 
                       const slotImageLoading =
                         entry?.pendingHydration === true ||
@@ -5253,15 +5350,24 @@ function ControlView() {
                                   : ""
                               } `}
                             >
-                              <MissionSlotImage
-                                src={slotImageSrc}
-                                hasAssignedNft={hasAssignedNft}
-                                missionActive={missionActive}
-                                loading={slotImageLoading}
-                                assigning={slotAssigning}
-                                padded={usesKoreaTakeitArt}
-                                contain={usesKoreaTakeitArt}
-                              />
+                              {missionStateNotSynced ? (
+                                <MissionSlotFallback label="MISSION STATUS NOT SYNCED" />
+                              ) : missionStateSyncing ? (
+                                <MissionSlotFallback
+                                  label="SYNCING MISSION DATA..."
+                                  loading
+                                />
+                              ) : (
+                                <MissionSlotImage
+                                  src={slotImageSrc}
+                                  hasAssignedNft={hasAssignedNft}
+                                  missionActive={missionActive}
+                                  loading={slotImageLoading}
+                                  assigning={slotAssigning}
+                                  padded={usesKoreaTakeitArt}
+                                  contain={usesKoreaTakeitArt}
+                                />
+                              )}
 
                               {slotError ? (
                                 <button
@@ -5311,7 +5417,7 @@ function ControlView() {
 
                                     {perSlotMissionResetControlsVisible ? (
                                       <div
-                                        className={`relative z-20 mt-1 ${
+                                        className={`relative z-20 mt-2 ${
                                           perSlotMissionResetControlsDisabled
                                             ? "grayscale opacity-60"
                                             : ""
@@ -5443,6 +5549,8 @@ function ControlView() {
                               <div className="card-mission__title">
                                 {showRealLockedSlot4
                                   ? "Click to unlock slot 4"
+                                  : missionStateNotSynced
+                                    ? "Mission status not synced"
                                   : title
                                     ? title
                                     : "Assign NFT to start"}
