@@ -2812,6 +2812,7 @@ function ControlView() {
   };
 
   const openMissionPicker = async (slot) => {
+    if (status.running !== true) return;
     const slotNumber = Number(slot);
     if (!Number.isFinite(slotNumber) || slotNumber < 1 || slotNumber > 4)
       return;
@@ -2882,6 +2883,12 @@ function ControlView() {
   };
 
   const applyMissionPickerSelection = async () => {
+    if (status.running !== true) {
+      setMissionPickerSlot(null);
+      setMissionPickerPendingName("");
+      setMissionPickerPrepared(null);
+      return;
+    }
     const slotNumber = Number(missionPickerSlot);
     const selectedName = String(missionPickerPendingName || "").trim();
     if (!Number.isFinite(slotNumber) || !selectedName) return;
@@ -3004,6 +3011,13 @@ function ControlView() {
   const missionPickerHasActualChange =
     missionKey(missionPickerPendingName) !==
     missionKey(currentMissionPickerName);
+
+  useEffect(() => {
+    if (status.running === true || !missionPickerSlot) return;
+    setMissionPickerSlot(null);
+    setMissionPickerPendingName("");
+    setMissionPickerPrepared(null);
+  }, [missionPickerSlot, status.running]);
 
   useEffect(() => {
     let cancelled = false;
@@ -5248,6 +5262,7 @@ function ControlView() {
 
                       const slotAutomationEnabled =
                         missionActionEnabledBySlot[String(slot)] !== false;
+                      const canChangeMission = status.running === true;
 
                       const perSlotResetEnabled =
                         missionResetPerSlotEnabledBySlot[String(slot)] === true;
@@ -5266,22 +5281,33 @@ function ControlView() {
                                   ? usesKoreaTakeitArt
                                     ? ""
                                     : "opacity-70"
-                                  : "cursor-pointer"
+                                  : canChangeMission
+                                    ? "cursor-pointer"
+                                    : ""
                             } `}
-                            role={slotLocked ? undefined : "button"}
-                            tabIndex={slotLocked ? undefined : 0}
+                            role={
+                              slotLocked || !canChangeMission
+                                ? undefined
+                                : "button"
+                            }
+                            tabIndex={
+                              slotLocked || !canChangeMission ? undefined : 0
+                            }
                             title={
                               showRealLockedSlot4
                                 ? "Click to unlock slot 4"
                                 : slotLocked
                                   ? "Slot locked"
-                                  : "Click to change mission"
+                                  : canChangeMission
+                                    ? "Click to change mission"
+                                    : "Start the runner to change missions"
                             }
                             onClick={() => {
-                              if (!slotLocked) void openMissionPicker(slot);
+                              if (!slotLocked && canChangeMission)
+                                void openMissionPicker(slot);
                             }}
                             onKeyDown={(event) => {
-                              if (slotLocked) return;
+                              if (slotLocked || !canChangeMission) return;
 
                               if (event.key === "Enter" || event.key === " ") {
                                 event.preventDefault();
@@ -5293,7 +5319,9 @@ function ControlView() {
                               className={`card-mission__header transition-all relative overflow-clip  ${
                                 !slotAutomationEnabled
                                   ? "card-mission__header--disabled"
-                                  : "cursor-pointer"
+                                  : canChangeMission
+                                    ? "cursor-pointer"
+                                    : ""
                               } ${usesKoreaTakeitArt ? "card-mission__header--korea-art" : ""} ${
                                 showRealLockedSlot4
                                   ? "card-mission__header--unlock-slot cursor-pointer"
@@ -5514,8 +5542,9 @@ function ControlView() {
                                       slotUnlockExpiresAtLabel
                                     ? slotUnlockExpiresAtLabel
                                     : slot !== 4
+                                      && canChangeMission
                                       ? `↻ Select New Mission`
-                                      : null}
+                                      : "\u00A0"}
                               </div>
                             </div>
                           </div>
