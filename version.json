@@ -4,7 +4,7 @@
   "notes": [
     "Fixed 98% of normal throttling",
     "Faster mission claiming and assinging",
-    "Added Assign NFT by <order option> in settings to set the NFT assignment order",
-    "New experimental rental method due to new 1 use per min restriction, probably doesnt work well yet :D"
+    "Added 'Assign NFT by <option>' in settings to set NFT assignment order",
+    "New experimental rental method due to new 1 use per min restriction, probably doesnt work well yet. lol"
   ]
 }

@@ -81,7 +81,12 @@ export default function RentalsPage({ bridge }) {
         <div className="text-sm font-semibold text-slate-200">
           Current Active Rental Missions
         </div>
-        {data.activeRentals.length === 0 ? (
+        {loading ? (
+          <div className="text-sm text-slate-400 mt-3 flex items-center gap-2">
+            <span className="loading loading-spinner loading-sm text-success" />
+            <span>Loading rentals...</span>
+          </div>
+        ) : data.activeRentals.length === 0 ? (
           <div className="text-sm text-slate-400">
             No active rental-backed missions detected.
           </div>

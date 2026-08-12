@@ -4503,9 +4503,9 @@ function ControlView() {
               sessionStartedAtMs={sessionStartedAtRef.current}
             />
           ) : null}
-          {currentPage === "nfts" ? (
+          <div className={currentPage === "nfts" ? "h-full" : "hidden"}>
             <NftsPage bridge={bridge} signerMode={status.signerMode} />
-          ) : null}
+          </div>
           {currentPage === "rentals" ? <RentalsPage bridge={bridge} /> : null}
           {currentPage !== "missions" ? null : (
             <>

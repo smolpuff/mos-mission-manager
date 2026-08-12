@@ -2263,6 +2263,9 @@ function hydrateCachedNftList(result, cachedAt) {
   return {
     ...result,
     nfts,
+    cacheExpiresAt: Number.isFinite(fetchedAtMs)
+      ? fetchedAtMs + NFT_LIST_CACHE_TTL_MS
+      : null,
   };
 }
 
@@ -6707,7 +6710,7 @@ app.whenReady().then(async () => {
         pushSystemLog(
           `NFT page refresh complete. NFTs=${Number(result?.total || 0)}.`,
         );
-        return result;
+        return hydrateCachedNftList(nftListCache, nftListCacheAt);
       } catch (error) {
         if (!isAuthFailureMessage(error?.message)) {
           pushSystemLog(
@@ -6729,7 +6732,7 @@ app.whenReady().then(async () => {
         pushSystemLog(
           `NFT page refresh complete after login. NFTs=${Number(result?.total || 0)}.`,
         );
-        return result;
+        return hydrateCachedNftList(nftListCache, nftListCacheAt);
       } finally {
         nftListPromise = null;
       }

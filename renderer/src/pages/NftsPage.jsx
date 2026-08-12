@@ -6,6 +6,7 @@ import {
 } from "../collection-images";
 
 const NFT_COOLDOWN_RING_MAX_SECONDS = 24 * 60 * 60;
+const NFT_LIST_CACHE_TTL_MS = 5 * 60 * 1000;
 function formatAccount(value) {
   const text = String(value || "").trim();
   if (!text) return "n/a";
@@ -140,6 +141,7 @@ function NftCardImage({ src, alt }) {
 export default function NftsPage({ bridge, signerMode = "" }) {
   const [loading, setLoading] = useState(false);
   const [hasLoaded, setHasLoaded] = useState(false);
+  const [cacheExpiresAtMs, setCacheExpiresAtMs] = useState(null);
   const [error, setError] = useState(null);
   const [detailModal, setDetailModal] = useState(null);
   const [resetModal, setResetModal] = useState(null);
@@ -202,6 +204,12 @@ export default function NftsPage({ bridge, signerMode = "" }) {
         total: Number(next.total || 0),
         nfts: Array.isArray(next.nfts) ? next.nfts : [],
       });
+      const cacheExpiresAt = Number(next.cacheExpiresAt);
+      setCacheExpiresAtMs(
+        Number.isFinite(cacheExpiresAt)
+          ? cacheExpiresAt
+          : Date.now() + NFT_LIST_CACHE_TTL_MS,
+      );
     } catch (err) {
       setError(String(err?.message || err));
     } finally {
@@ -210,11 +218,28 @@ export default function NftsPage({ bridge, signerMode = "" }) {
     }
   };
 
-  // The desktop process retains a five-minute NFT snapshot. Rehydrate this
-  // page whenever the user returns so navigation never requires Load NFTs.
   useEffect(() => {
-    void load();
-  }, [bridge]);
+    if (!hasLoaded || loading || !Number.isFinite(cacheExpiresAtMs)) {
+      return undefined;
+    }
+    const remainingMs = cacheExpiresAtMs - Date.now();
+    if (remainingMs <= 0) {
+      setData({ total: 0, nfts: [] });
+      setHasLoaded(false);
+      setCacheExpiresAtMs(null);
+      setDetailModal(null);
+      setResetModal(null);
+      return undefined;
+    }
+    const timer = setTimeout(() => {
+      setData({ total: 0, nfts: [] });
+      setHasLoaded(false);
+      setCacheExpiresAtMs(null);
+      setDetailModal(null);
+      setResetModal(null);
+    }, remainingMs);
+    return () => clearTimeout(timer);
+  }, [cacheExpiresAtMs, hasLoaded, loading]);
 
   const cooldownDeadlinesMs = useMemo(
     () =>
@@ -621,7 +646,12 @@ export default function NftsPage({ bridge, signerMode = "" }) {
       ) : null}
 
       <div className="card !pr-2 border border-white/10 bg-black/30 h-120 flex flex-col overflow-hidden">
-        {!hasLoaded ? (
+        {loading ? (
+          <div className="text-sm text-slate-400 mt-3 flex items-center gap-2">
+            <span className="loading loading-spinner loading-sm text-success" />
+            <span>Loading NFTs...</span>
+          </div>
+        ) : !hasLoaded ? (
           <div className="flex h-full min-h-0 items-center justify-center">
             <div className="max-w-sm rounded-xl border border-white/10 bg-black/30 p-5 text-center">
               <div className="text-sm uppercase tracking-[0.22em] text-slate-400">
@@ -644,16 +674,7 @@ export default function NftsPage({ bridge, signerMode = "" }) {
             </div>
           </div>
         ) : data.nfts.length === 0 ? (
-          <div className="text-sm text-slate-400 mt-3 flex items-center gap-2">
-            {loading ? (
-              <>
-                <span className="loading loading-spinner loading-sm text-success" />
-                <span>Loading NFTs...</span>
-              </>
-            ) : (
-              <span>No NFTs found.</span>
-            )}
-          </div>
+          <div className="text-sm text-slate-400 mt-3">No NFTs found.</div>
         ) : (
           <div className="nft-grid-scrollw-full min-h-0 flex-1 overflow-y-auto overflow-x-hidden pr-1">
             <div className="grid grid-cols-5 gap-3 pb-3">
