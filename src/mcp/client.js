@@ -29,10 +29,10 @@ function createMcpClient(ctx, logger) {
   ]);
   const TOOL_MIN_INTERVAL_MS = new Map([
     ["get_wallet_summary", 60_000],
-    ["get_user_missions", 60_000],
   ]);
   const TOOL_WINDOW_LIMITS = new Map([
     ["watch_and_claim", { limit: 1, windowMs: 60_000 }],
+    ["get_user_missions", { limit: 10, windowMs: 60_000 }],
     ["get_mission_nfts", { limit: 10, windowMs: 60_000 }],
     ["claim_mission_reward", { limit: 10, windowMs: 60_000 }],
     ["assign_nft_to_mission", { limit: 10, windowMs: 60_000 }],
@@ -44,6 +44,10 @@ function createMcpClient(ctx, logger) {
   let userMissionsInflight = null;
   let userMissionsInflightForceFresh = false;
   let userMissionsGeneration = 0;
+  let userMissionsRequestSequence = 0;
+  let userMissionsAcceptedRequestSequence = 0;
+  let acceptedMissionSnapshotRevision = 0;
+  const missionSnapshotRevisionByResult = new WeakMap();
 
   function throttleDebugEnabled() {
     return ctx.debugMode === true;
@@ -442,6 +446,12 @@ function createMcpClient(ctx, logger) {
     }
     ctx.lastUserMissionsResult = result;
     ctx.lastUserMissionsFetchedAt = Date.now();
+    acceptedMissionSnapshotRevision += 1;
+    missionSnapshotRevisionByResult.set(
+      result,
+      acceptedMissionSnapshotRevision,
+    );
+    ctx.acceptedMissionSnapshotRevision = acceptedMissionSnapshotRevision;
     if (changed || !ctx.lastAssignedMissionLookup) {
       ctx.lastAssignedMissionLookup = nextLookup;
     }
@@ -465,6 +475,11 @@ function createMcpClient(ctx, logger) {
 
   function invalidateUserMissionsSnapshot(reason = "unknown") {
     userMissionsGeneration += 1;
+    // Invalidation is a mission-state revision tombstone. Even when a
+    // mutation returns no replacement missions, every previously accepted
+    // snapshot must become older so no delayed card refresh can republish it.
+    acceptedMissionSnapshotRevision += 1;
+    ctx.acceptedMissionSnapshotRevision = acceptedMissionSnapshotRevision;
     ctx.lastUserMissionsResult = null;
     ctx.lastUserMissionsFetchedAt = 0;
     if (userMissionsInflight && !userMissionsInflightForceFresh) {
@@ -501,6 +516,64 @@ function createMcpClient(ctx, logger) {
       missionCount: normalizeMissionList(result).length,
     });
     return true;
+  }
+
+  function adoptUserMissionsSnapshot(result, reason = "external_mutation") {
+    return adoptMutationMissionState(result, reason);
+  }
+
+  function getUserMissionsGeneration() {
+    return userMissionsGeneration;
+  }
+
+  function getMissionSnapshotRevision(result) {
+    if (!(result && typeof result === "object")) return null;
+    const revision = missionSnapshotRevisionByResult.get(result);
+    return Number.isFinite(Number(revision)) ? Number(revision) : null;
+  }
+
+  function getCurrentMissionSnapshotRevision() {
+    return acceptedMissionSnapshotRevision;
+  }
+
+  function rejectOrReplaceStaleMissionRead(
+    result,
+    generationAtStart,
+    requestSequence,
+    reason = "get_user_missions",
+  ) {
+    if (
+      generationAtStart === userMissionsGeneration &&
+      requestSequence >= userMissionsAcceptedRequestSequence
+    ) {
+      userMissionsAcceptedRequestSequence = requestSequence;
+      return result;
+    }
+    if (
+      ctx.lastUserMissionsResult &&
+      typeof ctx.lastUserMissionsResult === "object"
+    ) {
+      logDebug("mcp", "stale_mission_read_replaced", {
+        reason,
+        generationAtStart,
+        generationNow: userMissionsGeneration,
+        requestSequence,
+        acceptedRequestSequence: userMissionsAcceptedRequestSequence,
+      });
+      return ctx.lastUserMissionsResult;
+    }
+    const error = new Error(
+      "Discarded a mission snapshot that completed after mission state changed.",
+    );
+    error.staleMissionSnapshot = true;
+    logDebug("mcp", "stale_mission_read_rejected", {
+      reason,
+      generationAtStart,
+      generationNow: userMissionsGeneration,
+      requestSequence,
+      acceptedRequestSequence: userMissionsAcceptedRequestSequence,
+    });
+    throw error;
   }
 
   function toolWindowWaitMs(toolName, now = Date.now()) {
@@ -890,6 +963,20 @@ function createMcpClient(ctx, logger) {
     const hasFreshUserMissions =
       missionSnapshotEligible && hasFreshUserMissionsSnapshot();
 
+    // Temporary operational trace: keep every mission-state request visible
+    // while validating the updated 10-per-minute service limit.
+    if (missionSnapshotEligible) {
+      const reason = String(opts?.reason || "unspecified").trim() || "unspecified";
+      const cacheState = hasFreshUserMissions
+        ? "fresh"
+        : userMissionsAgeMs === null
+          ? "empty"
+          : "expired";
+      logWithTimestamp(
+        `[MCP TRACE] get_user_missions requested (reason=${reason}, forceFresh=${opts?.forceFresh === true}, cache=${cacheState}).`,
+      );
+    }
+
     if (
       missionSnapshotEligible &&
       opts?.forceFresh !== true &&
@@ -1074,6 +1161,9 @@ function createMcpClient(ctx, logger) {
     const userMissionsGenerationAtStart = missionSnapshotEligible
       ? userMissionsGeneration
       : 0;
+    const userMissionsRequestSequenceAtStart = missionSnapshotEligible
+      ? ++userMissionsRequestSequence
+      : 0;
 
     if (missionSnapshotEligible) {
       logDebug("tool", "call_snapshot_fetch_start", {
@@ -1093,9 +1183,15 @@ function createMcpClient(ctx, logger) {
           result &&
           typeof result === "object"
         ) {
-          if (userMissionsGenerationAtStart === userMissionsGeneration) {
+          if (
+            userMissionsGenerationAtStart === userMissionsGeneration &&
+            userMissionsRequestSequenceAtStart >=
+              userMissionsAcceptedRequestSequence
+          ) {
             try {
               updateMissionLookupCache(result);
+              userMissionsAcceptedRequestSequence =
+                userMissionsRequestSequenceAtStart;
             } catch (cacheError) {
               logDebug("mcp", "mission_cache_update_failed", {
                 error: cacheError.message,
@@ -1136,7 +1232,14 @@ function createMcpClient(ctx, logger) {
         });
         ctx.mcpRateLimitReason = null;
         setMcpConnection("connected");
-        return result;
+        return toolName === "get_user_missions"
+          ? rejectOrReplaceStaleMissionRead(
+              result,
+              userMissionsGenerationAtStart,
+              userMissionsRequestSequenceAtStart,
+              opts?.reason || toolName,
+            )
+          : result;
       } catch (error) {
         if (error?.rateLimited) {
           finalizeToolCallEntry(
@@ -1234,9 +1337,15 @@ function createMcpClient(ctx, logger) {
           result &&
           typeof result === "object"
         ) {
-          if (userMissionsGenerationAtStart === userMissionsGeneration) {
+          if (
+            userMissionsGenerationAtStart === userMissionsGeneration &&
+            userMissionsRequestSequenceAtStart >=
+              userMissionsAcceptedRequestSequence
+          ) {
             try {
               updateMissionLookupCache(result);
+              userMissionsAcceptedRequestSequence =
+                userMissionsRequestSequenceAtStart;
             } catch (cacheError) {
               logDebug("mcp", "mission_cache_update_failed", {
                 error: cacheError.message,
@@ -1257,7 +1366,14 @@ function createMcpClient(ctx, logger) {
         finalizeToolCallEntry(toolCallEntry, "ok_after_refresh");
         logDebug("tool", "call_ok_after_refresh", { toolName });
         setMcpConnection("connected");
-        return result;
+        return toolName === "get_user_missions"
+          ? rejectOrReplaceStaleMissionRead(
+              result,
+              userMissionsGenerationAtStart,
+              userMissionsRequestSequenceAtStart,
+              opts?.reason || `${toolName}:auth_refresh`,
+            )
+          : result;
       }
     };
 
@@ -1349,7 +1465,11 @@ function createMcpClient(ctx, logger) {
   return {
     bearerToken,
     getUserMissions,
+    getUserMissionsGeneration,
+    getMissionSnapshotRevision,
+    getCurrentMissionSnapshotRevision,
     getToolCooldownRemainingMs: rateLimitWaitMs,
+    adoptUserMissionsSnapshot,
     invalidateUserMissionsSnapshot,
     mcpToolCall,
     runLoginFlow,

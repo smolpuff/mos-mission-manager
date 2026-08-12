@@ -229,10 +229,10 @@ DATA...**. Once that result arrives, normal live card rendering takes over.
 
 ## Cache and rate-limit behavior
 
-- `get_wallet_summary` and `get_user_missions` each have a 60-second client
-  minimum interval.
+- `get_wallet_summary` has a 60-second client minimum interval.
 - `get_user_missions` also has a 60-second client snapshot cache and coalesces
-  compatible in-flight requests.
+  compatible in-flight requests; it is limited to ten calls in a 60-second
+  window. The service may return its cached mission result during that window.
 - `watch_and_claim` is limited to one call in a 60-second window.
 - `get_mission_nfts`, `claim_mission_reward`, and
   `assign_nft_to_mission` are each limited to ten calls in a 60-second window.

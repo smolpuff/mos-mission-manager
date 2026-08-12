@@ -544,8 +544,7 @@ export default function StatsPage({ status }) {
       // (and older installs have no history for already-persisted uses).
       uses: isAllTime ? asNumber(nft?.uses, 0) : scoped?.uses || 0,
       sessionUses: session?.uses || 0,
-      lastUsedAt:
-        (isAllTime ? nft?.lastUsedAt : scoped?.lastUsedAt) || null,
+      lastUsedAt: (isAllTime ? nft?.lastUsedAt : scoped?.lastUsedAt) || null,
     };
   });
   const nftLifetimeUses = nftUsage.reduce(

@@ -2047,6 +2047,7 @@ function ControlView() {
   };
   const [activityLabel, setActivityLabel] = useState(null);
   const activityStatusRef = useRef(status);
+  const activityResetTimerRef = useRef(null);
   activityStatusRef.current = status;
   const [manualCheckBusy, setManualCheckBusy] = useState(false);
   const [activeAssigningSlot, setActiveAssigningSlot] = useState(null);
@@ -2156,10 +2157,24 @@ function ControlView() {
 
   useEffect(() => {
     if (status.running) return;
+    if (activityResetTimerRef.current) {
+      clearTimeout(activityResetTimerRef.current);
+      activityResetTimerRef.current = null;
+    }
     setActivityLabel(null);
     setManualCheckBusy(false);
     manualCheckPendingRef.current = false;
   }, [status.running]);
+
+  useEffect(
+    () => () => {
+      if (activityResetTimerRef.current) {
+        clearTimeout(activityResetTimerRef.current);
+        activityResetTimerRef.current = null;
+      }
+    },
+    [],
+  );
 
   useEffect(() => {
     if (!manualCheckBusy) {
@@ -2238,6 +2253,10 @@ function ControlView() {
       }
     }
     if (!next) return;
+    if (activityResetTimerRef.current) {
+      clearTimeout(activityResetTimerRef.current);
+      activityResetTimerRef.current = null;
+    }
     setActivityLabel(next);
     if (
       !Number.isFinite(Number(resetToWatchingMs)) ||
@@ -2245,7 +2264,8 @@ function ControlView() {
     ) {
       return;
     }
-    const timer = setTimeout(() => {
+    activityResetTimerRef.current = setTimeout(() => {
+      activityResetTimerRef.current = null;
       setActivityLabel((current) => {
         const latestStatus = activityStatusRef.current || {};
         if (!latestStatus.running) return null;
@@ -2255,7 +2275,6 @@ function ControlView() {
         return current === next ? null : current;
       });
     }, Number(resetToWatchingMs));
-    return () => clearTimeout(timer);
   }, [lastEvent]);
 
   useEffect(() => {

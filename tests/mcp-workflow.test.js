@@ -139,7 +139,7 @@ test("new claim balanceChange payload drives reward totals and local wallet bala
   );
 });
 
-test("next natural mission poll assigns a claim whose watch response omitted missions", async () => {
+test("same cycle assigns a claim whose watch response omitted missions after cooldown", async () => {
   let missionReads = 0;
   let watchCalls = 0;
   let missionCooldownChecks = 0;
@@ -159,6 +159,13 @@ test("next natural mission poll assigns a claim whose watch response omitted mis
       },
     },
   };
+  const preClaimMissionResult = {
+    structuredContent: {
+      missions: {
+        missions: [mission("claimed-old-id", 1, "old-nft")],
+      },
+    },
+  };
   const ctx = {
     config: {
       totalClaimed: 0,
@@ -174,6 +181,8 @@ test("next natural mission poll assigns a claim whose watch response omitted mis
     },
     watchLoopEnabled: true,
     watcherRunning: true,
+    lastUserMissionsResult: preClaimMissionResult,
+    lastUserMissionsFetchedAt: Date.now() - 60_000,
     currentMissionStats: {},
     currentUserWalletSummary: {
       balances: [{ key: "pbp", balance: 100, displayBalance: 100 }],
@@ -264,14 +273,8 @@ test("next natural mission poll assigns a claim whose watch response omitted mis
   const claimResult = await watch.runWatchCycle();
 
   assert.equal(claimResult.claimed, 1);
-  assert.equal(missionReads, 0);
-  assert.equal(assignmentInputs.length, 0);
-
-  const naturalPollResult = await watch.runWatchCycle();
-
-  assert.equal(naturalPollResult.claimed, 0);
-  assert.equal(watchCalls, 2);
   assert.equal(missionReads, 1);
+  assert.equal(watchCalls, 1);
   assert.equal(assignmentInputs.length, 1);
   assert.equal(
     normalizeMissionList(assignmentInputs[0].missionsResult)[0]
@@ -279,6 +282,8 @@ test("next natural mission poll assigns a claim whose watch response omitted mis
     "replacement-1",
   );
   assert.equal(ctx.sessionRewardTotals.pbp, 75);
+  assert.equal(ctx.sessionClaimedCount, 1);
+  assert.equal(ctx.config.totalClaimed, 1);
   assert.equal(ctx.currentUserWalletSummary.balances[0].balance, 175);
   assert.deepEqual(
     claimingEvents.map((event) => event.state),
@@ -658,6 +663,7 @@ test("failed required reset blocks assignment of the threshold mission", async (
 test("auto mode level-20 claim restores the prior mission before assignment", async () => {
   const callOrder = [];
   const assignmentInputs = [];
+  const publishedMissionNames = [];
   let missionReads = 0;
   const replacement = {
     ...mission("random-replacement", 3),
@@ -670,6 +676,13 @@ test("auto mode level-20 claim restores the prior mission before assignment", as
     name: "Race for Points",
     current_level: 1,
     level: 1,
+  };
+  const completedBeforeClaim = {
+    ...mission("claimed-level-20", 3, "level-20-nft"),
+    name: "Race for Points",
+    current_level: 20,
+    level: 20,
+    completed: true,
   };
   const ctx = {
     config: {
@@ -690,6 +703,10 @@ test("auto mode level-20 claim restores the prior mission before assignment", as
     },
     watchLoopEnabled: true,
     watcherRunning: true,
+    lastUserMissionsResult: {
+      structuredContent: { missions: [completedBeforeClaim] },
+    },
+    lastUserMissionsFetchedAt: Date.now(),
     currentMissionStats: {},
     sessionClaimedCount: 0,
     sessionRewardTotals: { pbp: 0, tc: 0, cc: 0 },
@@ -717,9 +734,6 @@ test("auto mode level-20 claim restores the prior mission before assignment", as
           claims: [
             {
               assignedMissionId: "claimed-level-20",
-              missionName: "Race for Points",
-              currentLevel: 20,
-              slot: 3,
               success: true,
             },
           ],
@@ -733,6 +747,9 @@ test("auto mode level-20 claim restores the prior mission before assignment", as
     },
   };
   const checks = {
+    filterSelectedMissions(missions) {
+      return missions;
+    },
     isConfiguredTargetMission() {
       return true;
     },
@@ -752,7 +769,9 @@ test("auto mode level-20 claim restores the prior mission before assignment", as
         missionStateAuthoritative: true,
       };
     },
-    async refreshMissionHeaderStats() {
+    async refreshMissionHeaderStats({ missionsResult } = {}) {
+      const publishedName = normalizeMissionList(missionsResult)[0]?.name;
+      if (publishedName) publishedMissionNames.push(publishedName);
       return { ok: true, stats: { available: 0 } };
     },
     async autoAssignConfiguredMissions(args) {
@@ -787,6 +806,7 @@ test("auto mode level-20 claim restores the prior mission before assignment", as
     normalizeMissionList(assignmentInputs[0].missionsResult)[0].name,
     "Race for Points",
   );
+  assert.deepEqual(publishedMissionNames, ["Race for Points"]);
 });
 
 test("auto mode blocks assignment when required restore lacks mutation missions", async () => {
@@ -891,6 +911,137 @@ test("auto mode blocks assignment when required restore lacks mutation missions"
   assert.equal(result.claimed, 1);
   assert.equal(missionReads, 0);
   assert.equal(assignments, 0);
+});
+
+test("same-cycle level-20 fallback poll never publishes the replacement mission", async () => {
+  const publishedMissionNames = [];
+  let missionReads = 0;
+  let assignments = 0;
+  const completed = {
+    ...mission("claimed-level-20", 3, "level-20-nft"),
+    name: "Race for Points",
+    current_level: 20,
+    level: 20,
+    completed: true,
+  };
+  const replacement = {
+    ...mission("random-replacement", 3),
+    name: "Different Mission",
+    current_level: 1,
+    level: 1,
+  };
+  const restored = {
+    ...mission("restored-race", 3),
+    name: "Race for Points",
+    current_level: 1,
+    level: 1,
+  };
+  const ctx = {
+    config: {
+      totalClaimed: 0,
+      watchPollIntervalSeconds: 60,
+      watchRequestSeconds: 1,
+      autoModeEnabled: true,
+      autoModeMissionRestoreDelayMs: 0,
+      missionActionEnabledBySlot: { "3": true },
+    },
+    autoModeEnabled: true,
+    missionActionEnabledBySlot: { "3": true },
+    runtimeDefaults: {
+      watchDefaultPollSeconds: 60,
+      watchRequestSeconds: 1,
+      watchMaxLimitSeconds: 240,
+      watchMinCycleSeconds: 30,
+    },
+    watchLoopEnabled: true,
+    watcherRunning: true,
+    lastUserMissionsResult: {
+      structuredContent: { missions: [completed] },
+    },
+    lastUserMissionsFetchedAt: Date.now() - 60_000,
+    currentMissionStats: {},
+    sessionClaimedCount: 0,
+    sessionRewardTotals: { pbp: 0, tc: 0, cc: 0 },
+    sessionSpendTotals: { pbp: 0, tc: 0, cc: 0 },
+    guiMissionSlots: [],
+    guiBridge: { sendEvent() {}, emitNow() {} },
+  };
+  const logger = {
+    logWithTimestamp() {},
+    logDebug() {},
+    redrawHeaderAndLog() {},
+    formatTaggedLog(_tag, _icon, message) {
+      return message;
+    },
+  };
+  const mcp = {
+    async mcpToolCall(toolName) {
+      assert.equal(toolName, "watch_and_claim");
+      return {
+        structuredContent: {
+          success: true,
+          watch: { polls: 1, elapsedMs: 1, timedOut: true },
+          missionSnapshot: { total: 1, eligible: 1 },
+          claims: [
+            { assignedMissionId: "claimed-level-20", success: true },
+          ],
+        },
+      };
+    },
+    invalidateUserMissionsSnapshot() {},
+    getToolCooldownRemainingMs() {
+      return 0;
+    },
+    async getUserMissions() {
+      missionReads += 1;
+      return { structuredContent: { missions: [replacement] } };
+    },
+  };
+  const checks = {
+    filterSelectedMissions(missions) {
+      return missions;
+    },
+    isConfiguredTargetMission() {
+      return true;
+    },
+    async applyMissionSelection({ publishMissionState }) {
+      assert.equal(publishMissionState, false);
+      return {
+        ok: true,
+        changed: true,
+        swapped: true,
+        missionResult: { structuredContent: { missions: [restored] } },
+        missionStateAuthoritative: true,
+      };
+    },
+    async refreshMissionHeaderStats({ missionsResult } = {}) {
+      const name = normalizeMissionList(missionsResult)[0]?.name;
+      if (name) publishedMissionNames.push(name);
+      return { ok: true, stats: { available: 0 } };
+    },
+    async autoAssignConfiguredMissions() {
+      assignments += 1;
+      return {
+        attempted: 1,
+        assigned: 1,
+        missionResult: {
+          structuredContent: {
+            missions: [{ ...restored, assigned_nft: "auto-nft" }],
+          },
+        },
+        missionStateAuthoritative: true,
+      };
+    },
+  };
+
+  const result = await createWatchService(ctx, logger, mcp, checks, {
+    saveConfig() {},
+  }).runWatchCycle();
+
+  assert.equal(result.claimed, 1);
+  assert.equal(missionReads, 1);
+  assert.equal(assignments, 1);
+  assert.deepEqual(publishedMissionNames, ["Race for Points"]);
 });
 
 test("mission restore swaps the claim replacement rather than stale cached mission", async () => {
@@ -1103,7 +1254,7 @@ test("auto mode rerolls an open level-20 mission when no NFT is available", asyn
   ]);
 });
 
-test("post-claim missing mutation state is neither read, published, nor assigned", async () => {
+test("failed same-cycle post-claim state read is neither published nor assigned", async () => {
   let missionReads = 0;
   let refreshes = 0;
   let assignments = 0;
@@ -1141,6 +1292,7 @@ test("post-claim missing mutation state is neither read, published, nor assigned
       return message;
     },
   };
+  let invalidations = 0;
   const mcp = {
     async mcpToolCall(toolName) {
       assert.equal(toolName, "watch_and_claim");
@@ -1161,7 +1313,11 @@ test("post-claim missing mutation state is neither read, published, nor assigned
     },
     async getUserMissions() {
       missionReads += 1;
-      throw new Error("unexpected get_user_missions");
+      throw new Error("mission state temporarily unavailable");
+    },
+    invalidateUserMissionsSnapshot(reason) {
+      invalidations += 1;
+      assert.equal(reason, "watch_claim_mutation_without_missions");
     },
   };
   const checks = {
@@ -1181,9 +1337,10 @@ test("post-claim missing mutation state is neither read, published, nor assigned
   const result = await watch.runWatchCycle();
 
   assert.equal(result.claimed, 1);
-  assert.equal(missionReads, 0);
+  assert.equal(missionReads, 1);
   assert.equal(refreshes, 0);
   assert.equal(assignments, 0);
+  assert.equal(invalidations, 1);
 });
 
 test("fresh startup mission snapshot prevents an immediate duplicate mission read", async () => {
@@ -1447,12 +1604,70 @@ test("authoritative NFT inventory refresh excludes assigned accounts without ano
   assert.equal(ctx.lastUserMissionsFetchedAt, 123);
 });
 
+test("an older accepted mission snapshot cannot roll cards back after a mutation", async () => {
+  const oldResult = {
+    structuredContent: {
+      missions: [{ ...mission("mission-1", 1), current_level: 4, level: 4 }],
+    },
+  };
+  const mutationResult = {
+    structuredContent: {
+      missions: [{ ...mission("mission-1", 1), current_level: 5, level: 5 }],
+    },
+  };
+  const revisions = new WeakMap([
+    [oldResult, 1],
+    [mutationResult, 2],
+  ]);
+  const ctx = {
+    config: { targetMissions: ["mission-1"], totalClaimed: 0 },
+    currentMissionStats: {},
+    sessionClaimedCount: 0,
+    lastUserMissionsResult: mutationResult,
+    guiMissionSlots: [],
+    guiBridge: { emitNow() {}, sendEvent() {} },
+  };
+  const logger = {
+    logWithTimestamp() {},
+    logDebug() {},
+    redrawHeaderAndLog() {},
+    formatTaggedLog(_tag, _icon, message) {
+      return message;
+    },
+  };
+  const mcp = {
+    getMissionSnapshotRevision(result) {
+      return revisions.get(result) ?? null;
+    },
+    getCurrentMissionSnapshotRevision() {
+      return 2;
+    },
+  };
+  const checks = createChecksService(ctx, logger, mcp);
+
+  const mutationRefresh = await checks.refreshMissionHeaderStats({
+    missionsResult: mutationResult,
+    hydrateAssignedMetadata: false,
+  });
+  assert.equal(mutationRefresh.ok, true);
+  assert.equal(ctx.guiMissionSlots[0].missionLevel, 5);
+
+  const staleRefresh = await checks.refreshMissionHeaderStats({
+    missionsResult: oldResult,
+    hydrateAssignedMetadata: false,
+  });
+  assert.equal(staleRefresh.superseded, true);
+  assert.equal(staleRefresh.staleMissionSnapshot, true);
+  assert.equal(ctx.guiMissionSlots[0].missionLevel, 5);
+});
+
 test("one assignment pass fills every open configured slot without a mission read", async () => {
   let missionReads = 0;
   let inventoryReads = 0;
   const inventoryOffsets = [];
   const assignedIds = [];
   const assignedAccounts = [];
+  const callOrder = [];
   let liveMissions = [mission("open-1", 1), mission("open-2", 2)];
   const ctx = {
     config: {
@@ -1480,6 +1695,7 @@ test("one assignment pass fills every open configured slot without a mission rea
     },
     async mcpToolCall(toolName, args) {
       if (toolName === "get_mission_nfts") {
+        callOrder.push(`inventory:${args.assignedMissionId}`);
         inventoryReads += 1;
         inventoryOffsets.push(Number(args?.offset || 0));
         return {
@@ -1492,6 +1708,7 @@ test("one assignment pass fills every open configured slot without a mission rea
         };
       }
       if (toolName === "assign_nft_to_mission") {
+        callOrder.push(`assign:${args.assignedMissionId}`);
         assignedIds.push(args.assignedMissionId);
         assignedAccounts.push(args.nftAccount);
         liveMissions = liveMissions.map((entry) =>
@@ -1522,6 +1739,12 @@ test("one assignment pass fills every open configured slot without a mission rea
   assert.deepEqual(assignedAccounts, ["nft-a", "nft-b"]);
   assert.equal(inventoryReads, 2);
   assert.deepEqual(inventoryOffsets, [0, 0]);
+  assert.deepEqual(callOrder, [
+    "inventory:open-1",
+    "inventory:open-2",
+    "assign:open-1",
+    "assign:open-2",
+  ]);
   assert.equal(missionReads, 0);
   assert.equal(ctx.currentMissionStats.nftsAvailable, 0);
 });
@@ -1886,5 +2109,122 @@ test("per-slot mission reset overrides are always visible and self-enable", () =
   assert.match(
     rendererSource,
     /missionResetPerSlotModeEnabled: nextPerSlotModeEnabled,\s*missionResetPerSlotEnabledBySlot: nextEnabledBySlot/,
+  );
+});
+
+test("activity status timeout survives unrelated backend events", () => {
+  const rendererSource = fs.readFileSync(
+    path.join(repoRoot, "renderer/src/pages/ControlPage.jsx"),
+    "utf8",
+  );
+
+  assert.match(rendererSource, /const activityResetTimerRef = useRef\(null\)/);
+  assert.match(
+    rendererSource,
+    /activityResetTimerRef\.current = setTimeout\([\s\S]{0,700}Watching missions/,
+  );
+  assert.doesNotMatch(
+    rendererSource,
+    /activityResetTimerRef\.current = setTimeout\([\s\S]{0,700}return \(\) => clearTimeout\(timer\)/,
+  );
+});
+
+test("NFT count deferrals keep a stable reason and prefer cycle mutation state", () => {
+  const watchSource = fs.readFileSync(
+    path.join(repoRoot, "src/services/watch.js"),
+    "utf8",
+  );
+
+  assert.doesNotMatch(watchSource, /\$\{reason\}_claim_state_pending/);
+  assert.doesNotMatch(watchSource, /\$\{reason\}_assignment_priority/);
+  assert.match(
+    watchSource,
+    /ctx\.lastUserMissionsResult \|\| startupMissionResult\(\) \|\| missionsResult/,
+  );
+  assert.match(watchSource, /preserveMissionState: true/);
+  assert.match(
+    watchSource,
+    /missionResult: postCycleMissionResult/,
+  );
+});
+
+test("watch mutation state replaces passive cache and rejects pre-mutation polls", () => {
+  const clientSource = fs.readFileSync(
+    path.join(repoRoot, "src/mcp/client.js"),
+    "utf8",
+  );
+  const watchSource = fs.readFileSync(
+    path.join(repoRoot, "src/services/watch.js"),
+    "utf8",
+  );
+
+  assert.match(clientSource, /function adoptUserMissionsSnapshot/);
+  assert.match(clientSource, /function getUserMissionsGeneration/);
+  assert.match(clientSource, /function rejectOrReplaceStaleMissionRead/);
+  assert.match(clientSource, /stale_mission_read_replaced/);
+  assert.match(clientSource, /stale_mission_read_rejected/);
+  assert.match(clientSource, /userMissionsAcceptedRequestSequence/);
+  assert.match(
+    clientSource,
+    /return toolName === "get_user_missions"[\s\S]{0,300}rejectOrReplaceStaleMissionRead/,
+  );
+  assert.match(
+    watchSource,
+    /mcp\.adoptUserMissionsSnapshot\(\s*watchMissionResult,\s*"watch_and_claim"/,
+  );
+  assert.match(watchSource, /missionResultCoordinator\.seed\(watchMissionResult\)/);
+  assert.match(watchSource, /mission_state_poll_rejected_pre_mutation/);
+  assert.match(watchSource, /!missionPollRejectedPreMutation/);
+});
+
+test("mission UI polling keeps 2 seconds of additional cooldown headroom", () => {
+  const clientSource = fs.readFileSync(
+    path.join(repoRoot, "src/mcp/client.js"),
+    "utf8",
+  );
+  const watchSource = fs.readFileSync(
+    path.join(repoRoot, "src/services/watch.js"),
+    "utf8",
+  );
+
+  assert.match(
+    clientSource,
+    /\["get_user_missions", \{ limit: 10, windowMs: 60_000 \}\]/,
+  );
+  assert.doesNotMatch(
+    clientSource,
+    /\["get_user_missions", 60_000\]/,
+  );
+  assert.match(watchSource, /MISSION_UI_POLL_HEADROOM_MS = 2_000/);
+  assert.match(
+    watchSource,
+    /WATCH_START_INTERVAL_MS = 60_000 \+ MISSION_UI_POLL_HEADROOM_MS/,
+  );
+  assert.match(
+    watchSource,
+    /refreshWatchCycleMissionUi\("watch_cycle_ui_state_poll"\)/,
+  );
+  assert.match(watchSource, /reason: "watch_cycle_pre_start_ui_state_poll"/);
+  assert.match(watchSource, /\}, 31_000\);/);
+  assert.doesNotMatch(watchSource, /mission_result_short_throttle_retry/);
+  assert.match(
+    watchSource,
+    /claim_poll_ui_publish_deferred/,
+  );
+});
+
+test("100k and 500k NFTs remain reserved for Level 20 missions", () => {
+  const checksSource = fs.readFileSync(
+    path.join(repoRoot, "src/services/checks.js"),
+    "utf8",
+  );
+
+  assert.match(
+    checksSource,
+    /const reservePoolIsPrimary = isLevel20Mission\(mission\)/,
+  );
+  assert.match(
+    checksSource,
+    /prioritizedReadyOwnedCandidates\.length > 0[\s\S]{0,180}reservedReadyOwnedFallbackCandidates/,
   );
 });
