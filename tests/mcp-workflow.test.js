@@ -2213,18 +2213,78 @@ test("mission UI polling keeps 2 seconds of additional cooldown headroom", () =>
   );
 });
 
-test("100k and 500k NFTs remain reserved for Level 20 missions", () => {
-  const checksSource = fs.readFileSync(
-    path.join(repoRoot, "src/services/checks.js"),
-    "utf8",
-  );
+test("100k and 500k NFTs are never assigned to lower-level missions", async () => {
+  const assignedAccounts = [];
+  const openMission = {
+    ...mission("lower-level-open", 1),
+    name: "Race for Points",
+    level: 9,
+  };
+  const ctx = {
+    config: {
+      targetMissions: ["Race for Points"],
+      enableRentals: true,
+      nftAssignmentOrder: "normal",
+      missionActionEnabledBySlot: { "1": true },
+    },
+    missionActionEnabledBySlot: { "1": true },
+    currentMissionStats: { nftsAvailable: 0 },
+    sessionClaimedCount: 0,
+    guiBridge: { emitNow() {}, sendEvent() {} },
+  };
+  const logger = {
+    logWithTimestamp() {},
+    logDebug() {},
+    redrawHeaderAndLog() {},
+    formatTaggedLog(_tag, _icon, message) {
+      return message;
+    },
+  };
+  const mcp = {
+    async getUserMissions() {
+      throw new Error("unexpected get_user_missions");
+    },
+    async mcpToolCall(toolName, args) {
+      if (toolName === "get_mission_nfts") {
+        return { structuredContent: { nfts: [] } };
+      }
+      if (toolName === "get_rentable_nfts") {
+        return {
+          structuredContent: {
+            data: [
+              {
+                listingId: "reserved-listing",
+                nftData: { account: "reserved-100k", collection: "100K" },
+              },
+              {
+                listingId: "standard-listing",
+                nft: { account: "standard-nft", collection: "Genesis" },
+              },
+            ],
+          },
+        };
+      }
+      if (toolName === "get_nft") {
+        return { structuredContent: { nft: { account: args.nftAccount } } };
+      }
+      if (toolName === "assign_nft_to_mission") {
+        assignedAccounts.push(args.nftAccount);
+        return {
+          structuredContent: {
+            missions: [{ ...openMission, assigned_nft: args.nftAccount }],
+          },
+        };
+      }
+      throw new Error(`unexpected tool: ${toolName}`);
+    },
+  };
+  const checks = createChecksService(ctx, logger, mcp);
 
-  assert.match(
-    checksSource,
-    /const reservePoolIsPrimary = isLevel20Mission\(mission\)/,
-  );
-  assert.match(
-    checksSource,
-    /prioritizedReadyOwnedCandidates\.length > 0[\s\S]{0,180}reservedReadyOwnedFallbackCandidates/,
-  );
+  const result = await checks.autoAssignConfiguredMissions({
+    reason: "poll_tick_available_recheck",
+    missionsResult: { structuredContent: { missions: [openMission] } },
+  });
+
+  assert.equal(result.assigned, 1);
+  assert.deepEqual(assignedAccounts, ["standard-nft"]);
 });

@@ -1659,7 +1659,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
 
   function isLevel20Mission(mission) {
     const level = Number(missionLevel(mission));
-    return Number.isFinite(level) && level >= 20;
+    return Number.isFinite(level) && level === 20;
   }
 
   function shouldReserveLevel20CollectionNfts(mission) {
@@ -1899,7 +1899,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
       .map((entry) => ({
         listingId: entry?.listingId || rentalListingId(entry),
         account: rentalNftAccountId(entry),
-        nft: entry?.nft || entry,
+        nft: entry?.nft || entry?.nftData || entry,
       }))
       .filter((entry) => entry.listingId)
       .filter((entry) => {
@@ -4476,16 +4476,12 @@ function createChecksService(ctx, logger, mcp, services = {}) {
                 "ready_rental",
                 "owned_cooldown_reset_highest_level",
                 "rental_cooldown_reset",
-                "reserved_ready_owned_nft_highest_level",
-                "reserved_owned_cooldown_reset_highest_level",
               ]
             : [
                 "ready_owned_nft",
                 "ready_rental",
                 "owned_cooldown_reset",
                 "rental_cooldown_reset",
-                "reserved_ready_owned_nft",
-                "reserved_owned_cooldown_reset",
               ],
         rentalFallbackEnabled,
         autoNftCooldownResetEnabled: autoNftCooldownResetEnabled(),
@@ -4607,9 +4603,14 @@ function createChecksService(ctx, logger, mcp, services = {}) {
           });
         }
 
-        logWithTimestamp(
-          `[ASSIGN] 🔢 ${name}: order=${autoModeThresholdFallbackOnlyLocal ? nftAssignmentOrderMode() === "highest_level_first" ? "highest level owned → highest level owned cooldown → reserved owned ready → reserved owned cooldown → reroll if none work" : "ready owned → owned cooldown reset → reserved owned ready → reserved owned cooldown → reroll if none work" : nftAssignmentOrderMode() === "highest_level_first" ? "highest level owned → ready rental → highest level owned cooldown → rental cooldown reset → reserved owned ready → reserved owned cooldown" : "ready owned → ready rental → owned cooldown reset → rental cooldown reset → reserved owned ready → reserved owned cooldown"}.`,
-        );
+        const assignmentOrder = isLevel20Mission(mission)
+          ? nftAssignmentOrderMode() === "highest_level_first"
+            ? "reserved owned → standard owned → owned cooldown → reroll if none work"
+            : "reserved owned → standard owned → owned cooldown → reroll if none work"
+          : nftAssignmentOrderMode() === "highest_level_first"
+            ? "highest level owned → ready rental → owned cooldown → rental cooldown"
+            : "ready owned → ready rental → owned cooldown → rental cooldown";
+        logWithTimestamp(`[ASSIGN] 🔢 ${name}: order=${assignmentOrder}.`);
 
         const currentMission = findMissionByAssignedMissionId(missions, id);
         if (currentMission && missionHasAssignedNftForAssign(currentMission, reason)) {
@@ -4691,16 +4692,17 @@ function createChecksService(ctx, logger, mcp, services = {}) {
         const reservedReadyOwnedFallbackCandidates =
           reservedReadyOwnedCandidates.slice(0, 3);
 
-        // Keep normal and Level-20-reserved pools separate. Lower levels use
-        // reserved NFTs only when no normal candidate is ready; Level 20 does
-        // the inverse and rotates through the reserved pool first.
-        const selectedReadyOwnedCandidates =
-          prioritizedReadyOwnedCandidates.length > 0
+        // 100K and 500K NFTs are exclusively for Level 20 missions. Never
+        // fall back to them for a lower-level mission, even if this inventory
+        // page has no standard ready candidates.
+        const selectedReadyOwnedCandidates = isLevel20Mission(mission)
+          ? prioritizedReadyOwnedCandidates.length > 0
             ? prioritizedReadyOwnedCandidates
-            : reservedReadyOwnedFallbackCandidates;
+            : reservedReadyOwnedFallbackCandidates
+          : prioritizedReadyOwnedCandidates;
         if (selectedReadyOwnedCandidates.length > 0) {
           assignmentOptions = selectedReadyOwnedCandidates.map((entry) => {
-            const reserved = reservedReadyOwnedCandidates.includes(entry);
+            const reserved = isLevel20ReservedCollectionNft(entry.nft);
             return {
               ...entry,
               source: reserved ? "owned_reserved" : "owned",
@@ -4871,9 +4873,19 @@ function createChecksService(ctx, logger, mcp, services = {}) {
                 `[TIMING] rental lookup ${name}: ${timingMs(rentalLookupStartedAt)}ms${usedPrefetchedOnly ? " (prefetched)" : rentalLookupCache && cacheAgeMs >= 0 && cacheAgeMs <= 2000 ? " (cache)" : ""}`,
               );
               readyRentalCandidates = loadedRentalCandidates
+                .filter(
+                  (entry) =>
+                    isLevel20Mission(mission) ||
+                    !isLevel20ReservedCollectionNft(entry.nft),
+                )
                 .filter((entry) => nftIsAvailable(entry.nft))
                 .slice(0, rentalBatchLimit());
               cooledRentalCandidates = loadedRentalCandidates
+                .filter(
+                  (entry) =>
+                    isLevel20Mission(mission) ||
+                    !isLevel20ReservedCollectionNft(entry.nft),
+                )
                 .filter((entry) => !nftIsAvailable(entry.nft))
                 .slice(0, autoNftCooldownResetProbeLimit());
               rentalLookupSucceeded = true;
@@ -4994,6 +5006,27 @@ function createChecksService(ctx, logger, mcp, services = {}) {
           assignmentOptions = orderedOptions;
           if (!assignmentSourceStage && orderedOptions.length > 0) {
             assignmentSourceStage = orderedOptions[0].stage || null;
+          }
+        }
+
+        // Keep the reservation rule at the final assignment boundary as well.
+        // This protects lower-level missions if a future candidate source is
+        // added without its own collection filter.
+        if (!isLevel20Mission(mission)) {
+          const optionCountBeforeReservationGuard = assignmentOptions.length;
+          assignmentOptions = assignmentOptions.filter(
+            (option) => !isLevel20ReservedCollectionNft(option.nft),
+          );
+          if (assignmentOptions.length !== optionCountBeforeReservationGuard) {
+            logDebug("assign", "reserved_nft_blocked_for_lower_level_mission", {
+              reason,
+              missionName: name,
+              missionId: id,
+              missionLevel: missionLevel(mission),
+              blockedCount:
+                optionCountBeforeReservationGuard - assignmentOptions.length,
+            });
+            assignmentSourceStage = assignmentOptions[0]?.stage || null;
           }
         }
 

@@ -453,69 +453,6 @@ function isLikelyRealMissionName(value) {
   return lowered !== "unknown mission" && lowered !== "unassigned";
 }
 
-function normalizeRewardToken(value) {
-  const token = String(value || "")
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "_");
-  if (token === "pbp" || token === "pbp_token" || token === "pixel_by_pixel")
-    return "pbp";
-  if (
-    token === "tc" ||
-    token === "tc_token" ||
-    token === "tournament_coin" ||
-    token === "tournament_coins"
-  )
-    return "tc";
-  if (
-    token === "cc" ||
-    token === "cc_token" ||
-    token === "community_coin" ||
-    token === "community_coins"
-  )
-    return "cc";
-  return token || "";
-}
-
-function parseRewardLabel(value) {
-  const label = String(value || "").trim();
-  if (!label) return null;
-  const match = label.match(/([0-9]+(?:\.[0-9]+)?)\s*([A-Za-z_]+)/);
-  if (!match) return { amount: label, token: "" };
-  return {
-    amount: Number(match[1]).toLocaleString(undefined, {
-      maximumFractionDigits: 2,
-    }),
-    token: normalizeRewardToken(match[2]),
-  };
-}
-
-function RewardBadge({ reward }) {
-  const parsed = parseRewardLabel(reward);
-  if (!parsed) return <span>Reward unknown</span>;
-  const icon =
-    parsed.token === "pbp"
-      ? pbpIcon
-      : parsed.token === "tc"
-        ? tcIcon
-        : parsed.token === "cc"
-          ? ccIcon
-          : null;
-  return (
-    <span className="inline-flex items-center gap-1 whitespace-nowrap">
-      {icon ? (
-        <img
-          src={icon}
-          alt=""
-          className="h-3.5 w-3.5 shrink-0 object-contain"
-        />
-      ) : null}
-      <span>{parsed.amount}</span>
-      {parsed.token ? <span>{parsed.token.toUpperCase()}</span> : null}
-    </span>
-  );
-}
-
 function SlideNumberFormatted({ value, format }) {
   const formatFn = typeof format === "function" ? format : (n) => String(n);
   const [current, setCurrent] = useState(Number(value) || 0);
@@ -613,9 +550,13 @@ function ControlView() {
     String(status.nftCooldownResetMaxPbp ?? 20),
   );
   const [nftAssignmentOrder, setNftAssignmentOrderState] = useState(
-    ["highest_level_first", "lowest_level_first", "rotate_least_used", "collection_first", "normal"].includes(
-      status.nftAssignmentOrder,
-    )
+    [
+      "highest_level_first",
+      "lowest_level_first",
+      "rotate_least_used",
+      "collection_first",
+      "normal",
+    ].includes(status.nftAssignmentOrder)
       ? status.nftAssignmentOrder
       : "rotate_least_used",
   );
@@ -1030,9 +971,13 @@ function ControlView() {
   useEffect(() => {
     if (typeof status.nftAssignmentOrder === "string") {
       setNftAssignmentOrderState(
-        ["highest_level_first", "lowest_level_first", "rotate_least_used", "collection_first", "normal"].includes(
-          status.nftAssignmentOrder,
-        )
+        [
+          "highest_level_first",
+          "lowest_level_first",
+          "rotate_least_used",
+          "collection_first",
+          "normal",
+        ].includes(status.nftAssignmentOrder)
           ? status.nftAssignmentOrder
           : "rotate_least_used",
       );
@@ -1109,9 +1054,13 @@ function ControlView() {
         setNftResetEnabled(config.nftCooldownResetEnabled);
       }
       setNftAssignmentOrderState(
-        ["highest_level_first", "lowest_level_first", "rotate_least_used", "collection_first", "normal"].includes(
-          config.nftAssignmentOrder,
-        )
+        [
+          "highest_level_first",
+          "lowest_level_first",
+          "rotate_least_used",
+          "collection_first",
+          "normal",
+        ].includes(config.nftAssignmentOrder)
           ? config.nftAssignmentOrder
           : "rotate_least_used",
       );
@@ -1216,8 +1165,7 @@ function ControlView() {
       setSelectedCompetitionNumber((current) => {
         if (!competitions.length) return "";
         const stillExists = competitions.some(
-          (item, index) =>
-            competitionOptionValue(item, index) === current,
+          (item, index) => competitionOptionValue(item, index) === current,
         );
         if (stillExists) return current;
         return competitionOptionValue(competitions[0], 0);
@@ -1255,8 +1203,7 @@ function ControlView() {
             : [];
         if (!competitions.length) return "";
         const stillExists = competitions.some(
-          (item, index) =>
-            competitionOptionValue(item, index) === current,
+          (item, index) => competitionOptionValue(item, index) === current,
         );
         if (stillExists) return current;
         return competitionOptionValue(competitions[0], 0);
@@ -2270,8 +2217,7 @@ function ControlView() {
         const latestStatus = activityStatusRef.current || {};
         if (!latestStatus.running) return null;
         if (latestStatus.watchLoopEnabled === false) return "Stopped";
-        if (latestStatus.watcherRunning === true)
-          return "Watching missions...";
+        if (latestStatus.watcherRunning === true) return "Watching missions...";
         return current === next ? null : current;
       });
     }, Number(resetToWatchingMs));
@@ -2461,9 +2407,7 @@ function ControlView() {
       return;
     }
     setActivityLabel((current) =>
-      !current ||
-      current === "Stopped" ||
-      current === "Watching missions..."
+      !current || current === "Stopped" || current === "Watching missions..."
         ? "Starting up..."
         : current,
     );
@@ -3494,8 +3438,7 @@ function ControlView() {
       await applyConfigPatch({
         signerMode: onboardingSignerMode,
         targetMissions: targetMissions.length > 0 ? targetMissions : undefined,
-        missionActionEnabledBySlot:
-          onboardingMissionActionEnabledBySlot,
+        missionActionEnabledBySlot: onboardingMissionActionEnabledBySlot,
         firstRunOnboardingCompleted: true,
       });
       setMissionActionEnabledBySlot({
@@ -3506,8 +3449,7 @@ function ControlView() {
           signerMode: onboardingSignerMode,
           targetMissions:
             targetMissions.length > 0 ? targetMissions : undefined,
-          missionActionEnabledBySlot:
-            onboardingMissionActionEnabledBySlot,
+          missionActionEnabledBySlot: onboardingMissionActionEnabledBySlot,
         });
         if (!response?.ok) {
           throw new Error(response?.error || "Failed to apply onboarding.");
@@ -3890,9 +3832,7 @@ function ControlView() {
                               >
                                 <div className="flex gap-2 justify-between">
                                   <div
-                                    onClick={(event) =>
-                                      event.stopPropagation()
-                                    }
+                                    onClick={(event) => event.stopPropagation()}
                                     onMouseDown={(event) =>
                                       event.stopPropagation()
                                     }
@@ -3937,12 +3877,6 @@ function ControlView() {
                                   <div className="flex flex-col flex-1">
                                     <div className="text-sm text-slate-100 text-left">
                                       {selectedName || "Select mission"}
-                                    </div>
-                                    <div className="flex text-[11px] text-slate-300 mt-auto">
-                                      <RewardBadge
-                                        reward={selectedCard?.reward}
-                                      />
-                                      {/* this needs fixing */}
                                     </div>
                                     <div className="text-[11px] text-accent mt-1 text-left | hidden">
                                       Click to change
@@ -4124,11 +4058,8 @@ function ControlView() {
                                         SELECTED
                                       </div>
                                     ) : null}
-                                    <div className="text-sm text-slate-100 flex justify-between">
+                                    <div className="text-sm text-slate-100">
                                       <span>{name}</span>
-                                      <div className="flex shrink-0 items-center gap-2 text-[11px] text-slate-300">
-                                        <RewardBadge reward={mission?.reward} />
-                                      </div>
                                     </div>
                                     {description ? (
                                       <div className="text-xs leading-4 text-slate-400">
@@ -5075,7 +5006,7 @@ function ControlView() {
                                 value={resetLevelInput}
                                 onFocus={() => {
                                   lastResetLevelCommitRef.current = null;
-                                  setMissionModeButtonLevelEditing(true)
+                                  setMissionModeButtonLevelEditing(true);
                                 }}
                                 onChange={(event) => {
                                   const nextValue = event.target.value.replace(
@@ -5087,14 +5018,14 @@ function ControlView() {
                                   scheduleResetLevelCommit(nextValue);
                                 }}
                                 onBlur={(event) => {
-                                  void commitResetLevel(event.target.value).catch(
-                                    (error) => {
-                                      console.error(
-                                        "Reset level update failed",
-                                        error,
-                                      );
-                                    },
-                                  );
+                                  void commitResetLevel(
+                                    event.target.value,
+                                  ).catch((error) => {
+                                    console.error(
+                                      "Reset level update failed",
+                                      error,
+                                    );
+                                  });
                                 }}
                                 onKeyDown={(event) => {
                                   if (event.key === "Enter") {
@@ -5370,10 +5301,10 @@ function ControlView() {
                               } `}
                             >
                               {missionStateNotSynced ? (
-                                <MissionSlotFallback label="MISSION STATUS NOT SYNCED" />
+                                <MissionSlotFallback label="Mission status not synced" />
                               ) : missionStateSyncing ? (
                                 <MissionSlotFallback
-                                  label="SYNCING MISSION DATA..."
+                                  label="Syncing..."
                                   loading
                                 />
                               ) : (
@@ -5565,17 +5496,17 @@ function ControlView() {
                                 usesKoreaTakeitArt ? "grayscale" : ""
                               }`}
                             >
-                              <div className="card-mission__title">
+                              <div className="card-mission__title  mt-0.5">
                                 {showRealLockedSlot4
                                   ? "Click to unlock slot 4"
                                   : missionStateNotSynced
-                                    ? "Mission status not synced"
-                                  : title
-                                    ? title
-                                    : "Assign NFT to start"}
+                                    ? " Not Synced"
+                                    : title
+                                      ? title
+                                      : "Assign NFT to start"}
                               </div>
 
-                              <div className="card-mission__slot text-gray-400">
+                              <div className="card-mission__slot text-gray-400 text-[11px] mt-0.5">
                                 {slot === 4 && showRealLockedSlot4
                                   ? "2,500 PBP"
                                   : slot === 4 &&
@@ -5583,7 +5514,7 @@ function ControlView() {
                                       slotUnlockExpiresAtLabel
                                     ? slotUnlockExpiresAtLabel
                                     : slot !== 4
-                                      ? `Slot ${slot}`
+                                      ? `↻ Select New Mission`
                                       : null}
                               </div>
                             </div>
@@ -5712,11 +5643,8 @@ function ControlView() {
                                 SELECTED
                               </div>
                             ) : null}
-                            <div className="text-sm text-slate-100 flex justify-between">
+                            <div className="text-sm text-slate-100">
                               <span>{name}</span>
-                              <div className="flex shrink-0 items-center gap-2 text-[11px] text-slate-300">
-                                <RewardBadge reward={mission?.reward} />
-                              </div>
                             </div>
                             {description ? (
                               <div className="text-xs leading-4 text-slate-400">
