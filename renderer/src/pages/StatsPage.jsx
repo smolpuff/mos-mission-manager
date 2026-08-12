@@ -21,21 +21,14 @@ function formatLastUsed(value) {
   const timestamp = Number(value);
   if (!Number.isFinite(timestamp) || timestamp <= 0) return "Never";
   const date = new Date(timestamp);
-  const now = new Date();
-  const sameDay =
-    date.getFullYear() === now.getFullYear() &&
-    date.getMonth() === now.getMonth() &&
-    date.getDate() === now.getDate();
-  return date.toLocaleString(undefined, {
-    ...(sameDay
-      ? {}
-      : {
-          month: "short",
-          day: "numeric",
-        }),
+  return `${date.toLocaleDateString(undefined, {
+    month: "numeric",
+    day: "numeric",
+    year: "2-digit",
+  })}, ${date.toLocaleTimeString(undefined, {
     hour: "numeric",
     minute: "2-digit",
-  });
+  })}`;
 }
 
 function historyClaimCount(entry) {
@@ -833,20 +826,6 @@ export default function StatsPage({ status }) {
                             Level {nft.level}
                           </span>
                         ) : null}
-                        {nft.available === true ? (
-                          <span className="inline-flex shrink-0 items-center gap-1 text-xs font-medium text-emerald-400">
-                            <span aria-hidden="true">✓</span>
-                            Ready
-                          </span>
-                        ) : nft.available === false ? (
-                          <span className="inline-flex shrink-0 items-center text-xs text-slate-400">
-                            On cooldown
-                          </span>
-                        ) : (
-                          <span className="inline-flex shrink-0 items-center text-xs text-slate-500">
-                            Status: Unknown
-                          </span>
-                        )}
                       </div>
                     </div>
                     <div
@@ -866,7 +845,7 @@ export default function StatsPage({ status }) {
                       {formatNumber(nft.sessionUses, 0)}
                     </div>
                     <div
-                      className="truncate text-right text-xs text-slate-400"
+                      className="truncate text-right text-[10px] text-slate-400"
                       title={
                         Number.isFinite(Number(nft.lastUsedAt))
                           ? new Date(Number(nft.lastUsedAt)).toLocaleString()

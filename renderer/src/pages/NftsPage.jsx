@@ -189,12 +189,12 @@ export default function NftsPage({ bridge, signerMode = "" }) {
     return message;
   };
 
-  const load = async () => {
+  const load = async ({ forceRefresh = false } = {}) => {
     if (!bridge?.getUserNfts) return;
     setLoading(true);
     setError(null);
     try {
-      const next = await bridge.getUserNfts();
+      const next = await bridge.getUserNfts({ forceRefresh });
       if (!next?.ok) {
         throw new Error(next?.error || "Failed to load NFTs.");
       }
@@ -209,6 +209,12 @@ export default function NftsPage({ bridge, signerMode = "" }) {
       setHasLoaded(true);
     }
   };
+
+  // The desktop process retains a five-minute NFT snapshot. Rehydrate this
+  // page whenever the user returns so navigation never requires Load NFTs.
+  useEffect(() => {
+    void load();
+  }, [bridge]);
 
   const cooldownDeadlinesMs = useMemo(
     () =>
@@ -525,7 +531,7 @@ export default function NftsPage({ bridge, signerMode = "" }) {
           <button
             type="button"
             className="btn btn-xs btn-black z-10 px-2 inline-flex font-normal rounded-sm"
-            onClick={() => void load()}
+            onClick={() => void load({ forceRefresh: true })}
             disabled={loading}
             style={{
               position: "absolute",

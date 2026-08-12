@@ -45,7 +45,7 @@ contextBridge.exposeInMainWorld("missionsDesktop", {
   applyMissionSelection: (payload) =>
     ipcRenderer.invoke("missions:apply-selection", payload),
   getRentalsPreview: () => ipcRenderer.invoke("rentals:preview"),
-  getUserNfts: () => ipcRenderer.invoke("nfts:list"),
+  getUserNfts: (options) => ipcRenderer.invoke("nfts:list", options),
   prepareNftCooldownReset: (payload) =>
     ipcRenderer.invoke("nfts:prepare-cooldown-reset", payload),
   resetNftCooldown: (payload) =>

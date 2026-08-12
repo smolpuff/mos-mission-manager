@@ -6594,7 +6594,8 @@ app.whenReady().then(async () => {
     })();
     return rentalsPreviewPromise;
   });
-  ipcMain.handle("nfts:list", async () => {
+  ipcMain.handle("nfts:list", async (_event, options = {}) => {
+    const forceRefresh = options?.forceRefresh === true;
     const loadNfts = async () => {
       pushSystemLog("NFT page refresh started.");
       pushSystemLog("NFT page refresh: fetching get_mission_nfts.");
@@ -6689,7 +6690,11 @@ app.whenReady().then(async () => {
       pushSystemLog("NFT page refresh wait: refresh already running.");
       return nftListPromise;
     }
-    if (nftListCache && shouldServeCachedNftList(nftListCacheAt)) {
+    if (
+      !forceRefresh &&
+      nftListCache &&
+      shouldServeCachedNftList(nftListCacheAt)
+    ) {
       pushSystemLog("NFT page refresh cache hit.");
       return hydrateCachedNftList(nftListCache, nftListCacheAt);
     }

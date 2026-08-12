@@ -2,6 +2,9 @@
   "version": "3.2.14",
   "downloadUrl": "https://github.com/smolpuff/mos-mission-manager/releases/latest",
   "notes": [
-    "Partial MCP throttling update. You will still get throttled, just about 85% less. Ignore and let the app do it's thing. Assining is slower thanks to throttling, blame spamming clowns."
+    "Fixed 98% of normal throttling",
+    "Faster mission claiming and assinging",
+    "Added Assign NFT by <order option> in settings to set the NFT assignment order",
+    "New experimental rental method due to new 1 use per min restriction, probably doesnt work well yet :D"
   ]
 }
