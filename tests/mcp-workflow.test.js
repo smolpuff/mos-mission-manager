@@ -242,6 +242,7 @@ test("same cycle assigns a claim whose watch response omitted missions after coo
       return replacementMissionResult;
     },
     getToolCooldownRemainingMs(toolName) {
+      if (toolName === "get_wallet_summary") return 0;
       assert.equal(toolName, "get_user_missions");
       missionCooldownChecks += 1;
       return missionCooldownChecks === 1 ? 5 : 0;
@@ -1952,7 +1953,19 @@ test("successful claims and assignments have no confirmation-read fallbacks", ()
   assert.doesNotMatch(watchSource, /after_fallback_assign/);
   assert.doesNotMatch(watchSource, /claim_followup_refetched_after_assign/);
   assert.doesNotMatch(watchSource, /reason: "watch_reported_zero"/);
-  assert.doesNotMatch(watchSource, /scheduleCurrentWalletSummaryRefresh/);
+  assert.match(watchSource, /function scheduleCurrentWalletSummaryRefresh/);
+  assert.match(
+    watchSource,
+    /const finishClaimLifecycle = \(followup\) => \{[\s\S]{0,250}scheduleCurrentWalletSummaryRefresh\("claim"\)/,
+  );
+  assert.match(
+    watchSource,
+    /currentWalletSummaryRefreshInFlight/,
+  );
+  assert.match(
+    watchSource,
+    /getToolCooldownRemainingMs\?\.\("get_wallet_summary"\)/,
+  );
   assert.match(watchSource, /reason: "startup_missing_snapshot_refresh"/);
   assert.match(watchSource, /reason: "startup_background_mission_refresh"/);
   assert.doesNotMatch(electronSource, /reason: "startup_mission_sync"/);

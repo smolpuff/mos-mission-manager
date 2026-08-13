@@ -1446,8 +1446,8 @@ button.btn.btn-gradient {
 
 .mission-choice-card {
   position: relative;
-  border: 2px solid transparent;
   background: rgba(0, 0, 0, 0.2);
+  box-shadow: 0 2px 2px rgba(0, 0, 0, 0.3);
   transition:
     border-color 150ms ease,
     background-color 150ms ease,
@@ -1462,10 +1462,9 @@ button.btn.btn-gradient {
   pointer-events: none;
   z-index: 0;
   border-radius: inherit;
-  background: linear-gradient(165deg,
-      rgba(255, 255, 255, 0.07) 30%,
-      rgba(255, 255, 255, 0.15) 70%,
-      rgba(255, 255, 255, 0.06) 80%);
+  background: linear-gradient(120deg,
+      rgba(255, 255, 255, 0.065) 40%,
+      rgba(255, 255, 255, 0.027) 100%);
   -webkit-mask:
     linear-gradient(#fff 0 0) content-box,
     linear-gradient(#fff 0 0);
@@ -1473,46 +1472,28 @@ button.btn.btn-gradient {
   mask-composite: exclude;
 }
 
-.mission-choice-card::before {
-  content: "";
-  position: absolute;
-  inset: 1px;
-  pointer-events: none;
-  z-index: 1;
-  border-radius: inherit;
-  background: rgb(255 255 255 / 0.08);
-  mix-blend-mode: overlay;
-}
-
 .mission-choice-card>* {
   position: relative;
   z-index: 2;
 }
 
-@property --mission-choice-border-angle {
-  syntax: "<angle>";
-  inherits: false;
-  initial-value: 0deg;
+.mission-choice-card--selected {
+  background: rgb(255 255 255 / 0.1);
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.03),
+    0 10px 30px rgba(0, 0, 0, 0.28);
 }
 
 .mission-choice-card--selected::after {
-  background: conic-gradient(from var(--mission-choice-border-angle),
-      #519E6F 0deg,
-
-      var(--color-success)180deg,
-      #519E6F 360deg);
-
-  animation: missionChoiceSelectedGradientShift 2s linear infinite;
-}
-
-@keyframes missionChoiceSelectedGradientShift {
-  from {
-    --mission-choice-border-angle: 0deg;
-  }
-
-  to {
-    --mission-choice-border-angle: 360deg;
-  }
+  background-image: linear-gradient(105deg,
+      var(--color-success),
+      var(--color-info),
+      var(--color-primary),
+      var(--color-secondary),
+      var(--color-accent));
+  background-size: 200% 100%;
+  background-position: 0% 50%;
+  animation: btnGradientShift 8s linear infinite;
 }
 
 .mission-choice-card .fake-checkbox-radio {

@@ -59,6 +59,10 @@ function createWatchService(
   let traceSequence = 0;
   let walletRefreshTimer = null;
   let walletRefreshPendingReason = null;
+  let currentWalletSummaryRefreshTimer = null;
+  let currentWalletSummaryRefreshPendingReason = null;
+  let currentWalletSummaryRefreshInFlight = false;
+  let currentWalletSummaryRefreshRequestedWhileInFlight = false;
   let startupMissionRefreshTimer = null;
   let nftCountRefreshTimer = null;
   let nftCountRefreshDeferralKey = "";
@@ -783,6 +787,88 @@ function createWatchService(
           }),
         );
     }, 250);
+  }
+
+  function scheduleCurrentWalletSummaryRefresh(reason = "claim") {
+    currentWalletSummaryRefreshPendingReason = reason;
+    if (currentWalletSummaryRefreshInFlight) {
+      // A newer claim completed while this snapshot was loading. Keep only
+      // one latest request; every queued refresh would return the same data.
+      currentWalletSummaryRefreshRequestedWhileInFlight = true;
+      return;
+    }
+    if (currentWalletSummaryRefreshTimer) return;
+
+    const run = () => {
+      currentWalletSummaryRefreshTimer = null;
+      if (ctx.pauseBackgroundMcpReason) {
+        scheduleCurrentWalletSummaryRefresh(
+          currentWalletSummaryRefreshPendingReason || reason,
+        );
+        return;
+      }
+      if (!checks || typeof checks.runWalletSummaryCheck !== "function") {
+        return;
+      }
+      const cooldownMs = Math.max(
+        0,
+        Number(mcp.getToolCooldownRemainingMs?.("get_wallet_summary") || 0),
+      );
+      if (cooldownMs > 0) {
+        scheduleCurrentWalletSummaryRefresh(
+          currentWalletSummaryRefreshPendingReason || reason,
+        );
+        return;
+      }
+      const pending = currentWalletSummaryRefreshPendingReason || reason;
+      currentWalletSummaryRefreshPendingReason = null;
+      currentWalletSummaryRefreshInFlight = true;
+      let retryAfterCooldown = false;
+      Promise.resolve()
+        .then(() => checks.runWalletSummaryCheck())
+        .then((result) => {
+          if (!result?.ok && result?.rateLimited) {
+            retryAfterCooldown = true;
+            return;
+          }
+          if (result?.ok && ctx.guiBridge?.emitNow) ctx.guiBridge.emitNow();
+          logDebug("watch", "current_wallet_summary_refreshed", {
+            reason: pending,
+            ok: result?.ok === true,
+          });
+        })
+        .catch((error) => {
+          if (error?.rateLimited) {
+            retryAfterCooldown = true;
+            return;
+          }
+          logDebug("watch", "current_wallet_summary_refresh_failed", {
+            reason: pending,
+            error: error.message,
+          });
+        })
+        .finally(() => {
+          currentWalletSummaryRefreshInFlight = false;
+          if (
+            retryAfterCooldown ||
+            currentWalletSummaryRefreshRequestedWhileInFlight
+          ) {
+            const nextReason =
+              currentWalletSummaryRefreshPendingReason || pending;
+            currentWalletSummaryRefreshRequestedWhileInFlight = false;
+            scheduleCurrentWalletSummaryRefresh(nextReason);
+          }
+        });
+    };
+
+    const cooldownMs = Math.max(
+      0,
+      Number(mcp.getToolCooldownRemainingMs?.("get_wallet_summary") || 0),
+    );
+    currentWalletSummaryRefreshTimer = setTimeout(
+      run,
+      Math.max(postClaimSettleDelayMs(), cooldownMs + 250),
+    );
   }
 
   function nextTraceId(kind = "cycle") {
@@ -1955,6 +2041,12 @@ function createWatchService(
         missionResult: initialMissionResult,
       };
     }
+    const finishClaimLifecycle = (followup) => {
+      if (Number(followup?.claimed || 0) > 0) {
+        scheduleCurrentWalletSummaryRefresh("claim");
+      }
+      return followup;
+    };
     let currentClaimed = Number(claimed || 0);
     if (Array.isArray(claims) && claims.length > 0) {
       const successFromClaimLines = logClaimDetails(
@@ -2007,7 +2099,9 @@ function createWatchService(
       missionResultLoader,
     });
 
-    if (followup.mutationStateMissing === true) return followup;
+    if (followup.mutationStateMissing === true) {
+      return finishClaimLifecycle(followup);
+    }
 
     if (claimWorkPaused()) {
       trace("watch", "claim_lifecycle_after_followup_paused", {
@@ -2016,7 +2110,7 @@ function createWatchService(
         assigned: followup.assigned,
         assignReason,
       });
-      return followup;
+      return finishClaimLifecycle(followup);
     }
 
     const shouldSkipPostClaimStatsRefresh =
@@ -2046,7 +2140,7 @@ function createWatchService(
         assigned: followup.assigned,
         assignReason,
       });
-      return followup;
+      return finishClaimLifecycle(followup);
     }
 
     if (finalTraceAction) {
@@ -2069,7 +2163,7 @@ function createWatchService(
       }
     }
 
-    return followup;
+    return finishClaimLifecycle(followup);
   }
 
   async function runSharedClaimFollowup({
@@ -3406,15 +3500,10 @@ function createWatchService(
         });
         if (transitions.claimedTransitions > 0) {
           liveStateRecoveryRunning = true;
-          logClaimTransitionDetails(
-            transitions.claimed,
-            "[WATCH] ✅ Claimed (live state)",
-            null,
-          );
           logWithTimestamp(
             "[ASSIGN] ▶ Post-claim assign check (live state)...",
           );
-          const followup = await runSharedClaimFollowup({
+          const followup = await runClaimLifecycle({
             claimed: transitions.claimedTransitions,
             claims: transitions.claimed,
             beforeSnapshot: liveSelectedSnapshot,

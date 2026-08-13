@@ -52,8 +52,8 @@ const DEFAULT_ACTION_COOLDOWN_SECONDS = {
 };
 const DEFAULT_MAX_ACTION_COST = {
   nft_cooldown_reset: 1000,
-  mission_reroll: 5500,
-  mission_swap: 500,
+  mission_reroll: 500,
+  mission_swap: 250,
   mission_slot_unlock: 2500,
 };
 const DEFAULT_MNEMONIC_DERIVATION_PATH = "m/44'/501'/0'/0'";
@@ -441,7 +441,9 @@ function createSignerService(ctx, logger) {
         const matches = value.match(/https?:\/\/[^\s"'<>]+/gi) || [];
         for (const matched of matches) {
           const clean = matched.replace(/[),.;]+$/, "");
-          if (/(sign|bridge|browser|wallet|transaction|tx)/i.test(path + clean)) {
+          if (
+            /(sign|bridge|browser|wallet|transaction|tx)/i.test(path + clean)
+          ) {
             candidates.push(clean);
           }
         }
@@ -478,7 +480,8 @@ function createSignerService(ctx, logger) {
         param: "missionSwapId",
       },
       {
-        id: sc.resetToken || sc.cooldownId || sc.nftCooldownResetId || sc.resetId,
+        id:
+          sc.resetToken || sc.cooldownId || sc.nftCooldownResetId || sc.resetId,
         path: "/mcp/sign-nft-cooldown-reset",
         param: "resetToken",
       },

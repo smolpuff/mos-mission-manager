@@ -3982,7 +3982,7 @@ function ControlView() {
                           <div className="flex items-center justify-between gap-3">
                             <div>
                               <div className="text-lg font-semibold text-slate-100">
-                                Change Mission for 500 PBP
+                                Change Mission for 250 PBP
                               </div>
                               <div className="text-xs text-slate-400">
                                 Pick the mission this slot should run.
@@ -5541,8 +5541,7 @@ function ControlView() {
                                       !slotLocked &&
                                       slotUnlockExpiresAtLabel
                                     ? slotUnlockExpiresAtLabel
-                                    : slot !== 4
-                                      && canChangeMission
+                                    : slot !== 4 && canChangeMission
                                       ? `↻ Select New Mission`
                                       : "\u00A0"}
                               </div>
@@ -5584,7 +5583,7 @@ function ControlView() {
                       Change Mission for{" "}
                       {Number(
                         actionResultCost(missionPickerPrepared, ["swapCost"]) ??
-                          500,
+                          250,
                       ).toLocaleString()}{" "}
                       PBP
                     </div>
