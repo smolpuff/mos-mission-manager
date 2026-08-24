@@ -64,6 +64,28 @@ export default function NavMain({
         <a
           href="#"
           className={`items-center justify-center flex aspect-square w-full | text-[10px] font-thin uppercase ${
+            currentPage === "pbp_timers" ? "is-active nav-active" : ""
+          }`}
+          onClick={(e) => {
+            e.preventDefault();
+            onNavigate?.("pbp_timers");
+          }}
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            viewBox="0 0 640 640"
+            className="nav-icon"
+            style={{
+              fill: currentPage === "pbp_timers" ? ACTIVE_ICON_FILL : undefined,
+            }}
+          >
+            <path d="M320 64C178.6 64 64 178.6 64 320S178.6 576 320 576 576 461.4 576 320 461.4 64 320 64zm0 48c114.9 0 208 93.1 208 208s-93.1 208-208 208-208-93.1-208-208 93.1-208 208-208zm-24 72v152l112 64 24-41.6-88-50.3V184h-48z" />
+          </svg>
+          Timers
+        </a>
+        <a
+          href="#"
+          className={`items-center justify-center flex aspect-square w-full | text-[10px] font-thin uppercase ${
             currentPage === "nfts" ? "is-active nav-active" : ""
           }`}
           onClick={(e) => {
@@ -149,6 +171,7 @@ export default function NavMain({
           </svg>
           Stats
         </a>
+
         <button
           className={` items-center justify-center flex aspect-square w-full | text-[10px] font-thin uppercase ${
             isCliActive ? "is-active nav-active" : ""

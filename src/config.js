@@ -17,6 +17,7 @@ const pendingSaves = new WeakMap();
 const DEFAULT_TARGET_MISSIONS = ["Do it All!", "Race!"];
 const DESKTOP_MANAGED_KEYS = [
   "missionCompetitionPopupSuppressedThroughNumber",
+  "missionCompetitionLastObservedNumber",
   "missionCompetitionCheckEnabled",
 ];
 const SALVAGE_TOP_LEVEL_KEYS = [
@@ -57,6 +58,7 @@ const SALVAGE_TOP_LEVEL_KEYS = [
   "competitionRangeLockMaxRank",
   "competitionRangeLockPollSeconds",
   "missionCompetitionPopupSuppressedThroughNumber",
+  "missionCompetitionLastObservedNumber",
 ];
 
 function configBackupPath(configPath) {
@@ -474,6 +476,14 @@ function loadConfig(ctx, logWithTimestamp) {
     Number.isFinite(competitionPopupSuppressedThroughNumber) &&
     competitionPopupSuppressedThroughNumber > 0
       ? Math.floor(competitionPopupSuppressedThroughNumber)
+      : 0;
+  const competitionLastObservedNumber = Number(
+    ctx.config.missionCompetitionLastObservedNumber,
+  );
+  ctx.config.missionCompetitionLastObservedNumber =
+    Number.isFinite(competitionLastObservedNumber) &&
+    competitionLastObservedNumber > 0
+      ? Math.floor(competitionLastObservedNumber)
       : 0;
   delete ctx.config.missionCompetitionPopupHideUntilNumberV2;
   delete ctx.config.missionCompetitionDismissedThroughNumber;

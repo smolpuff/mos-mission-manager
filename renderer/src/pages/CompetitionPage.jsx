@@ -1,13 +1,23 @@
-import {
-  competitionOptionLabel,
-  competitionOptionValue,
-} from "../competition-options";
+function formatCompetitionDateTime(value) {
+  const parsed = new Date(String(value || ""));
+  if (!Number.isFinite(parsed.getTime())) return String(value || "Unknown");
+  return new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    timeZoneName: "short",
+  }).format(parsed);
+}
+
+const MAX_RECENT_COMPETITIONS = 3;
 
 export default function CompetitionPage({
   latestCompetition,
   latestCompetitionList,
   selectedCompetitionNumber,
-  setSelectedCompetitionNumber,
+  selectCompetition,
   latestCompetitionBusy,
   latestCompetitionError,
   refreshLatestCompetition,
@@ -18,14 +28,15 @@ export default function CompetitionPage({
     : latestCompetition
       ? [latestCompetition]
       : [];
-  const selectedCompetition =
-    competitions.find(
-      (competition, index) =>
-        competitionOptionValue(competition, index) ===
-        String(selectedCompetitionNumber || ""),
-    ) ||
-    competitions[0] ||
-    latestCompetition;
+  const selectedCompetition = competitions[0] || latestCompetition;
+  const totalCompetitionCount = Math.max(
+    0,
+    Math.floor(Number(latestCompetition?.debug?.totalCompetitionCount) || 0),
+  );
+  const competitionNumbers = Array.from(
+    { length: Math.min(MAX_RECENT_COMPETITIONS, totalCompetitionCount) },
+    (_, index) => totalCompetitionCount - index,
+  );
   const hasCompetitionData = Boolean(selectedCompetition);
   const competitionMissions = Array.isArray(selectedCompetition?.missions)
     ? selectedCompetition.missions
@@ -33,7 +44,7 @@ export default function CompetitionPage({
   const missionColumnClass =
     competitionMissions.length > 4 ? "basis-1/3" : "basis-1/2";
   const showPageLoading =
-    latestCompetitionBusy || (!latestCompetitionError && !hasCompetitionData);
+    !hasCompetitionData && (latestCompetitionBusy || !latestCompetitionError);
 
   if (showPageLoading) {
     return (
@@ -52,37 +63,33 @@ export default function CompetitionPage({
         <div className="-mt-6">
           <h1 className="text-2xl font-normal competition__h leading-tight flex gap-2">
             Competition
-            <span>
+            <span className="competition__number self-center">
               {selectedCompetition?.competitionNumber
                 ? ` ${selectedCompetition.competitionNumber}`
                 : ""}
             </span>{" "}
           </h1>
           <div className="flex gap-4 items-center">
-            {competitions.length > 1 ? (
+            {competitionNumbers.length > 1 ? (
               <select
                 className="select select-sm  bg-black/50 focus-within:bg-black border-white/10 text-slate-100 w-auto"
                 value={String(selectedCompetitionNumber || "")}
-                onChange={(event) =>
-                  setSelectedCompetitionNumber?.(event.target.value)
-                }
+                onChange={(event) => selectCompetition?.(event.target.value)}
                 disabled={latestCompetitionBusy}
               >
-                {competitions.map((competition, index) => {
-                  const value = competitionOptionValue(competition, index);
-                  const label = competitionOptionLabel(competition, index);
-                  return (
-                    <option key={value} value={value}>
-                      {label}
-                    </option>
-                  );
-                })}
+                {competitionNumbers.map((competitionNumber) => (
+                  <option key={competitionNumber} value={competitionNumber}>
+                    Competition {competitionNumber}
+                  </option>
+                ))}
               </select>
             ) : null}{" "}
             <button
               type="button"
               className="btn btn-xs btn-black z-10 rounded-sm font-normal px-2 inline-flex"
-              onClick={() => void refreshLatestCompetition()}
+              onClick={() =>
+                void refreshLatestCompetition(selectedCompetitionNumber)
+              }
               disabled={latestCompetitionBusy}
               title={
                 latestCompetition
@@ -103,15 +110,15 @@ export default function CompetitionPage({
         <div className="gap-1 text-xs justify-self-end flex flex-col flex-0">
           <div>
             Start{" "}
-            {selectedCompetition?.start ||
-              selectedCompetition?.datesText ||
-              "Unknown"}
+            {formatCompetitionDateTime(
+              selectedCompetition?.start || selectedCompetition?.datesText,
+            )}
           </div>
           <div>
             End{" "}
-            {selectedCompetition?.end ||
-              selectedCompetition?.datesText ||
-              "Unknown"}
+            {formatCompetitionDateTime(
+              selectedCompetition?.end || selectedCompetition?.datesText,
+            )}
           </div>
         </div>
       </div>

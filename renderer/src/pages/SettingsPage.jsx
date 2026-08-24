@@ -478,7 +478,7 @@ export default function SettingsPage({
                   )
                 }
                 title="Check for Mission Competitions"
-                helperText="Periodically checks for new mission competitions"
+                helperText="Periodically checks the public competition count for a new event"
                 styling="!text-base"
               />{" "}
             </div>

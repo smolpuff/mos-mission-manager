@@ -10,6 +10,7 @@ import SettingsPage from "./SettingsPage";
 import StatsPage from "./StatsPage";
 import RentalsPage from "./RentalsPage";
 import NftsPage from "./NftsPage";
+import PbpTimersPage from "./PbpTimersPage";
 import { competitionOptionValue } from "../competition-options";
 
 import pbpIcon from "../img/icon_pbp.webp";
@@ -38,7 +39,7 @@ const AUTO_UPDATE_BACKGROUND_THRESHOLD_MS = 24 * 60 * 60 * 1000;
 const AUTO_UPDATE_BACKGROUND_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const MISSION_COMPETITION_CHECK_THRESHOLD_MS = 24 * 60 * 60 * 1000;
 const MISSION_COMPETITION_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
-const MISSION_COMPETITION_END_BUFFER_MS = 15 * 60 * 1000;
+const COMPETITION_PAGE_REFRESH_INTERVAL_MS = 60 * 1000;
 
 function renderLogText(text) {
   const value = String(text || "");
@@ -60,45 +61,12 @@ function useDesktopBridge() {
   return window.missionsDesktop;
 }
 
-function competitionSummaryFrom(raw) {
-  const competition = raw && typeof raw === "object" ? raw : {};
-  const competitionNumber = String(competition?.competitionNumber || "").trim();
-  const start = String(
-    competition?.start || competition?.datesText || "Unknown",
-  ).trim();
-  const end = String(
-    competition?.end || competition?.datesText || "Unknown",
-  ).trim();
-  return {
-    competitionNumber,
-    title: competitionNumber
-      ? `Competition ${competitionNumber}`
-      : "Mission Competition",
-    start,
-    end,
-    missions: Array.isArray(competition?.missions) ? competition.missions : [],
-    prizes: Array.isArray(competition?.prizes) ? competition.prizes : [],
-    resultsStatus: String(competition?.resultsStatus || "").trim() || null,
-  };
-}
-
-function competitionNumberValue(raw) {
-  const competition = raw && typeof raw === "object" ? raw : {};
-  const value = Number(
-    String(competition?.competitionNumber || "")
-      .trim()
-      .replace(/[^\d]/g, ""),
-  );
-  return Number.isFinite(value) && value > 0 ? value : null;
-}
-
-function storedCompetitionNumberValue(storedId) {
-  const value = Number(
-    String(storedId || "")
-      .trim()
-      .replace(/[^\d]/g, ""),
-  );
-  return Number.isFinite(value) && value > 0 ? value : null;
+function competitionListFrom(raw) {
+  if (!raw || typeof raw !== "object") return [];
+  if (Array.isArray(raw.competitions) && raw.competitions.length) {
+    return raw.competitions;
+  }
+  return [raw];
 }
 
 function missionNameKey(value) {
@@ -157,13 +125,6 @@ function formatRemainingMs(ms) {
   return hrs > 0 ? `${days}d ${hrs}h remaining` : `${days}d remaining`;
 }
 
-function competitionDateMs(value) {
-  const text = String(value || "").trim();
-  if (!text || /^unknown$/i.test(text)) return null;
-  const parsed = Date.parse(text);
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
 function getSlotUnlockExpiresAtLabel(slotUnlockSummary) {
   if (!slotUnlockSummary || typeof slotUnlockSummary !== "object") return null;
   const raw = slotUnlockSummary.raw || slotUnlockSummary;
@@ -172,72 +133,6 @@ function getSlotUnlockExpiresAtLabel(slotUnlockSummary) {
   );
   if (!expiresAt || expiresAt <= Date.now()) return null;
   return formatRemainingMs(expiresAt - Date.now());
-}
-
-function competitionStatusFrom(summary, isNewCompetition) {
-  const now = Date.now();
-  const startMs = competitionDateMs(summary?.start);
-  const endMs = competitionDateMs(summary?.end);
-  if (endMs && now > endMs) {
-    return {
-      label: "Ended",
-      className: "badge bg-slate-300 text-slate-900 border-transparent",
-    };
-  }
-  if (startMs && now < startMs) {
-    if (startMs - now <= 24 * 60 * 60 * 1000) {
-      return {
-        label: "Starting Soon!",
-        className: "badge bg-warning text-slate-900 border-transparent",
-      };
-    }
-    return {
-      label: "Soon",
-      className: "badge bg-warning text-slate-900 border-transparent",
-    };
-  }
-  return { label: "Live!", className: "badge badge-success" };
-}
-
-function competitionLifecycleFromSummary(summary) {
-  const now = Date.now();
-  const startMs = competitionDateMs(summary?.start);
-  const endMs = competitionDateMs(summary?.end);
-  if (Number.isFinite(endMs) && now > endMs) {
-    return { state: "ended", startMs, endMs };
-  }
-  if (Number.isFinite(startMs) && now < startMs) {
-    return { state: "upcoming", startMs, endMs };
-  }
-  if (Number.isFinite(startMs) || Number.isFinite(endMs)) {
-    return { state: "active", startMs, endMs };
-  }
-  return { state: "unknown", startMs, endMs };
-}
-
-function latestCompetitionNotificationSummary(rawCompetition) {
-  const items = Array.isArray(rawCompetition?.competitions)
-    ? rawCompetition.competitions
-    : rawCompetition
-      ? [rawCompetition]
-      : [];
-  if (!items.length) return null;
-
-  const normalized = items
-    .map((item) => {
-      const summary = competitionSummaryFrom(item);
-      const competitionNumber = competitionNumberValue(summary);
-      return {
-        summary,
-        competitionNumber,
-      };
-    })
-    .filter((entry) => entry.competitionNumber !== null);
-
-  if (!normalized.length) return null;
-  return normalized.sort(
-    (a, b) => b.competitionNumber - a.competitionNumber,
-  )[0];
 }
 
 function shouldShowCompetitionNotification({
@@ -652,6 +547,7 @@ function ControlView() {
   const [latestCompetitionList, setLatestCompetitionList] = useState([]);
   const [selectedCompetitionNumber, setSelectedCompetitionNumber] =
     useState("");
+  const selectedCompetitionNumberRef = useRef("");
   const [latestCompetitionBusy, setLatestCompetitionBusy] = useState(false);
   const [latestCompetitionError, setLatestCompetitionError] = useState(null);
   const [createWalletOpen, setCreateWalletOpen] = useState(false);
@@ -691,6 +587,7 @@ function ControlView() {
   const dismissedCompetitionNotificationIdsRef = useRef(new Set());
   const competitionNotificationSuppressCheckedRef = useRef(false);
   const competitionNotificationCeilingNumberRef = useRef(null);
+  const latestCompetitionRequestActiveRef = useRef(false);
   const lastThrottleModalKeyRef = useRef(null);
   const pendingModeSelectionRef = useRef(null);
   const pendingModeReleaseTimerRef = useRef(null);
@@ -1142,79 +1039,72 @@ function ControlView() {
     return () => clearTimeout(timer);
   }, [bridge]);
 
-  const refreshLatestCompetition = async () => {
+  const refreshLatestCompetition = async (requestedNumber = null) => {
     if (!bridge?.getLatestCompetition) {
       setLatestCompetitionError(
         "Desktop bridge missing getLatestCompetition()",
       );
       return;
     }
+    if (latestCompetitionRequestActiveRef.current) return;
+    latestCompetitionRequestActiveRef.current = true;
     setLatestCompetitionBusy(true);
     setLatestCompetitionError(null);
     try {
-      const res = await bridge.getLatestCompetition({});
-      if (!res?.ok) throw new Error(res?.error || "Scrape failed.");
+      const res = await bridge.getLatestCompetition({
+        competitionPick: "first",
+        includeCompetitionNumber: true,
+        maxCompetitions: 1,
+        competitionNumber:
+          Number.isFinite(Number(requestedNumber)) &&
+          Number(requestedNumber) > 0
+            ? Math.floor(Number(requestedNumber))
+            : undefined,
+      });
+      if (!res?.ok) throw new Error(res?.error || "Competition fetch failed.");
       const competition = res.competition || null;
-      const competitions = Array.isArray(competition?.competitions)
-        ? competition.competitions
-        : competition
-          ? [competition]
-          : [];
+      const competitions = competitionListFrom(competition);
       setLatestCompetition(competition);
       setLatestCompetitionList(competitions);
-      setSelectedCompetitionNumber((current) => {
-        if (!competitions.length) return "";
-        const stillExists = competitions.some(
-          (item, index) => competitionOptionValue(item, index) === current,
-        );
-        if (stillExists) return current;
-        return competitionOptionValue(competitions[0], 0);
-      });
+      const loadedNumber = String(competition?.competitionNumber || "");
+      selectedCompetitionNumberRef.current = loadedNumber;
+      setSelectedCompetitionNumber(loadedNumber);
     } catch (e) {
       setLatestCompetitionError(String(e?.message || e));
     } finally {
+      latestCompetitionRequestActiveRef.current = false;
       setLatestCompetitionBusy(false);
     }
   };
 
   const checkForNewMissionCompetition = async () => {
     if (missionCompetitionCheckEnabled !== true) return;
-    if (!bridge?.getLatestCompetition) return;
-    setLatestCompetitionBusy(true);
-    setLatestCompetitionError(null);
-    let deferredNextCheckAt = null;
+    if (!bridge?.getCompetitionCount) return;
     try {
-      const res = await bridge.getLatestCompetition({});
-      if (!res?.ok) throw new Error(res?.error || "Scrape failed.");
-      const competition = res.competition || null;
-      setLatestCompetition(competition);
-      setLatestCompetitionList(
-        Array.isArray(competition?.competitions)
-          ? competition.competitions
-          : competition
-            ? [competition]
-            : [],
-      );
-      setSelectedCompetitionNumber((current) => {
-        const competitions = Array.isArray(competition?.competitions)
-          ? competition.competitions
-          : competition
-            ? [competition]
-            : [];
-        if (!competitions.length) return "";
-        const stillExists = competitions.some(
-          (item, index) => competitionOptionValue(item, index) === current,
-        );
-        if (stillExists) return current;
-        return competitionOptionValue(competitions[0], 0);
-      });
-      if (!competition) return;
-      const candidate = latestCompetitionNotificationSummary(competition);
-      if (!candidate) return;
-      const { summary, competitionNumber } = candidate;
+      const result = await bridge.getCompetitionCount();
+      if (!result?.ok) {
+        throw new Error(result?.error || "Competition count check failed.");
+      }
+      const competitionNumber = Math.floor(Number(result.total));
+      if (!Number.isFinite(competitionNumber) || competitionNumber <= 0) return;
       competitionNotificationCeilingNumberRef.current = competitionNumber;
       const response = await bridge.getConfig();
       const config = response?.config || {};
+      const lastObservedNumber = Math.floor(
+        Number(config.missionCompetitionLastObservedNumber),
+      );
+      await bridge.updateConfig({
+        missionCompetitionLastObservedNumber: Math.max(
+          Number.isFinite(lastObservedNumber) && lastObservedNumber > 0
+            ? lastObservedNumber
+            : 0,
+          competitionNumber,
+        ),
+      });
+      if (!Number.isFinite(lastObservedNumber) || lastObservedNumber <= 0) {
+        return;
+      }
+      if (competitionNumber <= lastObservedNumber) return;
       const shouldShow = shouldShowCompetitionNotification({
         competitionNumber,
         suppressedThroughNumber:
@@ -1222,37 +1112,57 @@ function ControlView() {
       });
       const isDismissedThisSession =
         dismissedCompetitionNotificationIdsRef.current.has(competitionNumber);
-      const statusBadge = competitionStatusFrom(summary, shouldShow);
       if (shouldShow && !isDismissedThisSession) {
+        let notificationCompetition = null;
+        if (bridge?.getLatestCompetition) {
+          try {
+            const detailResult = await bridge.getLatestCompetition({
+              competitionPick: "first",
+              includeCompetitionNumber: true,
+              maxCompetitions: 1,
+              competitionNumber,
+            });
+            if (detailResult?.ok) {
+              notificationCompetition = detailResult.competition || null;
+            }
+          } catch {
+            // The count notification is still useful if detail loading fails.
+          }
+        }
         setCompetitionNotificationSuppressChecked(false);
         competitionNotificationSuppressCheckedRef.current = false;
         setCompetitionNotificationModal({
-          ...summary,
-          statusBadge,
+          ...(notificationCompetition || {}),
+          competitionNumber: String(competitionNumber),
+          title: `Competition ${competitionNumber}`,
+          start: notificationCompetition?.start || null,
+          end: notificationCompetition?.end || null,
+          missions: Array.isArray(notificationCompetition?.missions)
+            ? notificationCompetition.missions
+            : [],
+          prizes: Array.isArray(notificationCompetition?.prizes)
+            ? notificationCompetition.prizes
+            : [],
+          resultsStatus: notificationCompetition?.resultsStatus || null,
+          statusBadge: {
+            label: "New!",
+            className: "badge badge-success",
+          },
         });
       }
-      const lifecycle = competitionLifecycleFromSummary(summary);
-      if (
-        lifecycle.state === "active" &&
-        Number.isFinite(lifecycle.endMs) &&
-        lifecycle.endMs > Date.now()
-      ) {
-        deferredNextCheckAt =
-          lifecycle.endMs + MISSION_COMPETITION_END_BUFFER_MS;
-      }
-    } catch (e) {
-      setLatestCompetitionError(String(e?.message || e));
+    } catch {
+      // This background check is intentionally silent. Opening the Competition
+      // page performs the visible active-competition fetch and reports errors.
     } finally {
       lastMissionCompetitionCheckAtRef.current = Date.now();
-      nextMissionCompetitionCheckAtRef.current = deferredNextCheckAt;
-      setLatestCompetitionBusy(false);
+      nextMissionCompetitionCheckAtRef.current = null;
     }
   };
 
   useEffect(() => {
     if (startupCompetitionCheckRequestedRef.current) return;
     if (missionCompetitionCheckEnabled !== true) return;
-    if (!bridge?.getLatestCompetition) return;
+    if (!bridge?.getCompetitionCount) return;
     const timer = setTimeout(() => {
       startupCompetitionCheckRequestedRef.current = true;
       void checkForNewMissionCompetition();
@@ -1262,7 +1172,7 @@ function ControlView() {
 
   useEffect(() => {
     if (missionCompetitionCheckEnabled !== true) return;
-    if (!bridge?.getLatestCompetition) return;
+    if (!bridge?.getCompetitionCount) return;
     let cancelled = false;
     let timer = null;
 
@@ -1311,15 +1221,12 @@ function ControlView() {
 
   useEffect(() => {
     if (currentPage !== "mish_tish") return;
-    if (latestCompetition || latestCompetitionBusy || latestCompetitionError)
-      return;
     void refreshLatestCompetition();
-  }, [
-    currentPage,
-    latestCompetition,
-    latestCompetitionBusy,
-    latestCompetitionError,
-  ]);
+    const timer = setInterval(() => {
+      void refreshLatestCompetition(selectedCompetitionNumberRef.current);
+    }, COMPETITION_PAGE_REFRESH_INTERVAL_MS);
+    return () => clearInterval(timer);
+  }, [currentPage, bridge]);
 
   const setMissionResetEnabled = async (enabled) => {
     if (isMissionLikeMode) return;
@@ -1946,7 +1853,7 @@ function ControlView() {
       : 2500;
   const slotUnlockExpiresAtLabel =
     getSlotUnlockExpiresAtLabel(slotUnlockSummary);
-  const canUnlockSlot4 =
+  const slot4UnlockConfirmed =
     slotUnlockSummary?.canUnlockMore === true &&
     Number(slotUnlockSummary?.nextUnlockSlot) === 4;
   const isMissionSlotLocked = (slot) => {
@@ -2092,15 +1999,17 @@ function ControlView() {
   }, [onboardingMissionCatalog]);
   const slots = liveSlots;
 
-  const mainStatusLabel = manualCheckBusy
-    ? "Manual check..."
-    : isStarting
-      ? "Starting up..."
-      : activityLabel
-        ? activityLabel
-        : status.running
-          ? "Watching missions..."
-          : "Stopped";
+  const mainStatusLabel = slotUnlockBusy
+    ? "Checking slot 4..."
+    : manualCheckBusy
+      ? "Manual check..."
+      : isStarting
+        ? "Starting up..."
+        : activityLabel
+          ? activityLabel
+          : status.running
+            ? "Watching missions..."
+            : "Stopped";
 
   useEffect(() => {
     if (status.running) return;
@@ -2623,7 +2532,8 @@ function ControlView() {
     };
 
     if (!status.running) {
-      await bridge.startBackend();
+      const started = await bridge.startBackend();
+      if (started?.startCancelled === true) return;
     }
     await applyPersistedModeToBackend();
     await bridge.sendCommand("resume");
@@ -4503,7 +4413,14 @@ function ControlView() {
               latestCompetition={latestCompetition}
               latestCompetitionList={latestCompetitionList}
               selectedCompetitionNumber={selectedCompetitionNumber}
-              setSelectedCompetitionNumber={setSelectedCompetitionNumber}
+              selectCompetition={(competitionNumber) => {
+                const nextNumber = String(competitionNumber || "");
+                selectedCompetitionNumberRef.current = nextNumber;
+                setSelectedCompetitionNumber(nextNumber);
+                setLatestCompetition(null);
+                setLatestCompetitionList([]);
+                void refreshLatestCompetition(nextNumber);
+              }}
               latestCompetitionBusy={latestCompetitionBusy}
               latestCompetitionError={latestCompetitionError}
               refreshLatestCompetition={refreshLatestCompetition}
@@ -4521,6 +4438,9 @@ function ControlView() {
             <NftsPage bridge={bridge} signerMode={status.signerMode} />
           </div>
           {currentPage === "rentals" ? <RentalsPage bridge={bridge} /> : null}
+          {currentPage === "pbp_timers" ? (
+            <PbpTimersPage bridge={bridge} />
+          ) : null}
           {currentPage !== "missions" ? null : (
             <>
               <div className="space-y-1.5">
@@ -4542,7 +4462,11 @@ function ControlView() {
                             : void startMissions()
                         }
                       >
-                        {!status.running ? "Start" : "Press to stop"}
+                        {!status.running
+                          ? "Start"
+                          : slotUnlockBusy
+                            ? "Cancel unlock"
+                            : "Press to stop"}
                       </button>
                     </div>
                   </div>
@@ -5063,7 +4987,7 @@ function ControlView() {
                           </div>
                         </>
                         <div
-                          className={`mt-4 w-full flex items-center  gap-3 ${!isMissionMode ? "grayscale opacity-60" : ""}`}
+                          className={`mt-1 w-full flex items-center  gap-3 ${!isMissionMode ? "grayscale opacity-60" : ""}`}
                         >
                           <div className="flex-1 items-center">
                             <ToggleSwitch
@@ -5212,14 +5136,13 @@ function ControlView() {
                       const slotLocked = isMissionSlotLocked(slot);
 
                       const showRealLockedSlot4 =
-                        slotLocked && slot === 4 && canUnlockSlot4;
+                        slot === 4 && slotLocked && slot4UnlockConfirmed;
 
-                      const imgSrc =
-                        slotLocked && slot === 4
-                          ? koreaTakeitImg
-                          : pickSlotImage(entry);
+                      const imgSrc = showRealLockedSlot4
+                        ? koreaTakeitImg
+                        : pickSlotImage(entry);
 
-                      const usesKoreaTakeitArt = slotLocked && slot === 4;
+                      const usesKoreaTakeitArt = showRealLockedSlot4;
 
                       const hasAssignedNft = Boolean(
                         String(
@@ -5502,7 +5425,7 @@ function ControlView() {
                                 </div>
                               ) : null}
 
-                              {slot === 4 && canUnlockSlot4 ? (
+                              {slot === 4 && slot4UnlockConfirmed ? (
                                 <button
                                   type="button"
                                   className="absolute inset-0 z-30 grid cursor-pointer place-items-center text-white font-semibold uppercase text-xs"
@@ -5513,9 +5436,7 @@ function ControlView() {
                                     setSlotUnlockError(null);
                                     setSlotUnlockResult(null);
                                   }}
-                                >
-                                  {/* Click to unlock */}
-                                </button>
+                                />
                               ) : null}
                             </div>
 

@@ -4,17 +4,550 @@ const { withHeadlessWindow } = require("./headless");
 
 const COMPETITIONS_URL =
   "https://pixelbypixel.studio/missions/competitions";
+const COMPETITION_STATUS_URL =
+  "https://pixelbypixel.studio/api/missions/competitions";
+const COMPETITION_HISTORY_URL =
+  "https://pixelbypixel.studio/api/competish/history?offset=0";
+const COMPETITION_COUNT_URL =
+  "https://pixelbypixel.studio/api/competish/history?offset=1000000";
+const MAX_RECENT_COMPETITIONS = 3;
 
 function coerceText(value) {
   const text = String(value || "").replace(/\s+/g, " ").trim();
   return text || null;
 }
 
-async function scrapeLatestCompetition(opts = {}) {
+function extractNextFlightText(html) {
+  const source = String(html || "");
+  const pattern = /self\.__next_f\.push\((\[1,.*?\])\)<\/script>/gs;
+  let flightText = "";
+  let match;
+
+  while ((match = pattern.exec(source))) {
+    try {
+      const chunk = JSON.parse(match[1]);
+      if (chunk?.[0] === 1 && typeof chunk?.[1] === "string") {
+        flightText += chunk[1];
+      }
+    } catch {
+      // Ignore unrelated or malformed Next.js flight chunks. A later chunk may
+      // still contain the competitions payload.
+    }
+  }
+
+  return flightText;
+}
+
+function extractBalancedJsonObject(source, start) {
+  if (start < 0 || source[start] !== "{") return null;
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+
+  for (let index = start; index < source.length; index += 1) {
+    const char = source[index];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (char === "\\") escaped = true;
+      else if (char === '"') inString = false;
+      continue;
+    }
+    if (char === '"') {
+      inString = true;
+      continue;
+    }
+    if (char === "{") depth += 1;
+    if (char === "}" && --depth === 0) {
+      return source.slice(start, index + 1);
+    }
+  }
+
+  return null;
+}
+
+function competitionHistoryUrl(offset = 0) {
+  const parsedOffset = Math.max(0, Math.floor(Number(offset) || 0));
+  return `https://pixelbypixel.studio/api/competish/history?offset=${parsedOffset}`;
+}
+
+async function readFirstCompetitionResponse(response) {
+  return readCompetitionResponse(response, 1);
+}
+
+async function readCompetitionResponse(
+  response,
+  limit = MAX_RECENT_COMPETITIONS,
+) {
+  const safeLimit = Math.min(
+    MAX_RECENT_COMPETITIONS,
+    Math.max(1, Math.floor(Number(limit) || 1)),
+  );
+  if (!response?.body?.getReader) {
+    const payload = await response.json();
+    return {
+      competitions: Array.isArray(payload?.competitions)
+        ? payload.competitions.slice(0, safeLimit)
+        : [],
+      total: payload?.total,
+      hasMore: payload?.hasMore,
+    };
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let source = "";
+  let competitions = [];
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      source += decoder.decode(value, { stream: true });
+      const markerIndex = source.search(/"competitions"\s*:\s*\[/);
+      if (markerIndex < 0) continue;
+      competitions = [];
+      let objectStart = source.indexOf("{", markerIndex);
+      while (objectStart >= 0 && competitions.length < safeLimit) {
+        const objectText = extractBalancedJsonObject(source, objectStart);
+        if (!objectText) break;
+        competitions.push(JSON.parse(objectText));
+        objectStart = source.indexOf("{", objectStart + objectText.length);
+      }
+      if (competitions.length >= safeLimit) {
+        await reader.cancel();
+        return { competitions, hasMore: true };
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  if (competitions.length) {
+    return { competitions, hasMore: false };
+  }
+  throw new Error("competition history returned no competitions");
+}
+
+function assertCompetitionWithinRecentWindow(
+  requestedCompetitionNumber,
+  totalCompetitionCount,
+) {
+  if (
+    !Number.isFinite(requestedCompetitionNumber) ||
+    requestedCompetitionNumber <= 0
+  ) {
+    return;
+  }
+  if (!Number.isFinite(totalCompetitionCount) || totalCompetitionCount <= 0) {
+    throw new Error(
+      "competition count is required to load a numbered competition",
+    );
+  }
+  if (
+    requestedCompetitionNumber > totalCompetitionCount ||
+    requestedCompetitionNumber <
+      Math.max(1, totalCompetitionCount - MAX_RECENT_COMPETITIONS + 1)
+  ) {
+    throw new Error(
+      `only the latest ${MAX_RECENT_COMPETITIONS} competitions can be loaded`,
+    );
+  }
+}
+
+function parseCompetitionPageData(html) {
+  const flightText = extractNextFlightText(html);
+  const marker = '{"competitions":[';
+  const start = flightText.indexOf(marker);
+  const jsonText = extractBalancedJsonObject(flightText, start);
+  if (!jsonText) {
+    throw new Error("competition data was not found in the page response");
+  }
+
+  const payload = JSON.parse(jsonText);
+  if (!Array.isArray(payload?.competitions)) {
+    throw new Error("competition page returned an invalid data payload");
+  }
+  return payload;
+}
+
+function formatCompetitionPrize(prize) {
+  if (typeof prize === "string") return coerceText(prize);
+  if (!prize || typeof prize !== "object") return null;
+  const range = coerceText(prize.range);
+  const reward = coerceText(prize.reward);
+  if (range && reward) return `${range}: ${reward}`;
+  return reward || range;
+}
+
+function normalizePageCompetition(
+  competition,
+  index = 0,
+  derivedCompetitionNumber = null,
+) {
+  const rows = Array.isArray(competition?.rows) ? competition.rows : [];
+  const status = coerceText(competition?.status);
+  const start = coerceText(competition?.start_ts);
+  const end = coerceText(competition?.end_ts);
+  const scrapedAt = new Date().toISOString();
+  return {
+    competitionNumber: coerceText(
+      competition?.competition_number ||
+        competition?.number ||
+        derivedCompetitionNumber,
+    ),
+    start,
+    end,
+    datesText: start && end ? `${start} → ${end}` : start || end,
+    missions: Array.isArray(competition?.mission_names)
+      ? competition.mission_names.map(coerceText).filter(Boolean)
+      : [],
+    prizes: Array.isArray(competition?.prizes)
+      ? competition.prizes.map(formatCompetitionPrize).filter(Boolean)
+      : [],
+    resultsStatus:
+      rows.length > 0 ? null : status ? `Competition status: ${status}` : null,
+    userRows: rows
+      .map((row) => ({
+        rank: Number(row?.rank),
+        player: coerceText(row?.display_name),
+        completed: Number.isFinite(Number(row?.completed_missions_in_range))
+          ? Number(row.completed_missions_in_range)
+          : null,
+        uniqueNFTs: Number.isFinite(Number(row?.unique_nfts_used_in_range))
+          ? Number(row.unique_nfts_used_in_range)
+          : null,
+      }))
+      .filter((row) => Number.isFinite(row.rank) && row.rank > 0 && row.player),
+    users: rows.map((row) => coerceText(row?.display_name)).filter(Boolean),
+    sourceUrl: COMPETITIONS_URL,
+    scrapedAt,
+    debug: {
+      source: "next-flight",
+      competitionId: coerceText(competition?.id),
+      status,
+      sourceIndex: index,
+    },
+  };
+}
+
+async function fetchCompetitionCount({ timeoutMs = 20_000 } = {}) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(COMPETITION_COUNT_URL, {
+      headers: {
+        Accept: "application/json",
+        "User-Agent": "missions-v3-mcp competition counter",
+      },
+      signal: controller.signal,
+    });
+    if (!response.ok) {
+      throw new Error(`competition count returned HTTP ${response.status}`);
+    }
+    const payload = await response.json();
+    const total = Number(payload?.total);
+    if (!Number.isFinite(total) || total < 0) {
+      throw new Error("competition count response did not include a total");
+    }
+    return {
+      total: Math.floor(total),
+      sourceUrl: COMPETITION_COUNT_URL,
+      checkedAt: new Date().toISOString(),
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function pickCompetition(competitions, competitionPick) {
+  if (!competitions.length) return null;
+  if (competitionPick === "second") return competitions[1] || competitions[0];
+  if (competitionPick === "last") return competitions.at(-1);
+  if (competitionPick === "active") {
+    const now = Date.now();
+    return competitions.find((competition) => {
+        const start = Date.parse(competition?.start || "");
+        const end = Date.parse(competition?.end || "");
+        return (
+          ["in_progress", "not_started"].includes(
+            String(competition?.debug?.status || "").toLowerCase(),
+          ) ||
+          Number.isFinite(start) &&
+          Number.isFinite(end) &&
+          now >= start &&
+          now <= end
+        );
+      }) || null;
+  }
+  return competitions[0];
+}
+
+async function fetchLatestCompetition(opts = {}) {
+  const competitionPick = ["first", "second", "last", "active"].includes(
+    opts?.competitionPick,
+  )
+    ? opts.competitionPick
+    : "first";
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 20_000);
+  try {
+    const requestHeaders = {
+      Accept: "application/json",
+      "User-Agent": "missions-v3-mcp competition reader",
+    };
+    const requestedMaximum = Number(opts?.maxCompetitions);
+    const maxCompetitions =
+      Number.isFinite(requestedMaximum) && requestedMaximum > 0
+        ? Math.min(MAX_RECENT_COMPETITIONS, Math.floor(requestedMaximum))
+        : 2;
+    let statusPayload = null;
+    let countPayload = null;
+    const requestedNumberForPrefetch = Math.floor(
+      Number(opts?.competitionNumber),
+    );
+    const prefetchedNewestHistoryPayload =
+      competitionPick === "first" &&
+      (!Number.isFinite(requestedNumberForPrefetch) ||
+        requestedNumberForPrefetch <= 0)
+        ? fetch(COMPETITION_HISTORY_URL, {
+            headers: requestHeaders,
+            signal: controller.signal,
+          }).then(async (response) => {
+            if (!response.ok) {
+              throw new Error(
+                `competition history returned HTTP ${response.status}`,
+              );
+            }
+            return readCompetitionResponse(response, maxCompetitions);
+          }).then(
+            (value) => ({ ok: true, value }),
+            (error) => ({ ok: false, error }),
+          )
+        : null;
+    try {
+      const requests = [];
+      if (competitionPick === "active") {
+        requests.push(fetch(COMPETITION_STATUS_URL, {
+          headers: requestHeaders,
+          signal: controller.signal,
+        }).then(async (response) => {
+          if (!response.ok) return null;
+          return response.json();
+        }));
+      }
+      const statusRequestIndex = competitionPick === "active" ? 0 : -1;
+      const countRequestIndex = requests.length;
+      if (
+        !countPayload &&
+        (opts?.includeCompetitionNumber === true ||
+          Number.isFinite(Number(opts?.competitionNumber)))
+      ) {
+        requests.push(fetchCompetitionCount());
+      }
+      const results = await Promise.allSettled(requests);
+      if (
+        statusRequestIndex >= 0 &&
+        results[statusRequestIndex]?.status === "fulfilled"
+      ) {
+        statusPayload = results[statusRequestIndex].value;
+      }
+      if (
+        !countPayload &&
+        results[countRequestIndex]?.status === "fulfilled"
+      ) {
+        countPayload = results[countRequestIndex].value;
+      }
+    } catch {
+      // Status detection is an optimization. History/page data remains the
+      // authoritative fallback if this small endpoint is unavailable.
+    }
+    const hasCurrentCompetition =
+      statusPayload?.active === true ||
+      ["in_progress", "not_started"].includes(statusPayload?.status);
+    if (
+      competitionPick === "active" &&
+      statusPayload &&
+      !hasCurrentCompetition
+    ) {
+      return {
+        competitionNumber:
+          Number.isFinite(Number(countPayload?.total)) && countPayload.total > 0
+            ? String(Math.floor(countPayload.total))
+            : null,
+        start: null,
+        end: null,
+        datesText: null,
+        missions: [],
+        prizes: [],
+        resultsStatus: "No active competition.",
+        userRows: [],
+        users: [],
+        competitions: [],
+        sourceUrl: COMPETITION_STATUS_URL,
+        scrapedAt: new Date().toISOString(),
+        debug: {
+          source: "competition-status-api",
+          competitionPick,
+          detectorStatus: coerceText(statusPayload?.status),
+          active: false,
+        },
+      };
+    }
+    const totalCompetitionCount = Number(countPayload?.total);
+    const requestedCompetitionNumber = Math.floor(
+      Number(opts?.competitionNumber),
+    );
+    assertCompetitionWithinRecentWindow(
+      requestedCompetitionNumber,
+      totalCompetitionCount,
+    );
+    const historyOffset =
+      Number.isFinite(totalCompetitionCount) &&
+      Number.isFinite(requestedCompetitionNumber) &&
+      requestedCompetitionNumber > 0
+        ? Math.max(0, totalCompetitionCount - requestedCompetitionNumber)
+        : 0;
+    const historyUrl = competitionHistoryUrl(historyOffset);
+    let historyPayload;
+    if (prefetchedNewestHistoryPayload) {
+      const prefetchedResult = await prefetchedNewestHistoryPayload;
+      if (!prefetchedResult.ok) throw prefetchedResult.error;
+      historyPayload = prefetchedResult.value;
+    } else {
+      const historyResponse = await fetch(historyUrl, {
+        headers: requestHeaders,
+        signal: controller.signal,
+      });
+      if (!historyResponse.ok) {
+        throw new Error(
+          `competition history returned HTTP ${historyResponse.status}`,
+        );
+      }
+      historyPayload = await readCompetitionResponse(
+        historyResponse,
+        maxCompetitions,
+      );
+    }
+    const historyTotal = Number(
+      historyPayload?.total ?? countPayload?.total,
+    );
+    const currentNumber = Number(countPayload?.total);
+    const rawCompetitions = [
+      ...(competitionPick === "active" &&
+      hasCurrentCompetition &&
+      statusPayload?.competition
+        ? [{
+            competition: statusPayload.competition,
+            number:
+              Number.isFinite(currentNumber) && currentNumber > 0
+                ? Math.floor(currentNumber)
+                : Number.isFinite(historyTotal) && historyTotal > 0
+                  ? Math.floor(historyTotal)
+                  : null,
+          }]
+        : []),
+      ...(Array.isArray(historyPayload?.competitions)
+        ? historyPayload.competitions.map((competition, index) => ({
+            competition,
+            number:
+              Number.isFinite(historyTotal) && historyTotal > historyOffset + index
+                ? Math.floor(historyTotal) - historyOffset - index
+                : null,
+          }))
+        : []),
+    ];
+    const seenIds = new Set();
+    const competitions = rawCompetitions
+      .filter((entry) => {
+        const id = coerceText(entry?.competition?.id);
+        if (!id || seenIds.has(id)) return false;
+        seenIds.add(id);
+        return true;
+      })
+      .map((entry, index) =>
+        normalizePageCompetition(entry.competition, index, entry.number),
+      )
+      .filter(
+        (competition) =>
+          competition.start ||
+          competition.end ||
+          competition.missions.length ||
+          competition.userRows.length,
+      );
+    const primary = pickCompetition(competitions, competitionPick);
+    if (!primary) {
+      if (competitionPick === "active") {
+        return {
+          competitionNumber:
+            Number.isFinite(historyTotal) && historyTotal > 0
+              ? String(Math.floor(historyTotal))
+              : null,
+          start: null,
+          end: null,
+          datesText: null,
+          missions: [],
+          prizes: [],
+          resultsStatus: "No active competition.",
+          userRows: [],
+          users: [],
+          competitions: [],
+          sourceUrl: COMPETITION_STATUS_URL,
+          scrapedAt: new Date().toISOString(),
+          debug: {
+            source: "competition-json-api",
+            competitionPick,
+            active: false,
+            totalCompetitionCount: Number(historyPayload?.total) || null,
+          },
+        };
+      }
+      throw new Error("competition history returned no competitions");
+    }
+    const ordered =
+      competitionPick === "active"
+        ? [primary]
+        : [
+            primary,
+            ...competitions.filter((competition) => competition !== primary),
+          ].slice(0, maxCompetitions);
+    return {
+      ...primary,
+      competitions: ordered,
+      debug: {
+        ...primary.debug,
+        source: "competition-json-api",
+        competitionPick,
+        competitionCount: competitions.length,
+        totalCompetitionCount:
+          Number(countPayload?.total) || Number(historyPayload?.total) || null,
+        historyOffset,
+        historyHasMore: historyPayload?.hasMore === true,
+        status: primary.debug?.status,
+        detectorStatus: coerceText(statusPayload?.status),
+        active: statusPayload?.active === true,
+      },
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function scrapeLatestCompetitionWithBrowser(opts = {}) {
   const competitionPick = ["first", "second", "last", "active"].includes(opts?.competitionPick)
     ? opts.competitionPick
     : "first";
-  const maxCompetitions = 2;
+  const maxCompetitions = MAX_RECENT_COMPETITIONS;
+  const requestedCompetitionNumber = Math.floor(
+    Number(opts?.competitionNumber),
+  );
+  if (
+    Number.isFinite(requestedCompetitionNumber) &&
+    requestedCompetitionNumber > 0
+  ) {
+    const count = await fetchCompetitionCount();
+    assertCompetitionWithinRecentWindow(
+      requestedCompetitionNumber,
+      Number(count?.total),
+    );
+  }
   return withHeadlessWindow(
     COMPETITIONS_URL,
     // Allow styles; some sites hide/replace content until CSS/JS finishes loading.
@@ -210,7 +743,7 @@ async function scrapeLatestCompetition(opts = {}) {
       if (containsPicked) continue;
       picked.push(item.el);
       seenNumbers.add(item.number);
-      if (picked.length >= 10) break;
+      if (picked.length >= ${maxCompetitions}) break;
     }
     return picked;
   };
@@ -243,7 +776,7 @@ async function scrapeLatestCompetition(opts = {}) {
 
   const findCompetitionCards = () => {
     const toggleCards = findCompetitionCardsFromToggles();
-    if (toggleCards.length) return toggleCards.slice(0, 10);
+    if (toggleCards.length) return toggleCards.slice(0, ${maxCompetitions});
 
     const headers = findCompetitionHeaders();
     const cards = [];
@@ -283,7 +816,7 @@ async function scrapeLatestCompetition(opts = {}) {
         const pos = a.compareDocumentPosition(b);
         return pos & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1;
       })
-      .slice(0, 10);
+      .slice(0, ${maxCompetitions});
   };
 
   const competitionCardNumber = (card) => {
@@ -321,6 +854,18 @@ async function scrapeLatestCompetition(opts = {}) {
   const pickCompetitionCard = (pick) => {
     const cards = latestCompetitionCards(findCompetitionCards());
     if (!cards.length) return null;
+    const requestedNumber = ${JSON.stringify(
+      Number.isFinite(requestedCompetitionNumber) &&
+        requestedCompetitionNumber > 0
+        ? requestedCompetitionNumber
+        : null,
+    )};
+    if (requestedNumber) {
+      return (
+        cards.find((card) => competitionCardNumber(card) === requestedNumber) ||
+        null
+      );
+    }
     if (pick === "active") {
       const activeCard =
         cards.find((card) => {
@@ -1277,6 +1822,12 @@ async function scrapeLatestCompetition(opts = {}) {
     await bruteForceExpandCompetitionScopes(rootsToExpand);
     cards = latestCompetitionCards(findCompetitionCards());
     const pickedCard = pickCompetitionCard(${JSON.stringify(competitionPick)});
+    if (${JSON.stringify(
+      Number.isFinite(requestedCompetitionNumber) &&
+        requestedCompetitionNumber > 0,
+    )} && !pickedCard) {
+      throw new Error("requested competition is not available in the latest three");
+    }
     const fallbackRoot = findFallbackCompetitionRoot();
     const orderedRoots = [];
     if (pickedCard) orderedRoots.push(pickedCard);
@@ -1408,7 +1959,24 @@ async function scrapeLatestCompetition(opts = {}) {
   );
 }
 
+async function scrapeLatestCompetition(opts = {}) {
+  return opts?.forceBrowser === true
+    ? scrapeLatestCompetitionWithBrowser(opts)
+    : fetchLatestCompetition(opts);
+}
+
 module.exports = {
   scrapeLatestCompetition,
+  fetchLatestCompetition,
+  fetchCompetitionCount,
+  parseCompetitionPageData,
   COMPETITIONS_URL,
+  COMPETITION_STATUS_URL,
+  COMPETITION_HISTORY_URL,
+  COMPETITION_COUNT_URL,
+  MAX_RECENT_COMPETITIONS,
+  assertCompetitionWithinRecentWindow,
+  competitionHistoryUrl,
+  readCompetitionResponse,
+  readFirstCompetitionResponse,
 };

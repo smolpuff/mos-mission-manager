@@ -18,8 +18,16 @@ const {
 const {
   fetchOnchainFundingWalletSummary,
 } = require("../src/wallet/onchain-summary");
-const { scrapeLatestCompetition } = require("./scrapeCompetitions");
+const {
+  fetchCompetitionCount,
+  scrapeLatestCompetition,
+} = require("./scrapeCompetitions");
 const { checkForUpdates } = require("./update-checker");
+const {
+  fetchPbpTimers,
+  getPbpTimerSessionStatus,
+  openPbpTimerLogin,
+} = require("./pbpTimers");
 const { createMcpClient } = require("../src/mcp/client");
 const {
   normalizeMissionList,
@@ -145,6 +153,7 @@ let logHistory = [];
 let logHistoryBytes = 0;
 let nextLogId = 1;
 const pendingBackendRequests = new Map();
+let temporarySlotUnlockBackend = null;
 const maxLogHistory = 1200;
 const maxLogHistoryBytes = 4 * 1024 * 1024;
 let fundingWalletSummaryRefreshPromise = null;
@@ -1963,6 +1972,14 @@ function normalizeDesktopCompetitionConfig(config = {}) {
     Number.isFinite(popupSuppressedThroughNumber) &&
     popupSuppressedThroughNumber > 0
       ? Math.floor(popupSuppressedThroughNumber)
+      : 0;
+  const competitionLastObservedNumber = Number(
+    next.missionCompetitionLastObservedNumber,
+  );
+  next.missionCompetitionLastObservedNumber =
+    Number.isFinite(competitionLastObservedNumber) &&
+    competitionLastObservedNumber > 0
+      ? Math.floor(competitionLastObservedNumber)
       : 0;
   delete next.missionCompetitionPopupHideUntilNumberV2;
   delete next.missionCompetitionDismissedThroughNumber;
@@ -4427,6 +4444,13 @@ function startBackend(options = {}) {
   backend.on("exit", (code, signal) => {
     flushAnalyticsBuffers();
     clearStopTimer();
+    const exitError = new Error(
+      `Backend exited before completing the request (code=${code ?? "null"}, signal=${signal ?? "null"}).`,
+    );
+    for (const [requestId, pending] of pendingBackendRequests.entries()) {
+      pendingBackendRequests.delete(requestId);
+      pending.reject(exitError);
+    }
     backendStatus.running = false;
     backendStatus.pid = null;
     backendStatus.exitCode = code;
@@ -5509,11 +5533,58 @@ async function createCliWindow() {
 app.whenReady().then(async () => {
   installMinimalApplicationMenu();
   backendStatus.nftUsageStats = loadPersistedNftUsageStats();
-  ipcMain.handle("backend:start", async (_event, options = {}) =>
-    startBackend(options),
-  );
-  ipcMain.handle("backend:stop", async () => stopBackend());
-  ipcMain.handle("backend:restart", async () => restartBackend());
+  ipcMain.handle("backend:start", async (_event, options = {}) => {
+    const actionBackend = temporarySlotUnlockBackend;
+    const isTemporarySlotUnlockBackend =
+      actionBackend &&
+      Number(actionBackend.pid) === Number(backendStatus.pid);
+    if (isTemporarySlotUnlockBackend) {
+      actionBackend.runnerStartRequested = true;
+      actionBackend.startCancelled = false;
+      actionBackend.startOptions = { ...options };
+      pushSystemLog(
+        "Runner start queued until the slot 4 unlock action completes.",
+      );
+      await actionBackend.completion;
+      if (actionBackend.startCancelled) {
+        return { ...backendStatus, startCancelled: true };
+      }
+      return { ...backendStatus };
+    }
+    return startBackend(options);
+  });
+  ipcMain.handle("backend:stop", async () => {
+    const actionBackend = temporarySlotUnlockBackend;
+    if (
+      actionBackend &&
+      Number(actionBackend.pid) === Number(backendStatus.pid)
+    ) {
+      actionBackend.runnerStartRequested = false;
+      actionBackend.startCancelled = true;
+      pushSystemLog("Queued runner start cancelled.");
+    }
+    return stopBackend();
+  });
+  ipcMain.handle("backend:restart", async () => {
+    const actionBackend = temporarySlotUnlockBackend;
+    if (
+      actionBackend &&
+      Number(actionBackend.pid) === Number(backendStatus.pid)
+    ) {
+      actionBackend.runnerStartRequested = true;
+      actionBackend.startCancelled = false;
+      actionBackend.startOptions = {};
+      pushSystemLog(
+        "Runner restart queued until the slot 4 unlock action completes.",
+      );
+      await actionBackend.completion;
+      if (actionBackend.startCancelled) {
+        return { ...backendStatus, startCancelled: true };
+      }
+      return { ...backendStatus };
+    }
+    return restartBackend();
+  });
   ipcMain.handle("backend:send-command", async (_event, command) =>
     sendBackendCommand(command),
   );
@@ -6799,15 +6870,58 @@ app.whenReady().then(async () => {
   );
   ipcMain.handle("slot:prepare-unlock4", async () => {
     pushSystemLog("Slot 4 unlock requested.");
-    const payload = await requestBackend(
-      "prepare_slot4_unlock",
-      {},
-      {
-        ensureRunning: true,
+    const startedActionBackend = !backend || backendStatus.running !== true;
+    let actionBackend = null;
+    if (startedActionBackend) {
+      const started = startBackend({ startPaused: true });
+      let resolveCompletion;
+      const completion = new Promise((resolve) => {
+        resolveCompletion = resolve;
+      });
+      actionBackend = {
+        pid: started?.pid || backendStatus.pid || null,
+        runnerStartRequested: false,
+        startCancelled: false,
+        startOptions: null,
+        completion,
+        resolveCompletion,
+      };
+      temporarySlotUnlockBackend = actionBackend;
+      pushSystemLog(
+        "Slot 4 unlock started a temporary paused action backend.",
+      );
+    }
+    try {
+      return await requestBackend("prepare_slot4_unlock", {}, {
         timeoutMs: 150000,
-      },
-    );
-    return payload;
+      });
+    } finally {
+      const sameActionBackend =
+        startedActionBackend &&
+        actionBackend?.pid !== null &&
+        Number(backendStatus.pid) === Number(actionBackend?.pid);
+      try {
+        if (sameActionBackend) {
+          pushSystemLog(
+            "Slot 4 unlock action complete; stopping temporary backend.",
+          );
+          stopBackend();
+          await waitForBackendStopped(7000);
+        }
+        if (
+          actionBackend?.runnerStartRequested === true &&
+          (!backend || backendStatus.running !== true)
+        ) {
+          pushSystemLog("Starting the queued runner with a normal backend.");
+          startBackend(actionBackend.startOptions || {});
+        }
+      } finally {
+        if (temporarySlotUnlockBackend === actionBackend) {
+          temporarySlotUnlockBackend = null;
+        }
+        actionBackend?.resolveCompletion();
+      }
+    }
   });
   ipcMain.handle("clipboard:copy", async (_event, text) => {
     const value = String(text || "");
@@ -6874,6 +6988,21 @@ app.whenReady().then(async () => {
       return { ok: false, error: String(error?.message || error) };
     }
   });
+  ipcMain.handle("pbp:get-competition-count", async () => {
+    try {
+      const result = await fetchCompetitionCount();
+      return { ok: true, ...result };
+    } catch (error) {
+      return { ok: false, error: String(error?.message || error) };
+    }
+  });
+  ipcMain.handle("pbp:timer-session-status", async () =>
+    getPbpTimerSessionStatus(),
+  );
+  ipcMain.handle("pbp:open-timer-login", async () =>
+    openPbpTimerLogin(controlWindow),
+  );
+  ipcMain.handle("pbp:get-timers", async () => fetchPbpTimers());
 
   hydrateBackendStatusFromConfig();
   publishStatus();

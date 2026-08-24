@@ -3878,7 +3878,7 @@ function createWatchService(
         afterAdjustment: claimed,
       });
     }
-    const hasClaimActivity = claimed > 0 || summary.claims.length > 0;
+    let hasClaimActivity = claimed > 0 || summary.claims.length > 0;
     for (const entry of summary.claims) {
       if (entry?.success === false) continue;
       const claimedMissionId = String(
@@ -4089,6 +4089,47 @@ function createWatchService(
           error: error.message,
           rateLimited: error?.rateLimited === true,
           retryAfterSeconds: Number(error?.retryAfterSeconds || 0) || null,
+        });
+      }
+    }
+    // watch_and_claim cannot be told which slots to exclude. When any slot is
+    // disabled we intentionally use the local-safe path above, where
+    // claimClaimableMissions applies the per-slot policy before submitting a
+    // claim. The old path only fetched state, so one disabled slot prevented
+    // every enabled slot from ever claiming.
+    if (
+      usedLocalSafeWatch &&
+      !hasClaimActivity &&
+      !claimWorkPaused() &&
+      !hasActiveMcpCooldown() &&
+      polledMissionResult
+    ) {
+      try {
+        const localClaimResult = await checks.claimClaimableMissions({
+          maxClaims: opts.maxClaims,
+          reason: "local_safe_watch",
+          onlySelected: false,
+          missionsResult: polledMissionResult,
+        });
+        const localClaimed = Number(localClaimResult?.claimed || 0);
+        if (localClaimed > 0) {
+          claimed += localClaimed;
+          fallbackClaims = Array.isArray(localClaimResult?.claims)
+            ? localClaimResult.claims
+            : [];
+          fallbackMissionResult =
+            localClaimResult?.missionResult || polledMissionResult;
+          fallbackMissionStateAuthoritative =
+            localClaimResult?.missionStateAuthoritative === true;
+          hasClaimActivity = true;
+          logDebug("watch", "local_safe_claim_scan_complete", {
+            claimed: localClaimed,
+            authoritative: fallbackMissionStateAuthoritative,
+          });
+        }
+      } catch (error) {
+        logDebug("watch", "local_safe_claim_scan_failed", {
+          error: error.message,
         });
       }
     }

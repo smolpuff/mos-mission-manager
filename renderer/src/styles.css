@@ -1288,6 +1288,15 @@ button.btn.btn-gradient {
   }
 }
 
+.competition__header .competition__h {
+  margin-top: 1rem;
+}
+
+.competition__header .competition__h .competition__number {
+  font-size: 4rem;
+  line-height: 1;
+}
+
 .results-table {
   border-collapse: separate !important;
   border-spacing: 0 4px;
