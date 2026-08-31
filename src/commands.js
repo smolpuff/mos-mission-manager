@@ -184,8 +184,8 @@ function createCommandHandler(ctx, logger, actions, configApi, services = {}) {
       toggleRow(
         "Rentals",
         onOff(ctx.config?.enableRentals === true),
-        "Fast refresh",
-        onOff(ctx.config?.rentalFastRefreshEnabled === true),
+        "Try limit",
+        value(ctx.config?.rentalAssignmentAttemptsPerWake ?? 3),
       ),
       toggleRow(
         "Debug",
@@ -224,7 +224,7 @@ function createCommandHandler(ctx, logger, actions, configApi, services = {}) {
       `[DEBUG] Debug mode ${enabled ? "enabled" : "disabled"}.`,
     );
     logWithTimestamp(
-      `[DEBUG] runtimeDefaults: missionResetLevel ${baseline.missionResetLevel} -> ${defaults.missionResetLevel}, rentalFastRefreshTickMs ${baseline.rentalFastRefreshTickMs} -> ${defaults.rentalFastRefreshTickMs}, rentalBatchLimit ${baseline.rentalBatchLimit} -> ${defaults.rentalBatchLimit}, watchMinCycleSeconds ${baseline.watchMinCycleSeconds} -> ${defaults.watchMinCycleSeconds}, watchDefaultPollSeconds ${baseline.watchDefaultPollSeconds} -> ${defaults.watchDefaultPollSeconds}`,
+      `[DEBUG] runtimeDefaults: missionResetLevel ${baseline.missionResetLevel} -> ${defaults.missionResetLevel}, rentalAssignmentAttemptsPerWake ${baseline.rentalAssignmentAttemptsPerWake} -> ${defaults.rentalAssignmentAttemptsPerWake}, rentalAssignmentContinuationDelaySeconds ${baseline.rentalAssignmentContinuationDelaySeconds} -> ${defaults.rentalAssignmentContinuationDelaySeconds}, watchMinCycleSeconds ${baseline.watchMinCycleSeconds} -> ${defaults.watchMinCycleSeconds}, watchDefaultPollSeconds ${baseline.watchDefaultPollSeconds} -> ${defaults.watchDefaultPollSeconds}`,
     );
     logWithTimestamp(
       `[DEBUG] watcher behavior: live mission polling=${enabled ? "enabled" : "disabled unless separately configured"}, verbose debug logs=${enabled ? "enabled" : "disabled"}, startup FX=${enabled ? "disabled" : "enabled"}`,
@@ -236,7 +236,7 @@ function createCommandHandler(ctx, logger, actions, configApi, services = {}) {
       `[DEBUG] auto NFT cooldown reset conditions: missionMode=${ctx.missionModeEnabled === true || ctx.config?.missionModeEnabled === true}, nftCooldownResetEnabled=${ctx.nftCooldownResetEnabled === true || ctx.config?.nftCooldownResetEnabled === true}`,
     );
     logWithTimestamp(
-      `[DEBUG] dev-equivalent defaults are now ${enabled ? "active" : "inactive"}; target dev values are missionResetLevel=${tuned.missionResetLevel}, rentalFastRefreshTickMs=${tuned.rentalFastRefreshTickMs}, rentalBatchLimit=${tuned.rentalBatchLimit}, watchMinCycleSeconds=${tuned.watchMinCycleSeconds}, watchDefaultPollSeconds=${tuned.watchDefaultPollSeconds}`,
+      `[DEBUG] dev-equivalent defaults are now ${enabled ? "active" : "inactive"}; target dev values are missionResetLevel=${tuned.missionResetLevel}, rentalAssignmentAttemptsPerWake=${tuned.rentalAssignmentAttemptsPerWake}, rentalAssignmentContinuationDelaySeconds=${tuned.rentalAssignmentContinuationDelaySeconds}, watchMinCycleSeconds=${tuned.watchMinCycleSeconds}, watchDefaultPollSeconds=${tuned.watchDefaultPollSeconds}`,
     );
   }
 

@@ -40,6 +40,16 @@ function createContext() {
     ),
     tokenFilePath: path.join(os.homedir(), ".pbp-mcp", "token.json"),
     mcpCooldownStatePath: path.join(configDir, "data", "mcp-cooldowns.json"),
+    rentalCandidateSnapshotPath: path.join(
+      configDir,
+      "data",
+      "rental-candidate-snapshot.json",
+    ),
+    rentalCandidateLockPath: path.join(
+      configDir,
+      "data",
+      "rental-candidate-snapshot.lock",
+    ),
     LOG_BUFFER_SIZE,
     LOG_BUFFER_SIZE_DEBUG,
     runtimeDefaults: defaults,

@@ -208,6 +208,7 @@ function normalizePageCompetition(
       .map((row) => ({
         rank: Number(row?.rank),
         player: coerceText(row?.display_name),
+        walletId: coerceText(row?.wallet_id || row?.walletId),
         completed: Number.isFinite(Number(row?.completed_missions_in_range))
           ? Number(row.completed_missions_in_range)
           : null,
@@ -228,27 +229,80 @@ function normalizePageCompetition(
   };
 }
 
-async function fetchCompetitionCount({ timeoutMs = 20_000 } = {}) {
+async function fetchCompetitionPageSnapshot({ timeoutMs = 20_000 } = {}) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const response = await fetch(COMPETITION_COUNT_URL, {
+    const response = await fetch(COMPETITIONS_URL, {
       headers: {
-        Accept: "application/json",
-        "User-Agent": "missions-v3-mcp competition counter",
+        Accept: "text/html",
+        "User-Agent": "missions-v3-mcp competition page reader",
       },
       signal: controller.signal,
     });
     if (!response.ok) {
-      throw new Error(`competition count returned HTTP ${response.status}`);
+      throw new Error(`competition page returned HTTP ${response.status}`);
     }
-    const payload = await response.json();
-    const total = Number(payload?.total);
-    if (!Number.isFinite(total) || total < 0) {
-      throw new Error("competition count response did not include a total");
+    const payload = parseCompetitionPageData(await response.text());
+    const competitions = Array.isArray(payload?.competitions)
+      ? payload.competitions.map((competition, index) =>
+          normalizePageCompetition(competition, index),
+        )
+      : [];
+    if (!competitions.length) {
+      throw new Error("competition page returned no competitions");
     }
     return {
-      total: Math.floor(total),
+      competitions,
+      sourceUrl: COMPETITIONS_URL,
+      fetchedAt: new Date().toISOString(),
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function fetchCompetitionCount({ timeoutMs = 20_000 } = {}) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const headers = {
+      Accept: "application/json",
+      "User-Agent": "missions-v3-mcp competition counter",
+    };
+    const [historyResult, statusResult] = await Promise.allSettled([
+      fetch(COMPETITION_COUNT_URL, {
+        headers,
+        signal: controller.signal,
+      }).then(async (response) => {
+        if (!response.ok) {
+          throw new Error(`competition count returned HTTP ${response.status}`);
+        }
+        return response.json();
+      }),
+      fetch(COMPETITION_STATUS_URL, {
+        headers,
+        signal: controller.signal,
+      }).then(async (response) => (response.ok ? response.json() : null)),
+    ]);
+    if (historyResult.status !== "fulfilled") throw historyResult.reason;
+    const historyTotal = Number(historyResult.value?.total);
+    if (!Number.isFinite(historyTotal) || historyTotal < 0) {
+      throw new Error("competition count response did not include a total");
+    }
+    const statusPayload =
+      statusResult.status === "fulfilled" ? statusResult.value : null;
+    const hasCurrentCompetition =
+      statusPayload?.active === true ||
+      ["in_progress", "not_started"].includes(
+        String(statusPayload?.status || "").toLowerCase(),
+      );
+    return {
+      // History only counts finished competitions. The live status endpoint
+      // contains the current competition, whose number is the next one.
+      total: Math.floor(historyTotal) + (hasCurrentCompetition ? 1 : 0),
+      historyTotal: Math.floor(historyTotal),
+      active: hasCurrentCompetition,
       sourceUrl: COMPETITION_COUNT_URL,
       checkedAt: new Date().toISOString(),
     };
@@ -324,16 +378,16 @@ async function fetchLatestCompetition(opts = {}) {
         : null;
     try {
       const requests = [];
-      if (competitionPick === "active") {
-        requests.push(fetch(COMPETITION_STATUS_URL, {
+      // The current competition is not present in the history endpoint, so
+      // every "latest" request must also consult the live status endpoint.
+      requests.push(fetch(COMPETITION_STATUS_URL, {
           headers: requestHeaders,
           signal: controller.signal,
         }).then(async (response) => {
           if (!response.ok) return null;
           return response.json();
         }));
-      }
-      const statusRequestIndex = competitionPick === "active" ? 0 : -1;
+      const statusRequestIndex = 0;
       const countRequestIndex = requests.length;
       if (
         !countPayload &&
@@ -392,6 +446,9 @@ async function fetchLatestCompetition(opts = {}) {
       };
     }
     const totalCompetitionCount = Number(countPayload?.total);
+    const completedCompetitionCount = Number(
+      countPayload?.historyTotal ?? countPayload?.total,
+    );
     const requestedCompetitionNumber = Math.floor(
       Number(opts?.competitionNumber),
     );
@@ -400,10 +457,10 @@ async function fetchLatestCompetition(opts = {}) {
       totalCompetitionCount,
     );
     const historyOffset =
-      Number.isFinite(totalCompetitionCount) &&
+      Number.isFinite(completedCompetitionCount) &&
       Number.isFinite(requestedCompetitionNumber) &&
       requestedCompetitionNumber > 0
-        ? Math.max(0, totalCompetitionCount - requestedCompetitionNumber)
+        ? Math.max(0, completedCompetitionCount - requestedCompetitionNumber)
         : 0;
     const historyUrl = competitionHistoryUrl(historyOffset);
     let historyPayload;
@@ -427,15 +484,26 @@ async function fetchLatestCompetition(opts = {}) {
       );
     }
     const historyTotal = Number(
-      historyPayload?.total ?? countPayload?.total,
+      historyPayload?.total ??
+        countPayload?.historyTotal ??
+        countPayload?.total,
     );
     const currentNumber = Number(countPayload?.total);
-    const rawCompetitions = [
-      ...(competitionPick === "active" &&
+    const shouldIncludeCurrentCompetition =
       hasCurrentCompetition &&
-      statusPayload?.competition
+      statusPayload?.competition &&
+      (competitionPick === "active" ||
+        !Number.isFinite(requestedCompetitionNumber) ||
+        requestedCompetitionNumber <= 0 ||
+        requestedCompetitionNumber === currentNumber);
+    const rawCompetitions = [
+      ...(shouldIncludeCurrentCompetition
         ? [{
-            competition: statusPayload.competition,
+            competition: {
+              ...statusPayload.competition,
+              status:
+                statusPayload.competition?.status || statusPayload.status,
+            },
             number:
               Number.isFinite(currentNumber) && currentNumber > 0
                 ? Math.floor(currentNumber)
@@ -1960,14 +2028,99 @@ async function scrapeLatestCompetitionWithBrowser(opts = {}) {
 }
 
 async function scrapeLatestCompetition(opts = {}) {
-  return opts?.forceBrowser === true
-    ? scrapeLatestCompetitionWithBrowser(opts)
-    : fetchLatestCompetition(opts);
+  if (opts?.forceBrowser === true) {
+    return scrapeLatestCompetitionWithBrowser(opts);
+  }
+
+  const apiCompetition = await fetchLatestCompetition(opts);
+  const apiStatus = String(apiCompetition?.debug?.status || "").toLowerCase();
+  const isCurrentCompetition =
+    apiCompetition?.debug?.active === true ||
+    ["in_progress", "not_started"].includes(apiStatus);
+  const hasCurrentDetails =
+    Array.isArray(apiCompetition?.missions) &&
+    apiCompetition.missions.length > 0 &&
+    Array.isArray(apiCompetition?.prizes) &&
+    apiCompetition.prizes.length > 0;
+
+  // Pixel by Pixel's live-status API only exposes the current ID and dates.
+  // The competitions page now carries its live API snapshot in the HTTP/Next
+  // payload, including standings. Read and parse that payload directly; the
+  // finish-target rank check must not depend on opening or scraping a browser.
+  if (!isCurrentCompetition || hasCurrentDetails) return apiCompetition;
+
+  try {
+    const pageSnapshot = await fetchCompetitionPageSnapshot();
+    const apiCompetitionId = coerceText(apiCompetition?.debug?.competitionId);
+    const pageCompetition =
+      pageSnapshot.competitions.find(
+        (competition) =>
+          apiCompetitionId &&
+          coerceText(competition?.debug?.competitionId) === apiCompetitionId,
+      ) ||
+      pickCompetition(pageSnapshot.competitions, "active") ||
+      pageSnapshot.competitions[0];
+    const takePageArray = (key) =>
+      Array.isArray(pageCompetition?.[key]) && pageCompetition[key].length
+        ? pageCompetition[key]
+        : apiCompetition?.[key] || [];
+    const currentUserRows = takePageArray("userRows");
+    const enrichedCompetition = {
+      ...apiCompetition,
+      start: pageCompetition?.start || apiCompetition?.start,
+      end: pageCompetition?.end || apiCompetition?.end,
+      datesText: pageCompetition?.datesText || apiCompetition?.datesText,
+      missions: takePageArray("missions"),
+      prizes: takePageArray("prizes"),
+      userRows: currentUserRows,
+      users: takePageArray("users"),
+      resultsStatus:
+        currentUserRows.length > 0
+          ? null
+          : pageCompetition?.resultsStatus || apiCompetition?.resultsStatus,
+      scrapedAt: pageCompetition?.scrapedAt || apiCompetition?.scrapedAt,
+      debug: {
+        ...(apiCompetition?.debug || {}),
+        pageEnriched: true,
+        pagePayloadSource: "http-next-payload",
+        page: pageCompetition?.debug || null,
+      },
+    };
+    const primary = { ...enrichedCompetition };
+    delete primary.competitions;
+    const requestedMaximum = Number(opts?.maxCompetitions);
+    const maxCompetitions =
+      Number.isFinite(requestedMaximum) && requestedMaximum > 0
+        ? Math.min(MAX_RECENT_COMPETITIONS, Math.floor(requestedMaximum))
+        : 2;
+    return {
+      ...enrichedCompetition,
+      competitions: [
+        primary,
+        ...(Array.isArray(apiCompetition?.competitions)
+          ? apiCompetition.competitions.filter(
+              (competition) =>
+                competition?.competitionNumber !== primary.competitionNumber,
+            )
+          : []),
+      ].slice(0, maxCompetitions),
+    };
+  } catch (error) {
+    return {
+      ...apiCompetition,
+      debug: {
+        ...(apiCompetition?.debug || {}),
+        pageEnriched: false,
+        pageEnrichmentError: String(error?.message || error),
+      },
+    };
+  }
 }
 
 module.exports = {
   scrapeLatestCompetition,
   fetchLatestCompetition,
+  fetchCompetitionPageSnapshot,
   fetchCompetitionCount,
   parseCompetitionPageData,
   COMPETITIONS_URL,

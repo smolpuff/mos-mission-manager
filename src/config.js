@@ -41,8 +41,8 @@ const SALVAGE_TOP_LEVEL_KEYS = [
   "totalClaimed",
   "firstRunOnboardingCompleted",
   "enableRentals",
-  "rentalFastRefreshEnabled",
-  "rentalFastRefreshTickMs",
+  "rentalAssignmentAttemptsPerWake",
+  "rentalAssignmentContinuationDelaySeconds",
   "interactiveAuth",
   "debugMode",
   "watchLoopEnabled",
@@ -406,10 +406,28 @@ function loadConfig(ctx, logWithTimestamp) {
   if (typeof ctx.config.enableRentals !== "boolean") {
     ctx.config.enableRentals = false;
   }
-  // Internal fast rental
-  if (typeof ctx.config.rentalFastRefreshEnabled !== "boolean") {
-    ctx.config.rentalFastRefreshEnabled = false;
-  }
+  const rentalAssignmentAttemptsPerWake = Number(
+    ctx.config.rentalAssignmentAttemptsPerWake,
+  );
+  ctx.config.rentalAssignmentAttemptsPerWake =
+    Number.isFinite(rentalAssignmentAttemptsPerWake) &&
+    rentalAssignmentAttemptsPerWake >= 1 &&
+    rentalAssignmentAttemptsPerWake <= 5
+      ? Math.floor(rentalAssignmentAttemptsPerWake)
+      : 3;
+  const rentalAssignmentContinuationDelaySeconds = Number(
+    ctx.config.rentalAssignmentContinuationDelaySeconds,
+  );
+  ctx.config.rentalAssignmentContinuationDelaySeconds =
+    Number.isFinite(rentalAssignmentContinuationDelaySeconds) &&
+    rentalAssignmentContinuationDelaySeconds >= 1 &&
+    rentalAssignmentContinuationDelaySeconds <= 30
+      ? Math.floor(rentalAssignmentContinuationDelaySeconds)
+      : 3;
+  // Remove obsolete rapid-poll settings during config migration. Rental
+  // refresh timing is now owned by the snapshot coordinator.
+  delete ctx.config.rentalFastRefreshEnabled;
+  delete ctx.config.rentalFastRefreshTickMs;
   if (typeof ctx.config.missionResetLevel === "string") {
     ctx.currentMissionResetLevel = ctx.config.missionResetLevel;
   }
@@ -505,13 +523,6 @@ function loadConfig(ctx, logWithTimestamp) {
     ctx.debugMode = ctx.config.debugMode;
   }
   applyRuntimeDefaults(ctx);
-  const rentalFastRefreshMinMs =
-    ctx.runtimeDefaults?.rentalFastRefreshTickMs || 15000;
-  const rentalFastRefreshTickMs = Number(ctx.config.rentalFastRefreshTickMs);
-  ctx.config.rentalFastRefreshTickMs =
-    Number.isFinite(rentalFastRefreshTickMs) && rentalFastRefreshTickMs > 0
-      ? Math.max(rentalFastRefreshMinMs, Math.floor(rentalFastRefreshTickMs))
-      : rentalFastRefreshMinMs;
   if (
     typeof ctx.config.missionResetLevel !== "string" ||
     !ctx.config.missionResetLevel.trim()

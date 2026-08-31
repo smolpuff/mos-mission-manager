@@ -18,6 +18,15 @@ function shouldRetryAssignmentOption({
   return hasNext;
 }
 
+function shouldRequestOwnedCooldownFollowup(rentalResult = {}) {
+  return Boolean(
+    rentalResult?.stopReason === "no_due_candidate" ||
+      rentalResult?.reason === "no_due_candidate" ||
+      rentalResult?.reason === "snapshot_batch_complete" ||
+      (rentalResult?.capped === true && rentalResult?.hasMoreDue === false),
+  );
+}
+
 const {
   normalizeMissionList,
   normalizeNftList,
@@ -74,18 +83,12 @@ const { applyWalletBalanceDeltas } = require("../wallet/balance-delta");
 function createChecksService(ctx, logger, mcp, services = {}) {
   const { logWithTimestamp, logDebug, redrawHeaderAndLog, formatTaggedLog } =
     logger;
-  const { signer = null } = services;
+  const { signer = null, rentals = null } = services;
   const { executePreparedMissionAction } = createMissionActionExecutor(
     logger,
     mcp,
     signer,
   );
-  let rentalFastRefreshTimer = null;
-  let rentalFastRefreshResumeTimer = null;
-  let rentalFastRefreshRunning = false;
-  let rentalFastRefreshFailedListings = new Set();
-  let rentalFastRefreshRequested = false;
-  let rentalFastRefreshRequestMeta = null;
   let walletRefreshTimer = null;
   let walletRefreshPendingReason = null;
   let missionCatalogRefreshPromise = null;
@@ -116,7 +119,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
   );
   let nftAssignmentScan = loadNftAssignmentScan(ctx.nftAssignmentScanPath);
   let autoAssignPromise = null;
-  let rentableNftsCallChain = Promise.resolve();
+  let rentalDemandMissionKeys = new Set();
   const OWNED_MISSION_NFTS_CACHE_TTL_MS = 2000;
   const MISSION_NFT_PAGE_LIMIT = 200;
   const MCP_COOLDOWN_RESUME_BUFFER_MS = 250;
@@ -582,26 +585,6 @@ function createChecksService(ctx, logger, mcp, services = {}) {
     if (list.length === 0) return "(none)";
     if (list.length <= limit) return list.join(", ");
     return `${list.slice(0, limit).join(", ")} +${list.length - limit} more`;
-  }
-
-  async function getRentableNftsSerialized(args = {}, meta = {}) {
-    const waitForPrior = rentableNftsCallChain.catch(() => {});
-    let release;
-    rentableNftsCallChain = new Promise((resolve) => {
-      release = resolve;
-    });
-    await waitForPrior;
-    try {
-      logDebug("assign", "rentable_nfts_call_start", {
-        source: meta.source || "unknown",
-        missionName: meta.missionName || null,
-        missionId: meta.missionId || null,
-        args,
-      });
-      return await mcp.mcpToolCall("get_rentable_nfts", args);
-    } finally {
-      release();
-    }
   }
 
   function normalizeRewardBucket(prize) {
@@ -1861,63 +1844,6 @@ function createChecksService(ctx, logger, mcp, services = {}) {
     return /mission already has an nft assigned/i.test(String(message || ""));
   }
 
-  function rentalListingId(entry) {
-    const id =
-      entry?.rentalListingId ||
-      entry?.listingId ||
-      entry?.listing_id ||
-      entry?.id;
-    return isUsableIdValue(id) ? String(id).trim() : null;
-  }
-
-  function normalizeRentableList(result) {
-    const sc = result?.structuredContent || {};
-    if (Array.isArray(sc?.data)) return sc.data;
-    if (Array.isArray(sc?.nfts)) return sc.nfts;
-    if (Array.isArray(sc?.items)) return sc.items;
-    return [];
-  }
-
-  function rentalNftAccountId(entry) {
-    const nested = nftAccountId(entry?.nft || entry?.nftData || null);
-    if (nested) return nested;
-    const direct =
-      entry?.nftAccount ||
-      entry?.nft_account ||
-      entry?.tokenAddress ||
-      entry?.token_address ||
-      entry?.mintAddress ||
-      entry?.mint_address ||
-      entry?.account ||
-      entry?.id;
-    return isUsableIdValue(direct) ? String(direct).trim() : null;
-  }
-
-  function normalizeRentalCandidates(entries, { limit = rentalBatchLimit() } = {}) {
-    const seen = new Set();
-    const normalized = (Array.isArray(entries) ? entries : [])
-      .map((entry) => ({
-        listingId: entry?.listingId || rentalListingId(entry),
-        account: rentalNftAccountId(entry),
-        nft: entry?.nft || entry?.nftData || entry,
-      }))
-      .filter((entry) => entry.listingId)
-      .filter((entry) => {
-        const key = String(entry.listingId);
-        if (seen.has(key)) return false;
-        seen.add(key);
-        return true;
-      });
-    const safeLimit = Number(limit);
-    return Number.isFinite(safeLimit) && safeLimit > 0
-      ? normalized.slice(0, Math.floor(safeLimit))
-      : normalized;
-  }
-
-  function rentalDevAdvantagesEnabled() {
-    return ctx.debugMode === true || ctx.devMode === true;
-  }
-
   function autoNftCooldownResetEnabled() {
     const autoEnabled =
       ctx.autoModeEnabled === true || ctx.config?.autoModeEnabled === true;
@@ -1989,257 +1915,6 @@ function createChecksService(ctx, logger, mcp, services = {}) {
   function autoNftCooldownResetProbeLimit() {
     const raw = Number(ctx.config?.nftCooldownResetProbeLimit);
     return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 1;
-  }
-
-  function rentalBatchLimit() {
-    const fallback = 2;
-    const raw = Number(ctx.runtimeDefaults?.rentalBatchLimit || fallback);
-    return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : fallback;
-  }
-
-  function rentalFastRefreshEnabled() {
-    return rentalDevAdvantagesEnabled();
-  }
-  // tick
-  function rentalFastRefreshTickMs() {
-    const minMs = ctx.runtimeDefaults?.rentalFastRefreshTickMs || 15000;
-    const raw = Number(ctx.config?.rentalFastRefreshTickMs);
-    return Number.isFinite(raw) && raw > 0
-      ? Math.max(minMs, Math.floor(raw))
-      : minMs;
-  }
-
-  function stopRentalFastRefresh(reason = "stop") {
-    if (rentalFastRefreshResumeTimer) {
-      clearTimeout(rentalFastRefreshResumeTimer);
-      rentalFastRefreshResumeTimer = null;
-    }
-    rentalFastRefreshRequested = false;
-    rentalFastRefreshRequestMeta = null;
-    if (!rentalFastRefreshTimer) return;
-    clearInterval(rentalFastRefreshTimer);
-    rentalFastRefreshTimer = null;
-    rentalFastRefreshRunning = false;
-    rentalFastRefreshFailedListings = new Set();
-    const reasonLabel =
-      reason === "assigned"
-        ? "mission assigned"
-        : reason === "no_unassigned_target"
-          ? "no open target"
-          : reason === "disabled"
-            ? "disabled"
-            : reason === "watch_stopped"
-              ? "watch stopped"
-              : reason;
-    logWithTimestamp(`[RENTAL] ⏹️ Fast refresh stopped (${reasonLabel}).`);
-      logDebug("assign", "⏹️ rental_fast_refresh_stopped", { reason });
-  }
-
-  function requestRentalFastRefresh({
-    reason = "no_rentables",
-    missionName = null,
-  } = {}) {
-    if (hasActiveAutoAssignCooldown()) {
-      logDebug("assign", "⏳ rental_fast_refresh_blocked_assign_backoff", {
-        reason,
-        missionName,
-        retryAfterMs: getAutoAssignCooldownRemainingMs(),
-      });
-      return;
-    }
-    rentalFastRefreshRequested = true;
-    rentalFastRefreshRequestMeta = { reason, missionName };
-    if (ctx.autoAssignRunning) {
-      logDebug("assign", "⏳ rental_fast_refresh_requested_pending_assign", {
-        reason,
-        missionName,
-      });
-      return;
-    }
-    startRentalFastRefresh({ reason, missionName });
-  }
-
-  function flushRequestedRentalFastRefresh() {
-    if (!rentalFastRefreshRequested || ctx.autoAssignRunning) return;
-    const meta = rentalFastRefreshRequestMeta || {};
-    rentalFastRefreshRequested = false;
-    rentalFastRefreshRequestMeta = null;
-    if (hasActiveAutoAssignCooldown()) {
-      logDebug("assign", "⏳ rental_fast_refresh_flush_blocked_assign_backoff", {
-        reason: meta.reason || "no_rentables",
-        missionName: meta.missionName || null,
-        retryAfterMs: getAutoAssignCooldownRemainingMs(),
-      });
-      return;
-    }
-    startRentalFastRefresh({
-      reason: meta.reason || "no_rentables",
-      missionName: meta.missionName || null,
-    });
-  }
-
-  function startRentalFastRefresh({
-    reason = "no_rentables",
-    missionName = null,
-  } = {}) {
-    if (rentalFastRefreshResumeTimer) {
-      clearTimeout(rentalFastRefreshResumeTimer);
-      rentalFastRefreshResumeTimer = null;
-    }
-    if (!rentalFastRefreshEnabled()) {
-      logWithTimestamp("[RENTAL] ⏭️ Fast refresh not armed (disabled).");
-      return;
-    }
-    if (!ctx.watchLoopEnabled || !ctx.watcherRunning) {
-      logWithTimestamp(
-        "[RENTAL] ⏭️ Fast refresh not armed (watch is not running).",
-      );
-      return;
-    }
-    if (hasActiveAutoAssignCooldown()) {
-      logWithTimestamp(
-        `[RENTAL] ⏭️ Fast refresh not armed (assign backoff ${Math.ceil(getAutoAssignCooldownRemainingMs() / 1000)}s).`,
-      );
-      logDebug("assign", "⏳ rental_fast_refresh_start_blocked_assign_backoff", {
-        reason,
-        missionName,
-        retryAfterMs: getAutoAssignCooldownRemainingMs(),
-      });
-      return;
-    }
-    if (rentalFastRefreshTimer) {
-      logWithTimestamp("[RENTAL] ℹ️ Fast refresh already running.");
-      return;
-    }
-
-    const tickMs = rentalFastRefreshTickMs();
-    logWithTimestamp(
-      `[RENTAL] ⏱️ Fast refresh armed: checking rentals every ${tickMs}ms.`,
-    );
-    logDebug("assign", "🚀 rental_fast_refresh_started", {
-      reason,
-      missionName,
-      tickMs,
-    });
-
-    const runRentalFastRefreshTick = async () => {
-      if (rentalFastRefreshRunning) return;
-      if (ctx.autoAssignRunning) {
-        logDebug("assign", "⏸️ rental_fast_refresh_skipped_assign_in_progress", {
-          reason,
-          missionName,
-        });
-        return;
-      }
-      if (hasActiveAutoAssignCooldown()) {
-        const retryAfterMs = getAutoAssignCooldownRemainingMs();
-        logDebug(
-          "assign",
-          "⏳ rental_fast_refresh_skipped_assign_backoff",
-          {
-            retryAfterMs,
-            reason,
-            missionName,
-          },
-        );
-        if (rentalFastRefreshTimer) {
-          clearInterval(rentalFastRefreshTimer);
-          rentalFastRefreshTimer = null;
-        }
-        if (!rentalFastRefreshResumeTimer) {
-          logWithTimestamp(
-            `[RENTAL] ⏳ Fast refresh paused for ${Math.ceil(retryAfterMs / 1000)}s due to assign backoff.`,
-          );
-          rentalFastRefreshResumeTimer = setTimeout(() => {
-            rentalFastRefreshResumeTimer = null;
-            requestRentalFastRefresh({ reason, missionName });
-          }, Math.max(250, retryAfterMs));
-        }
-        return;
-      }
-      if (hasActiveMcpCooldown()) {
-        const retryAfterMs = getMcpCooldownRemainingMs();
-        logDebug("assign", "⏳ rental_fast_refresh_skipped_rate_limited", {
-          retryAfterMs,
-          reason,
-          missionName,
-        });
-        if (rentalFastRefreshTimer) {
-          clearInterval(rentalFastRefreshTimer);
-          rentalFastRefreshTimer = null;
-        }
-        if (!rentalFastRefreshResumeTimer) {
-          logWithTimestamp(
-            `[RENTAL] ⏳ Fast refresh paused for ${Math.ceil(retryAfterMs / 1000)}s due to MCP cooldown.`,
-          );
-          rentalFastRefreshResumeTimer = setTimeout(() => {
-            rentalFastRefreshResumeTimer = null;
-            requestRentalFastRefresh({ reason, missionName });
-          }, Math.max(250, retryAfterMs + MCP_COOLDOWN_RESUME_BUFFER_MS));
-        }
-        return;
-      }
-      if (!rentalFastRefreshEnabled()) {
-        stopRentalFastRefresh("disabled");
-        return;
-      }
-      if (!ctx.watchLoopEnabled || !ctx.watcherRunning) {
-        stopRentalFastRefresh("watch_stopped");
-        return;
-      }
-      rentalFastRefreshRunning = true;
-      try {
-        const rentableResult = await getRentableNftsSerialized(
-          {},
-          {
-            source: "fast_refresh_tick",
-            missionName,
-          },
-        );
-        const rentableCandidates = normalizeRentalCandidates(
-          normalizeRentableList(rentableResult),
-        ).filter(
-          (entry) =>
-            !rentalFastRefreshFailedListings.has(String(entry.listingId)),
-        );
-        logDebug("assign", "rental_fast_refresh_tick", {
-          count: rentableCandidates.length,
-        });
-        logWithTimestamp(
-          `[RENTAL] 🔎 Fast refresh: found ${rentableCandidates.length} rentable candidate(s).`,
-        );
-        if (rentableCandidates.length === 0) return;
-
-        logWithTimestamp(
-          `[RENTAL] ⚡ Fast refresh found ${rentableCandidates.length} rentable candidate(s); assigning now...`,
-        );
-        const assignResult = await autoAssignConfiguredMissions({
-          reason: "rental_fast_refresh",
-          prefetchedRentalCandidates: rentableCandidates,
-        });
-        const attempted = Number(assignResult?.attempted || 0);
-        const assigned = Number(assignResult?.assigned || 0);
-        const skipped = assignResult?.skipped === true;
-        if (!skipped) {
-          if (attempted === 0) {
-            stopRentalFastRefresh("no_unassigned_target");
-          } else if (assigned > 0 && assigned >= attempted) {
-            stopRentalFastRefresh("assigned");
-          }
-        }
-      } catch (error) {
-        logDebug("assign", "❌ rental_fast_refresh_failed", {
-          error: error.message,
-          stack: error.stack,
-        });
-        logWithTimestamp(`[RENTAL] ❌ Fast refresh failed: ${error.message}`);
-      } finally {
-        rentalFastRefreshRunning = false;
-      }
-    };
-
-    rentalFastRefreshTimer = setInterval(runRentalFastRefreshTick, tickMs);
-    runRentalFastRefreshTick();
   }
 
   async function countAvailableOwnedNftsForAssignments() {
@@ -4071,6 +3746,188 @@ function createChecksService(ctx, logger, mcp, services = {}) {
     );
   }
 
+  function rentalCoordinatorEnabled() {
+    return Boolean(rentals && ctx.config?.enableRentals === true);
+  }
+
+  function getMissionsNeedingRental() {
+    if (!rentalCoordinatorEnabled()) return [];
+    const result = ctx.lastUserMissionsResult;
+    if (!(result && typeof result === "object")) return [];
+    return buildAssignCandidates(
+      normalizeMissionList(result),
+      resolveConfiguredTargets(),
+      extractSlotUnlockSummary(result),
+      "rental_coordinator",
+    )
+      .filter(
+        (mission) => !missionEligibleForAutoModeThresholdFallbackReset(mission),
+      )
+      .filter((mission) =>
+        rentalDemandMissionKeys.has(assignedMissionId(mission)),
+      );
+  }
+
+  function missionStillNeedsRental(missionKey, fallbackMission = null) {
+    const wanted = String(missionKey || "").trim();
+    const missions = getMissionsNeedingRental();
+    return missions.some((mission) => {
+      const id = assignedMissionId(mission);
+      const slot = Number(mission?.slot);
+      return (
+        (wanted && id === wanted) ||
+        (wanted && Number.isFinite(slot) && String(slot) === wanted) ||
+        (fallbackMission && mission === fallbackMission)
+      );
+    });
+  }
+
+  function stopRentalCoordinator(reason = "watch_stopped") {
+    rentalDemandMissionKeys = new Set();
+    if (rentals && typeof rentals.setDemand === "function") {
+      rentals.setDemand(false, { reason });
+    }
+  }
+
+  async function assignCachedRentalCandidate({
+    mission,
+    missionKey,
+    candidate,
+    boundaryRetry = false,
+    assignmentBudgetReservation = null,
+    assignmentBudgetToken = null,
+  } = {}) {
+    if (!missionStillNeedsRental(missionKey, mission)) {
+      if (assignmentBudgetToken) {
+        mcp.releaseToolWindowReservation(assignmentBudgetToken);
+      }
+      return { success: false, kind: "mission_filled", message: "Mission no longer needs an NFT." };
+    }
+    const missionId = assignedMissionId(mission) || String(missionKey || "").trim();
+    const listingId = String(candidate?.listingId || "").trim();
+    const nftAccount = String(candidate?.nftAccount || candidate?.account || "").trim();
+    if (!missionId || !listingId || !nftAccount) {
+      if (assignmentBudgetToken) {
+        mcp.releaseToolWindowReservation(assignmentBudgetToken);
+      }
+      return { success: false, kind: "terminal", message: "Rental candidate is missing mission, listing, or NFT identity." };
+    }
+
+    logWithTimestamp(
+      `[RENTAL] 🚀 Assigning cached rental listing=${listingId}${boundaryRetry ? " (readiness retry)" : ""}...`,
+    );
+    const result = await mcp.mcpToolCall(
+      "assign_nft_to_mission",
+      {
+        assignedMissionId: missionId,
+        nftAccount,
+        rentalListingId: listingId,
+        nftSource: "rental",
+      },
+      {
+        reason: boundaryRetry
+          ? "rental_readiness_boundary_retry"
+          : "rental_cached_assignment",
+        toolWindowReservationToken:
+          assignmentBudgetToken || assignmentBudgetReservation?.token || null,
+      },
+    );
+    if (!toolCallSucceeded(result)) {
+      return {
+        success: false,
+        message: assignFailureMessage(result),
+        details: assignFailureDetails(result),
+      };
+    }
+    const responseMissions = normalizeMissionList(result);
+    if (responseMissions.length === 0) {
+      const error = new Error(
+        "Rental assignment response omitted authoritative mission state.",
+      );
+      error.timeout = true;
+      throw error;
+    }
+
+    nftAssignmentLastUsedAt.set(nftAccount, Date.now());
+    ensureNftAssignmentUsageLoaded();
+    nftAssignmentUsage.set(
+      nftAccount,
+      (nftAssignmentUsage.get(nftAccount) || 0) + 1,
+    );
+    nftAssignmentSessionUsage.set(
+      nftAccount,
+      (nftAssignmentSessionUsage.get(nftAccount) || 0) + 1,
+    );
+    persistNftAssignmentUsage();
+    await refreshMissionHeaderStats({
+      missionsResult: result,
+      refreshNftCount: false,
+    });
+    if (ctx.guiBridge?.sendEvent) {
+      ctx.guiBridge.sendEvent("stats_assignment", {
+        at: Date.now(),
+        assignedMissionId: missionId,
+        missionId,
+        missionName: missionName(mission) || null,
+        slot: mission?.slot ?? null,
+        missionLevel: missionLevel(mission),
+        nftAccount,
+        nftName: candidate?.nftName || null,
+        nftLevel: candidate?.nftLevel ?? null,
+        source: "rental",
+        usedReset: false,
+        reason: boundaryRetry
+          ? "rental_readiness_boundary_retry"
+          : "rental_cached_assignment",
+      });
+      ctx.guiBridge.sendEvent("assigned", {
+        missionId,
+        missionName: missionName(mission) || null,
+        slot: mission?.slot ?? null,
+        nftAccount,
+        reason: "rental_coordinator",
+        source: "rental",
+      });
+    }
+    if (ctx.guiBridge?.emitNow) ctx.guiBridge.emitNow();
+    logWithTimestamp(
+      `[RENTAL] ✅ Cached rental assigned listing=${listingId}.`,
+    );
+    return { success: true, missionState: result };
+  }
+
+  async function reconcileAmbiguousRentalAssignment({
+    mission,
+    missionKey,
+    candidate,
+  } = {}) {
+    try {
+      const result = await mcp.getUserMissions({
+        forceFresh: true,
+        reason: "rental_assignment_reconcile",
+      });
+      const current = findMissionByAssignedMissionId(
+        normalizeMissionList(result),
+        assignedMissionId(mission) || missionKey,
+      );
+      const assignedAccount = missionAssignedNftAccount(current);
+      if (assignedAccount && assignedAccount === candidate?.nftAccount) {
+        return { assigned: true, missionState: result };
+      }
+      if (!current || missionHasAssignedNftForAssign(current, "rental_reconcile")) {
+        return { assigned: false, safeToRelease: false, missionState: result };
+      }
+      return { assigned: false, safeToRelease: true, missionState: result };
+    } catch (error) {
+      logDebug("rental", "ambiguous_reconcile_failed", {
+        missionKey,
+        listingId: candidate?.listingId || null,
+        error: error.message,
+      });
+      return { assigned: false, safeToRelease: false, error: error.message };
+    }
+  }
+
   function findMissionByAssignedMissionId(missions = [], assignedId = "") {
     const wanted = String(assignedId || "").trim();
     if (!wanted) return null;
@@ -4321,34 +4178,41 @@ function createChecksService(ctx, logger, mcp, services = {}) {
       return autoAssignPromise;
     }
     autoAssignPromise = runAutoAssignConfiguredMissions(options);
+    let result;
     try {
-      return await autoAssignPromise;
+      result = await autoAssignPromise;
     } finally {
       autoAssignPromise = null;
     }
+    if (
+      result?.ownedCooldownFollowupRequested === true &&
+      options.skipRentalCoordinator !== true
+    ) {
+      const followup = await autoAssignConfiguredMissions({
+        reason: `${options.reason || "periodic"}_owned_cooldown_fallback`,
+        missionsResult: result.missionResult || null,
+        skipRentalCoordinator: true,
+      });
+      return {
+        ...result,
+        assigned:
+          Number(result.assigned || 0) + Number(followup?.assigned || 0),
+        ownedCooldownFollowup: followup,
+      };
+    }
+    return result;
   }
 
   async function runAutoAssignConfiguredMissions({
     reason = "periodic",
     missionsResult = null,
-    prefetchedRentalCandidates = null,
+    skipRentalCoordinator = false,
   } = {}) {
     const resolved = resolveConfiguredTargets();
-    const initialPrefetchedRentalCandidates = normalizeRentalCandidates(
-      prefetchedRentalCandidates,
-    );
-    const usePrefetchedRentalOnly =
-      reason === "rental_fast_refresh" &&
-      initialPrefetchedRentalCandidates.length > 0;
-    const prefetchedRentalCandidateQueue =
-      initialPrefetchedRentalCandidates.slice();
-    let rentalLookupCache = null;
     logDebug("assign", "check", {
       reason,
       configured: resolved.configured.length,
       targets: resolved.targetIds.size || resolved.targetNames.size,
-      prefetchedRentalCandidates: initialPrefetchedRentalCandidates.length,
-      usePrefetchedRentalOnly,
     });
     const mutationStateBlockedUntil = Number(
       ctx.missionMutationStateBlockedUntil || 0,
@@ -4378,6 +4242,8 @@ function createChecksService(ctx, logger, mcp, services = {}) {
       return { ok: true, attempted: 0, assigned: 0, skipped: true };
     }
     if (resolved.targetIds.size === 0 && resolved.targetNames.size === 0) {
+      rentalDemandMissionKeys = new Set();
+      if (rentals) rentals.setDemand(false, { reason: "no_configured_targets" });
       return { ok: true, attempted: 0, assigned: 0 };
     }
     ctx.autoAssignRunning = true;
@@ -4415,6 +4281,8 @@ function createChecksService(ctx, logger, mcp, services = {}) {
       }
 
       if (candidates.length === 0) {
+        rentalDemandMissionKeys = new Set();
+        if (rentals) rentals.setDemand(false, { reason: "no_open_missions" });
         if (reason === "manual") {
           logWithTimestamp(
             "[ASSIGN] ℹ️ No unassigned target mission to start right now.",
@@ -4440,6 +4308,8 @@ function createChecksService(ctx, logger, mcp, services = {}) {
         `[ASSIGN] 🚀 Attempting to start ${candidates.length} mission(s) via NFT assignment...`,
       );
       let assigned = 0;
+      let rentalDemandDetected = false;
+      const rentalDemandKeysThisPass = new Set();
       let assignmentMissionStateAuthoritative = true;
       let needsFreshMissionRefresh = false;
       const startedMissionNames = [];
@@ -4462,10 +4332,9 @@ function createChecksService(ctx, logger, mcp, services = {}) {
         missions,
         { reason },
       );
-      const rentalFallbackEnabled =
-        ctx.missionModeEnabled === true ||
-        ctx.config?.missionModeEnabled === true ||
-        ctx.config?.enableRentals === true;
+      const rentalCoordinatorAvailable =
+        rentalCoordinatorEnabled() && skipRentalCoordinator !== true;
+      let ownedCooldownFollowupRequested = false;
       logDebug("assign", "assignment_order_policy", {
         reason,
         mode: nftAssignmentOrderMode(),
@@ -4483,7 +4352,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
                 "owned_cooldown_reset",
                 "rental_cooldown_reset",
               ],
-        rentalFallbackEnabled,
+        rentalCoordinatorAvailable,
         autoNftCooldownResetEnabled: autoNftCooldownResetEnabled(),
       });
       const inventorySnapshotResults = await Promise.all(
@@ -4714,6 +4583,16 @@ function createChecksService(ctx, logger, mcp, services = {}) {
             `[ASSIGN] ✅ ${name}: found ${readyOwnedCandidates.length} ready owned NFT candidate(s); queued ${selectedReadyOwnedCandidates.length} least-used candidate(s) for assignment.`,
           );
         } else if (
+          rentalCoordinatorAvailable &&
+          !autoModeThresholdFallbackOnlyLocal
+        ) {
+          rentalDemandDetected = true;
+          rentalDemandKeysThisPass.add(id);
+          logWithTimestamp(
+            `[RENTAL] 📋 ${name}: no ready owned NFT; queued for cached rental assignment.`,
+          );
+          continue;
+        } else if (
           nftAssignmentOrderMode() === "rotate_least_used" &&
           !autoModeThresholdFallbackOnlyLocal
         ) {
@@ -4778,189 +4657,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
               })),
           });
 
-          let rentalLookupSucceeded = false;
-          let readyRentalCandidates = [];
-          let cooledRentalCandidates = [];
-          if (rentalFallbackEnabled && !autoModeThresholdFallbackOnlyLocal) {
-            try {
-              let loadedRentalCandidates = [];
-              logWithTimestamp(
-                `[RENTAL] 🔎 ${name}: no ready owned NFT; checking rental pool before cooldown resets...`,
-              );
-              while (prefetchedRentalCandidateQueue.length > 0) {
-                loadedRentalCandidates.push(
-                  prefetchedRentalCandidateQueue.shift(),
-                );
-              }
-              if (loadedRentalCandidates.length > 0) {
-                logDebug("assign", "rental_candidates_prefetched", {
-                  reason,
-                  missionName: name,
-                  missionId: id,
-                  count: loadedRentalCandidates.length,
-                  remainingPrefetchedRentalCandidates:
-                    prefetchedRentalCandidateQueue.length,
-                });
-              }
-              const nowMs = Date.now();
-              const cacheAgeMs = rentalLookupCache
-                ? nowMs - rentalLookupCache.loadedAt
-                : Infinity;
-              let rentableEntries = null;
-              const rentalLookupStartedAt = Date.now();
-              let usedPrefetchedOnly = false;
-              if (usePrefetchedRentalOnly) {
-                rentableEntries = [];
-                usedPrefetchedOnly = true;
-                logDebug("assign", "rental_fast_refresh_prefetched_only", {
-                  reason,
-                  missionName: name,
-                  missionId: id,
-                  prefetchedCount: loadedRentalCandidates.length,
-                });
-              } else if (
-                rentalLookupCache &&
-                cacheAgeMs >= 0 &&
-                cacheAgeMs <= 2000
-              ) {
-                rentableEntries = rentalLookupCache.entries;
-                logDebug("assign", "rental_candidates_cache_hit", {
-                  reason,
-                  missionName: name,
-                  missionId: id,
-                  ageMs: cacheAgeMs,
-                  count: rentableEntries.length,
-                });
-              } else {
-                const rentalPoolResult = await getRentableNftsSerialized(
-                  {
-                    hideCooldowned: false,
-                    showRented: false,
-                    showOwned: false,
-                    sortOrder: "cooldown_asc",
-                    pageSize: 100,
-                  },
-                  {
-                    source: "assignment_pool_lookup",
-                    missionName: name,
-                    missionId: id,
-                  },
-                );
-                rentableEntries = normalizeRentableList(rentalPoolResult);
-                rentalLookupCache = {
-                  loadedAt: Date.now(),
-                  entries: rentableEntries,
-                };
-                const readyCount = rentableEntries.filter((entry) =>
-                  nftIsAvailable(entry),
-                ).length;
-                const cooldownCount = rentableEntries.length - readyCount;
-                logDebug("assign", "rental_lookup_sources_loaded", {
-                  reason,
-                  missionName: name,
-                  missionId: id,
-                  readyCount,
-                  cooldownPoolCount: cooldownCount,
-                  totalCount: rentableEntries.length,
-                  cooldownLookupEnabled: autoNftCooldownResetEnabled(),
-                });
-              }
-              loadedRentalCandidates = normalizeRentalCandidates([
-                ...loadedRentalCandidates,
-                ...rentableEntries,
-              ], { limit: 0 });
-              logWithTimestamp(
-                `[TIMING] rental lookup ${name}: ${timingMs(rentalLookupStartedAt)}ms${usedPrefetchedOnly ? " (prefetched)" : rentalLookupCache && cacheAgeMs >= 0 && cacheAgeMs <= 2000 ? " (cache)" : ""}`,
-              );
-              readyRentalCandidates = loadedRentalCandidates
-                .filter(
-                  (entry) =>
-                    isLevel20Mission(mission) ||
-                    !isLevel20ReservedCollectionNft(entry.nft),
-                )
-                .filter((entry) => nftIsAvailable(entry.nft))
-                .slice(0, rentalBatchLimit());
-              cooledRentalCandidates = loadedRentalCandidates
-                .filter(
-                  (entry) =>
-                    isLevel20Mission(mission) ||
-                    !isLevel20ReservedCollectionNft(entry.nft),
-                )
-                .filter((entry) => !nftIsAvailable(entry.nft))
-                .slice(0, autoNftCooldownResetProbeLimit());
-              rentalLookupSucceeded = true;
-              logDebug("assign", "rental_candidates_loaded", {
-                reason,
-                missionName: name,
-                missionId: id,
-                count: loadedRentalCandidates.length,
-                readyCount: readyRentalCandidates.length,
-                cooldownCount: cooledRentalCandidates.length,
-              });
-              logWithTimestamp(
-                `[RENTAL] 🔎 ${name}: found ${readyRentalCandidates.length} ready rental candidate(s); ${cooledRentalCandidates.length} cooled rental candidate(s) saved for last resort.`,
-              );
-              if (
-                readyRentalCandidates.length === 0 &&
-                cooledRentalCandidates.length === 0
-              ) {
-                logWithTimestamp(
-                  `[RENTAL] ℹ️ ${name}: no ready or cooled rental NFTs returned right now.`,
-                );
-                if (ownedCooldownCandidates.length === 0) {
-                  requestRentalFastRefresh({
-                    reason,
-                    missionName: name,
-                  });
-                } else {
-                  logWithTimestamp(
-                    `[RENTAL] ⏸️ ${name}: deferring fast refresh while owned cooldown fallback is in progress.`,
-                  );
-                }
-              }
-            } catch (error) {
-              if (isRateLimitError(error)) {
-                abortedForRateLimit = true;
-                logDebug("assign", "⏳ rental_candidates_rate_limited", {
-                  reason,
-                  missionName: name,
-                  missionId: id,
-                  retryAfterMs: getMcpCooldownRemainingMs(),
-                });
-              }
-              logDebug("assign", "❌ rental_candidates_failed", {
-                reason,
-                missionName: name,
-                missionId: id,
-                error: error.message,
-              });
-              logWithTimestamp(
-                `[RENTAL] ❌ ${name}: failed to load rentable NFTs: ${error.message}`,
-              );
-            }
-          } else if (autoModeThresholdFallbackOnlyLocal) {
-            logWithTimestamp(
-              `[RENTAL] ⏭️ ${name}: level 20 auto fallback is local-only; skipping rentals entirely.`,
-            );
-          } else {
-            logWithTimestamp(
-              `[RENTAL] ⏭️ ${name}: rental fallback disabled; skipping cooldown resets.`,
-            );
-          }
-          if (abortedForRateLimit) break;
-
           const orderedOptions = [];
-          if (rentalFallbackEnabled && readyRentalCandidates.length > 0) {
-            orderedOptions.push(
-              ...readyRentalCandidates.map((entry) => ({
-                ...entry,
-                source: "rental",
-                stage: "ready_rental",
-                skipPreLeaseRefresh: usePrefetchedRentalOnly,
-              })),
-            );
-            assignmentSourceStage = "ready_rental";
-          }
           if (autoNftCooldownResetEnabled()) {
             const maxPbp = autoNftCooldownResetMaxPbp();
             if (ownedCooldownCandidates.length > 0) {
@@ -4975,30 +4672,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
                 `[RESET] 🔎 ${name}: stage 3/4 queued ${ownedCooldownCandidates.length} owned cooldown NFT candidate(s), max=${maxPbp} PBP.`,
               );
             }
-            if (rentalFallbackEnabled && rentalLookupSucceeded) {
-              if (cooledRentalCandidates.length > 0) {
-                orderedOptions.push(
-                  ...cooledRentalCandidates.map((entry) => ({
-                    ...entry,
-                    source: "rental",
-                    stage: "rental_cooldown_reset",
-                    skipPreLeaseRefresh: usePrefetchedRentalOnly,
-                  })),
-                );
-                logWithTimestamp(
-                  `[RESET] 🔎 ${name}: stage 4/4 queued ${cooledRentalCandidates.length} rental cooldown NFT candidate(s), max=${maxPbp} PBP.`,
-                );
-              }
-            } else if (rentalFallbackEnabled) {
-              logWithTimestamp(
-                `[RESET] ⏭️ ${name}: skipping rental cooldown fallback because rentals were not successfully checked first.`,
-              );
-            }
-          } else if (
-            readyRentalCandidates.length === 0 &&
-            (ownedCooldownCandidates.length > 0 ||
-              cooledRentalCandidates.length > 0)
-          ) {
+          } else if (ownedCooldownCandidates.length > 0) {
             logWithTimestamp(
               `[RESET] ⏭️ ${name}: auto NFT cooldown reset is disabled.`,
             );
@@ -5125,8 +4799,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
           if (assignmentNowBlockedByReset("attempt_start")) break;
           const option = assignmentOptions[index];
           const nft = option.nft;
-          const ownedNftWasAvailable =
-            option.source !== "rental" && nftIsAvailable(nft);
+          const ownedNftWasAvailable = nftIsAvailable(nft);
           let account = option.account;
           try {
             if (
@@ -5164,97 +4837,6 @@ function createChecksService(ctx, logger, mcp, services = {}) {
                 `[RESET] ✅ ${name}: owned NFT cooldown reset ready for assignment.`,
               );
             }
-            if (option.source === "rental") {
-              const shouldUseSelectedRental = Boolean(option.listingId);
-              const freshRental = shouldUseSelectedRental ? option : null;
-              if (!freshRental) {
-                const error = new Error(
-                  "Rental listing disappeared before lease; waiting for the next fast refresh tick.",
-                );
-                error.rentalRefreshEmpty = true;
-                throw error;
-              }
-              logDebug("assign", "rental_candidate_reused", {
-                reason,
-                missionName: name,
-                missionId: id,
-                attempt: index + 1,
-                maxAttempts: assignmentOptions.length,
-                listingId: option.listingId || null,
-                sourceStage: option.stage || null,
-                prefetched: option.skipPreLeaseRefresh === true,
-              });
-              option.nft = freshRental.nft || option.nft;
-              option.account = freshRental.account || option.account;
-              option.listingId = freshRental.listingId || option.listingId;
-              account = option.account;
-              const freshNft = option.nft;
-              if (!nftIsAvailable(freshNft)) {
-                if (!autoNftCooldownResetEnabled()) {
-                  throw new Error(
-                    "Rental NFT is on cooldown and auto NFT cooldown reset is disabled.",
-                  );
-                }
-                if (!account) {
-                  throw new Error(
-                    "Rental NFT is on cooldown but no nftAccount was available for cooldown reset.",
-                  );
-                }
-                const maxPbp = autoNftCooldownResetMaxPbp();
-                if (assignmentNowBlockedByReset("before_rental_cooldown_reset")) {
-                  break;
-                }
-                logWithTimestamp(
-                  `[RESET] 🔎 ${name}: rental NFT is on cooldown; checking reset cost before lease (max=${maxPbp} PBP).`,
-                );
-                const resetResult = await tryResetCooldownNft({
-                  reason: `${reason}_rental_auto_cooldown_reset`,
-                  missionName: name,
-                  missionId: id,
-                  nft: {
-                    ...freshNft,
-                    account,
-                    nftAccount: account,
-                  },
-                  maxPbp,
-                  source: "rental",
-                });
-                if (resetResult?.reset !== true) {
-                  throw new Error(
-                    resetResult?.error
-                      ? `Rental NFT cooldown reset was not usable: ${resetResult.error}`
-                      : `Rental NFT cooldown reset was not usable (${resetResult?.reason || "reset_failed"}).`,
-                  );
-                }
-                option.rentalResetUsed = true;
-                option.nft = {
-                  ...freshNft,
-                  account,
-                  nftAccount: account,
-                  onCooldown: false,
-                  cooldownSeconds: 0,
-                  cooldownEndsAt: null,
-                };
-                logWithTimestamp(
-                  `[RESET] ✅ ${name}: rental NFT cooldown reset complete; assigning now.`,
-                );
-              }
-              logWithTimestamp(
-                `[RENTAL] 🚀 ${name}: assigning rental directly (listingId=${option.listingId})...`,
-              );
-              logDebug("assign", "rental_direct_assign_ready", {
-                reason,
-                missionName: name,
-                missionId: id,
-                listingId: option.listingId,
-                nftAccount: account || null,
-                signingMode: usesBrowserBridgeSigning()
-                  ? "browser_bridge"
-                  : "agent_managed",
-                attempt: index + 1,
-                maxAttempts: assignmentOptions.length,
-              });
-            }
             if (assignmentNowBlockedByReset("before_assign_call")) break;
             logDebug("assign", "assign_call_start", {
               reason,
@@ -5269,16 +4851,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
             const assignCallStartedAt = Date.now();
             const assignResult = await mcp.mcpToolCall(
               "assign_nft_to_mission",
-              {
-                assignedMissionId: id,
-                nftAccount: account,
-                ...(option.source === "rental"
-                  ? {
-                      rentalListingId: option.listingId || undefined,
-                      nftSource: "rental",
-                    }
-                  : {}),
-              },
+              { assignedMissionId: id, nftAccount: account },
             );
             logWithTimestamp(
               `[TIMING] assign ${option.source} ${name}: ${timingMs(assignCallStartedAt)}ms`,
@@ -5393,11 +4966,8 @@ function createChecksService(ctx, logger, mcp, services = {}) {
                         ?.startTime || "",
                     ).trim() || new Date().toISOString()
                   : new Date().toISOString();
-              const usedReset =
-                option.source === "owned_cooldown" ||
-                (option.source === "rental" && option.rentalResetUsed === true);
-              const normalizedSource =
-                option.source === "rental" ? "rental" : "owned";
+              const usedReset = option.source === "owned_cooldown";
+              const normalizedSource = "owned";
               const nftLevel = Number.isFinite(Number(nft?.level))
                 ? Number(nft.level)
                 : null;
@@ -5528,7 +5098,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
               abortedForRateLimit,
               abortedForMutationState,
               inactiveMissionError,
-              rentalRefreshEmpty: error.rentalRefreshEmpty === true,
+              rentalRefreshEmpty: false,
               source: option.source,
               hasNext,
               retryable,
@@ -5545,26 +5115,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
               selectedNft: compactNftSelection(nft),
               selectedFrom: option.source,
             });
-            if (option.source === "rental") {
-              if (option.listingId) {
-                rentalFastRefreshFailedListings.add(String(option.listingId));
-              }
-              if (error.rentalRefreshEmpty === true) {
-                logWithTimestamp(
-                  `[RENTAL] ℹ️ ${name}: prefetched rental was gone before lease; staying on fast refresh.`,
-                );
-              } else {
-                logWithTimestamp(
-                  `[RENTAL] ❌ ${name}: rental attempt failed: ${error.message}`,
-                );
-              }
-              if (!shouldTryNext && !inactiveMissionError) {
-                requestRentalFastRefresh({
-                  reason: "rental_attempt_failed",
-                  missionName: name,
-                });
-              }
-            } else if (option.source === "owned_cooldown") {
+            if (option.source === "owned_cooldown") {
               logWithTimestamp(
                 `[RESET] ⏭️ ${name}: owned cooldown reset attempt not usable; ${shouldTryNext ? "trying next fallback" : "no fallback left"}.`,
               );
@@ -5588,15 +5139,9 @@ function createChecksService(ctx, logger, mcp, services = {}) {
         }
 
         if (!missionAssigned && lastError) {
-          if (lastError.rentalRefreshEmpty === true) {
-            logWithTimestamp(
-              `[ASSIGN] ℹ️ ${name}: rental disappeared before lease; continuing fast refresh.`,
-            );
-          } else {
-            logWithTimestamp(
-              `[ASSIGN] ❌ Failed assign for ${name} (missionId=${id}): ${lastError.message}`,
-            );
-          }
+          logWithTimestamp(
+            `[ASSIGN] ❌ Failed assign for ${name} (missionId=${id}): ${lastError.message}`,
+          );
         }
         if (!missionAssigned && autoModeThresholdFallbackOnlyLocal) {
           try {
@@ -5637,12 +5182,39 @@ function createChecksService(ctx, logger, mcp, services = {}) {
       if (assignmentPassLoadedNftPage) {
         advanceNftAssignmentScan(assignmentPassMaxNftPageCount);
       }
+      rentalDemandMissionKeys = rentalDemandKeysThisPass;
+      if (rentals && skipRentalCoordinator !== true) {
+        const rentalMissions = getMissionsNeedingRental();
+        const rentalsNeeded =
+          rentalCoordinatorAvailable &&
+          (rentalDemandDetected || rentalMissions.length > 0);
+        rentals.setDemand(rentalsNeeded, { reason });
+        if (rentalsNeeded) {
+          await rentals.requestSearch({ reason, rentalsNeeded: true });
+          const rentalResult = await rentals.runAssignmentWorker({
+            reason,
+            missions: rentalMissions,
+          });
+          assigned += Number(rentalResult?.successes || 0);
+          logDebug("rental", "coordinator_pass_complete", {
+            reason,
+            attemptedDistinct: Number(rentalResult?.attemptedDistinct || 0),
+            dispatches: Number(rentalResult?.dispatches || 0),
+            successes: Number(rentalResult?.successes || 0),
+            stopReason: rentalResult?.stopReason || rentalResult?.reason || null,
+          });
+          rentals.setDemand(getMissionsNeedingRental().length > 0, {
+            reason: `${reason}_post_assignment`,
+          });
+          ownedCooldownFollowupRequested =
+            autoNftCooldownResetEnabled() &&
+            getMissionsNeedingRental().length > 0 &&
+            shouldRequestOwnedCooldownFollowup(rentalResult);
+        }
+      }
       assignedCountForEvent = assigned;
 
       if (assigned > 0) {
-        if (reason !== "rental_fast_refresh") {
-          stopRentalFastRefresh("assigned");
-        }
         await refreshMissionHeaderStats({
           missionsResult: currentMissionResult,
           refreshNftCount: false,
@@ -5682,7 +5254,6 @@ function createChecksService(ctx, logger, mcp, services = {}) {
         });
       }
       if (ctx.guiBridge?.emitNow) ctx.guiBridge.emitNow();
-      flushRequestedRentalFastRefresh();
       return {
         ok: true,
         attempted: candidates.length,
@@ -5693,8 +5264,11 @@ function createChecksService(ctx, logger, mcp, services = {}) {
         mutationStateMissing: abortedForMutationState,
         startedMissionNames,
         startedMissionDetails,
+        ownedCooldownFollowupRequested,
       };
     } catch (error) {
+      rentalDemandMissionKeys = new Set();
+      if (rentals) rentals.setDemand(false, { reason: "assignment_check_failed" });
       logWithTimestamp(`[ASSIGN] ❌ Assign check failed: ${error.message}`);
       logDebug("assign", "❌ auto_assign_failed", {
         reason,
@@ -5710,11 +5284,9 @@ function createChecksService(ctx, logger, mcp, services = {}) {
         });
       }
       if (ctx.guiBridge?.emitNow) ctx.guiBridge.emitNow();
-      flushRequestedRentalFastRefresh();
       return { ok: false, attempted: 0, assigned: 0, error: error.message };
     } finally {
       ctx.autoAssignRunning = false;
-      flushRequestedRentalFastRefresh();
     }
   }
 
@@ -5725,7 +5297,8 @@ function createChecksService(ctx, logger, mcp, services = {}) {
     missionsResult = null,
   } = {}) {
     const limit = Math.max(1, Number(maxClaims || 10));
-    const claimsPaused = () => ctx.watchLoopEnabled === false;
+    const claimsPaused = () =>
+      ctx.watchLoopEnabled === false && ctx.manualClaimOverrideActive !== true;
     try {
       if (claimsPaused()) {
         logDebug("watch", "claim_scan_skipped_paused", { reason, limit });
@@ -5830,11 +5403,12 @@ function createChecksService(ctx, logger, mcp, services = {}) {
             normalizeMissionList(claimResult).length > 0;
           if (!claimResponseHasMissions) {
             claimMutationStateMissing = true;
-            const protocolError = new Error(
-              "claim_mission_reward succeeded without authoritative missions state",
-            );
-            protocolError.mutationStateMissing = true;
-            throw protocolError;
+            // The mutation itself succeeded, so the claim must still be
+            // counted and emitted even if this server version omits its
+            // replacement mission rows. Do not expose the pre-claim snapshot
+            // as authoritative; the shared lifecycle will preserve the
+            // optimistic UI and wait for a permitted fresh read.
+            authoritativeMissionResult = null;
           }
           claimMissionStateAuthoritative = claimResponseHasMissions;
           if (claimResponseHasMissions) {
@@ -5883,7 +5457,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
               "Mission reward claimed",
           });
           emitClaimAnalyticsEvent(ctx, {
-            source: "fallback_claim",
+            source: reason || "fallback_claim",
             at: Date.now(),
             assignedMissionId: mission.id || null,
             missionName: mission.name || "unknown mission",
@@ -5928,6 +5502,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
           logWithTimestamp(
             `[WATCH] ✅ Claimed (fallback): ${mission.name}${slotText}${levelText}`,
           );
+          if (claimMutationStateMissing) break;
         } catch (error) {
           if (
             claimsPaused() ||
@@ -6350,9 +5925,13 @@ function createChecksService(ctx, logger, mcp, services = {}) {
     isConfiguredTargetMission,
     filterSelectedMissions,
     hasAssignableConfiguredMissions,
+    getMissionsNeedingRental,
+    missionStillNeedsRental,
+    assignCachedRentalCandidate,
+    reconcileAmbiguousRentalAssignment,
     logSelectedWatchTargetsAtStartup,
     autoAssignConfiguredMissions,
-    stopRentalFastRefresh,
+    stopRentalCoordinator,
     prepareUnlockSlot4,
     applyMissionSelection,
     previewMissionSelection,
@@ -6365,4 +5944,5 @@ function createChecksService(ctx, logger, mcp, services = {}) {
 module.exports = {
   createChecksService,
   shouldRetryAssignmentOption,
+  shouldRequestOwnedCooldownFollowup,
 };

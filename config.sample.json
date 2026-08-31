@@ -2,6 +2,9 @@
   "missionsAnalyticsEnabled": true,
   "missionsAnalyticsUrl": "https://missions.lol/missions-analytics/public/track.php",
   "missionsAnalyticsToken": "c8957cffc9fc68d35a886c14a6ca9d48aefbfdd564b3eef0c89de03efa5c056f",
+  "enableRentals": false,
+  "rentalAssignmentAttemptsPerWake": 3,
+  "rentalAssignmentContinuationDelaySeconds": 3,
   "targetMissions": [
     "Do it All!",
     "Race!",

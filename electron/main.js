@@ -22,12 +22,11 @@ const {
   fetchCompetitionCount,
   scrapeLatestCompetition,
 } = require("./scrapeCompetitions");
-const { checkForUpdates } = require("./update-checker");
 const {
-  fetchPbpTimers,
-  getPbpTimerSessionStatus,
-  openPbpTimerLogin,
-} = require("./pbpTimers");
+  normalizeCompetitionRowKey,
+  competitionRangeLockDecision,
+} = require("./competitionRangeLock");
+const { checkForUpdates } = require("./update-checker");
 const { createMcpClient } = require("../src/mcp/client");
 const {
   normalizeMissionList,
@@ -1986,15 +1985,6 @@ function normalizeDesktopCompetitionConfig(config = {}) {
   delete next.suppressedMissionCompetitionNotificationId;
   delete next.lastSeenMissionCompetitionId;
   return next;
-}
-
-function normalizeCompetitionRowKey(value) {
-  return String(value || "")
-    .trim()
-    .toLowerCase()
-    .replace(/^@+/, "")
-    .replace(/\s+/g, "")
-    .replace(/[^a-z0-9._-]/g, "");
 }
 
 function competitionRangeLockConfigFrom(config = {}) {
@@ -4731,11 +4721,11 @@ function debugToggleSummaryLines(config = {}) {
   });
   return [
     `[DEBUG] Debug mode ${enabled ? "enabled" : "disabled"}.`,
-    `[DEBUG] runtimeDefaults: missionResetLevel ${NORMAL_DEFAULTS.missionResetLevel} -> ${defaults.missionResetLevel}, rentalFastRefreshTickMs ${NORMAL_DEFAULTS.rentalFastRefreshTickMs} -> ${defaults.rentalFastRefreshTickMs}, rentalBatchLimit ${NORMAL_DEFAULTS.rentalBatchLimit} -> ${defaults.rentalBatchLimit}, watchMinCycleSeconds ${NORMAL_DEFAULTS.watchMinCycleSeconds} -> ${defaults.watchMinCycleSeconds}, watchDefaultPollSeconds ${NORMAL_DEFAULTS.watchDefaultPollSeconds} -> ${defaults.watchDefaultPollSeconds}`,
+    `[DEBUG] runtimeDefaults: missionResetLevel ${NORMAL_DEFAULTS.missionResetLevel} -> ${defaults.missionResetLevel}, rentalAssignmentAttemptsPerWake ${NORMAL_DEFAULTS.rentalAssignmentAttemptsPerWake} -> ${defaults.rentalAssignmentAttemptsPerWake}, rentalAssignmentContinuationDelaySeconds ${NORMAL_DEFAULTS.rentalAssignmentContinuationDelaySeconds} -> ${defaults.rentalAssignmentContinuationDelaySeconds}, watchMinCycleSeconds ${NORMAL_DEFAULTS.watchMinCycleSeconds} -> ${defaults.watchMinCycleSeconds}, watchDefaultPollSeconds ${NORMAL_DEFAULTS.watchDefaultPollSeconds} -> ${defaults.watchDefaultPollSeconds}`,
     `[DEBUG] watcher behavior: live mission polling=${enabled ? "enabled" : "disabled unless separately configured"}, verbose debug logs=${enabled ? "enabled" : "disabled"}, startup FX=${enabled ? "disabled" : "enabled"}`,
     `[DEBUG] auth behavior: startup interactive login=${enabled ? "enabled when token is missing" : "normal token-first flow"}, browser login prompts=${enabled ? "enabled" : "disabled unless interactiveAuth is enabled"}`,
     `[DEBUG] auto NFT cooldown reset conditions: missionMode=${config?.missionModeEnabled === true}, nftCooldownResetEnabled=${config?.nftCooldownResetEnabled === true}`,
-    `[DEBUG] dev-equivalent defaults are now ${enabled ? "active" : "inactive"}; target dev values are missionResetLevel=${DEV_DEFAULTS.missionResetLevel}, rentalFastRefreshTickMs=${DEV_DEFAULTS.rentalFastRefreshTickMs}, rentalBatchLimit=${DEV_DEFAULTS.rentalBatchLimit}, watchMinCycleSeconds=${DEV_DEFAULTS.watchMinCycleSeconds}, watchDefaultPollSeconds=${DEV_DEFAULTS.watchDefaultPollSeconds}`,
+    `[DEBUG] dev-equivalent defaults are now ${enabled ? "active" : "inactive"}; target dev values are missionResetLevel=${DEV_DEFAULTS.missionResetLevel}, rentalAssignmentAttemptsPerWake=${DEV_DEFAULTS.rentalAssignmentAttemptsPerWake}, rentalAssignmentContinuationDelaySeconds=${DEV_DEFAULTS.rentalAssignmentContinuationDelaySeconds}, watchMinCycleSeconds=${DEV_DEFAULTS.watchMinCycleSeconds}, watchDefaultPollSeconds=${DEV_DEFAULTS.watchDefaultPollSeconds}`,
   ];
 }
 
@@ -4757,7 +4747,7 @@ function toggleSettingsSummaryLines(config = {}, runtimeStatus = {}) {
     `│ Mode              ${config?.autoModeEnabled === true ? "AUTO" : config?.missionModeEnabled === true ? "MISSION" : "MANUAL"}    Reset level ${configuredMissionResetLevel}`,
     `│ Level 20 reset    ${onOff(config?.level20ResetEnabled === true)}        Per-slot reset ${onOff(config?.missionResetPerSlotModeEnabled === true)}`,
     `│ NFT reset         ${onOff(config?.nftCooldownResetEnabled === true)}        Max cost ${normalizedNftResetMaxPbp} PBP`,
-    `│ Rentals           ${onOff(config?.enableRentals === true)}        Fast refresh ${onOff(config?.rentalFastRefreshEnabled === true)}`,
+    `│ Rentals           ${onOff(config?.enableRentals === true)}        Try limit ${config?.rentalAssignmentAttemptsPerWake ?? 3}`,
     `│ Debug             ${onOff(config?.debugMode === true)}        Watch loop ${onOff(config?.watchLoopEnabled !== false)}`,
     `└${"─".repeat(57)}`,
   ];
@@ -4940,13 +4930,6 @@ function scheduleCompetitionRangeLockTick(delayMs = 0) {
   );
 }
 
-function competitionRangeLockTopRank(lockConfig = {}) {
-  return Math.min(
-    Number(lockConfig?.minRank) || 0,
-    Number(lockConfig?.maxRank) || 0,
-  );
-}
-
 function competitionLockDateMs(value) {
   const text = String(value || "").trim();
   if (!text || /^unknown$/i.test(text)) return null;
@@ -5100,11 +5083,13 @@ async function runCompetitionRangeLockCycle() {
   }
   competitionRangeLockRunning = true;
   try {
-    const topRank = competitionRangeLockTopRank(lockConfig);
-    const userKeys = [
-      normalizeCompetitionRowKey(backendStatus.currentUserDisplayName),
-      normalizeCompetitionRowKey(backendStatus.currentUserWalletId),
-    ].filter(Boolean);
+    const userIdentityValues = [
+      backendStatus.currentUserDisplayName,
+      backendStatus.currentUserWalletId,
+    ];
+    const userKeys = userIdentityValues
+      .map(normalizeCompetitionRowKey)
+      .filter(Boolean);
     if (!userKeys.length) {
       pushSystemLog(
         "[COMP LOCK] Missing current user identity; waiting for wallet summary.",
@@ -5143,16 +5128,14 @@ async function runCompetitionRangeLockCycle() {
       );
       return;
     }
-    const currentRow =
-      rows.find((row) => {
-        const rowKey = normalizeCompetitionRowKey(row?.player);
-        if (!rowKey) return false;
-        return userKeys.some(
-          (key) =>
-            rowKey === key || rowKey.includes(key) || key.includes(rowKey),
-        );
-      }) || null;
-    if (!currentRow || !Number.isFinite(Number(currentRow.rank))) {
+    const decision = competitionRangeLockDecision({
+      rows,
+      userIdentityValues,
+      minRank: lockConfig.minRank,
+      maxRank: lockConfig.maxRank,
+    });
+    const currentRow = decision.row;
+    if (!decision.action) {
       pushSystemLog("[COMP LOCK] Current user row not found; no action.");
       return;
     }
@@ -5165,9 +5148,8 @@ async function runCompetitionRangeLockCycle() {
       return;
     }
 
-    const rank = Number(currentRow.rank);
-    const detail = `rank=${rank} threshold<=${topRank} player=${String(currentRow.player || "unknown").trim() || "unknown"}`;
-    if (rank <= topRank) {
+    const detail = `rank=${decision.rank} target=${decision.target.minRank}-${decision.target.maxRank} player=${String(currentRow.player || "unknown").trim() || "unknown"}`;
+    if (decision.action === "pause") {
       await applyCompetitionRangeLockAction(
         "pause",
         `${detail} at/above lock threshold`,
@@ -6996,14 +6978,6 @@ app.whenReady().then(async () => {
       return { ok: false, error: String(error?.message || error) };
     }
   });
-  ipcMain.handle("pbp:timer-session-status", async () =>
-    getPbpTimerSessionStatus(),
-  );
-  ipcMain.handle("pbp:open-timer-login", async () =>
-    openPbpTimerLogin(controlWindow),
-  );
-  ipcMain.handle("pbp:get-timers", async () => fetchPbpTimers());
-
   hydrateBackendStatusFromConfig();
   publishStatus();
   if (isStandaloneCliMode()) {

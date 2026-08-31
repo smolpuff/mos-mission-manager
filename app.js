@@ -15,6 +15,7 @@ const { loadConfig, saveConfig, flushConfig } = require("./src/config");
 const { createSignerService } = require("./src/signer");
 const { createMcpClient } = require("./src/mcp/client");
 const { createChecksService } = require("./src/services/checks");
+const { createRentalCoordinator } = require("./src/services/rentals");
 const { createWatchService } = require("./src/services/watch");
 const { createCommandHandler } = require("./src/commands");
 const { startStartupFx } = require("./src/ui/startup-fx");
@@ -32,7 +33,44 @@ const ctx = createContext();
 const logger = createLogger(ctx);
 const signer = createSignerService(ctx, logger);
 const mcp = createMcpClient(ctx, logger);
-const checks = createChecksService(ctx, logger, mcp, { signer });
+let checks = null;
+const rentals = createRentalCoordinator({
+  snapshotPath: ctx.rentalCandidateSnapshotPath,
+  lockPath: ctx.rentalCandidateLockPath,
+  searchRentals: (args) =>
+    mcp.mcpToolCall("get_rentable_nfts", args, {
+      reason: "rental_coordinator_search",
+    }),
+  getMissionsNeedingRental: () =>
+    checks?.getMissionsNeedingRental?.() || [],
+  missionStillNeedsRental: (missionKey, mission) =>
+    checks?.missionStillNeedsRental?.(missionKey, mission) === true,
+  reserveAssignmentBudget: () => {
+    const reservation = mcp.reserveToolWindowCapacity(
+      "assign_nft_to_mission",
+    );
+    return {
+      admitted: reservation.ok === true,
+      nextAvailableAt: reservation.nextAvailableAt,
+      token: reservation.token,
+    };
+  },
+  assignCandidate: (payload) => checks.assignCachedRentalCandidate(payload),
+  reconcileAmbiguous: (payload) =>
+    checks.reconcileAmbiguousRentalAssignment(payload),
+  onScheduledWake: () =>
+    checks?.autoAssignConfiguredMissions?.({ reason: "rental_scheduled" }),
+  attemptsPerWake: 3,
+  continuationDelaySeconds: 3,
+  log(event, meta) {
+    logger.logDebug("rental", event, meta);
+  },
+  onStateChange(status) {
+    ctx.rentalCoordinatorStatus = status;
+    if (ctx.guiBridge?.emitSoon) ctx.guiBridge.emitSoon();
+  },
+});
+checks = createChecksService(ctx, logger, mcp, { signer, rentals });
 const watch = createWatchService(
   ctx,
   logger,
@@ -446,6 +484,34 @@ if (process.env.PBP_GUI_BRIDGE === "1" && typeof process.send === "function") {
             ctx.config.nftCooldownResetMaxPbp = maxPbp;
           }
         }
+        if (typeof payload.enableRentals === "boolean") {
+          ctx.config.enableRentals = payload.enableRentals;
+          if (!payload.enableRentals) {
+            rentals.setDemand(false, { reason: "rentals_disabled" });
+          }
+        }
+        if (payload.rentalAssignmentAttemptsPerWake !== undefined) {
+          const attempts = Number(payload.rentalAssignmentAttemptsPerWake);
+          if (Number.isFinite(attempts) && attempts >= 1 && attempts <= 5) {
+            ctx.config.rentalAssignmentAttemptsPerWake = Math.floor(attempts);
+          }
+        }
+        if (
+          payload.rentalAssignmentContinuationDelaySeconds !== undefined
+        ) {
+          const delay = Number(
+            payload.rentalAssignmentContinuationDelaySeconds,
+          );
+          if (Number.isFinite(delay) && delay >= 1 && delay <= 30) {
+            ctx.config.rentalAssignmentContinuationDelaySeconds =
+              Math.floor(delay);
+          }
+        }
+        rentals.configure({
+          attemptsPerWake: ctx.config.rentalAssignmentAttemptsPerWake,
+          continuationDelaySeconds:
+            ctx.config.rentalAssignmentContinuationDelaySeconds,
+        });
         flushConfig(ctx, logger.logDebug);
         logger.logWithTimestamp(
           `[CONFIG] Runtime config updated: debug=${ctx.debugMode ? "on" : "off"}, slot automation saved, per-slot mission resets=${ctx.missionResetPerSlotModeEnabled ? "enabled" : "disabled"}, auto NFT resets=${ctx.nftCooldownResetEnabled ? "enabled" : "disabled"} (max ${Number(ctx.config.nftCooldownResetMaxPbp ?? 20)} PBP).`,
@@ -560,6 +626,12 @@ async function runStartupSequence() {
   ctx.startupFxProgress = 5;
 
   loadConfig(ctx, logger.logWithTimestamp);
+  rentals.configure({
+    attemptsPerWake: ctx.config.rentalAssignmentAttemptsPerWake,
+    continuationDelaySeconds:
+      ctx.config.rentalAssignmentContinuationDelaySeconds,
+  });
+  rentals.load();
   if (Object.prototype.hasOwnProperty.call(ctx.config, "nftAssignmentUsage")) {
     const legacyUsage = normalizeNftAssignmentUsage(
       ctx.config.nftAssignmentUsage,
@@ -776,6 +848,7 @@ async function main() {
 
 process.on("SIGINT", () => {
   ctx.watchLoopEnabled = false;
+  rentals.shutdown();
   signer.shutdown();
   flushConfig(ctx, logger.logDebug);
   logger.logWithTimestamp(
@@ -786,12 +859,14 @@ process.on("SIGINT", () => {
 
 process.on("SIGTERM", () => {
   ctx.watchLoopEnabled = false;
+  rentals.shutdown();
   signer.shutdown();
   flushConfig(ctx, logger.logDebug);
   process.exit(0);
 });
 
 main().catch((err) => {
+  rentals.shutdown();
   signer.shutdown();
   logger.logWithTimestamp(
     logger.formatTaggedLog(

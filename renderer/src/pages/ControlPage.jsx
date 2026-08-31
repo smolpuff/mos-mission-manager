@@ -10,7 +10,6 @@ import SettingsPage from "./SettingsPage";
 import StatsPage from "./StatsPage";
 import RentalsPage from "./RentalsPage";
 import NftsPage from "./NftsPage";
-import PbpTimersPage from "./PbpTimersPage";
 import { competitionOptionValue } from "../competition-options";
 
 import pbpIcon from "../img/icon_pbp.webp";
@@ -4438,9 +4437,6 @@ function ControlView() {
             <NftsPage bridge={bridge} signerMode={status.signerMode} />
           </div>
           {currentPage === "rentals" ? <RentalsPage bridge={bridge} /> : null}
-          {currentPage === "pbp_timers" ? (
-            <PbpTimersPage bridge={bridge} />
-          ) : null}
           {currentPage !== "missions" ? null : (
             <>
               <div className="space-y-1.5">

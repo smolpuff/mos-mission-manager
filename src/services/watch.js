@@ -46,6 +46,10 @@ function createWatchService(
   const WATCH_MAX_CLAIMS = 4;
   const WATCH_FALLBACK_CLAIMS = true;
   const MISSION_UI_POLL_HEADROOM_MS = 2_000;
+  // If the mid-cycle mission refresh finds a completed mission while the
+  // strict watch_and_claim window is still this far away, use the direct
+  // claim tool instead of leaving the reward pending for another UI turn.
+  const DIRECT_CLAIM_MIN_WATCH_WAIT_MS = 10_000;
   // Keep the next passive mission/UI refresh safely beyond the MCP tool's
   // minute boundary. This is timing headroom only; it does not add a call.
   const WATCH_START_INTERVAL_MS = 60_000 + MISSION_UI_POLL_HEADROOM_MS;
@@ -55,6 +59,8 @@ function createWatchService(
   const DEFAULT_SESSION_REWARD_TOTALS = { pbp: 0, tc: 0, cc: 0 };
   const DEFAULT_SESSION_SPEND_TOTALS = { pbp: 0, tc: 0, cc: 0 };
   let cycleInFlight = null;
+  let intermediateClaimInFlight = null;
+  let manualProcessInFlight = null;
   let cycleAbortController = null;
   let traceSequence = 0;
   let walletRefreshTimer = null;
@@ -546,7 +552,9 @@ function createWatchService(
   }
 
   function claimWorkPaused() {
-    return ctx.watchLoopEnabled === false;
+    return (
+      ctx.watchLoopEnabled === false && ctx.manualClaimOverrideActive !== true
+    );
   }
 
   function missionAutomationEnabled(mission) {
@@ -2029,18 +2037,6 @@ function createWatchService(
     finalTraceMeta = {},
     missionResultLoader = null,
   } = {}) {
-    if (claimWorkPaused()) {
-      trace("watch", "claim_lifecycle_skipped_paused", {
-        traceId,
-        claimed: Number(claimed || 0),
-        assignReason,
-      });
-      return {
-        claimed: Number(claimed || 0),
-        assigned: 0,
-        missionResult: initialMissionResult,
-      };
-    }
     const finishClaimLifecycle = (followup) => {
       if (Number(followup?.claimed || 0) > 0) {
         scheduleCurrentWalletSummaryRefresh("claim");
@@ -3814,6 +3810,89 @@ function createWatchService(
               refreshNftCount: false,
               hydrateAssignedMetadata: false,
             });
+            const claimableCount = normalizeMissionList(missionsResult).filter(
+              (mission) => missionIsClaimable(mission),
+            ).length;
+            if (claimableCount === 0 || claimWorkPaused()) return;
+
+            const watchBudget =
+              typeof mcp.getToolWindowBudget === "function"
+                ? mcp.getToolWindowBudget("watch_and_claim")
+                : null;
+            const nextWatchWaitMs = Math.max(
+              0,
+              Number(watchBudget?.waitMs || 0),
+            );
+            if (nextWatchWaitMs <= DIRECT_CLAIM_MIN_WATCH_WAIT_MS) {
+              logDebug("watch", "intermediate_direct_claim_skipped", {
+                reason,
+                claimableCount,
+                nextWatchWaitMs,
+                thresholdMs: DIRECT_CLAIM_MIN_WATCH_WAIT_MS,
+                skipReason: "watch_trigger_near",
+              });
+              return;
+            }
+            if (
+              intermediateClaimInFlight ||
+              manualProcessInFlight ||
+              cycleInFlight ||
+              ctx.activeClaimAbortController ||
+              ctx.autoAssignRunning === true
+            ) {
+              logDebug("watch", "intermediate_direct_claim_skipped", {
+                reason,
+                claimableCount,
+                nextWatchWaitMs,
+                skipReason: "claim_or_assignment_in_flight",
+              });
+              return;
+            }
+
+            intermediateClaimInFlight = (async () => {
+              const directTraceId = nextTraceId("gap_claim");
+              const beforeDirectClaimSnapshot =
+                await loadSelectedMissionSnapshot(missionsResult);
+              logWithTimestamp(
+                `[WATCH] ⚡ ${claimableCount} claimable mission(s) found with ${Math.ceil(nextWatchWaitMs / 1000)}s until the next watcher; claiming directly...`,
+              );
+              const directClaimResult = await checks.claimClaimableMissions({
+                maxClaims: opts.maxClaims,
+                reason: "watch_gap_direct_claim",
+                onlySelected: false,
+                missionsResult,
+              });
+              const directClaims = Array.isArray(directClaimResult?.claims)
+                ? directClaimResult.claims
+                : [];
+              const directClaimed = directClaims.filter(
+                (claim) => claim?.success !== false,
+              ).length;
+              if (directClaimed <= 0) {
+                return directClaimResult;
+              }
+              return await runClaimLifecycle({
+                traceId: directTraceId,
+                beforeSnapshot: beforeDirectClaimSnapshot,
+                claimed: directClaimed,
+                claims: directClaims,
+                assignReason: "watch_gap_direct_claim",
+                claimLogLabel: "Gap claimed",
+                assignIntro:
+                  "[ASSIGN] ▶ Post-gap-claim assign check (immediate)...",
+                initialMissionResult:
+                  directClaimResult?.mutationStateMissing === true
+                    ? null
+                    : directClaimResult?.missionResult || missionsResult,
+                initialMissionStateAuthoritative:
+                  directClaimResult?.missionStateAuthoritative === true,
+                allowStateFallback: true,
+                finalTraceAction: "gap_claim_final_snapshot",
+              });
+            })().finally(() => {
+              intermediateClaimInFlight = null;
+            });
+            await intermediateClaimInFlight;
           } catch (error) {
             logDebug("watch", "watch_cycle_ui_state_poll_failed", {
               reason,
@@ -3900,17 +3979,23 @@ function createWatchService(
     let fallbackClaims = [];
     let fallbackMissionResult = null;
     let fallbackMissionStateAuthoritative = false;
-    if (claimWorkPaused()) {
+    let fallbackMutationStateMissing = false;
+    if (claimWorkPaused() && !hasClaimActivity) {
       logDebug("watch", "cycle_followup_skipped_paused", { claimed });
+      return { claimed, opts, summary };
+    }
+    if (claimWorkPaused()) {
+      logDebug("watch", "cycle_claim_accounting_continues_paused", {
+        claimed,
+      });
       if (hasClaimActivity && ctx.guiBridge?.sendEvent) {
         ctx.guiBridge.sendEvent("claiming", {
-          state: "done",
+          state: "start",
           reason: "watch_paused",
           claimed,
         });
         if (ctx.guiBridge?.emitNow) ctx.guiBridge.emitNow();
       }
-      return { claimed, opts, summary };
     }
     logDebug("watch", "cycle_result", {
       watch: result?.structuredContent?.watch || {},
@@ -4009,7 +4094,7 @@ function createWatchService(
             normalMissionPollMs,
           });
         } else if (missionReadCooldownMs > 0) {
-          if (pendingClaimedMissionIds.size > 0) {
+          if (pendingClaimedMissionIds.size > 0 && !claimWorkPaused()) {
             // This is already the normal mission poll for this cycle. Do not
             // discard it at the cooldown boundary and then wait another full
             // 62-second watch cycle. Wait only for this tool's remaining
@@ -4092,22 +4177,35 @@ function createWatchService(
         });
       }
     }
-    // watch_and_claim cannot be told which slots to exclude. When any slot is
-    // disabled we intentionally use the local-safe path above, where
-    // claimClaimableMissions applies the per-slot policy before submitting a
-    // claim. The old path only fetched state, so one disabled slot prevented
-    // every enabled slot from ever claiming.
+    // watch_and_claim cannot be told which slots to exclude, and it can
+    // occasionally return no attempts even though this cycle's mission read
+    // is already claimable. In either case, claim directly before entering
+    // the long watcher gap when the next watcher trigger is not imminent.
+    const postWatchBudget =
+      typeof mcp.getToolWindowBudget === "function"
+        ? mcp.getToolWindowBudget("watch_and_claim")
+        : null;
+    const postWatchWaitMs = Math.max(
+      0,
+      Number(postWatchBudget?.waitMs || 0),
+    );
+    const shouldRunPostWatchDirectClaim =
+      usedLocalSafeWatch ||
+      postWatchWaitMs > DIRECT_CLAIM_MIN_WATCH_WAIT_MS;
     if (
-      usedLocalSafeWatch &&
+      shouldRunPostWatchDirectClaim &&
       !hasClaimActivity &&
       !claimWorkPaused() &&
       !hasActiveMcpCooldown() &&
       polledMissionResult
     ) {
       try {
+        const directClaimReason = usedLocalSafeWatch
+          ? "local_safe_watch"
+          : "watch_gap_direct_claim";
         const localClaimResult = await checks.claimClaimableMissions({
           maxClaims: opts.maxClaims,
-          reason: "local_safe_watch",
+          reason: directClaimReason,
           onlySelected: false,
           missionsResult: polledMissionResult,
         });
@@ -4118,17 +4216,23 @@ function createWatchService(
             ? localClaimResult.claims
             : [];
           fallbackMissionResult =
-            localClaimResult?.missionResult || polledMissionResult;
+            localClaimResult?.mutationStateMissing === true
+              ? null
+              : localClaimResult?.missionResult || polledMissionResult;
           fallbackMissionStateAuthoritative =
             localClaimResult?.missionStateAuthoritative === true;
+          fallbackMutationStateMissing =
+            localClaimResult?.mutationStateMissing === true;
           hasClaimActivity = true;
-          logDebug("watch", "local_safe_claim_scan_complete", {
+          logDebug("watch", "post_watch_direct_claim_complete", {
+            reason: directClaimReason,
             claimed: localClaimed,
             authoritative: fallbackMissionStateAuthoritative,
+            nextWatchWaitMs: postWatchWaitMs,
           });
         }
       } catch (error) {
-        logDebug("watch", "local_safe_claim_scan_failed", {
+        logDebug("watch", "post_watch_direct_claim_failed", {
           error: error.message,
         });
       }
@@ -4142,11 +4246,14 @@ function createWatchService(
       if (ctx.guiBridge?.emitNow) ctx.guiBridge.emitNow();
     }
     const selectedFallbackMissionResult = Boolean(fallbackMissionResult);
-    let postCycleMissionResult =
-      fallbackMissionResult || watchMissionResult || polledMissionResult;
-    const postCycleMissionStateAuthoritative = selectedFallbackMissionResult
-      ? fallbackMissionStateAuthoritative
-      : watchMissionStateAuthoritative || polledMissionStateAuthoritative;
+    let postCycleMissionResult = fallbackMutationStateMissing
+      ? null
+      : fallbackMissionResult || watchMissionResult || polledMissionResult;
+    const postCycleMissionStateAuthoritative = fallbackMutationStateMissing
+      ? false
+      : selectedFallbackMissionResult
+        ? fallbackMissionStateAuthoritative
+        : watchMissionStateAuthoritative || polledMissionStateAuthoritative;
     let claimLookupByAssignedMissionId = null;
     if (summary.claims.length > 0) {
       const needsLookup = summary.claims.some((c) => {
@@ -4234,6 +4341,10 @@ function createWatchService(
           traceId,
           claimed,
         });
+      } else if (claimWorkPaused()) {
+        logDebug("watch", "cycle_end_checks_skipped_paused", {
+          claimed,
+        });
       } else if (hasActiveMcpCooldown()) {
         logDebug("watch", "⏳ cycle_end_checks_skipped_rate_limited", {
           retryAfterMs: getMcpCooldownRemainingMs(),
@@ -4306,9 +4417,12 @@ function createWatchService(
     return cycleInFlight;
   }
 
-  async function runManualProcess({ waitForCycle = true } = {}) {
+  async function runManualProcessInternal({ waitForCycle = true } = {}) {
     const traceId = nextTraceId("manual");
     if (waitForCycle && cycleInFlight) await cycleInFlight.catch(() => {});
+    if (waitForCycle && intermediateClaimInFlight) {
+      await intermediateClaimInFlight.catch(() => {});
+    }
     if (!ctx.isAuthenticated) throw new Error("Not authenticated");
     logWithTimestamp(
       formatTaggedLog(
@@ -4351,10 +4465,9 @@ function createWatchService(
         missionsResult: preManualMissionResult,
       });
       if (claimWorkPaused()) {
-        logDebug("watch", "manual_followup_skipped_paused", {
+        logDebug("watch", "manual_followup_accounting_only_paused", {
           claimed: Number(claimResult?.claimed || 0),
         });
-        return { claimed: Number(claimResult?.claimed || 0), assigned: 0 };
       }
       const followup = await runClaimLifecycle({
         traceId,
@@ -4365,13 +4478,15 @@ function createWatchService(
         claimLogLabel: "Manual claimed",
         assignIntro: "[ASSIGN] ▶ Post-claim assign check (immediate)...",
         initialMissionResult:
-          claimResult?.missionResult || preManualMissionResult,
+          claimResult?.mutationStateMissing === true
+            ? null
+            : claimResult?.missionResult || preManualMissionResult,
         initialMissionStateAuthoritative:
           claimResult?.missionStateAuthoritative === true,
         allowStateFallback: true,
         finalTraceAction: "manual_final_snapshot",
       });
-      if (!manualResetOpened)
+      if (!manualResetOpened && !claimWorkPaused())
         await runResetCheckSafely(
           "manual_post",
           followup.missionResult,
@@ -4385,6 +4500,22 @@ function createWatchService(
       });
       throw error;
     }
+  }
+
+  function runManualProcess(options = {}) {
+    if (manualProcessInFlight) return manualProcessInFlight;
+    const task = (async () => {
+      ctx.manualClaimOverrideActive = true;
+      try {
+        return await runManualProcessInternal(options);
+      } finally {
+        ctx.manualClaimOverrideActive = false;
+      }
+    })();
+    manualProcessInFlight = task.finally(() => {
+      manualProcessInFlight = null;
+    });
+    return manualProcessInFlight;
   }
 
   async function runManualResetCheck({ waitForCycle = true } = {}) {
@@ -4506,10 +4637,11 @@ function createWatchService(
             missionsResult: startupActionMissionResult,
           });
           if (claimWorkPaused()) {
-            logDebug("watch", "startup_followup_skipped_paused", {
+            logDebug("watch", "startup_followup_accounting_only_paused", {
               claimed: Number(claimResult?.claimed || 0),
             });
-          } else if (Number(claimResult?.claimed || 0) > 0) {
+          }
+          if (Number(claimResult?.claimed || 0) > 0) {
             startupDidClaimOrAssign = true;
             startupHandledByClaimLifecycle = true;
             const followup = await runClaimLifecycle({
@@ -4524,7 +4656,9 @@ function createWatchService(
               claimLogLabel: "Startup claimed",
               assignIntro: "[ASSIGN] ▶ Startup post-claim assign check...",
               initialMissionResult:
-                claimResult?.missionResult || startupActionMissionResult,
+                claimResult?.mutationStateMissing === true
+                  ? null
+                  : claimResult?.missionResult || startupActionMissionResult,
               initialMissionStateAuthoritative:
                 claimResult?.missionStateAuthoritative === true,
               allowStateFallback: true,
@@ -4613,10 +4747,33 @@ function createWatchService(
     let hasCompletedFirstWatcherCycle = false;
     while (ctx.watchLoopEnabled) {
       try {
-        const preCycleCooldownMs = getMcpCooldownRemainingMs();
+        if (manualProcessInFlight) {
+          await manualProcessInFlight.catch((error) => {
+            logDebug("watch", "manual_process_wait_failed", {
+              error: error.message,
+            });
+          });
+        }
+        if (intermediateClaimInFlight) {
+          await intermediateClaimInFlight.catch((error) => {
+            logDebug("watch", "intermediate_direct_claim_wait_failed", {
+              error: error.message,
+            });
+          });
+        }
+        const watchWindowWaitMs =
+          typeof mcp.getToolWindowBudget === "function"
+            ? Number(
+                mcp.getToolWindowBudget("watch_and_claim")?.waitMs || 0,
+              )
+            : 0;
+        const preCycleCooldownMs = Math.max(
+          getMcpCooldownRemainingMs(),
+          watchWindowWaitMs,
+        );
         if (preCycleCooldownMs > 0) {
           logWithTimestamp(
-            `[WATCH] ⏳ MCP cooldown active. Waiting ${Math.ceil(preCycleCooldownMs / 1000)}s before next cycle.`,
+            `[WATCH] ⏳ watch_and_claim window active. Waiting ${Math.ceil(preCycleCooldownMs / 1000)}s before next cycle; direct/manual claims remain available.`,
           );
           await new Promise((resolve) =>
             setTimeout(resolve, preCycleCooldownMs),
@@ -4762,8 +4919,8 @@ function createWatchService(
     startWatchLoop,
     stopWatchLoop: async ({ persist = true, waitForCycle = true } = {}) => {
       ctx.watchLoopEnabled = false;
-      if (typeof checks.stopRentalFastRefresh === "function") {
-        checks.stopRentalFastRefresh("watch_stopped");
+      if (typeof checks.stopRentalCoordinator === "function") {
+        checks.stopRentalCoordinator("watch_stopped");
       }
       if (persist) {
         ctx.config.watchLoopEnabled = false;
@@ -4777,6 +4934,16 @@ function createWatchService(
       if (waitForCycle && cycleInFlight) {
         try {
           await cycleInFlight;
+        } catch {}
+      }
+      if (waitForCycle && intermediateClaimInFlight) {
+        try {
+          await intermediateClaimInFlight;
+        } catch {}
+      }
+      if (waitForCycle && manualProcessInFlight) {
+        try {
+          await manualProcessInFlight;
         } catch {}
       }
     },

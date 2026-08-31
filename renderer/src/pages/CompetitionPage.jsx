@@ -42,7 +42,11 @@ export default function CompetitionPage({
     ? selectedCompetition.missions
     : [];
   const missionColumnClass =
-    competitionMissions.length > 4 ? "basis-1/3" : "basis-1/2";
+    competitionMissions.length >= 8
+      ? "basis-1/4"
+      : competitionMissions.length > 4
+        ? "basis-1/3"
+        : "basis-1/2";
   const showPageLoading =
     !hasCompetitionData && (latestCompetitionBusy || !latestCompetitionError);
 
@@ -157,12 +161,8 @@ export default function CompetitionPage({
               <div className="text-sm text-slate-400 w-full | hidden">
                 Results
               </div>
-              {selectedCompetition.resultsStatus ? (
-                <div className="text-sm text-slate-300">
-                  {selectedCompetition.resultsStatus}
-                </div>
-              ) : Array.isArray(selectedCompetition.userRows) &&
-                selectedCompetition.userRows.length ? (
+              {Array.isArray(selectedCompetition.userRows) &&
+              selectedCompetition.userRows.length ? (
                 <div className="w-full flex-1 min-h-0 flex flex-col">
                   <table className="results-table results-table--header w-full text-xs border-collapse shrink-0">
                     <colgroup>
@@ -232,6 +232,10 @@ export default function CompetitionPage({
                       </tbody>
                     </table>
                   </div>
+                </div>
+              ) : selectedCompetition.resultsStatus ? (
+                <div className="text-sm text-slate-300">
+                  {selectedCompetition.resultsStatus}
                 </div>
               ) : Array.isArray(selectedCompetition.users) &&
                 selectedCompetition.users.length ? (

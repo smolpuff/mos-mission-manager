@@ -83,8 +83,4 @@ contextBridge.exposeInMainWorld("missionsDesktop", {
   getLatestCompetition: (opts) =>
     ipcRenderer.invoke("pbp:get-latest-competition", opts || {}),
   getCompetitionCount: () => ipcRenderer.invoke("pbp:get-competition-count"),
-  getPbpTimerSessionStatus: () =>
-    ipcRenderer.invoke("pbp:timer-session-status"),
-  openPbpTimerLogin: () => ipcRenderer.invoke("pbp:open-timer-login"),
-  getPbpTimers: () => ipcRenderer.invoke("pbp:get-timers"),
 });

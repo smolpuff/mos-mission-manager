@@ -29,6 +29,15 @@ function createMcpClient(ctx, logger) {
   ]);
   const TOOL_MIN_INTERVAL_MS = new Map([
     ["get_wallet_summary", 60_000],
+    // watch_and_claim is a strict one-per-minute server window. Persist its
+    // dispatch deadline so a backend restart (or a second process) cannot
+    // forget the previous call and reset the server cooldown with an early
+    // rejected retry.
+    ["watch_and_claim", 62_000],
+    // The rental pool permits one search per minute and an early rejected
+    // request restarts that server-side window. This interval is measured
+    // from dispatch, not from completion.
+    ["get_rentable_nfts", 61_000],
   ]);
   const TOOL_WINDOW_LIMITS = new Map([
     ["watch_and_claim", { limit: 1, windowMs: 60_000 }],
@@ -38,6 +47,9 @@ function createMcpClient(ctx, logger) {
     ["assign_nft_to_mission", { limit: 10, windowMs: 60_000 }],
   ]);
   const toolWindowCalls = new Map();
+  const toolWindowReservations = new Map();
+  const TOOL_WINDOW_RESERVATION_TTL_MS = 30_000;
+  let toolWindowReservationSequence = 0;
   let throttleDebugSequence = 0;
   let logicalToolCallSequence = 0;
   const recentToolCalls = [];
@@ -576,20 +588,71 @@ function createMcpClient(ctx, logger) {
     throw error;
   }
 
-  function toolWindowWaitMs(toolName, now = Date.now()) {
+  function activeToolWindowReservations(toolName, now = Date.now()) {
+    const normalizedToolName = String(toolName || "").trim();
+    const active = [];
+    for (const [token, reservation] of toolWindowReservations.entries()) {
+      if (Number(reservation?.expiresAt || 0) <= now) {
+        toolWindowReservations.delete(token);
+        continue;
+      }
+      if (reservation.toolName === normalizedToolName) {
+        active.push({ token, ...reservation });
+      }
+    }
+    return active;
+  }
+
+  function toolWindowBudget(toolName, now = Date.now()) {
     const normalizedToolName = String(toolName || "").trim();
     const config = TOOL_WINDOW_LIMITS.get(normalizedToolName);
-    if (!config) return 0;
+    if (!config) {
+      return {
+        toolName: normalizedToolName,
+        limit: null,
+        used: 0,
+        reserved: 0,
+        remaining: null,
+        waitMs: rateLimitWaitMs(normalizedToolName),
+        nextAvailableAt: null,
+      };
+    }
     const cutoff = now - config.windowMs;
     const recent = (toolWindowCalls.get(normalizedToolName) || []).filter(
       (timestamp) => timestamp > cutoff,
     );
     toolWindowCalls.set(normalizedToolName, recent);
-    if (recent.length < config.limit) return 0;
-    return Math.max(
-      0,
-      recent[0] + config.windowMs + THROTTLE_SAFETY_BUFFER_MS - now,
-    );
+    const reservations = activeToolWindowReservations(normalizedToolName, now);
+    const occupiedAt = [
+      ...recent,
+      ...reservations.map((reservation) => reservation.reservedAt),
+    ].sort((a, b) => a - b);
+    const remaining = Math.max(0, config.limit - occupiedAt.length);
+    const windowWaitMs =
+      remaining > 0
+        ? 0
+        : Math.max(
+            0,
+            occupiedAt[0] +
+              config.windowMs +
+              THROTTLE_SAFETY_BUFFER_MS -
+              now,
+          );
+    const cooldownWaitMs = rateLimitWaitMs(normalizedToolName);
+    const waitMs = Math.max(windowWaitMs, cooldownWaitMs);
+    return {
+      toolName: normalizedToolName,
+      limit: config.limit,
+      used: recent.length,
+      reserved: reservations.length,
+      remaining,
+      waitMs,
+      nextAvailableAt: waitMs > 0 ? now + waitMs : now,
+    };
+  }
+
+  function toolWindowWaitMs(toolName, now = Date.now()) {
+    return toolWindowBudget(toolName, now).waitMs;
   }
 
   function recordToolWindowCall(toolName, now = Date.now()) {
@@ -598,6 +661,41 @@ function createMcpClient(ctx, logger) {
     const recent = toolWindowCalls.get(normalizedToolName) || [];
     recent.push(now);
     toolWindowCalls.set(normalizedToolName, recent);
+  }
+
+  function reserveToolWindowCapacity(toolName) {
+    const normalizedToolName = String(toolName || "").trim();
+    const budget = toolWindowBudget(normalizedToolName);
+    if (!TOOL_WINDOW_LIMITS.has(normalizedToolName)) {
+      return { ok: true, token: null, ...budget };
+    }
+    if (budget.waitMs > 0 || budget.remaining < 1) {
+      return { ok: false, token: null, ...budget };
+    }
+    const now = Date.now();
+    const token = `${process.pid}:${++toolWindowReservationSequence}:${now}`;
+    toolWindowReservations.set(token, {
+      toolName: normalizedToolName,
+      reservedAt: now,
+      expiresAt: now + TOOL_WINDOW_RESERVATION_TTL_MS,
+    });
+    const updated = toolWindowBudget(normalizedToolName, now);
+    return { ok: true, token, ...updated };
+  }
+
+  function releaseToolWindowReservation(token) {
+    const key = String(token || "").trim();
+    return key ? toolWindowReservations.delete(key) : false;
+  }
+
+  function validToolWindowReservation(token, toolName, now = Date.now()) {
+    const key = String(token || "").trim();
+    if (!key) return false;
+    activeToolWindowReservations(toolName, now);
+    return (
+      toolWindowReservations.get(key)?.toolName ===
+      String(toolName || "").trim()
+    );
   }
 
   function shouldUseUserMissionsSnapshot(toolName, args) {
@@ -635,14 +733,45 @@ function createMcpClient(ctx, logger) {
     }
   }
 
+  function dedicatedToolCooldownPath(toolName) {
+    return `${cooldownStatePath()}.${String(toolName || "unknown_tool").trim()}.deadline`;
+  }
+
+  function readDedicatedToolCooldown(toolName) {
+    try {
+      const retryAt = Number(
+        fs.readFileSync(dedicatedToolCooldownPath(toolName), "utf8"),
+      );
+      return Number.isFinite(retryAt) ? retryAt : 0;
+    } catch {
+      return 0;
+    }
+  }
+
+  function persistDedicatedToolCooldown(toolName, retryAt) {
+    const targetPath = dedicatedToolCooldownPath(toolName);
+    fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+    const tempPath = `${targetPath}.${process.pid}.tmp`;
+    fs.writeFileSync(tempPath, String(Number(retryAt || 0)));
+    fs.renameSync(tempPath, targetPath);
+  }
+
   function sharedToolCooldownWaitMs(toolName) {
-    const retryAt = Number(readSharedCooldowns()?.tools?.[toolName] || 0);
+    const retryAt = Math.max(
+      Number(readSharedCooldowns()?.tools?.[toolName] || 0),
+      readDedicatedToolCooldown(toolName),
+    );
     return Number.isFinite(retryAt) ? Math.max(0, retryAt - Date.now()) : 0;
   }
 
   function persistToolCooldown(toolName, retryAt) {
     const name = String(toolName || "unknown_tool").trim() || "unknown_tool";
     const current = readSharedCooldowns();
+    const deadline = Math.max(
+      Number(current?.tools?.[name] || 0),
+      readDedicatedToolCooldown(name),
+      Number(retryAt || 0),
+    );
     const next = {
       ...current,
       updatedAt: Date.now(),
@@ -650,10 +779,13 @@ function createMcpClient(ctx, logger) {
         ...(current.tools && typeof current.tools === "object"
           ? current.tools
           : {}),
-        [name]: Number(retryAt || 0),
+        [name]: deadline,
       },
     };
     try {
+      if (name === "get_rentable_nfts") {
+        persistDedicatedToolCooldown(name, deadline);
+      }
       fs.mkdirSync(path.dirname(cooldownStatePath()), { recursive: true });
       const tempPath = `${cooldownStatePath()}.${process.pid}.tmp`;
       fs.writeFileSync(tempPath, JSON.stringify(next, null, 2));
@@ -663,6 +795,48 @@ function createMcpClient(ctx, logger) {
         error: error.message,
         file: cooldownStatePath(),
       });
+    }
+  }
+
+  function reserveSharedToolCooldown(toolName, intervalMs) {
+    const lockPath = `${cooldownStatePath()}.${toolName}.lock`;
+    const token = `${process.pid}:${Date.now()}:${Math.random()}`;
+    let handle = null;
+    for (let attempt = 0; attempt < 2 && !handle; attempt += 1) {
+      try {
+        fs.mkdirSync(path.dirname(lockPath), { recursive: true });
+        handle = fs.openSync(lockPath, "wx");
+        fs.writeFileSync(handle, token);
+      } catch (error) {
+        if (error?.code !== "EEXIST") throw error;
+        try {
+          const stat = fs.statSync(lockPath);
+          if (Date.now() - stat.mtimeMs > MCP_REQUEST_TIMEOUT_MS * 2) {
+            fs.unlinkSync(lockPath);
+            continue;
+          }
+        } catch (statError) {
+          if (statError?.code === "ENOENT") continue;
+          throw statError;
+        }
+        return { ok: false, waitMs: 1_000 };
+      }
+    }
+    if (!handle) return { ok: false, waitMs: 1_000 };
+    try {
+      const waitMs = sharedToolCooldownWaitMs(toolName);
+      if (waitMs > 0) return { ok: false, waitMs };
+      const retryAt = Date.now() + intervalMs;
+      persistDedicatedToolCooldown(toolName, retryAt);
+      persistToolCooldown(toolName, retryAt);
+      return { ok: true, waitMs: 0 };
+    } finally {
+      try {
+        fs.closeSync(handle);
+      } catch {}
+      try {
+        if (fs.readFileSync(lockPath, "utf8") === token) fs.unlinkSync(lockPath);
+      } catch {}
     }
   }
 
@@ -956,26 +1130,17 @@ function createMcpClient(ctx, logger) {
   }
 
   async function mcpToolCall(toolName, args = {}, opts = {}) {
+    let pendingToolWindowReservation = String(
+      opts?.toolWindowReservationToken ||
+        opts?.toolBudgetReservation?.token ||
+        "",
+    ).trim();
     const missionSnapshotEligible = shouldUseUserMissionsSnapshot(toolName, args);
     const userMissionsAgeMs = missionSnapshotEligible
       ? userMissionsSnapshotAgeMs()
       : null;
     const hasFreshUserMissions =
       missionSnapshotEligible && hasFreshUserMissionsSnapshot();
-
-    // Temporary operational trace: keep every mission-state request visible
-    // while validating the updated 10-per-minute service limit.
-    if (missionSnapshotEligible) {
-      const reason = String(opts?.reason || "unspecified").trim() || "unspecified";
-      const cacheState = hasFreshUserMissions
-        ? "fresh"
-        : userMissionsAgeMs === null
-          ? "empty"
-          : "expired";
-      logWithTimestamp(
-        `[MCP TRACE] get_user_missions requested (reason=${reason}, forceFresh=${opts?.forceFresh === true}, cache=${cacheState}).`,
-      );
-    }
 
     if (
       missionSnapshotEligible &&
@@ -1046,6 +1211,8 @@ function createMcpClient(ctx, logger) {
     const toolCallEntry = recordToolCallStart(toolName, args);
     const record = tokenRecord();
     if (!record?.access_token) {
+      releaseToolWindowReservation(pendingToolWindowReservation);
+      pendingToolWindowReservation = "";
       finalizeToolCallEntry(toolCallEntry, "missing_token");
       setMcpConnection("expired", { error: "missing_token" });
       throw new Error("Missing token. Run login.");
@@ -1053,6 +1220,8 @@ function createMcpClient(ctx, logger) {
     if (tokenExpiresSoon(record)) {
       const refreshed = await recoverAuthAfterRefreshFailure("expires_soon");
       if (!refreshed) {
+        releaseToolWindowReservation(pendingToolWindowReservation);
+        pendingToolWindowReservation = "";
         finalizeToolCallEntry(toolCallEntry, "auth_expired");
         setMcpConnection("expired", { error: "refresh_failed" });
         throw new Error("Authentication expired. Login required.");
@@ -1060,6 +1229,10 @@ function createMcpClient(ctx, logger) {
     }
 
     const runOnce = async () => {
+      const hasReservedWindowCapacity = validToolWindowReservation(
+        pendingToolWindowReservation,
+        toolName,
+      );
       const sharedWaitMs = sharedToolCooldownWaitMs(toolName);
       if (sharedWaitMs > 0) {
         throw buildActiveRateLimitError(
@@ -1071,8 +1244,10 @@ function createMcpClient(ctx, logger) {
       if (rateLimitWaitMs(toolName) > 0) {
         throw buildActiveRateLimitError("per_tool_cooldown", toolName);
       }
-      const windowWaitMs = toolWindowWaitMs(toolName);
-      if (windowWaitMs > 0) {
+      const windowWaitMs = hasReservedWindowCapacity
+        ? 0
+        : toolWindowWaitMs(toolName);
+      if (!hasReservedWindowCapacity && windowWaitMs > 0) {
         throw buildActiveRateLimitError(
           "local_per_tool_window",
           toolName,
@@ -1085,8 +1260,49 @@ function createMcpClient(ctx, logger) {
         throw new Error("Missing token. Run login.");
       }
       const sessionId = await mcpInitialize(token, callTrace);
+      if (hasReservedWindowCapacity) {
+        if (
+          !validToolWindowReservation(
+            pendingToolWindowReservation,
+            toolName,
+          )
+        ) {
+          const expiredReservationWaitMs = toolWindowWaitMs(toolName);
+          if (expiredReservationWaitMs > 0) {
+            throw buildActiveRateLimitError(
+              "expired_tool_window_reservation",
+              toolName,
+              expiredReservationWaitMs,
+            );
+          }
+        } else {
+          releaseToolWindowReservation(pendingToolWindowReservation);
+        }
+        pendingToolWindowReservation = "";
+      }
       callTrace.httpRequests += 1;
       recordToolWindowCall(toolName);
+      const minIntervalMs = Number(TOOL_MIN_INTERVAL_MS.get(toolName) || 0);
+      if (
+        (toolName === "get_rentable_nfts" ||
+          toolName === "watch_and_claim") &&
+        minIntervalMs > 0
+      ) {
+        // Atomically recheck and reserve across backend/UI processes after
+        // initialization. Only the process holding this filesystem lock may
+        // advance the shared dispatch deadline.
+        const dispatchReservation = reserveSharedToolCooldown(
+          toolName,
+          minIntervalMs,
+        );
+        if (!dispatchReservation.ok) {
+          throw buildActiveRateLimitError(
+            "shared_per_tool_cooldown_before_dispatch",
+            toolName,
+            dispatchReservation.waitMs,
+          );
+        }
+      }
       logDebug("mcp", "tool_http_start", {
         callId: callTrace.callId,
         toolName,
@@ -1217,7 +1433,7 @@ function createMcpClient(ctx, logger) {
         }
         finalizeToolCallEntry(toolCallEntry, "ok");
         const minIntervalMs = Number(TOOL_MIN_INTERVAL_MS.get(toolName) || 0);
-        if (minIntervalMs > 0) {
+        if (toolName !== "get_rentable_nfts" && minIntervalMs > 0) {
           persistToolCooldown(
             toolName,
             Date.now() + minIntervalMs + THROTTLE_SAFETY_BUFFER_MS,
@@ -1392,6 +1608,9 @@ function createMcpClient(ctx, logger) {
       return await executeToolCall();
     } catch (error) {
       throw error;
+    } finally {
+      releaseToolWindowReservation(pendingToolWindowReservation);
+      pendingToolWindowReservation = "";
     }
   }
 
@@ -1469,6 +1688,12 @@ function createMcpClient(ctx, logger) {
     getMissionSnapshotRevision,
     getCurrentMissionSnapshotRevision,
     getToolCooldownRemainingMs: rateLimitWaitMs,
+    getSharedToolCooldownRemainingMs: sharedToolCooldownWaitMs,
+    reserveSharedToolCooldown,
+    persistSharedToolCooldown: persistToolCooldown,
+    getToolWindowBudget: toolWindowBudget,
+    reserveToolWindowCapacity,
+    releaseToolWindowReservation,
     adoptUserMissionsSnapshot,
     invalidateUserMissionsSnapshot,
     mcpToolCall,

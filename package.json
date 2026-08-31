@@ -3,6 +3,7 @@
   "version": "3.2.16b",
   "main": "electron/main.js",
   "scripts": {
+    "test": "node --test",
     "desktop": "electron .",
     "desktop:dev": "concurrently -k \"vite\" \"wait-on tcp:5179 && electron .\"",
     "desktop:build": "vite build",

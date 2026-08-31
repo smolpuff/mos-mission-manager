@@ -9,6 +9,7 @@ scripts/
 releases/
 config.json.bak
 STARTUP_CALLS_ROLLBACK_NOTES.md
+test/
 
 # macOS junk
 .DS_Store
@@ -159,3 +160,4 @@ release/
 # Standalone local analytics admin/tooling
 missions-analytics/
 PAYLOAD_NOTES.md
+VERCEL_APP_AUDIT_PLAN.md
