@@ -2619,6 +2619,18 @@ function createChecksService(ctx, logger, mcp, services = {}) {
     logWithTimestamp(
       `[RESET] ✅ Auto mode fallback rerolled: ${name}${level === null ? "" : ` lvl=${level}`}`,
     );
+    // This reroll route is also used for the automatic retry after a throttle.
+    // It used to omit the companion event emitted by the watch reroll route,
+    // leaving a red card/error badge attached to the previous mission even
+    // though the retry had succeeded.
+    if (ctx.guiBridge?.sendEvent) {
+      ctx.guiBridge.sendEvent("reset_error_cleared", {
+        actionName: "mission_reroll",
+        assignedMissionId: wantedAssignedMissionId,
+        missionName: name,
+        slot,
+      });
+    }
     const missionResult =
       normalizeMissionList(actionResult?.submitted).length > 0
         ? actionResult.submitted

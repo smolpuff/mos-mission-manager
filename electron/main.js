@@ -157,6 +157,7 @@ const maxLogHistory = 1200;
 const maxLogHistoryBytes = 4 * 1024 * 1024;
 let fundingWalletSummaryRefreshPromise = null;
 let fundingWalletSummaryLastAttemptAt = 0;
+let fundingWalletRefreshTimer = null;
 let bootstrapWalletSummaryPromise = null;
 let bootstrapWalletSummaryLastAttemptAt = 0;
 let startupMissionBootstrapPromise = null;
@@ -185,6 +186,7 @@ let telemetryQuitInProgress = false;
 let analyticsTelemetrySessionReusableUntil = 0;
 let appQuitInFlight = false;
 const FUNDING_WALLET_REFRESH_MIN_INTERVAL_MS = 30000;
+const FUNDING_WALLET_PERIODIC_REFRESH_MS = 30 * 60 * 1000;
 const BOOTSTRAP_WALLET_REFRESH_MIN_INTERVAL_MS = 30000;
 const PAGE_PREVIEW_CACHE_TTL_MS = 2000;
 const RENTALS_PREVIEW_CACHE_TTL_MS = 120000;
@@ -5903,12 +5905,13 @@ app.whenReady().then(async () => {
     }
     return await runDesktopUpdateCheck({ manual });
   });
-  ipcMain.handle("wallet:refresh-summary", async () => {
+  const refreshFundingWalletSummary = async ({ force = false, reason = "manual" } = {}) => {
     const now = Date.now();
     if (fundingWalletSummaryRefreshPromise) {
       return fundingWalletSummaryRefreshPromise;
     }
     if (
+      !force &&
       backendStatus.fundingWalletSummary &&
       now - fundingWalletSummaryLastAttemptAt <
         FUNDING_WALLET_REFRESH_MIN_INTERVAL_MS
@@ -5921,7 +5924,7 @@ app.whenReady().then(async () => {
       };
     }
     fundingWalletSummaryLastAttemptAt = now;
-    pushSystemLog("Funding wallet summary refresh requested.");
+    pushSystemLog(`Funding wallet summary refresh requested (${reason}).`);
     const config = readDesktopConfig();
     const walletAddress =
       String(
@@ -5947,7 +5950,7 @@ app.whenReady().then(async () => {
         backendStatus.signerMode =
           config.signerMode || backendStatus.signerMode;
         backendStatus.fundingWalletSummary = summary.fundingWalletSummary;
-        pushSystemLog("Funding wallet summary refresh complete.");
+        pushSystemLog(`Funding wallet summary refresh complete (${reason}).`);
         publishStatus();
         return summary;
       } catch (error) {
@@ -5977,6 +5980,10 @@ app.whenReady().then(async () => {
       }
     })();
     return fundingWalletSummaryRefreshPromise;
+  };
+
+  ipcMain.handle("wallet:refresh-summary", async () => {
+    return await refreshFundingWalletSummary({ reason: "manual" });
   });
   ipcMain.handle("wallet:bootstrap-summary", async () => {
     const now = Date.now();
@@ -7000,7 +7007,8 @@ app.whenReady().then(async () => {
     if (launchConfig.signerMode) {
       backendStatus.signerMode = launchConfig.signerMode;
     }
-    // One-time funding wallet load at desktop startup (do not poll).
+    // Load the funding wallet at startup, then check it periodically so a
+    // top-up made outside the app appears without needing a manual refresh.
     if (walletAddress) {
       try {
         backendStatus.fundingWalletSummary =
@@ -7015,6 +7023,12 @@ app.whenReady().then(async () => {
     }
     publishStatus();
   } catch {}
+  if (!isStandaloneCliMode() && !fundingWalletRefreshTimer) {
+    fundingWalletRefreshTimer = setInterval(() => {
+      void refreshFundingWalletSummary({ reason: "periodic_30m" });
+    }, FUNDING_WALLET_PERIODIC_REFRESH_MS);
+    fundingWalletRefreshTimer.unref?.();
+  }
   if (!isStandaloneCliMode()) {
     const closeSplash = () => {
       splashProgressCurrent = 100;
@@ -7046,6 +7060,10 @@ app.on("window-all-closed", () => {
 });
 
 app.on("before-quit", (event) => {
+  if (fundingWalletRefreshTimer) {
+    clearInterval(fundingWalletRefreshTimer);
+    fundingWalletRefreshTimer = null;
+  }
   if (telemetryQuitInProgress) {
     return;
   }

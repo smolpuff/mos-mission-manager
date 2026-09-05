@@ -36,7 +36,6 @@
   --depth: 1;
   --noise: 0;
 }
-
 @layer base {
   :root {
     color-scheme: dark;
@@ -820,6 +819,19 @@
     &.debug {
       @apply text-sky-300;
     }
+  }
+}
+@keyframes funding-confetti {
+  0% {
+    opacity: 0;
+    translate: 0 -12vh;
+  }
+  12% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    translate: 8vw 112vh;
   }
 }
 

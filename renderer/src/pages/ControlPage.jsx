@@ -567,6 +567,8 @@ function ControlView() {
   const [missionPickerPrepared, setMissionPickerPrepared] = useState(null);
   const [bridgeLinkModal, setBridgeLinkModal] = useState(null);
   const [lowBalanceModal, setLowBalanceModal] = useState(null);
+  const [fundingWalletFundedModal, setFundingWalletFundedModal] =
+    useState(null);
   const [throttleModal, setThrottleModal] = useState(null);
   const [throttleModalCountdown, setThrottleModalCountdown] = useState(5);
   const [statsHistory, setStatsHistory] = useState([]);
@@ -576,6 +578,7 @@ function ControlView() {
     sol: 0.01,
   });
   const lowBalanceArmedRef = useRef({ pbp: false, sol: false });
+  const previousFundingWalletBalanceRef = useRef(null);
   const bootstrapWalletSummaryRequestedRef = useRef(false);
   const startupUpdateCheckRequestedRef = useRef(false);
   const lastUpdateCheckAtRef = useRef(null);
@@ -1998,6 +2001,50 @@ function ControlView() {
   }, [onboardingMissionCatalog]);
   const slots = liveSlots;
 
+  useEffect(() => {
+    // A rate-limit error belongs to the mission that failed, not permanently
+    // to its slot. If a later refresh shows a different mission there, the
+    // reroll recovered and the old warning treatment must disappear.
+    const recoveredKeys = Object.entries(slotResetErrors).flatMap(
+      ([key, error]) => {
+        const slot = Number(error?.slot ?? key);
+        const failedMissionId = String(error?.assignedMissionId || "").trim();
+        const current = liveSlots.find((entry) => Number(entry?.slot) === slot);
+        const currentMissionId = String(
+          // GUI slot records deliberately expose this as missionId. Keep the
+          // alternate forms for older/optimistic records, but do not miss a
+          // successful reroll merely because the card uses its display shape.
+          current?.missionId ||
+            current?.assignedMissionId ||
+            current?.assigned_mission_id ||
+            current?.id ||
+            "",
+        ).trim();
+        return failedMissionId &&
+          currentMissionId &&
+          failedMissionId !== currentMissionId
+          ? [key]
+          : [];
+      },
+    );
+    if (recoveredKeys.length === 0) return;
+
+    setSlotResetErrors((current) => {
+      const next = { ...current };
+      for (const key of recoveredKeys) delete next[key];
+      return next;
+    });
+    setResetErrorModal((current) =>
+      recoveredKeys.some(
+        (key) =>
+          String(current?.slot ?? "") ===
+          String(slotResetErrors[key]?.slot ?? key),
+      )
+        ? null
+        : current,
+    );
+  }, [liveSlots, slotResetErrors]);
+
   const mainStatusLabel = slotUnlockBusy
     ? "Checking slot 4..."
     : manualCheckBusy
@@ -2251,6 +2298,42 @@ function ControlView() {
     }, 400);
     return () => clearTimeout(timer);
   }, [bridge, status.signerMode, status.fundingWalletSummary?.status]);
+
+  useEffect(() => {
+    if (!fundingWalletSummary) return;
+    const address = String(
+      fundingWalletSummary?.address || status.signerWallet || "",
+    ).trim();
+    const next = {
+      address,
+      pbp: parseDisplayNumber(fundingWalletSummary?.pbp),
+      sol: parseDisplayNumber(fundingWalletSummary?.sol),
+    };
+    const previous = previousFundingWalletBalanceRef.current;
+    previousFundingWalletBalanceRef.current = next;
+
+    // The first summary establishes the baseline. Only later positive changes
+    // represent a wallet top-up, so startup and ordinary balance loads stay quiet.
+    if (!previous || previous.address !== next.address) return;
+    const pbpAdded =
+      Number.isFinite(next.pbp) && Number.isFinite(previous.pbp)
+        ? Math.max(0, next.pbp - previous.pbp)
+        : 0;
+    const solAdded =
+      Number.isFinite(next.sol) && Number.isFinite(previous.sol)
+        ? Math.max(0, next.sol - previous.sol)
+        : 0;
+    if (pbpAdded <= 0 && solAdded <= 0) return;
+
+    setFundingWalletFundedModal({
+      address,
+      pbpAdded,
+      solAdded,
+      pbp: next.pbp,
+      sol: next.sol,
+      at: Date.now(),
+    });
+  }, [fundingWalletSummary, status.signerWallet]);
 
   useEffect(() => {
     if (!fundingWalletSummary) return;
@@ -4483,7 +4566,7 @@ function ControlView() {
                             value={missionStats.nftsAvailable || 0}
                           />
                         </strong>{" "}
-                        NFTs
+                        NFTs ready
                       </div>
                       <div>
                         🥞{" "}
@@ -6289,6 +6372,130 @@ function ControlView() {
                     }}
                   >
                     Download Update
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : null}
+          {fundingWalletFundedModal ? (
+            <div
+              className="fixed inset-0 z-60 grid place-items-center overflow-hidden bg-black/50 p-4"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="funding-wallet-funded-title"
+              onMouseDown={(e) => {
+                if (e.target === e.currentTarget)
+                  setFundingWalletFundedModal(null);
+              }}
+            >
+              <div
+                className="pointer-events-none absolute inset-0 overflow-hidden"
+                aria-hidden="true"
+              >
+                {Array.from({ length: 42 }, (_, index) => (
+                  <span
+                    key={index}
+                    className="absolute h-2 w-1 rounded-full"
+                    style={{
+                      left: `${(index * 37) % 100}%`,
+                      top: "-4%",
+                      backgroundColor: [
+                        "#facc15",
+                        "#f472b6",
+                        "#38bdf8",
+                        "#a3e635",
+                        "#c084fc",
+                      ][index % 5],
+                      transform: `rotate(${index * 29}deg)`,
+                      animation: `funding-confetti ${1.4 + (index % 7) * 0.16}s ${-(index % 8) * 0.18}s ease-in forwards`,
+                    }}
+                  />
+                ))}
+              </div>
+              <div
+                className="relative z-10 w-full max-w-xl space-y-4 rounded-xl border-2 border-[#1D1C27] p-4 shadow-2xl shadow-black/95"
+                style={{
+                  backgroundImage: `url(${backImg})`,
+                  backgroundSize: "cover",
+                  backgroundPosition: "center",
+                }}
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <div
+                    id="funding-wallet-funded-title"
+                    className="text-lg font-semibold text-success"
+                  >
+                    Funding Wallet Funded! 🎉
+                  </div>
+                  <button
+                    type="button"
+                    className="btn btn-clear btn-sm"
+                    onClick={() => setFundingWalletFundedModal(null)}
+                    title="Close"
+                  >
+                    ✕
+                  </button>
+                </div>
+                <div className="text-sm text-slate-200">
+                  Your funding wallet balance increased. You’re ready for more
+                  mission actions.
+                </div>
+                <div className="flex flex-wrap justify-center gap-3 text-slate-100">
+                  {fundingWalletFundedModal.solAdded > 0 ? (
+                    <div className="flex min-w-32 flex-col items-center gap-1 rounded-lg border border-success/40 bg-success/10 px-5 py-4 text-center shadow-lg shadow-black/20">
+                      <img src={solIcon} alt="Solana" className="h-10 w-10" />
+                      <div className="text-lg font-semibold text-success">
+                        +
+                        {fundingWalletFundedModal.solAdded.toLocaleString(
+                          undefined,
+                          { maximumFractionDigits: 4 },
+                        )}
+                      </div>
+                      <div className="text-xs uppercase tracking-wide text-slate-300">
+                        SOL
+                      </div>
+                    </div>
+                  ) : null}
+                  {fundingWalletFundedModal.pbpAdded > 0 ? (
+                    <div className="flex min-w-32 flex-col items-center gap-1 rounded-lg border border-success/40 bg-success/10 px-5 py-4 text-center shadow-lg shadow-black/20">
+                      <img
+                        src={pbpIcon}
+                        alt="PBP"
+                        className="h-10 w-10 rounded-full"
+                      />
+                      <div className="text-lg font-semibold text-success">
+                        +
+                        {fundingWalletFundedModal.pbpAdded.toLocaleString(
+                          undefined,
+                          { maximumFractionDigits: 2 },
+                        )}
+                      </div>
+                      <div className="text-xs uppercase tracking-wide text-slate-300">
+                        PBP
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+                <div className="text-center text-xs text-slate-300">
+                  Total balance:{" "}
+                  {Number(fundingWalletFundedModal.sol || 0).toLocaleString(
+                    undefined,
+                    { maximumFractionDigits: 4 },
+                  )}{" "}
+                  SOL ·{" "}
+                  {Number(fundingWalletFundedModal.pbp || 0).toLocaleString(
+                    undefined,
+                    { maximumFractionDigits: 2 },
+                  )}{" "}
+                  PBP
+                </div>
+                <div className="flex items-center justify-end">
+                  <button
+                    type="button"
+                    className="btn btn-gradient btn-sm"
+                    onClick={() => setFundingWalletFundedModal(null)}
+                  >
+                    Let’s go!
                   </button>
                 </div>
               </div>
