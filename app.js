@@ -58,8 +58,6 @@ const rentals = createRentalCoordinator({
   assignCandidate: (payload) => checks.assignCachedRentalCandidate(payload),
   reconcileAmbiguous: (payload) =>
     checks.reconcileAmbiguousRentalAssignment(payload),
-  onScheduledWake: () =>
-    checks?.autoAssignConfiguredMissions?.({ reason: "rental_scheduled" }),
   attemptsPerWake: 3,
   continuationDelaySeconds: 3,
   log(event, meta) {

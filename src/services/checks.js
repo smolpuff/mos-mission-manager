@@ -27,6 +27,31 @@ function shouldRequestOwnedCooldownFollowup(rentalResult = {}) {
   );
 }
 
+function allowsRecentClaimedMissionOverride(reason) {
+  const text = String(reason || "").trim().toLowerCase();
+  return (
+    text.includes("post_claim") ||
+    text.startsWith("cycle_end_unassigned_check") ||
+    text.includes("rental_coordinator") ||
+    // The ready counter is rendered from the same post-claim mission
+    // snapshot. Until the normal lifecycle replaces that snapshot, do not
+    // count an NFT from a just-claimed mission as still assigned.
+    text.startsWith("nft_count_")
+  );
+}
+
+function shouldAdvanceNftScanBeforeCooldown({
+  assignmentOrderMode = "",
+  autoModeThresholdFallbackOnlyLocal = false,
+  autoCooldownResetEnabled = false,
+} = {}) {
+  return (
+    assignmentOrderMode === "rotate_least_used" &&
+    !autoModeThresholdFallbackOnlyLocal &&
+    !autoCooldownResetEnabled
+  );
+}
+
 const {
   normalizeMissionList,
   normalizeNftList,
@@ -34,6 +59,7 @@ const {
   extractMissionReward,
   computeMissionStats,
   missionHasAssignedNft,
+  missionIsActive,
   missionIsClaimable,
 } = require("../missions/normalize");
 const {
@@ -93,7 +119,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
   let walletRefreshPendingReason = null;
   let missionCatalogRefreshPromise = null;
   let missionHeaderRefreshSequence = 0;
-  let ownedMissionNftsCache = null;
+  let ownedMissionNftsCache = [];
   let ownedMissionNftsCacheAt = 0;
   let ownedMissionNftsPromise = null;
   let ownedMissionNftAvailabilityTimer = null;
@@ -250,17 +276,18 @@ function createChecksService(ctx, logger, mcp, services = {}) {
     }
   }
 
-  function advanceNftAssignmentScan(returnedCount) {
+  function advanceNftAssignmentScan(returnedCount, scan = nftAssignmentScan) {
     const count = Number(returnedCount) || 0;
+    const current = scan && typeof scan === "object" ? scan : nftAssignmentScan;
     const next =
       count >= MISSION_NFT_PAGE_LIMIT
         ? {
-            ...nftAssignmentScan,
-            offset: nftAssignmentScan.offset + MISSION_NFT_PAGE_LIMIT,
+            ...current,
+            offset: Number(current.offset || 0) + MISSION_NFT_PAGE_LIMIT,
           }
         : {
             offset: 0,
-            cycle: nftAssignmentScan.cycle + 1,
+            cycle: Number(current.cycle || 0) + 1,
           };
     nftAssignmentScan = next;
     try {
@@ -969,11 +996,24 @@ function createChecksService(ctx, logger, mcp, services = {}) {
   }
 
   function assignedNftAccountSetFromMissions(missions = [], { reason = "" } = {}) {
-    const assigned = new Set();
+    return new Set(assignedNftOwnersFromMissions(missions, { reason }).keys());
+  }
+
+  function assignedNftOwnersFromMissions(missions = [], { reason = "" } = {}) {
+    const assigned = new Map();
     for (const mission of Array.isArray(missions) ? missions : []) {
+      // Only one of the currently running mission slots can hold an NFT.
+      // Completed or inactive rows may retain historical NFT fields, but
+      // must never reduce the owned-ready count or assignment pool.
+      if (!missionIsActive(mission) || missionIsClaimable(mission)) continue;
       if (recentClaimedMissionOverride(mission, reason)) continue;
       const account = missionAssignedNftAccount(mission);
-      if (account) assigned.add(account);
+      if (!account) continue;
+      assigned.set(account, {
+        assignedMissionId: assignedMissionId(mission),
+        slot: Number.isFinite(Number(mission?.slot)) ? Number(mission.slot) : null,
+        name: missionName(mission) || null,
+      });
     }
     return assigned;
   }
@@ -1314,8 +1354,14 @@ function createChecksService(ctx, logger, mcp, services = {}) {
   }
 
   function allowRecentClaimOverride(reason) {
-    const text = String(reason || "").trim().toLowerCase();
-    return text.includes("post_claim") || text === "cycle_end_unassigned_check";
+    // Assignment follow-ups append a suffix (for example
+    // `_owned_cooldown_fallback`) to the cycle-end reason. They still use the
+    // same just-claimed mission snapshot, so they must retain this override;
+    // otherwise its former NFT is incorrectly treated as assigned elsewhere
+    // even after it has become ready again. The rental coordinator also
+    // rebuilds its demand list from the shared snapshot and must see the same
+    // override or it will discard the queued mission as already assigned.
+    return allowsRecentClaimedMissionOverride(reason);
   }
 
   function recentClaimedMissionOverride(missionOrId, reason = "") {
@@ -1350,7 +1396,26 @@ function createChecksService(ctx, logger, mcp, services = {}) {
         String(entry?.missionName || "")
           .trim()
           .toLowerCase() === missionNameValue;
-      if (slotMatches || nameMatches) return entry;
+      const hasComparableSlot =
+        Number.isFinite(slot) && Number.isFinite(Number(entry?.slot));
+      const hasComparableName = Boolean(
+        missionNameValue && String(entry?.missionName || "").trim(),
+      );
+      // When IDs differ, require every stable identity field available on
+      // both sides. Name-only matching could incorrectly release the NFT of
+      // another slot running the same mission.
+      if (
+        hasComparableSlot &&
+        hasComparableName &&
+        slotMatches &&
+        nameMatches
+      ) {
+        return entry;
+      }
+      if (!missionId && hasComparableSlot && slotMatches) return entry;
+      if (!missionId && !hasComparableSlot && hasComparableName && nameMatches) {
+        return entry;
+      }
     }
     return null;
   }
@@ -1880,10 +1945,10 @@ function createChecksService(ctx, logger, mcp, services = {}) {
       return pending.slice();
     }
     ownedMissionNftsPromise = (async () => {
-      const nftResult = await mcp.mcpToolCall("get_mission_nfts", {
-        limit: 200,
-        offset: 0,
-      });
+      // Do not cap the wallet inventory at the first page. The reserve
+      // collections must be visible to both the ready counter and owned
+      // fallback selection even when they sort after standard NFTs.
+      const nftResult = await mcp.mcpToolCall("get_mission_nfts", {});
       const nfts = normalizeNftList(nftResult);
       ownedMissionNftsCache = nfts;
       ownedMissionNftsCacheAt = Date.now();
@@ -3825,30 +3890,91 @@ function createChecksService(ctx, logger, mcp, services = {}) {
       return { success: false, kind: "terminal", message: "Rental candidate is missing mission, listing, or NFT identity." };
     }
 
+    let usedCooldownReset = false;
+    if (candidate?.cooldownResetRequested === true) {
+      if (!autoNftCooldownResetEnabled()) {
+        if (assignmentBudgetToken) {
+          mcp.releaseToolWindowReservation(assignmentBudgetToken);
+        }
+        return {
+          success: false,
+          kind: "cooldown_reset_unusable",
+          readyAt: candidate?.readyAt ?? candidate?.cooldownEndAt ?? null,
+          message: "Rental NFT cooldown reset is disabled.",
+        };
+      }
+      const maxPbp = autoNftCooldownResetMaxPbp();
+      const targetMissionName = missionName(mission) || "unknown mission";
+      logWithTimestamp(
+        `[RESET] 🔎 ${targetMissionName}: stage 4/4 checking cached rental cooldown reset (max=${maxPbp} PBP).`,
+      );
+      const resetResult = await tryResetCooldownNft({
+        reason: "rental_cached_cooldown_reset",
+        missionName: targetMissionName,
+        missionId,
+        nft: {
+          account: nftAccount,
+          nftAccount,
+          name: candidate?.nftName || "Rental NFT",
+          level: candidate?.nftLevel ?? null,
+          onCooldown: true,
+          cooldownEndsAt:
+            candidate?.cooldownEndAt ?? candidate?.readyAt ?? null,
+        },
+        maxPbp,
+        source: "rental",
+      });
+      if (resetResult?.reset !== true) {
+        if (assignmentBudgetToken) {
+          mcp.releaseToolWindowReservation(assignmentBudgetToken);
+        }
+        return {
+          success: false,
+          kind: "cooldown_reset_unusable",
+          readyAt: candidate?.readyAt ?? candidate?.cooldownEndAt ?? null,
+          message: `Rental NFT cooldown reset was not usable (${resetResult?.reason || "reset_failed"}).`,
+          resetResult,
+        };
+      }
+      usedCooldownReset = true;
+      logWithTimestamp(
+        `[RESET] ✅ ${targetMissionName}: cached rental cooldown reset complete; assigning now.`,
+      );
+    }
+
     logWithTimestamp(
       `[RENTAL] 🚀 Assigning cached rental listing=${listingId}${boundaryRetry ? " (readiness retry)" : ""}...`,
     );
-    const result = await mcp.mcpToolCall(
-      "assign_nft_to_mission",
-      {
-        assignedMissionId: missionId,
-        nftAccount,
-        rentalListingId: listingId,
-        nftSource: "rental",
-      },
-      {
-        reason: boundaryRetry
-          ? "rental_readiness_boundary_retry"
-          : "rental_cached_assignment",
-        toolWindowReservationToken:
-          assignmentBudgetToken || assignmentBudgetReservation?.token || null,
-      },
-    );
+    let result;
+    try {
+      result = await mcp.mcpToolCall(
+        "assign_nft_to_mission",
+        {
+          assignedMissionId: missionId,
+          nftAccount,
+          rentalListingId: listingId,
+          nftSource: "rental",
+        },
+        {
+          reason: boundaryRetry
+            ? "rental_readiness_boundary_retry"
+            : "rental_cached_assignment",
+          toolWindowReservationToken:
+            assignmentBudgetToken || assignmentBudgetReservation?.token || null,
+        },
+      );
+    } catch (error) {
+      if (usedCooldownReset && error && typeof error === "object") {
+        error.cooldownResetSucceeded = true;
+      }
+      throw error;
+    }
     if (!toolCallSucceeded(result)) {
       return {
         success: false,
         message: assignFailureMessage(result),
         details: assignFailureDetails(result),
+        cooldownResetSucceeded: usedCooldownReset,
       };
     }
     const responseMissions = normalizeMissionList(result);
@@ -3857,6 +3983,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
         "Rental assignment response omitted authoritative mission state.",
       );
       error.timeout = true;
+      error.cooldownResetSucceeded = usedCooldownReset;
       throw error;
     }
 
@@ -3871,6 +3998,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
       (nftAssignmentSessionUsage.get(nftAccount) || 0) + 1,
     );
     persistNftAssignmentUsage();
+    clearRecentClaimedMissionOverride(missionId);
     await refreshMissionHeaderStats({
       missionsResult: result,
       refreshNftCount: false,
@@ -3887,7 +4015,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
         nftName: candidate?.nftName || null,
         nftLevel: candidate?.nftLevel ?? null,
         source: "rental",
-        usedReset: false,
+        usedReset: usedCooldownReset,
         reason: boundaryRetry
           ? "rental_readiness_boundary_retry"
           : "rental_cached_assignment",
@@ -3905,7 +4033,12 @@ function createChecksService(ctx, logger, mcp, services = {}) {
     logWithTimestamp(
       `[RENTAL] ✅ Cached rental assigned listing=${listingId}.`,
     );
-    return { success: true, missionState: result };
+    return {
+      success: true,
+      missionState: result,
+      usedCooldownReset,
+      cooldownResetSucceeded: usedCooldownReset,
+    };
   }
 
   async function reconcileAmbiguousRentalAssignment({
@@ -4205,11 +4338,32 @@ function createChecksService(ctx, logger, mcp, services = {}) {
         missionsResult: result.missionResult || null,
         skipRentalCoordinator: true,
       });
+      let rentalCooldownFollowup = null;
+      if (
+        Number(followup?.assigned || 0) === 0 &&
+        rentalCoordinatorEnabled() &&
+        autoNftCooldownResetEnabled()
+      ) {
+        const rentalMissions = getMissionsNeedingRental();
+        if (rentalMissions.length > 0) {
+          rentalCooldownFollowup = await rentals.runAssignmentWorker({
+            reason: `${options.reason || "periodic"}_rental_cooldown_fallback`,
+            missions: rentalMissions,
+            allowCoolingReset: true,
+          });
+          rentals.setDemand(getMissionsNeedingRental().length > 0, {
+            reason: `${options.reason || "periodic"}_post_rental_cooldown_fallback`,
+          });
+        }
+      }
       return {
         ...result,
         assigned:
-          Number(result.assigned || 0) + Number(followup?.assigned || 0),
+          Number(result.assigned || 0) +
+          Number(followup?.assigned || 0) +
+          Number(rentalCooldownFollowup?.successes || 0),
         ownedCooldownFollowup: followup,
+        rentalCooldownFollowup,
       };
     }
     return result;
@@ -4340,10 +4494,12 @@ function createChecksService(ctx, logger, mcp, services = {}) {
       const assignmentInventoryByMissionId = new Map();
       let assignmentPassLoadedNftPage = false;
       let assignmentPassMaxNftPageCount = 0;
-      const alreadyAssignedNftAccounts = assignedNftAccountSetFromMissions(
+      let assignmentPassWrappedNftScan = false;
+      const assignedNftOwners = assignedNftOwnersFromMissions(
         missions,
         { reason },
       );
+      const alreadyAssignedNftAccounts = new Set(assignedNftOwners.keys());
       const rentalCoordinatorAvailable =
         rentalCoordinatorEnabled() && skipRentalCoordinator !== true;
       let ownedCooldownFollowupRequested = false;
@@ -4365,6 +4521,8 @@ function createChecksService(ctx, logger, mcp, services = {}) {
                 "rental_cooldown_reset",
               ],
         rentalCoordinatorAvailable,
+        rentalCoordinatorConfigured: rentalCoordinatorEnabled(),
+        rentalCoordinatorSkipped: skipRentalCoordinator === true,
         autoNftCooldownResetEnabled: autoNftCooldownResetEnabled(),
       });
       const inventorySnapshotResults = await Promise.all(
@@ -4375,18 +4533,49 @@ function createChecksService(ctx, logger, mcp, services = {}) {
           }
           const nftPageOffset = assignmentPassNftScan.offset;
           try {
-            const nftResult = await mcp.mcpToolCall("get_mission_nfts", {
+            let nftResult = await mcp.mcpToolCall("get_mission_nfts", {
               assignedMissionId: missionId,
               limit: MISSION_NFT_PAGE_LIMIT,
               offset: nftPageOffset,
             });
-            const nfts = normalizeNftList(nftResult);
+            let nfts = normalizeNftList(nftResult);
+            const pageNftCount = nfts.length;
+            // A persisted rotation offset can outlive a shrinking inventory.
+            // Wrap in this pass so an empty tail page cannot defer ready NFTs
+            // on page zero for another watcher cycle.
+            const wrappedFromOffset =
+              nfts.length === 0 && nftPageOffset > 0 ? nftPageOffset : null;
+            if (wrappedFromOffset !== null) {
+              nftResult = await mcp.mcpToolCall("get_mission_nfts", {
+                assignedMissionId: missionId,
+                limit: MISSION_NFT_PAGE_LIMIT,
+                offset: 0,
+              });
+              nfts = normalizeNftList(nftResult);
+            }
+            // The startup/normal inventory load is the complete My NFTs
+            // mission-NFT list. Keep its already-loaded reserve entries in
+            // the candidate pool when this paged mission query omits them.
+            const byAccount = new Map(
+              nfts
+                .map((nft) => [nftAccountId(nft), nft])
+                .filter(([account]) => account),
+            );
+            for (const cachedNft of ownedMissionNftsCache) {
+              const account = nftAccountId(cachedNft);
+              if (account && !byAccount.has(account)) {
+                byAccount.set(account, cachedNft);
+              }
+            }
+              nfts = Array.from(byAccount.values());
             return {
               missionId,
               mission,
               ok: true,
               nfts,
-              nftPageOffset,
+              pageNftCount: wrappedFromOffset === null ? pageNftCount : nfts.length,
+              nftPageOffset: wrappedFromOffset === null ? nftPageOffset : 0,
+              wrappedFromOffset,
             };
           } catch (error) {
             return {
@@ -4405,11 +4594,20 @@ function createChecksService(ctx, logger, mcp, services = {}) {
           assignmentInventoryByMissionId.set(snapshot.missionId, snapshot);
         }
         if (snapshot.ok) {
+          if (snapshot.wrappedFromOffset !== null) {
+            assignmentPassWrappedNftScan = true;
+            logDebug("assign", "nft_scan_wrapped_to_first_page", {
+              reason,
+              missionName: missionName(snapshot.mission),
+              missionId: snapshot.missionId,
+              wrappedFromOffset: snapshot.wrappedFromOffset,
+            });
+          }
           publishNftUsageStats(snapshot.nfts);
           assignmentPassLoadedNftPage = true;
           assignmentPassMaxNftPageCount = Math.max(
             assignmentPassMaxNftPageCount,
-            snapshot.nfts.length,
+            Number(snapshot.pageNftCount ?? snapshot.nfts.length),
           );
           logDebug("assign", "eligible_nfts_loaded", {
             reason,
@@ -4429,6 +4627,24 @@ function createChecksService(ctx, logger, mcp, services = {}) {
               ).length,
             snapshotPhase: "pre_assignment",
           });
+          const readyAssignedElsewhere = snapshot.nfts
+            .filter(nftIsAvailable)
+            .map((nft) => ({ nft, account: nftAccountId(nft) }))
+            .filter(({ account }) => account && assignedNftOwners.has(account))
+            .map(({ nft, account }) => ({
+              account,
+              nftName: nftDisplayName(nft),
+              collection: nftCollectionKeys(nft),
+              owner: assignedNftOwners.get(account),
+            }));
+          if (readyAssignedElsewhere.length > 0) {
+            logDebug("assign", "ready_owned_excluded_assigned_elsewhere", {
+              reason,
+              missionName: missionName(snapshot.mission),
+              missionId: snapshot.missionId,
+              exclusions: readyAssignedElsewhere,
+            });
+          }
         } else if (snapshot.error) {
           logDebug("assign", "nft_list_failed", {
             missionId: snapshot.missionId,
@@ -4523,12 +4739,17 @@ function createChecksService(ctx, logger, mcp, services = {}) {
         let assignmentSourceStage = null;
         let nextNftScan = nftAssignmentScan;
         let nftListLoaded = false;
+        let nftPageHasMore = false;
         const inventorySnapshot = assignmentInventoryByMissionId.get(id);
         if (inventorySnapshot?.ok) {
           nfts = inventorySnapshot.nfts;
+          const pageNftCount = Number(
+            inventorySnapshot.pageNftCount ?? nfts.length,
+          );
+          nftPageHasMore = pageNftCount >= MISSION_NFT_PAGE_LIMIT;
           nftListLoaded = true;
           nextNftScan =
-            nfts.length >= MISSION_NFT_PAGE_LIMIT
+            nftPageHasMore
               ? {
                   ...assignmentPassNftScan,
                   offset:
@@ -4573,14 +4794,13 @@ function createChecksService(ctx, logger, mcp, services = {}) {
         const reservedReadyOwnedFallbackCandidates =
           reservedReadyOwnedCandidates.slice(0, 3);
 
-        // 100K and 500K NFTs are exclusively for Level 20 missions. Never
-        // fall back to them for a lower-level mission, even if this inventory
-        // page has no standard ready candidates.
-        const selectedReadyOwnedCandidates = isLevel20Mission(mission)
-          ? prioritizedReadyOwnedCandidates.length > 0
+        // Reserve 100K/500K NFTs for Level 20 while standard ready NFTs are
+        // available. They are still the owned fallback when no standard ready
+        // NFT remains, ahead of a rental assignment.
+        const selectedReadyOwnedCandidates =
+          prioritizedReadyOwnedCandidates.length > 0
             ? prioritizedReadyOwnedCandidates
-            : reservedReadyOwnedFallbackCandidates
-          : prioritizedReadyOwnedCandidates;
+            : reservedReadyOwnedFallbackCandidates;
         if (selectedReadyOwnedCandidates.length > 0) {
           assignmentOptions = selectedReadyOwnedCandidates.map((entry) => {
             const reserved = isLevel20ReservedCollectionNft(entry.nft);
@@ -4594,6 +4814,11 @@ function createChecksService(ctx, logger, mcp, services = {}) {
           logWithTimestamp(
             `[ASSIGN] ✅ ${name}: found ${readyOwnedCandidates.length} ready owned NFT candidate(s); queued ${selectedReadyOwnedCandidates.length} least-used candidate(s) for assignment.`,
           );
+        } else if (nftPageHasMore) {
+          logWithTimestamp(
+            `[ASSIGN] ⏭️ ${name}: checking the next owned NFT page before rentals or cooldown resets.`,
+          );
+          continue;
         } else if (
           rentalCoordinatorAvailable &&
           !autoModeThresholdFallbackOnlyLocal
@@ -4605,11 +4830,14 @@ function createChecksService(ctx, logger, mcp, services = {}) {
           );
           continue;
         } else if (
-          nftAssignmentOrderMode() === "rotate_least_used" &&
-          !autoModeThresholdFallbackOnlyLocal
+          shouldAdvanceNftScanBeforeCooldown({
+            assignmentOrderMode: nftAssignmentOrderMode(),
+            autoModeThresholdFallbackOnlyLocal,
+            autoCooldownResetEnabled: autoNftCooldownResetEnabled(),
+          })
         ) {
           logWithTimestamp(
-            `[ASSIGN] ⏭️ ${name}: no ready NFT on this fresh inventory page; advancing to the next page on the next normal assignment pass.`,
+            `[ASSIGN] ⏭️ ${name}: no ready NFT on this fresh inventory page and auto cooldown reset is disabled; advancing to the next page on the next normal assignment pass.`,
           );
           logDebug("assign", "rotation_page_no_ready_nft", {
             reason,
@@ -4692,27 +4920,6 @@ function createChecksService(ctx, logger, mcp, services = {}) {
           assignmentOptions = orderedOptions;
           if (!assignmentSourceStage && orderedOptions.length > 0) {
             assignmentSourceStage = orderedOptions[0].stage || null;
-          }
-        }
-
-        // Keep the reservation rule at the final assignment boundary as well.
-        // This protects lower-level missions if a future candidate source is
-        // added without its own collection filter.
-        if (!isLevel20Mission(mission)) {
-          const optionCountBeforeReservationGuard = assignmentOptions.length;
-          assignmentOptions = assignmentOptions.filter(
-            (option) => !isLevel20ReservedCollectionNft(option.nft),
-          );
-          if (assignmentOptions.length !== optionCountBeforeReservationGuard) {
-            logDebug("assign", "reserved_nft_blocked_for_lower_level_mission", {
-              reason,
-              missionName: name,
-              missionId: id,
-              missionLevel: missionLevel(mission),
-              blockedCount:
-                optionCountBeforeReservationGuard - assignmentOptions.length,
-            });
-            assignmentSourceStage = assignmentOptions[0]?.stage || null;
           }
         }
 
@@ -5192,9 +5399,17 @@ function createChecksService(ctx, logger, mcp, services = {}) {
         }
       }
       if (assignmentPassLoadedNftPage) {
-        advanceNftAssignmentScan(assignmentPassMaxNftPageCount);
+        advanceNftAssignmentScan(
+          assignmentPassWrappedNftScan ? 0 : assignmentPassMaxNftPageCount,
+          assignmentPassNftScan,
+        );
       }
-      rentalDemandMissionKeys = rentalDemandKeysThisPass;
+      // The owned-cooldown follow-up deliberately skips the rental worker,
+      // but stage 4 still needs the demand keys produced by the preceding
+      // ready-rental pass so it can reuse that cached rental snapshot.
+      if (skipRentalCoordinator !== true) {
+        rentalDemandMissionKeys = rentalDemandKeysThisPass;
+      }
       if (rentals && skipRentalCoordinator !== true) {
         const rentalMissions = getMissionsNeedingRental();
         const rentalsNeeded =
@@ -5957,4 +6172,6 @@ module.exports = {
   createChecksService,
   shouldRetryAssignmentOption,
   shouldRequestOwnedCooldownFollowup,
+  allowsRecentClaimedMissionOverride,
+  shouldAdvanceNftScanBeforeCooldown,
 };

@@ -190,6 +190,7 @@ function normalizeRentalCandidate(entry, options = {}) {
     cooldownEndAt,
     readyAt,
     readinessSource,
+    cooldownResetAttemptedGeneration: null,
     snapshotAt,
     snapshotGeneration,
     attemptCount: 0,
@@ -322,6 +323,11 @@ function sanitizePersistedState(input) {
       attemptCount: Math.max(0, Math.floor(Number(raw.attemptCount || 0))),
       lastAttemptAt: Number.isFinite(Number(raw.lastAttemptAt))
         ? Number(raw.lastAttemptAt)
+        : null,
+      cooldownResetAttemptedGeneration: Number.isFinite(
+        Number(raw.cooldownResetAttemptedGeneration),
+      )
+        ? Number(raw.cooldownResetAttemptedGeneration)
         : null,
       quarantinedUntil: Number.isFinite(Number(raw.quarantinedUntil))
         ? Number(raw.quarantinedUntil)
@@ -505,6 +511,9 @@ function classifyRentalAssignmentFailure(error, options = {}) {
   }
   if (/mission already has|mission is no longer active|no longer needs/.test(lower)) {
     return { code: "mission_filled" };
+  }
+  if (explicitKind === "cooldown_reset_unusable") {
+    return { code: "cooldown_reset_unusable", readyAt };
   }
   if (/incompatible|not eligible|cannot be used for (?:this )?mission/.test(lower)) {
     return { code: "incompatible" };
@@ -811,7 +820,12 @@ class RentalCoordinator {
     }
   }
 
-  _candidateForMission(missionKey, attemptedIdentities, now) {
+  _candidateForMission(
+    missionKey,
+    attemptedIdentities,
+    now,
+    { allowCoolingReset = false } = {},
+  ) {
     return rankRentalCandidates(this.state.candidates, {
       now,
       missionKey,
@@ -819,7 +833,11 @@ class RentalCoordinator {
     }).find(
       (candidate) =>
         Number.isFinite(candidate.readyAt) &&
-        candidate.readyAt <= now &&
+        (candidate.readyAt <= now ||
+          (allowCoolingReset &&
+            candidate.readyAt > now &&
+            Number(candidate.cooldownResetAttemptedGeneration) !==
+              Number(this.state.generation))) &&
         !attemptedIdentities.has(candidateIdentity(candidate)),
     );
   }
@@ -873,6 +891,12 @@ class RentalCoordinator {
         next.readyAt = Number(failure.readyAt) + this.readinessBufferMs;
         next.cooldownEndAt = Number(failure.readyAt);
         next.readinessSource = "assignment_response";
+      } else if (failure.code === "cooldown_reset_unusable") {
+        if (Number.isFinite(Number(failure.readyAt))) {
+          next.readyAt = Number(failure.readyAt);
+          next.cooldownEndAt = Number(failure.readyAt);
+        }
+        next.cooldownResetAttemptedGeneration = Number(current.generation || 0);
       } else if (failure.code === "not_ready_unknown") {
         next.readyAt = null;
         next.readinessSource = "assignment_unknown";
@@ -880,6 +904,12 @@ class RentalCoordinator {
         next.state = "ambiguous";
         next.inFlightMissionKey = missionKey;
         next.inFlightAt = found.inFlightAt || this.clock();
+      }
+      if (failure.cooldownResetSucceeded === true) {
+        next.readyAt = this.clock();
+        next.cooldownEndAt = null;
+        next.readinessSource = "cooldown_reset_succeeded";
+        next.cooldownResetAttemptedGeneration = Number(current.generation || 0);
       }
       candidates[index] = next;
       return {
@@ -952,7 +982,22 @@ class RentalCoordinator {
 
   async _runAssignmentWorker(options) {
     const nowAtStart = this.clock();
+    const allowCoolingReset = options.allowCoolingReset === true;
     if (
+      allowCoolingReset &&
+      (this.state.stale === true ||
+        !Number(this.state.snapshotAt || 0) ||
+        nowAtStart - Number(this.state.snapshotAt || 0) >= SEARCH_INTERVAL_MS)
+    ) {
+      return {
+        attemptedDistinct: 0,
+        dispatches: 0,
+        successes: 0,
+        reason: "cooldown_reset_snapshot_stale",
+      };
+    }
+    if (
+      !allowCoolingReset &&
       Number(this.state.worker.pausedGeneration || 0) ===
         Number(this.state.generation || 0) &&
       Number(this.state.generation || 0) > 0
@@ -978,7 +1023,12 @@ class RentalCoordinator {
     let stopReason = null;
     let guard = 0;
 
-    while (attemptedIdentities.size < this.attemptsPerWake && guard < 100) {
+    // Paid cooldown fallback walks the same bounded cached working set as the
+    // ready-rental worker. If the cheapest/earliest reset is unusable or over
+    // the configured max, continue to the next cached rental without issuing
+    // another search.
+    const attemptLimit = this.attemptsPerWake;
+    while (attemptedIdentities.size < attemptLimit && guard < 100) {
       guard += 1;
       let selection = null;
       for (let offset = 0; offset < missions.length; offset += 1) {
@@ -990,6 +1040,7 @@ class RentalCoordinator {
           missionKey,
           attemptedIdentities,
           this.clock(),
+          { allowCoolingReset },
         );
         if (candidate) {
           selection = { mission, missionKey, candidate, index };
@@ -1043,20 +1094,31 @@ class RentalCoordinator {
 
       let result;
       let failure = null;
+      const cooldownResetRequested =
+        allowCoolingReset &&
+        Number.isFinite(selection.candidate.readyAt) &&
+        selection.candidate.readyAt > this.clock();
       try {
         result = await this.assignCandidate({
           mission: selection.mission,
           missionKey: selection.missionKey,
-          candidate: reserved,
+          candidate: {
+            ...reserved,
+            cooldownResetRequested,
+          },
           boundaryRetry: false,
           assignmentBudgetReservation: capacity.raw,
           assignmentBudgetToken: capacity.token,
         });
         if (result?.success === false) {
           failure = classifyRentalAssignmentFailure(result, { now: this.clock() });
+          failure.cooldownResetSucceeded =
+            result?.cooldownResetSucceeded === true;
         }
       } catch (error) {
         failure = classifyRentalAssignmentFailure(error, { now: this.clock() });
+        failure.cooldownResetSucceeded =
+          error?.cooldownResetSucceeded === true;
         result = { error };
       }
 
@@ -1201,11 +1263,14 @@ class RentalCoordinator {
       }
     }
 
-    const capped = attemptedIdentities.size >= this.attemptsPerWake;
+    const capped = attemptedIdentities.size >= attemptLimit;
     const now = this.clock();
     const hasMoreDue = missions.some((mission, index) => {
       const key = missionKeyOf(mission, index);
-      return Boolean(this._candidateForMission(key, attemptedIdentities, now));
+      return Boolean(
+        !allowCoolingReset &&
+          this._candidateForMission(key, attemptedIdentities, now),
+      );
     });
     await this._commit((current) => {
       const generation = Number(current.generation || 0);
