@@ -2040,6 +2040,7 @@ function createWatchService(
     const finishClaimLifecycle = (followup) => {
       if (Number(followup?.claimed || 0) > 0) {
         scheduleCurrentWalletSummaryRefresh("claim");
+        if (ctx.guiBridge?.emitNow) ctx.guiBridge.emitNow();
       }
       return followup;
     };
