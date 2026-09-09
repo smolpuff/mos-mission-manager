@@ -1,5 +1,7 @@
 "use strict";
 
+const { readLimitedJson } = require("./update-download");
+
 const UPDATE_JSON_URL =
   "https://raw.githubusercontent.com/smolpuff/mos-mission-manager/main/version.json";
 const UPDATE_CHECK_TIMEOUT_MS = 8000;
@@ -71,7 +73,7 @@ async function checkForUpdates({
         currentVersion: installedVersion,
       };
     }
-    const payload = await response.json();
+    const payload = await readLimitedJson(response);
     const latestVersion = String(payload?.version || "").trim();
     const downloadUrl = String(payload?.downloadUrl || "").trim();
     const notes = Array.isArray(payload?.notes)

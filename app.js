@@ -270,6 +270,14 @@ if (process.env.PBP_GUI_BRIDGE === "1" && typeof process.send === "function") {
 
   process.on("message", async (message) => {
     if (!message || typeof message !== "object") return;
+    if (message.type === "pbp_shutdown_for_update") {
+      ctx.watchLoopEnabled = false;
+      rentals.shutdown();
+      signer.shutdown();
+      flushConfig(ctx, logger.logDebug);
+      process.exit(0);
+      return;
+    }
     if (message.type !== "pbp_request") return;
     const requestId = message.requestId;
     const action = String(message.action || "");

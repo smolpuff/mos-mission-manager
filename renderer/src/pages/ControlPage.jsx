@@ -476,6 +476,14 @@ function ControlView() {
   const [updateCheckBusy, setUpdateCheckBusy] = useState(false);
   const [updateCheckMessage, setUpdateCheckMessage] = useState(null);
   const [updateModal, setUpdateModal] = useState(null);
+  const [updateInstallStatus, setUpdateInstallStatus] = useState(null);
+  const updateInstalling = Boolean(
+    updateInstallStatus && updateInstallStatus.phase !== "error",
+  );
+  const updateDownloadPercent = Math.min(
+    100,
+    Math.max(0, Number(updateInstallStatus?.percent) || 0),
+  );
   const [competitionNotificationModal, setCompetitionNotificationModal] =
     useState(null);
   const [
@@ -1509,6 +1517,24 @@ function ControlView() {
     },
     [bridge],
   );
+
+  useEffect(() => bridge?.onUpdateStatus?.(setUpdateInstallStatus), [bridge]);
+  useEffect(() => {
+    void bridge?.reportUpdateUiReady?.().catch(() => {});
+  }, [bridge]);
+
+  const installOfferedUpdate = async () => {
+    if (updateInstalling) return;
+    setUpdateInstallStatus({ phase: "downloading", percent: 0 });
+    try {
+      const result = await bridge.installUpdate(updateModal.latestVersion);
+      if (!result?.ok)
+        throw new Error(result?.error || "Unable to update the app.");
+    } catch (error) {
+      setUpdateInstallStatus({ phase: "error", error: error.message });
+      window.alert(error.message);
+    }
+  };
 
   useEffect(() => {
     if (autoUpdateCheckEnabled !== true) return;
@@ -6298,7 +6324,10 @@ function ControlView() {
               role="dialog"
               aria-modal="true"
               onMouseDown={(e) => {
-                if (e.target === e.currentTarget) setUpdateModal(null);
+                if (e.target === e.currentTarget && !updateInstalling) {
+                  setUpdateModal(null);
+                  setUpdateInstallStatus(null);
+                }
               }}
             >
               <div
@@ -6312,32 +6341,18 @@ function ControlView() {
               >
                 <div className="flex items-center justify-between gap-3">
                   <div className="text-lg font-semibold">Update Available</div>
-                  <button
-                    type="button"
-                    className="btn btn-clear btn-sm"
-                    onClick={() => setUpdateModal(null)}
-                    title="Close"
-                  >
-                    ✕
-                  </button>
                 </div>
+
                 <div className="text-sm text-slate-200">
-                  A newer version of the app is available.
-                </div>
-                <div className="rounded-md border border-white/10 bg-black/20 p-3 space-y-1 text-sm text-slate-200">
                   <div>
                     Version{" "}
                     <span className="font-semibold">
                       {updateModal.latestVersion || "unknown"}
                     </span>{" "}
+                    is available for download.
                   </div>
-                  {updateModal.currentVersion ? (
-                    <div className="text-xs text-slate-400">
-                      Installed: {updateModal.currentVersion}
-                    </div>
-                  ) : null}
                 </div>
-                <div className="rounded-md border border-white/10 bg-black/20 p-3 text-xs text-slate-100 whitespace-pre-wrap">
+                <div className="rounded-md border border-white/10 bg-black/20 p-2 text-xs text-slate-100 whitespace-pre-wrap">
                   {Array.isArray(updateModal.notes) &&
                   updateModal.notes.length > 0 ? (
                     <ul className="list-disc pl-0 list-inside">
@@ -6346,32 +6361,77 @@ function ControlView() {
                       ))}
                     </ul>
                   ) : (
-                    "No update notes were provided."
+                    "No update notes :(."
                   )}
                 </div>
-                <div className="rounded-md border border-white/10 bg-black/20 p-2 text-xs break-all text-slate-200">
-                  {updateModal.downloadUrl}
-                </div>
+
+                {updateInstalling ? (
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between gap-2 text-xs text-slate-200">
+                      <span role="status">
+                        {updateInstallStatus.phase === "downloading"
+                          ? "Downloading update…"
+                          : updateInstallStatus.phase === "verifying"
+                            ? "Verifying download…"
+                            : updateInstallStatus.phase === "preparing"
+                              ? "Preparing update…"
+                              : "Restarting…"}
+                      </span>
+                      <span>
+                        {updateInstallStatus.phase === "downloading"
+                          ? updateDownloadPercent
+                          : 100}
+                        %
+                      </span>
+                    </div>
+                    <div
+                      role="progressbar"
+                      aria-label="Update download"
+                      aria-valuemin={0}
+                      aria-valuemax={100}
+                      aria-valuenow={
+                        updateInstallStatus.phase === "downloading"
+                          ? updateDownloadPercent
+                          : 100
+                      }
+                      className="h-2 overflow-hidden rounded-full bg-white/10"
+                    >
+                      <div
+                        className="h-full rounded-full bg-gradient-to-r from-emerald-300 to-fuchsia-300 transition-[width] duration-200"
+                        style={{
+                          width: `${updateInstallStatus.phase === "downloading" ? updateDownloadPercent : 100}%`,
+                        }}
+                      />
+                    </div>
+                  </div>
+                ) : null}
                 <div className="flex items-center justify-end gap-2">
                   <button
                     type="button"
                     className="btn btn-clear btn-sm"
-                    onClick={() => setUpdateModal(null)}
+                    disabled={updateInstalling}
+                    onClick={() => {
+                      setUpdateModal(null);
+                      setUpdateInstallStatus(null);
+                    }}
                   >
-                    Later
+                    Cancel
                   </button>
                   <button
                     type="button"
                     className="btn btn-gradient btn-sm text-shadow-sm text-shadow-black/40"
-                    onClick={() => {
-                      const url = String(updateModal.downloadUrl || "").trim();
-                      if (url) {
-                        void openExternalUrl(url);
-                      }
-                      setUpdateModal(null);
-                    }}
+                    disabled={updateInstalling}
+                    onClick={installOfferedUpdate}
                   >
-                    Download Update
+                    {updateInstallStatus?.phase === "downloading"
+                      ? `Downloading… ${updateInstallStatus.percent || 0}%`
+                      : updateInstallStatus?.phase === "verifying"
+                        ? "Verifying…"
+                        : updateInstallStatus?.phase === "preparing"
+                          ? "Preparing…"
+                          : updateInstallStatus?.phase === "restarting"
+                            ? "Restarting…"
+                            : "Download and restart"}
                   </button>
                 </div>
               </div>

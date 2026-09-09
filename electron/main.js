@@ -27,6 +27,8 @@ const {
   competitionRangeLockDecision,
 } = require("./competitionRangeLock");
 const { checkForUpdates } = require("./update-checker");
+const { MacUpdater, acknowledgeMacUpdate, updateRecoveryMessage } = require("./mac-updater");
+const { WindowsUpdater, acknowledgeWindowsUpdate, windowsRecoveryMessage } = require("./windows-updater");
 const { createMcpClient } = require("../src/mcp/client");
 const {
   normalizeMissionList,
@@ -185,6 +187,10 @@ let analyticsTelemetryEndTimer = null;
 let telemetryQuitInProgress = false;
 let analyticsTelemetrySessionReusableUntil = 0;
 let appQuitInFlight = false;
+let updateShutdownInProgress = false;
+let desktopUpdater = null;
+let desktopUpdateOffer = null;
+let updateRecoveryReported = false;
 const FUNDING_WALLET_REFRESH_MIN_INTERVAL_MS = 30000;
 const FUNDING_WALLET_PERIODIC_REFRESH_MS = 30 * 60 * 1000;
 const BOOTSTRAP_WALLET_REFRESH_MIN_INTERVAL_MS = 30000;
@@ -3542,6 +3548,7 @@ async function runDesktopUpdateCheck({ manual = false } = {}) {
           pushSystemLog(`Update check failed: ${String(message || "unknown")}`)
       : null,
   });
+  if (!desktopUpdater?.busy) desktopUpdateOffer = result.ok && result.updateAvailable ? result : null;
   return {
     ok: result.ok === true,
     manual: manual === true,
@@ -3557,6 +3564,7 @@ async function runDesktopUpdateCheck({ manual = false } = {}) {
           .map((note) => note.trim())
           .filter(Boolean),
     updateAvailable: result.updateAvailable === true,
+    canInstall: ["darwin", "win32"].includes(process.platform) && app.isPackaged && !isDesktopDevMode(),
     reason: result.reason || null,
   };
 }
@@ -4318,6 +4326,7 @@ function hardenWindow(win) {
 }
 
 function startBackend(options = {}) {
+  if (updateShutdownInProgress) throw new Error("The app is restarting for an update.");
   if (backendStatus.running && backend) {
     return { ...backendStatus };
   }
@@ -4504,6 +4513,33 @@ async function waitForBackendStopped(timeoutMs = 7000) {
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
   return !backend || backendStatus.running !== true;
+}
+
+async function stopBackendForUpdate() {
+  updateShutdownInProgress = true;
+  flushAnalyticsBuffers();
+  clearStopTimer();
+  const child = backend;
+  if (!child || child.exitCode !== null || child.signalCode !== null) return;
+  try {
+    await new Promise((resolve, reject) => {
+      const cleanup = () => { clearTimeout(timer); child.removeListener("exit", onExit); };
+      const onExit = (code, signal) => {
+        cleanup();
+        if (code === 0 && !signal) resolve();
+        else reject(new Error("The runner did not stop cleanly. The app has not been replaced."));
+      };
+      const timer = setTimeout(() => {
+        cleanup();
+        reject(new Error("The runner could not stop safely. The app has not been replaced; stop the runner and retry."));
+      }, 10000);
+      child.once("exit", onExit);
+      if (process.platform === "win32") {
+        if (!child.connected) { cleanup(); reject(new Error("The runner IPC channel is unavailable. Stop the runner before updating.")); }
+        else child.send({ type: "pbp_shutdown_for_update" }, (error) => { if (error) { cleanup(); reject(error); } });
+      } else if (!child.kill("SIGTERM")) { cleanup(); reject(new Error("Unable to stop the runner for the update.")); }
+    });
+  } catch (error) { updateShutdownInProgress = false; throw error; }
 }
 
 async function restartBackend() {
@@ -5514,8 +5550,22 @@ async function createCliWindow() {
   await loadWindow(cliWindow, "/cli");
 }
 
+// Only one packaged desktop instance can own the runner and update transaction.
+if (["darwin", "win32"].includes(process.platform) && app.isPackaged && !isDesktopDevMode()) {
+  if (!app.requestSingleInstanceLock()) app.exit(0);
+  app.on("second-instance", () => {
+    const window = controlWindow || cliWindow;
+    if (window && !window.isDestroyed()) { window.show(); window.focus(); }
+  });
+}
+
 app.whenReady().then(async () => {
   installMinimalApplicationMenu();
+  if (["darwin", "win32"].includes(process.platform) && app.isPackaged && !isDesktopDevMode()) {
+    const Updater = process.platform === "darwin" ? MacUpdater : WindowsUpdater;
+    desktopUpdater = new Updater({ userData: app.getPath("userData"), execPath: process.execPath,
+      arch: process.arch, onStatus: (status) => publish("updates:status", status) });
+  }
   backendStatus.nftUsageStats = loadPersistedNftUsageStats();
   ipcMain.handle("backend:start", async (_event, options = {}) => {
     const actionBackend = temporarySlotUnlockBackend;
@@ -5904,6 +5954,35 @@ app.whenReady().then(async () => {
       };
     }
     return await runDesktopUpdateCheck({ manual });
+  });
+  ipcMain.handle("updates:install", async (event, version) => {
+    if (!desktopUpdater || event.sender !== controlWindow?.webContents || event.senderFrame !== event.sender.mainFrame) {
+      return { ok: false, error: "In-app updates are available in packaged Mac and Windows apps." };
+    }
+    if (typeof version !== "string" || version !== desktopUpdateOffer?.latestVersion) {
+      return { ok: false, error: "This update offer has changed. Check for updates again." };
+    }
+    if (desktopUpdater.busy) return { ok: false, error: "An update is already in progress." };
+    try {
+      await desktopUpdater.install(version, { stopGracefully: stopBackendForUpdate, quit: () => app.exit(0) });
+      return { ok: true };
+    } catch (error) {
+      updateShutdownInProgress = false;
+      return { ok: false, error: String(error.message || error) };
+    }
+  });
+  ipcMain.handle("updates:ui-ready", async (event) => {
+    if (!desktopUpdater || updateRecoveryReported || event.senderFrame !== event.sender.mainFrame ||
+        ![controlWindow?.webContents, cliWindow?.webContents].includes(event.sender)) return;
+    updateRecoveryReported = true;
+    try {
+      await (process.platform === "darwin" ? acknowledgeMacUpdate : acknowledgeWindowsUpdate)({ userData: app.getPath("userData"), execPath: process.execPath,
+        version: app.getVersion(), argv: process.argv });
+      const recovery = process.platform === "darwin"
+        ? await updateRecoveryMessage(app.getPath("userData"), process.execPath)
+        : await windowsRecoveryMessage(app.getPath("userData"));
+      if (recovery) void dialog.showMessageBox({ type: "warning", title: "Update recovery", message: recovery });
+    } catch (error) { pushSystemLog(`Update acknowledgement failed: ${error.message}`); }
   });
   const refreshFundingWalletSummary = async ({ force = false, reason = "manual" } = {}) => {
     const now = Date.now();
@@ -6992,8 +7071,8 @@ app.whenReady().then(async () => {
   } else {
     createSplashWindow();
     await createControlWindow();
-    await bootstrapStartupMissionSlots();
   }
+  if (!isStandaloneCliMode()) await bootstrapStartupMissionSlots();
   try {
     const launchConfig = readDesktopConfig();
     const walletAddress =

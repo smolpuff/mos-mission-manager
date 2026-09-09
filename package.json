@@ -4,6 +4,7 @@
   "main": "electron/main.js",
   "scripts": {
     "test": "node --test",
+    "test:mac-update": "node electron/update-tools/verify-mac-app.js",
     "desktop": "electron .",
     "desktop:dev": "concurrently -k \"vite\" \"wait-on tcp:5179 && electron .\"",
     "desktop:build": "vite build",
@@ -36,6 +37,7 @@
     "files": [
       "app.js",
       "electron/**/*",
+      "!electron/update-tools/**/*",
       "src/**/*",
       "lib/**/*",
       "bin/**/*",
@@ -43,6 +45,7 @@
       "package.json"
     ],
     "mac": {
+      "artifactName": "${productName}-${version}-${arch}-mac.${ext}",
       "icon": "electron/icons/icon.png",
       "category": "public.app-category.utilities",
       "target": [
@@ -51,6 +54,7 @@
       ]
     },
     "win": {
+      "artifactName": "${productName}-${version}-${arch}-portable.${ext}",
       "icon": "electron/icons/icon.png",
       "signAndEditExecutable": false,
       "target": [
@@ -88,6 +92,7 @@
     "react": "^19.2.5",
     "react-dom": "^19.2.5",
     "tailwindcss": "^4.2.2",
-    "vite": "^8.0.8"
+    "vite": "^8.0.8",
+    "yauzl": "3.4.0"
   }
 }

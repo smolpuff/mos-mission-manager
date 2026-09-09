@@ -24,6 +24,7 @@ export default function CliPage() {
     includeCommands: false,
   });
   const [command, setCommand] = useState("");
+  useEffect(() => { void bridge?.reportUpdateUiReady?.().catch(() => {}); }, [bridge]);
   const outputRef = useRef(null);
   const pinnedToBottomRef = useRef(true);
   const dragStateRef = useRef({

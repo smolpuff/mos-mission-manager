@@ -63,9 +63,24 @@ jobs:
             release/*.exe
             release/*.zip
 
+      - name: Generate Windows update metadata
+        shell: pwsh
+        run: |
+          $releaseVersion = node -p "require('./package.json').version"
+          node electron/update-tools/create-update-manifest.js artifact release/desktop-update-win32-x64.json x64 "release/missions-v3-mcp-$releaseVersion-x64-portable.exe"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-update-win32-x64
+          path: release/desktop-update-win32-x64.json
+          if-no-files-found: error
+
   build-mac:
     name: Build macOS
     runs-on: macos-latest
+    strategy:
+      matrix:
+        arch: [arm64, x64]
 
     steps:
       - name: Checkout repo
@@ -103,7 +118,10 @@ jobs:
       - name: Build macOS desktop app
         run: |
           npm run desktop:build
-          npx electron-builder --mac dir zip --publish never
+          npx electron-builder --mac dir zip --${{ matrix.arch }} --publish never
+
+      - name: Generate verified update metadata
+        run: node electron/update-tools/create-update-manifest.js artifact release/desktop-update-${{ matrix.arch }}.json ${{ matrix.arch }} release/missions-v3-mcp-$(node -p "require('./package.json').version")-${{ matrix.arch }}-mac.zip
 
       - name: Upload macOS release files
         uses: softprops/action-gh-release@v2
@@ -113,3 +131,32 @@ jobs:
           files: |
             release/*.zip
             MAC_INSTRUCTIONS.md
+
+      - name: Save update metadata for release finalization
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-update-${{ matrix.arch }}
+          path: release/desktop-update-${{ matrix.arch }}.json
+          if-no-files-found: error
+
+  publish-update-metadata:
+    name: Publish complete update manifest
+    needs: [build-mac, build-windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: desktop-update-*
+          path: update-metadata
+          merge-multiple: true
+      - name: Require all supported platform artifacts
+        run: node electron/update-tools/create-update-manifest.js merge desktop-update.json update-metadata/desktop-update-arm64.json update-metadata/desktop-update-x64.json update-metadata/desktop-update-win32-x64.json
+      - name: Publish manifest after all app uploads succeed
+        uses: softprops/action-gh-release@v2
+        with:
+          files: desktop-update.json
+          fail_on_unmatched_files: true

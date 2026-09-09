@@ -33,6 +33,13 @@ contextBridge.exposeInMainWorld("missionsDesktop", {
   getConfig: () => ipcRenderer.invoke("config:get"),
   updateConfig: (patch) => ipcRenderer.invoke("config:update", patch),
   checkForUpdates: (payload) => ipcRenderer.invoke("updates:check", payload),
+  installUpdate: (version) => ipcRenderer.invoke("updates:install", version),
+  reportUpdateUiReady: () => ipcRenderer.invoke("updates:ui-ready"),
+  onUpdateStatus: (callback) => {
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on("updates:status", listener);
+    return () => ipcRenderer.removeListener("updates:status", listener);
+  },
   refreshWalletSummary: () => ipcRenderer.invoke("wallet:refresh-summary"),
   bootstrapWalletSummary: () => ipcRenderer.invoke("wallet:bootstrap-summary"),
   revealSignerBackup: () => ipcRenderer.invoke("signer:reveal-backup"),
