@@ -52,6 +52,83 @@ function shouldAdvanceNftScanBeforeCooldown({
   );
 }
 
+function missionNftAccountId(nft) {
+  const id =
+    nft?.account ||
+    nft?.nftAccount ||
+    nft?.nft_account ||
+    nft?.tokenAddress ||
+    nft?.token_address ||
+    nft?.mintAddress ||
+    nft?.mint_address ||
+    nft?.id;
+  return typeof id === "string" && id.trim() ? id.trim() : null;
+}
+
+function mergeMissionNftMetadata(cached = {}, eligible = {}, fields = []) {
+  const merged = { ...cached, ...eligible };
+  for (const field of fields) {
+    const eligibleValue = eligible?.[field];
+    const cachedValue = cached?.[field];
+    if (
+      (eligibleValue === null ||
+        eligibleValue === undefined ||
+        String(eligibleValue).trim() === "") &&
+      cachedValue !== null &&
+      cachedValue !== undefined &&
+      String(cachedValue).trim() !== ""
+    ) {
+      merged[field] = cachedValue;
+    }
+  }
+  return merged;
+}
+
+function mergeMissionEligibleNftsWithCache(eligibleNfts = [], cachedNfts = []) {
+  const cachedByAccount = new Map(
+    cachedNfts
+      .map((nft) => [missionNftAccountId(nft), nft])
+      .filter(([account]) => account),
+  );
+  return eligibleNfts.map((eligibleNft) => {
+    const cachedNft = cachedByAccount.get(missionNftAccountId(eligibleNft));
+    if (!cachedNft) return eligibleNft;
+    const metadataFields = [
+      "collection",
+      "collectionName",
+      "collection_name",
+      "collectionSymbol",
+      "collection_symbol",
+      "symbol",
+    ];
+    const mergedOffChainMetadata = {
+      ...(cachedNft?.offChainMetadata || {}),
+      ...(eligibleNft?.offChainMetadata || {}),
+    };
+    return {
+      ...mergeMissionNftMetadata(cachedNft, eligibleNft, metadataFields),
+      metadata: mergeMissionNftMetadata(
+        cachedNft?.metadata,
+        eligibleNft?.metadata,
+        metadataFields,
+      ),
+      DASMetadata: mergeMissionNftMetadata(
+        cachedNft?.DASMetadata,
+        eligibleNft?.DASMetadata,
+        metadataFields,
+      ),
+      offChainMetadata: {
+        ...mergedOffChainMetadata,
+        metadata: mergeMissionNftMetadata(
+          cachedNft?.offChainMetadata?.metadata,
+          eligibleNft?.offChainMetadata?.metadata,
+          metadataFields,
+        ),
+      },
+    };
+  });
+}
+
 const {
   normalizeMissionList,
   normalizeNftList,
@@ -1707,7 +1784,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
 
   function isLevel20Mission(mission) {
     const level = Number(missionLevel(mission));
-    return Number.isFinite(level) && level === 20;
+    return Number.isFinite(level) && level >= 20;
   }
 
   function shouldReserveLevel20CollectionNfts(mission) {
@@ -1735,13 +1812,18 @@ function createChecksService(ctx, logger, mcp, services = {}) {
 
   function partitionOwnedCandidatesForMission(entries, mission) {
     const sortedEntries = sortOwnedAssignmentEntries(entries);
+    // The mission-scoped NFT lookup is the complete authority on which
+    // collections work at Level 20+. Do not reduce that list to the locally
+    // recognized 100K/500K reserve labels; other compatible collections exist.
+    if (isLevel20Mission(mission)) {
+      return { primary: sortedEntries, reserved: [] };
+    }
     const primary = [];
     const reserved = [];
-    const reservePoolIsPrimary = isLevel20Mission(mission);
     for (const entry of sortedEntries) {
       const isReserved = isLevel20ReservedCollectionNft(entry.nft);
-      if (isReserved === reservePoolIsPrimary) primary.push(entry);
-      else reserved.push(entry);
+      if (isReserved) reserved.push(entry);
+      else primary.push(entry);
     }
     return { primary, reserved };
   }
@@ -4553,21 +4635,14 @@ function createChecksService(ctx, logger, mcp, services = {}) {
               });
               nfts = normalizeNftList(nftResult);
             }
-            // The startup/normal inventory load is the complete My NFTs
-            // mission-NFT list. Keep its already-loaded reserve entries in
-            // the candidate pool when this paged mission query omits them.
-            const byAccount = new Map(
-              nfts
-                .map((nft) => [nftAccountId(nft), nft])
-                .filter(([account]) => account),
+            // The mission-filtered result is authoritative for eligibility.
+            // Wallet cache data may enrich those same accounts with collection
+            // metadata, but must never introduce an NFT the mission lookup did
+            // not return.
+            nfts = mergeMissionEligibleNftsWithCache(
+              nfts,
+              ownedMissionNftsCache,
             );
-            for (const cachedNft of ownedMissionNftsCache) {
-              const account = nftAccountId(cachedNft);
-              if (account && !byAccount.has(account)) {
-                byAccount.set(account, cachedNft);
-              }
-            }
-              nfts = Array.from(byAccount.values());
             return {
               missionId,
               mission,
@@ -4794,9 +4869,9 @@ function createChecksService(ctx, logger, mcp, services = {}) {
         const reservedReadyOwnedFallbackCandidates =
           reservedReadyOwnedCandidates.slice(0, 3);
 
-        // Reserve 100K/500K NFTs for Level 20 while standard ready NFTs are
-        // available. They are still the owned fallback when no standard ready
-        // NFT remains, ahead of a rental assignment.
+        // Level 20+ uses every NFT confirmed by the mission-scoped lookup.
+        // On lower levels, keep the locally recognized reserve collections as
+        // a final owned fallback.
         const selectedReadyOwnedCandidates =
           prioritizedReadyOwnedCandidates.length > 0
             ? prioritizedReadyOwnedCandidates
@@ -6174,4 +6249,5 @@ module.exports = {
   shouldRequestOwnedCooldownFollowup,
   allowsRecentClaimedMissionOverride,
   shouldAdvanceNftScanBeforeCooldown,
+  mergeMissionEligibleNftsWithCache,
 };
