@@ -561,6 +561,13 @@
     @apply text-center;
   }
 
+  /* Wayland owns window coordinates; avoid a renderer-driven move loop. */
+  .window-chrome--native-drag,
+  .window-chrome--native-drag .window-drag {
+    app-region: drag;
+    -webkit-app-region: drag;
+  }
+
   .chrome-title,
   .chrome-subtitle {
     @apply m-0;

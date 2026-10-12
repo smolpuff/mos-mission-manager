@@ -4,6 +4,7 @@ import useDesktopBridge from "../useDesktopBridge";
 export default function WindowChrome({ title, styling }) {
   const bridge = useDesktopBridge();
   const isWindows = bridge?.platform === "win32";
+  const useNativeDrag = bridge?.platform === "linux";
   const dragStateRef = useRef({
     active: false,
     pointerStartX: 0,
@@ -62,6 +63,7 @@ export default function WindowChrome({ title, styling }) {
   };
 
   const onHeaderMouseDown = async (event) => {
+    if (useNativeDrag) return;
     if (event.button !== 0) return;
     const interactive = event.target?.closest?.("button, input, textarea, select, a");
     if (interactive) return;
@@ -87,7 +89,7 @@ export default function WindowChrome({ title, styling }) {
 
   return (
     <header
-      className={`window-chrome ${isWindows ? "window-chrome--windows" : ""} ${styling || ""}`}
+      className={`window-chrome ${isWindows ? "window-chrome--windows" : ""} ${useNativeDrag ? "window-chrome--native-drag" : ""} ${styling || ""}`}
       onMouseDown={onHeaderMouseDown}
     >
       {!isWindows ? (

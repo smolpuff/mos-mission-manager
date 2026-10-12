@@ -121,6 +121,8 @@ export default function CliPage() {
   };
 
   const onTopBarMouseDown = async (event) => {
+    // Linux delegates dragging to the compositor via the native drag regions.
+    if (bridge?.platform === "linux") return;
     if (event.button !== 0) return;
     if (!bridge?.getWindowPosition || !bridge?.setWindowPosition) return;
     const interactive = event.target?.closest?.(

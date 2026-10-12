@@ -5,8 +5,8 @@
   "scripts": {
     "test": "node --test",
     "test:mac-update": "node electron/update-tools/verify-mac-app.js",
-    "desktop": "electron .",
-    "desktop:dev": "concurrently -k \"vite\" \"wait-on tcp:5179 && electron .\"",
+    "desktop": "node electron/launch.js",
+    "desktop:dev": "concurrently -k \"vite\" \"wait-on tcp:5179 && node electron/launch.js\"",
     "desktop:build": "vite build",
     "desktop:dist": "npm run desktop:build && electron-builder",
     "desktop:dist:mac": "npm run desktop:build && electron-builder --mac dir zip",
