@@ -94,5 +94,10 @@
     "tailwindcss": "^4.2.2",
     "vite": "^8.0.8",
     "yauzl": "3.4.0"
+  },
+  "allowScripts": {
+    "electron@41.2.0": true,
+    "electron-winstaller@5.4.0": true,
+    "esbuild@0.28.0": true
   }
 }
