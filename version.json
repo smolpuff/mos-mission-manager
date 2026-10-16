@@ -1,7 +1,8 @@
 {
-  "version": "3.2.16",
+  "version": "3.2.18",
   "downloadUrl": "https://github.com/smolpuff/mos-mission-manager/releases/latest",
   "notes": [
+    "Added Season 71–73 statistics ranges with Eastern time boundaries across totals, NFT usage, CSV exports, and clearing statistics",
     "Added Automatic in-app updates",
     "Fixed Level 20+ NFT selection to use all mission-eligible collections while preserving lvl 20 reserved NFT priority",
     "Fixed NFT metadata handling & caching",
