@@ -4,8 +4,15 @@ import tcIcon from "../img/icon_tc.webp";
 import { useEffect, useState } from "react";
 import useDesktopBridge from "../components/useDesktopBridge";
 import { canonicalCollectionLabel } from "../collection-images";
+import analyticsSeasons from "../../../src/analytics-seasons.json";
 
 const DETAILED_STATS_URL_BASE = "https://missions.lol/missions-analytics/";
+
+function availableAnalyticsSeasons(now = Date.now()) {
+  return Object.entries(analyticsSeasons).filter(
+    ([, season]) => now >= Date.parse(season.start),
+  );
+}
 
 function formatNumber(value, max = 2) {
   const n = Number(value || 0);
@@ -348,9 +355,10 @@ function DetailCard({ title, children }) {
 export default function StatsPage({ status }) {
   const bridge = useDesktopBridge();
   const safeStatus = status && typeof status === "object" ? status : {};
+  const availableSeasons = availableAnalyticsSeasons();
   const refreshKey = analyticsRefreshKey(safeStatus.analytics);
   const [statsTab, setStatsTab] = useState("overview");
-  const [overviewRangeKey, setOverviewRangeKey] = useState("session");
+  const [overviewRangeKey, setOverviewRangeKey] = useState("season71");
   const [nftRangeKey, setNftRangeKey] = useState("all");
   const rangeKey = statsTab === "nfts" ? nftRangeKey : overviewRangeKey;
   const setRangeKey =
@@ -407,7 +415,8 @@ export default function StatsPage({ status }) {
   const claims = asNumber(scopedAnalytics.totalClaims, 0);
   const elapsedHours = Math.max(
     1 / 60,
-    (Date.now() - asNumber(scopedAnalytics.startedAt, Date.now())) / 3600000,
+    (Math.min(Date.now(), asNumber(scopedAnalytics.endedAt, Date.now())) -
+      asNumber(scopedAnalytics.startedAt, Date.now())) / 3600000,
   );
   const sessionHistory = Array.isArray(scopedAnalytics.claimHistory)
     ? scopedAnalytics.claimHistory
@@ -483,7 +492,9 @@ export default function StatsPage({ status }) {
         ? "Last 24hrs"
         : rangeKey === "7d"
           ? "Last 7days"
-          : "All Time";
+          : rangeKey === "season71"
+            ? "This season (71)"
+            : analyticsSeasons[rangeKey]?.label || "All Time";
   const currentUserWalletId = String(
     safeStatus.currentUserWalletId || "",
   ).trim();
@@ -720,13 +731,17 @@ export default function StatsPage({ status }) {
                   className="select select-sm w-36 border-white/10 bg-black/50 text-slate-100 focus-within:bg-black"
                   value={rangeKey}
                   onChange={(event) =>
-                    setRangeKey(String(event.target.value || "session"))
+                    setRangeKey(String(event.target.value || "season71"))
                   }
                   disabled={loading || actionBusy}
                 >
-                  <option value="session">This session</option>
                   <option value="24h">Last 24hrs</option>
                   <option value="7d">Last 7days</option>
+                  {availableSeasons.map(([key, season]) => (
+                    <option key={key} value={key}>
+                      {key === "season71" ? "This season (71)" : season.label}
+                    </option>
+                  ))}
                   <option value="all">All time</option>
                 </select>
               </div>
@@ -903,13 +918,17 @@ export default function StatsPage({ status }) {
                 className="select select-sm  bg-black/50 focus-within:bg-black border-white/10 text-slate-100 w-36"
                 value={rangeKey}
                 onChange={(event) =>
-                  setRangeKey(String(event.target.value || "session"))
+                  setRangeKey(String(event.target.value || "season71"))
                 }
                 disabled={loading || actionBusy}
               >
-                <option value="session">This session</option>
                 <option value="24h">Last 24hrs</option>
                 <option value="7d">Last 7days</option>
+                {availableSeasons.map(([key, season]) => (
+                  <option key={key} value={key}>
+                    {key === "season71" ? "This season (71)" : season.label}
+                  </option>
+                ))}
                 <option value="all">All time</option>
               </select>
             </div>

@@ -1,5 +1,13 @@
 {
   "version": "3.2.16",
   "downloadUrl": "https://github.com/smolpuff/mos-mission-manager/releases/latest",
-  "notes": ["linux: fixed scaling","linux: stabilized window tiling in hyperland"]
+  "notes": [
+    "Added Automatic in-app updates",
+    "Fixed Level 20+ NFT selection to use all mission-eligible collections while preserving lvl 20 reserved NFT priority",
+    "Fixed NFT metadata handling & caching",
+    "Fixed the claim UI getting stuck by immediately refreshing the interface after successful claim",
+    "Fixed Linux; stabilized title-bar dragging on Hyprland with native window dragging",
+    "Fixed Linux; fixed Hyprland scaling for local desktop launches by using XWayland when available",
+    "forever free and the best. because i'm not a cornball :D "
+  ]
 }

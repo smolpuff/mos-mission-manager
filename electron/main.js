@@ -27,6 +27,7 @@ const {
   competitionRangeLockDecision,
 } = require("./competitionRangeLock");
 const { checkForUpdates } = require("./update-checker");
+const { normalizeAnalyticsRange, analyticsRangeBounds, isInAnalyticsRange } = require("./analytics-ranges");
 const { MacUpdater, acknowledgeMacUpdate, updateRecoveryMessage } = require("./mac-updater");
 const { WindowsUpdater, acknowledgeWindowsUpdate, windowsRecoveryMessage } = require("./windows-updater");
 const { createMcpClient } = require("../src/mcp/client");
@@ -2801,24 +2802,22 @@ function analyticsBucketFromRange(bucket = {}, rangeKey = "session") {
     });
   }
 
-  const rangeMs =
-    rangeKey === "24h" ? 24 * 60 * 60 * 1000 : 7 * 24 * 60 * 60 * 1000;
-  const cutoff = Date.now() - rangeMs;
+  const bounds = analyticsRangeBounds(rangeKey);
   const claimHistory = normalizeClaimHistory(src.claimHistory).filter(
-    (entry) => Number(entry.at) >= cutoff,
+    (entry) => isInAnalyticsRange(entry, bounds),
   );
   const spendHistory = normalizeSpendHistory(src.spendHistory).filter(
-    (entry) => Number(entry.at) >= cutoff,
+    (entry) => isInAnalyticsRange(entry, bounds),
   );
   const resetHistory = normalizeResetHistory(src.resetHistory).filter(
-    (entry) => Number(entry.at) >= cutoff,
+    (entry) => isInAnalyticsRange(entry, bounds),
   );
   const rentalHistory = normalizeRentalHistory(src.rentalHistory).filter(
-    (entry) => Number(entry.at) >= cutoff,
+    (entry) => isInAnalyticsRange(entry, bounds),
   );
   const assignmentHistory = normalizeAssignmentHistory(
     src.assignmentHistory,
-  ).filter((entry) => Number(entry.at) >= cutoff);
+  ).filter((entry) => isInAnalyticsRange(entry, bounds));
   const currencyEarned = { pbp: 0, tc: 0, cc: 0 };
   const missionClaims = {};
   for (const entry of claimHistory) {
@@ -2863,7 +2862,8 @@ function analyticsBucketFromRange(bucket = {}, rangeKey = "session") {
     ),
   );
   return {
-    startedAt: cutoff,
+    startedAt: bounds.start,
+    ...(Number.isFinite(bounds.end) ? { endedAt: bounds.end } : {}),
     totalClaims: claimHistory.reduce(
       (sum, entry) => sum + claimCountFromHistoryEntry(entry),
       0,
@@ -2968,9 +2968,7 @@ function analyticsView(rangeKey = "session") {
   const analytics = normalizeAnalytics(
     backendStatus.analytics || loadAnalytics(),
   );
-  const key = ["session", "24h", "7d", "all"].includes(rangeKey)
-    ? rangeKey
-    : "session";
+  const key = normalizeAnalyticsRange(rangeKey);
   const bucket =
     key === "session"
       ? analyticsBucketFromRange(analytics.session, "session")
@@ -2988,9 +2986,7 @@ function resetAnalyticsRange(rangeKey = "session") {
   const current = normalizeAnalytics(
     backendStatus.analytics || loadAnalytics(),
   );
-  const key = ["session", "24h", "7d", "all"].includes(rangeKey)
-    ? rangeKey
-    : "session";
+  const key = normalizeAnalyticsRange(rangeKey);
   const emptySession = {
     startedAt: Date.now(),
     totalClaims: 0,
@@ -3025,22 +3021,22 @@ function resetAnalyticsRange(rangeKey = "session") {
   } else if (key === "session") {
     current.session = emptySession;
   } else {
-    const cutoff = Date.now() - (key === "24h" ? 24 : 7 * 24) * 60 * 60 * 1000;
-    const keepRecent = (entry) => Number(entry?.at) < cutoff;
+    const bounds = analyticsRangeBounds(key);
+    const keepOutsideRange = (entry) => !isInAnalyticsRange(entry, bounds);
     current.lifetime.claimHistory = normalizeClaimHistory(
-      (current.lifetime.claimHistory || []).filter(keepRecent),
+      (current.lifetime.claimHistory || []).filter(keepOutsideRange),
     );
     current.lifetime.spendHistory = normalizeSpendHistory(
-      (current.lifetime.spendHistory || []).filter(keepRecent),
+      (current.lifetime.spendHistory || []).filter(keepOutsideRange),
     );
     current.lifetime.resetHistory = normalizeResetHistory(
-      (current.lifetime.resetHistory || []).filter(keepRecent),
+      (current.lifetime.resetHistory || []).filter(keepOutsideRange),
     );
     current.lifetime.rentalHistory = normalizeRentalHistory(
-      (current.lifetime.rentalHistory || []).filter(keepRecent),
+      (current.lifetime.rentalHistory || []).filter(keepOutsideRange),
     );
     current.lifetime.assignmentHistory = normalizeAssignmentHistory(
-      (current.lifetime.assignmentHistory || []).filter(keepRecent),
+      (current.lifetime.assignmentHistory || []).filter(keepOutsideRange),
     );
     current.lifetime = rebuildAnalyticsBucketFromHistories({
       ...current.lifetime,
@@ -3056,9 +3052,7 @@ function resetNftUsageRange(rangeKey = "session") {
   const current = normalizeAnalytics(
     backendStatus.analytics || loadAnalytics(),
   );
-  const key = ["session", "24h", "7d", "all"].includes(rangeKey)
-    ? rangeKey
-    : "session";
+  const key = normalizeAnalyticsRange(rangeKey);
   if (key === "all") {
     current.lifetime.assignmentHistory = [];
     current.lifetime.nftsUsed = [];
@@ -3068,10 +3062,10 @@ function resetNftUsageRange(rangeKey = "session") {
     current.session.assignmentHistory = [];
     current.session.nftsUsed = [];
   } else {
-    const cutoff = Date.now() - (key === "24h" ? 24 : 7 * 24) * 60 * 60 * 1000;
+    const bounds = analyticsRangeBounds(key);
     current.lifetime.assignmentHistory = normalizeAssignmentHistory(
       (current.lifetime.assignmentHistory || []).filter(
-        (entry) => Number(entry?.at) < cutoff,
+        (entry) => !isInAnalyticsRange(entry, bounds),
       ),
     );
     current.lifetime.nftsUsed = Array.from(
@@ -3237,9 +3231,7 @@ function buildNftUsageCsv(rangeKey = "session") {
 }
 
 async function exportAnalyticsCsv(rangeKey = "session") {
-  const key = ["session", "24h", "7d", "all"].includes(rangeKey)
-    ? rangeKey
-    : "session";
+  const key = normalizeAnalyticsRange(rangeKey);
   const defaultName = `missions-stats-${key}-${new Date()
     .toISOString()
     .slice(0, 10)}.csv`;
@@ -3257,9 +3249,7 @@ async function exportAnalyticsCsv(rangeKey = "session") {
 }
 
 async function exportNftUsageCsv(rangeKey = "session") {
-  const key = ["session", "24h", "7d", "all"].includes(rangeKey)
-    ? rangeKey
-    : "session";
+  const key = normalizeAnalyticsRange(rangeKey);
   const defaultName = `nft-usage-${key}-${new Date()
     .toISOString()
     .slice(0, 10)}.csv`;
