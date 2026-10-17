@@ -11,6 +11,10 @@ import StatsPage from "./StatsPage";
 import RentalsPage from "./RentalsPage";
 import NftsPage from "./NftsPage";
 import { competitionOptionValue } from "../competition-options";
+import {
+  createRecoveryPhraseController,
+  emptyRecoveryPhraseState,
+} from "../recovery-phrase.mjs";
 
 import pbpIcon from "../img/icon_pbp.webp";
 import solIcon from "../img/icon-sm__sol.svg";
@@ -1940,11 +1944,17 @@ function ControlView() {
   const isStarting = status.running && !isWatching;
   const manualCheckPendingRef = useRef(false);
   const [copiedLabel, setCopiedLabel] = useState(null);
-  const [secretModalOpen, setSecretModalOpen] = useState(false);
-  const [secretModalBusy, setSecretModalBusy] = useState(false);
-  const [secretModalError, setSecretModalError] = useState(null);
-  const [secretModalBackup, setSecretModalBackup] = useState(null);
-  const [secretModalRevealed, setSecretModalRevealed] = useState(false);
+  const [secretModalState, setSecretModalState] = useState(emptyRecoveryPhraseState);
+  const secretModalController = useMemo(() => createRecoveryPhraseController({
+    fetchBackup: () => {
+      if (!bridge?.revealSignerBackup) throw new Error("Secret key view is not available in this build.");
+      return bridge.revealSignerBackup();
+    },
+    onChange: setSecretModalState,
+  }), [bridge]);
+  useEffect(() => () => secretModalController.dispose(), [secretModalController]);
+  const { open: secretModalOpen, busy: secretModalBusy, error: secretModalError,
+    backup: secretModalBackup, revealed: secretModalRevealed } = secretModalState;
   const [secretCopiedPhraseLabel, setSecretCopiedPhraseLabel] = useState(null);
   const [secretCopiedAddrLabel, setSecretCopiedAddrLabel] = useState(null);
   const [onboardingOpen, setOnboardingOpen] = useState(false);
@@ -2647,29 +2657,10 @@ function ControlView() {
     await bridge.sendCommand("resume");
   };
 
-  const openSecretModal = async () => {
-    setSecretModalOpen(true);
-    setSecretModalError(null);
-    setSecretModalRevealed(false);
+  const openSecretModal = () => {
+    secretModalController.open();
     setSecretCopiedPhraseLabel(null);
     setSecretCopiedAddrLabel(null);
-    if (secretModalBackup) return;
-    if (!bridge?.revealSignerBackup) {
-      setSecretModalError("Secret key view is not available in this build.");
-      return;
-    }
-    setSecretModalBusy(true);
-    try {
-      const res = await bridge.revealSignerBackup();
-      if (!res?.ok) {
-        throw new Error(res?.error || "Failed to load recovery phrase.");
-      }
-      setSecretModalBackup(res.backup || null);
-    } catch (e) {
-      setSecretModalError(String(e?.message || e));
-    } finally {
-      setSecretModalBusy(false);
-    }
   };
 
   const openCreateWalletModal = ({ onboarding = false } = {}) => {
@@ -4190,7 +4181,7 @@ function ControlView() {
               role="dialog"
               aria-modal="true"
               onMouseDown={(e) => {
-                if (e.target === e.currentTarget) setSecretModalOpen(false);
+                if (e.target === e.currentTarget) secretModalController.close();
               }}
             >
               <div
@@ -4207,7 +4198,7 @@ function ControlView() {
                   <button
                     type="button"
                     className="btn btn-clear btn-sm"
-                    onClick={() => setSecretModalOpen(false)}
+                    onClick={() => secretModalController.close()}
                     title="Close"
                   >
                     ✕
@@ -4229,7 +4220,7 @@ function ControlView() {
                       <button
                         type="button"
                         className="btn btn-clear btn-xs"
-                        onClick={() => setSecretModalRevealed((v) => !v)}
+                        onClick={() => void secretModalController.toggleReveal()}
                         disabled={secretModalBusy}
                         title={secretModalRevealed ? "Hide" : "Reveal"}
                       >
@@ -4295,16 +4286,14 @@ function ControlView() {
                   <div className="rounded-md border border-white/10 bg-black/20 p-3 text-sm leading-relaxed">
                     {secretModalBusy ? (
                       <span className="text-slate-400">Loading…</span>
+                    ) : !secretModalRevealed ? (
+                      <span className="text-slate-400">
+                        Hidden. Click the eye icon to reveal.
+                      </span>
                     ) : secretModalBackup?.mnemonic ? (
-                      secretModalRevealed ? (
-                        <span className="select-text font-mono">
-                          {secretModalBackup.mnemonic}
-                        </span>
-                      ) : (
-                        <span className="text-slate-400">
-                          Hidden. Click the eye icon to reveal.
-                        </span>
-                      )
+                      <span className="select-text font-mono">
+                        {secretModalBackup.mnemonic}
+                      </span>
                     ) : (
                       <span className="text-slate-400">
                         No recovery phrase backup is available for this wallet.

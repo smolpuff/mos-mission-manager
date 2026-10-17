@@ -169,6 +169,9 @@ app.on("ready", () => fs.appendFileSync(${JSON.stringify(launches)}, JSON.string
     const repository = path.resolve(__dirname, "../..");
     await fs.mkdir(nextSource);
     await fs.cp(path.join(repository, "renderer"), path.join(nextSource, "renderer"), { recursive: true });
+    await fs.cp(path.join(repository, "src"), path.join(nextSource, "src"), { recursive: true });
+    await fs.mkdir(path.join(nextSource, "electron"));
+    await fs.copyFile(path.join(repository, "electron/security.js"), path.join(nextSource, "electron/security.js"));
     for (const file of ["vite.config.js", "index.html", "tailwind.config.js"]) await fs.copyFile(path.join(repository, file), path.join(nextSource, file));
     await fs.writeFile(path.join(nextSource, "package.json"), JSON.stringify({ ...require("../../package.json"), version: nextVersion }));
     await fs.symlink(path.join(repository, "node_modules"), path.join(nextSource, "node_modules"), "dir");

@@ -14,7 +14,9 @@ const {
   ipcMain,
   clipboard,
   shell,
+  session,
 } = require("electron");
+const { createRendererSecurity } = require("./security");
 const {
   fetchOnchainFundingWalletSummary,
 } = require("../src/wallet/onchain-summary");
@@ -146,6 +148,15 @@ function desktopWindowFrameOptions() {
 let controlWindow = null;
 let cliWindow = null;
 let splashWindow = null;
+const rendererSecurity = createRendererSecurity({
+  rendererPath: rendererIndexPath,
+  devServerUrl: RENDERER_DEV_URL,
+  isDev: isDesktopDevMode(),
+  getWindows: () => [controlWindow, cliWindow],
+});
+function handleTrustedIpc(channel, handler, options) {
+  rendererSecurity.registerHandler(ipcMain, channel, handler, options);
+}
 let backend = null;
 let splashProgressCurrent = 0;
 let splashProgressTarget = 0;
@@ -4294,7 +4305,7 @@ function hardenWindow(win) {
   if (typeof win.setAutoHideMenuBar === "function") {
     win.setAutoHideMenuBar(hideMenuBar);
   }
-  win.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+  rendererSecurity.hardenNavigation(win);
   if (!isDesktopDevMode()) {
     win.webContents.on("before-input-event", (event, input) => {
       const key = String(input.key || "").toLowerCase();
@@ -5258,6 +5269,8 @@ async function createControlWindow() {
       contextIsolation: true,
       nodeIntegration: false,
       devTools: DESKTOP_DEVTOOLS_ENABLED,
+      sandbox: true,
+      webviewTag: false,
     },
   });
 
@@ -5286,6 +5299,7 @@ async function createControlWindow() {
 }
 
 function createSplashWindow() {
+  const splashNonce = crypto.randomBytes(24).toString("base64");
   splashProgressCurrent = 0;
   splashProgressTarget = 0;
   stopSplashProgressTimer();
@@ -5309,9 +5323,12 @@ function createSplashWindow() {
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
+      sandbox: true,
+      webviewTag: false,
     },
   });
 
+  hardenWindow(splashWindow);
   const splashBgCandidates = [
     path.join(ROOT_DIR, "renderer", "src", "img", "back.png"),
     ...(() => {
@@ -5348,6 +5365,7 @@ function createSplashWindow() {
 <html>
   <head>
     <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; script-src 'nonce-${splashNonce}'; base-uri 'none'; form-action 'none'" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <style>
       html, body {
@@ -5474,7 +5492,7 @@ function createSplashWindow() {
         </div>
       </div>
     </div>
-    <script>
+    <script nonce="${splashNonce}">
       window.__updateSplashProgress__ = function updateSplashProgress(payload) {
         var state = payload && typeof payload === "object" ? payload : {};
         var progress = Math.max(0, Math.min(100, Number(state.progress) || 0));
@@ -5523,6 +5541,8 @@ async function createCliWindow() {
       contextIsolation: true,
       nodeIntegration: false,
       devTools: DESKTOP_DEVTOOLS_ENABLED,
+      sandbox: true,
+      webviewTag: false,
     },
   });
 
@@ -5550,6 +5570,7 @@ if (["darwin", "win32"].includes(process.platform) && app.isPackaged && !isDeskt
 }
 
 app.whenReady().then(async () => {
+  rendererSecurity.installContentSecurityPolicy(session.defaultSession);
   installMinimalApplicationMenu();
   if (["darwin", "win32"].includes(process.platform) && app.isPackaged && !isDesktopDevMode()) {
     const Updater = process.platform === "darwin" ? MacUpdater : WindowsUpdater;
@@ -5557,7 +5578,7 @@ app.whenReady().then(async () => {
       arch: process.arch, onStatus: (status) => publish("updates:status", status) });
   }
   backendStatus.nftUsageStats = loadPersistedNftUsageStats();
-  ipcMain.handle("backend:start", async (_event, options = {}) => {
+  handleTrustedIpc("backend:start", async (_event, options = {}) => {
     const actionBackend = temporarySlotUnlockBackend;
     const isTemporarySlotUnlockBackend =
       actionBackend &&
@@ -5577,7 +5598,7 @@ app.whenReady().then(async () => {
     }
     return startBackend(options);
   });
-  ipcMain.handle("backend:stop", async () => {
+  handleTrustedIpc("backend:stop", async () => {
     const actionBackend = temporarySlotUnlockBackend;
     if (
       actionBackend &&
@@ -5589,7 +5610,7 @@ app.whenReady().then(async () => {
     }
     return stopBackend();
   });
-  ipcMain.handle("backend:restart", async () => {
+  handleTrustedIpc("backend:restart", async () => {
     const actionBackend = temporarySlotUnlockBackend;
     if (
       actionBackend &&
@@ -5609,10 +5630,10 @@ app.whenReady().then(async () => {
     }
     return restartBackend();
   });
-  ipcMain.handle("backend:send-command", async (_event, command) =>
+  handleTrustedIpc("backend:send-command", async (_event, command) =>
     sendBackendCommand(command),
   );
-  ipcMain.handle("backend:get-state", async (_event, options) => {
+  handleTrustedIpc("backend:get-state", async (_event, options) => {
     if (!backendStatus.running) {
       backendStatus.nftUsageStats = loadPersistedNftUsageStats();
     }
@@ -5623,32 +5644,32 @@ app.whenReady().then(async () => {
       logs: includeLogs ? logHistory : [],
     };
   });
-  ipcMain.handle("debug:get-throttle-log", async () => readThrottleDebugLog());
-  ipcMain.handle("debug:delete-throttle-log", async () =>
+  handleTrustedIpc("debug:get-throttle-log", async () => readThrottleDebugLog());
+  handleTrustedIpc("debug:delete-throttle-log", async () =>
     deleteThrottleDebugLog(),
   );
-  ipcMain.handle("debug:get-resource-usage", async () =>
+  handleTrustedIpc("debug:get-resource-usage", async () =>
     readResourceUsageSnapshot(),
   );
-  ipcMain.handle("analytics:get-view", async (_event, rangeKey = "session") =>
+  handleTrustedIpc("analytics:get-view", async (_event, rangeKey = "session") =>
     analyticsView(rangeKey),
   );
-  ipcMain.handle(
+  handleTrustedIpc(
     "analytics:reset-range",
     async (_event, rangeKey = "session") => resetAnalyticsRange(rangeKey),
   );
-  ipcMain.handle("analytics:export-csv", async (_event, rangeKey = "session") =>
+  handleTrustedIpc("analytics:export-csv", async (_event, rangeKey = "session") =>
     exportAnalyticsCsv(rangeKey),
   );
-  ipcMain.handle(
+  handleTrustedIpc(
     "nft-usage:reset-range",
     async (_event, rangeKey = "session") => resetNftUsageRange(rangeKey),
   );
-  ipcMain.handle(
+  handleTrustedIpc(
     "nft-usage:export-csv",
     async (_event, rangeKey = "session") => exportNftUsageCsv(rangeKey),
   );
-  ipcMain.handle("config:get", async () => {
+  handleTrustedIpc("config:get", async () => {
     const config = readDesktopConfig();
     if (typeof config.autoUpdateCheckEnabled !== "boolean") {
       config.autoUpdateCheckEnabled = true;
@@ -5664,7 +5685,7 @@ app.whenReady().then(async () => {
     }
     return { config };
   });
-  ipcMain.handle("config:update", async (_event, patch) => {
+  handleTrustedIpc("config:update", async (_event, patch) => {
     const requestedPatch =
       patch && typeof patch === "object" ? { ...patch } : {};
     const previousConfig = readDesktopConfig();
@@ -5931,7 +5952,7 @@ app.whenReady().then(async () => {
     }
     return { config: next, status: { ...backendStatus } };
   });
-  ipcMain.handle("updates:check", async (_event, payload = {}) => {
+  handleTrustedIpc("updates:check", async (_event, payload = {}) => {
     const config = readDesktopConfig();
     const manual = payload?.manual === true;
     if (!manual && !autoUpdateCheckEnabledFromConfig(config)) {
@@ -5945,7 +5966,7 @@ app.whenReady().then(async () => {
     }
     return await runDesktopUpdateCheck({ manual });
   });
-  ipcMain.handle("updates:install", async (event, version) => {
+  handleTrustedIpc("updates:install", async (event, version) => {
     if (!desktopUpdater || event.sender !== controlWindow?.webContents || event.senderFrame !== event.sender.mainFrame) {
       return { ok: false, error: "In-app updates are available in packaged Mac and Windows apps." };
     }
@@ -5961,7 +5982,7 @@ app.whenReady().then(async () => {
       return { ok: false, error: String(error.message || error) };
     }
   });
-  ipcMain.handle("updates:ui-ready", async (event) => {
+  handleTrustedIpc("updates:ui-ready", async (event) => {
     if (!desktopUpdater || updateRecoveryReported || event.senderFrame !== event.sender.mainFrame ||
         ![controlWindow?.webContents, cliWindow?.webContents].includes(event.sender)) return;
     updateRecoveryReported = true;
@@ -6051,10 +6072,10 @@ app.whenReady().then(async () => {
     return fundingWalletSummaryRefreshPromise;
   };
 
-  ipcMain.handle("wallet:refresh-summary", async () => {
+  handleTrustedIpc("wallet:refresh-summary", async () => {
     return await refreshFundingWalletSummary({ reason: "manual" });
   });
-  ipcMain.handle("wallet:bootstrap-summary", async () => {
+  handleTrustedIpc("wallet:bootstrap-summary", async () => {
     const now = Date.now();
     if (bootstrapWalletSummaryPromise) {
       return bootstrapWalletSummaryPromise;
@@ -6150,7 +6171,7 @@ app.whenReady().then(async () => {
     })();
     return bootstrapWalletSummaryPromise;
   });
-  ipcMain.handle("signer:reveal-backup", async () => {
+  handleTrustedIpc("signer:reveal-backup", async (event) => {
     pushSystemLog("Reveal app wallet backup requested.");
     const payload = await requestBackend(
       "signer_reveal_backup",
@@ -6160,14 +6181,16 @@ app.whenReady().then(async () => {
         timeoutMs: 12000,
       },
     );
+    // The window may have navigated or closed while decryption was pending.
+    rendererSecurity.assertTrustedSender(event, { controlOnly: true });
     return payload;
-  });
-  ipcMain.handle("signer:create-generated-wallet", async () => {
+  }, { controlOnly: true });
+  handleTrustedIpc("signer:create-generated-wallet", async () => {
     pushSystemLog("Create generated app wallet requested.");
     const payload = await requestBackend("signer_create_generated_wallet", {});
     return payload;
   });
-  ipcMain.handle("onboarding:fetch-account", async () => {
+  handleTrustedIpc("onboarding:fetch-account", async () => {
     pushSystemLog("Onboarding account sync started.");
     const emitProgress = (progress, phase, message) => {
       publishEvent({
@@ -6333,7 +6356,7 @@ app.whenReady().then(async () => {
     };
   });
 
-  ipcMain.handle("missions:picker-data", async () => {
+  handleTrustedIpc("missions:picker-data", async () => {
     // The mission picker only needs the catalog and already-known slot state.
     // Never route this through onboarding:fetch-account: that endpoint also
     // loads wallet and NFT inventory and makes this unrelated UI depend on
@@ -6439,7 +6462,7 @@ app.whenReady().then(async () => {
       ownedCollections: Array.from(ownedCollectionKeys),
     };
   });
-  ipcMain.handle("onboarding:apply-selection", async (_event, payload = {}) => {
+  handleTrustedIpc("onboarding:apply-selection", async (_event, payload = {}) => {
     const nextTargets = Array.isArray(payload?.targetMissions)
       ? Array.from(
           new Set(
@@ -6465,7 +6488,7 @@ app.whenReady().then(async () => {
     publishStatus();
     return { ok: true, config: next };
   });
-  ipcMain.handle("missions:apply-selection", async (_event, payload = {}) => {
+  handleTrustedIpc("missions:apply-selection", async (_event, payload = {}) => {
     const slot = Number(payload?.slot);
     const missionName = String(
       payload?.missionName || payload?.name || "",
@@ -6500,7 +6523,7 @@ app.whenReady().then(async () => {
     if (response?.ok) invalidateMissionRelatedCaches();
     return response;
   });
-  ipcMain.handle("missions:preview-selection", async (_event, payload = {}) => {
+  handleTrustedIpc("missions:preview-selection", async (_event, payload = {}) => {
     const slot = Number(payload?.slot);
     const missionName = String(
       payload?.missionName || payload?.name || "",
@@ -6534,7 +6557,7 @@ app.whenReady().then(async () => {
     );
     return response;
   });
-  ipcMain.handle("rentals:preview", async () => {
+  handleTrustedIpc("rentals:preview", async () => {
     const loadPreview = async () => {
       pushSystemLog("Rentals page refresh started.");
       pushSystemLog("Rentals refresh: fetching get_rentable_nfts.");
@@ -6726,7 +6749,7 @@ app.whenReady().then(async () => {
     })();
     return rentalsPreviewPromise;
   });
-  ipcMain.handle("nfts:list", async (_event, options = {}) => {
+  handleTrustedIpc("nfts:list", async (_event, options = {}) => {
     const forceRefresh = options?.forceRefresh === true;
     const loadNfts = async () => {
       pushSystemLog("NFT page refresh started.");
@@ -6868,7 +6891,7 @@ app.whenReady().then(async () => {
     })();
     return nftListPromise;
   });
-  ipcMain.handle("nfts:reset-cooldown", async (_event, payload = {}) => {
+  handleTrustedIpc("nfts:reset-cooldown", async (_event, payload = {}) => {
     const nftId = String(
       payload?.nftId || payload?.nftAccount || payload?.account || "",
     ).trim();
@@ -6897,7 +6920,7 @@ app.whenReady().then(async () => {
     }
     return response;
   });
-  ipcMain.handle(
+  handleTrustedIpc(
     "nfts:prepare-cooldown-reset",
     async (_event, payload = {}) => {
       const nftId = String(
@@ -6926,7 +6949,7 @@ app.whenReady().then(async () => {
       return response;
     },
   );
-  ipcMain.handle("slot:prepare-unlock4", async () => {
+  handleTrustedIpc("slot:prepare-unlock4", async () => {
     pushSystemLog("Slot 4 unlock requested.");
     const startedActionBackend = !backend || backendStatus.running !== true;
     let actionBackend = null;
@@ -6981,12 +7004,12 @@ app.whenReady().then(async () => {
       }
     }
   });
-  ipcMain.handle("clipboard:copy", async (_event, text) => {
+  handleTrustedIpc("clipboard:copy", async (_event, text) => {
     const value = String(text || "");
     clipboard.writeText(value);
     return true;
   });
-  ipcMain.handle("external:open", async (_event, url) => {
+  handleTrustedIpc("external:open", async (_event, url) => {
     const target = String(url || "").trim();
     if (!/^https?:\/\//i.test(target)) {
       throw new Error("Invalid external URL.");
@@ -6994,19 +7017,19 @@ app.whenReady().then(async () => {
     await shell.openExternal(target);
     return true;
   });
-  ipcMain.handle("window:open-cli", async () => {
+  handleTrustedIpc("window:open-cli", async () => {
     await createCliWindow();
     return true;
   });
-  ipcMain.handle("window:is-cli-open", async () => {
+  handleTrustedIpc("window:is-cli-open", async () => {
     return Boolean(cliWindow && !cliWindow.isDestroyed());
   });
-  ipcMain.handle("window:get-position", async (event) => {
+  handleTrustedIpc("window:get-position", async (event) => {
     const win = BrowserWindow.fromWebContents(event.sender);
     if (!win || win.isDestroyed()) return [0, 0];
     return win.getPosition();
   });
-  ipcMain.handle("window:set-position", async (event, payload = {}) => {
+  handleTrustedIpc("window:set-position", async (event, payload = {}) => {
     const win = BrowserWindow.fromWebContents(event.sender);
     if (!win || win.isDestroyed()) return false;
     const x = Number(payload?.x);
@@ -7015,14 +7038,14 @@ app.whenReady().then(async () => {
     win.setPosition(Math.round(x), Math.round(y));
     return true;
   });
-  ipcMain.handle("window:minimize", async (event) => {
+  handleTrustedIpc("window:minimize", async (event) => {
     const win = BrowserWindow.fromWebContents(event.sender);
     if (win && !win.isDestroyed()) {
       win.minimize();
     }
     return true;
   });
-  ipcMain.handle("window:close", async (event) => {
+  handleTrustedIpc("window:close", async (event) => {
     const win = BrowserWindow.fromWebContents(event.sender);
     if (win && !win.isDestroyed()) {
       if (
@@ -7038,7 +7061,7 @@ app.whenReady().then(async () => {
     return true;
   });
 
-  ipcMain.handle("pbp:get-latest-competition", async (_event, opts = {}) => {
+  handleTrustedIpc("pbp:get-latest-competition", async (_event, opts = {}) => {
     try {
       const competition = await scrapeLatestCompetition(opts || {});
       return { ok: true, competition };
@@ -7046,7 +7069,7 @@ app.whenReady().then(async () => {
       return { ok: false, error: String(error?.message || error) };
     }
   });
-  ipcMain.handle("pbp:get-competition-count", async () => {
+  handleTrustedIpc("pbp:get-competition-count", async () => {
     try {
       const result = await fetchCompetitionCount();
       return { ok: true, ...result };

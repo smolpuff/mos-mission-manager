@@ -6,6 +6,7 @@
     "test": "node --test",
     "test:mac-update": "node electron/update-tools/verify-mac-app.js",
     "test:win-update": "node electron/update-tools/verify-windows-app.js",
+    "test:desktop-security": "npm run desktop:build && node electron/update-tools/verify-desktop-security.js",
     "desktop": "node electron/launch.js",
     "desktop:dev": "concurrently -k \"vite\" \"wait-on tcp:5179 && node electron/launch.js\"",
     "desktop:build": "vite build",
