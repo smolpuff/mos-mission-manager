@@ -91,18 +91,34 @@ class WindowsUpdater {
       await validatePortableExe(download);
       const script = path.join(directory, "helper.ps1");
       await fs.copyFile(path.join(__dirname, "windows-update-helper.ps1"), script);
-      const log = await fs.open(path.join(directory, "helper.log"), "wx");
-      try {
-        const powershell = path.join(process.env.SystemRoot || "C:\\Windows", "System32/WindowsPowerShell/v1.0/powershell.exe");
-        helper = spawn(powershell, ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", script,
-          "-Transaction", directory, "-ParentProcessId", String(process.pid), "-LauncherProcessId", String(process.ppid)],
-          { detached: true, windowsHide: true, cwd: directory, stdio: ["ignore", log.fd, log.fd] });
-        await new Promise((resolve, reject) => { helper.once("spawn", resolve); helper.once("error", reject); });
-        helper.unref();
-      } finally { await log.close(); }
+      const logPath = path.join(directory, "helper.log");
+      await (await fs.open(logPath, "wx")).close();
+      const powershell = path.join(process.env.SystemRoot || "C:\\Windows", "System32/WindowsPowerShell/v1.0/powershell.exe");
+      const quote = (value) => `'${String(value).replace(/'/g, "''")}'`;
+      const encode = (value) => Buffer.from(value, "utf16le").toString("base64");
+      const command = encode(
+        `& ${quote(script)} -Transaction ${quote(directory)} -ParentProcessId ${process.pid} -LauncherProcessId ${process.ppid}` +
+        ` 2>&1 | Out-File -LiteralPath ${quote(logPath)} -Encoding utf8 -Append; exit $LASTEXITCODE`,
+      );
+      // Detached PowerShell can exit before executing any script. A directly
+      // spawned, non-detached helper instead gets killed by Node's Windows job
+      // when the app exits. Start-Process gives the real helper its own hidden
+      // console outside that job; this short-lived launcher only monitors it.
+      const launch = encode(
+        `$ErrorActionPreference = 'Stop'; try { ` +
+        `$child = Start-Process -FilePath ${quote(powershell)} -ArgumentList @('-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', '${command}') -WindowStyle Hidden -WorkingDirectory ${quote(directory)} -PassThru; ` +
+        `$child.WaitForExit(); exit $child.ExitCode ` +
+        `} catch { $_ | Out-File -LiteralPath ${quote(logPath)} -Encoding utf8 -Append; exit 1 }`,
+      );
+      helper = spawn(powershell, ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-EncodedCommand", launch],
+        { windowsHide: true, cwd: directory, stdio: "ignore" });
+      await new Promise((resolve, reject) => { helper.once("spawn", resolve); helper.once("error", reject); });
+      helper.unref();
       const until = Date.now() + 10000;
       while (!(await exists(path.join(directory, "ready")))) {
-        if (Date.now() > until || helper.exitCode !== null) throw new Error("The Windows update helper could not start. See helper.log in the update folder.");
+        if (Date.now() > until || helper.exitCode !== null || helper.signalCode !== null) {
+          throw new Error(`The Windows update helper could not start. See ${path.join(directory, "helper.log")}.`);
+        }
         await sleep(100);
       }
       this.onStatus({ phase: "preparing" });
@@ -115,10 +131,12 @@ class WindowsUpdater {
       if (!committed && directory) {
         await fs.writeFile(path.join(directory, "cancel"), "").catch(() => {});
         const until = Date.now() + 3000;
-        while (helper && helper.exitCode === null && helper.signalCode === null && Date.now() < until) await sleep(100);
+        while (helper?.pid && helper.exitCode === null && helper.signalCode === null && Date.now() < until) await sleep(100);
       }
-      if (!committed && (!helper || helper.exitCode !== null || helper.signalCode !== null)) {
-        if (directory) await fs.rm(directory, { recursive: true, force: true }).catch(() => {});
+      if (!committed && (!helper?.pid || helper.exitCode !== null || helper.signalCode !== null)) {
+        // Retain the receipt, state and helper log so a failed update is diagnosable.
+        // Only the downloaded payload needs removing before a retry.
+        if (directory) await fs.unlink(path.join(directory, "download.exe")).catch(() => {});
         if (lock && token && (await fs.readFile(path.join(lock, "token"), "utf8").catch(() => "")) === token) {
           await fs.unlink(path.join(lock, "token")).catch(() => {}); await fs.rmdir(lock).catch(() => {});
         }

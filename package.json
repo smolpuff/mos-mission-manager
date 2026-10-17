@@ -5,6 +5,7 @@
   "scripts": {
     "test": "node --test",
     "test:mac-update": "node electron/update-tools/verify-mac-app.js",
+    "test:win-update": "node electron/update-tools/verify-windows-app.js",
     "desktop": "node electron/launch.js",
     "desktop:dev": "concurrently -k \"vite\" \"wait-on tcp:5179 && node electron/launch.js\"",
     "desktop:build": "vite build",
