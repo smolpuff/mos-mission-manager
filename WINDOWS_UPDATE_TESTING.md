@@ -7,6 +7,11 @@ npm run desktop:dist:win
 npm run test:win-update
 ```
 
+To rehearse the current release as the destination instead of the starting
+version, use `node electron/update-tools/verify-windows-app.js --from-version=3.2.16` (with an older
+version). Both private copies still contain the current fixed updater; this does
+not make a historical broken updater able to install its own repair.
+
 The rehearsal builds two private copies of the actual NSIS portable app. The
 current copy uses the repository version; the offered copy uses the next patch
 number **only as a test label**. For example, a v3.2.18 repository rehearses
@@ -39,3 +44,8 @@ validate public GitHub downloads, historical unfixed installers, or macOS.
 Verified on Windows on October 17, 2026: v3.2.18 → test v3.2.19, 439,303,499
 bytes downloaded, EXE replaced, new process started, healthy acknowledgement
 received, settings preserved, and helper state `complete`.
+
+Final v3.2.18 release rehearsal, October 17, 2026: private v3.2.16 label →
+v3.2.18 destination, 439,309,674 bytes downloaded, exact EXE hash verified,
+replacement and restart completed, settings preserved, and real renderer healthy
+acknowledgement received. Both private packages used the current fixed updater.

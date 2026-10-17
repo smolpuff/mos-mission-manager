@@ -13,8 +13,8 @@ const { Transform } = require("node:stream");
 const { pipeline } = require("node:stream/promises");
 const asar = require("@electron/asar");
 const resedit = require("resedit");
-const { version } = require("../../package.json");
-const { UPDATE_JSON_URL } = require("../update-checker");
+const { version: repositoryVersion } = require("../../package.json");
+const { UPDATE_JSON_URL, compareVersions } = require("../update-checker");
 const { releaseAssetUrl } = require("../update-download");
 
 const repository = path.resolve(__dirname, "../..");
@@ -38,9 +38,13 @@ async function waitFor(check, timeout = 120000) {
 
 async function main() {
   assert(process.platform === "win32", "Run this rehearsal on Windows.");
+  const args = process.argv.slice(2);
+  assert(args.length <= 1 && args.every(arg => /^--from-version=\d+\.\d+\.\d+$/.test(arg)), "Option: --from-version=X.Y.Z");
+  const version = args.length ? args[0].split("=")[1] : repositoryVersion;
+  if (args.length) assert(compareVersions(repositoryVersion, version) > 0, "The starting version must be older than the repository version.");
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "missions-windows-update-"));
   console.log(`Private update rehearsal: ${root}`);
-  const nextVersion = version.replace(/\d+$/, (patch) => String(Number(patch) + 1));
+  const nextVersion = args.length ? repositoryVersion : version.replace(/\d+$/, (patch) => String(Number(patch) + 1));
   const appData = path.join(root, "appData");
   const settings = path.join(appData, "missions-v3-mcp");
   const installed = path.join(root, "installed", "Missions Update Test.exe");
@@ -143,7 +147,8 @@ app.on('ready', () => fs.appendFileSync(${JSON.stringify(launchesFile)}, JSON.st
       console.log(`Packaging real portable test app ${buildVersion}...`);
       const bundle = path.join(root, `${label}-unpacked`);
       await fs.cp(sourceApp, bundle, { recursive: true });
-      if (label === "next") {
+      if (label === "next" || args.length) {
+        await fs.writeFile(path.join(nextRenderer, "package.json"), JSON.stringify({ ...require("../../package.json"), version: buildVersion }));
         await command([path.join(repository, "node_modules/vite/bin/vite.js"), "build", "--outDir", path.join(tree, "dist")], nextRenderer);
       }
       const pkg = JSON.parse(await fs.readFile(path.join(tree, "package.json"), "utf8"));
