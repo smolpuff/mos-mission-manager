@@ -7,6 +7,6 @@
     "Fixed Level 20+ NFT selection to use all mission-eligible collections while preserving lvl 20 reserved NFT priority",
     "Fixed NFT metadata handling & caching",
     "Fixed the claim UI getting stuck",
-    "Fixed varions linux things"
+    "Fixed various linux things"
   ]
 }
