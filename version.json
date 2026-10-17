@@ -2,15 +2,11 @@
   "version": "3.2.18",
   "downloadUrl": "https://github.com/smolpuff/mos-mission-manager/releases/latest",
   "notes": [
-    "Required update: fixed the Windows update helper failing to start and ensured it survives app shutdown to replace and restart the app.",
-    "Fixed recovery phrase access: fetch only on Reveal, clear on Hide or Close, discard late responses, and restrict recovery requests to the trusted app window.",
-    "Hardened Mac and Windows desktop security with IPC sender validation, restricted navigation, sandboxed windows, and a content security policy.",
-    "Important: a bug in earlier Windows builds may prevent automatic updates. If updating fails, close the app, download the latest Windows EXE, and replace your old EXE manually this time. Your settings and wallet stay in their existing location.",
-    "Added Automatic in-app updates",
+    "Added WORKING automatic updates. oopsie :D ",
+    "Hardened Mac and Windows desktop security",
     "Fixed Level 20+ NFT selection to use all mission-eligible collections while preserving lvl 20 reserved NFT priority",
     "Fixed NFT metadata handling & caching",
-    "Fixed the claim UI getting stuck by immediately refreshing the interface after successful claim",
-    "Fixed Linux; stabilized title-bar dragging on Hyprland with native window dragging",
-    "Fixed Linux; fixed Hyprland scaling for local desktop launches by using XWayland when available"
+    "Fixed the claim UI getting stuck",
+    "Fixed varions linux things"
   ]
 }
