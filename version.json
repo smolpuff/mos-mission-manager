@@ -13,20 +13,20 @@
     "darwin-arm64": {
       "url": "https://github.com/smolpuff/mos-mission-manager/releases/download/v3.2.18/missions-v3-mcp-3.2.18-arm64-mac.zip",
       "size": 129904519,
-      "sha256": "84a5b25c3cd9ab85cbcf44b83723dbe689026bb7dbfcffa1199f639b6a7bd043",
-      "md5": "fe29fac2ba010f7da47ff408fc886cc9"
+      "sha256": "572fa4e4cdc042f75187c49558c5e18fe4a25dcf5973cb7cf809e5466df913c1",
+      "md5": "534b6151b1ffa96bc0e684583e22c174"
     },
     "darwin-x64": {
       "url": "https://github.com/smolpuff/mos-mission-manager/releases/download/v3.2.18/missions-v3-mcp-3.2.18-x64-mac.zip",
       "size": 136319406,
-      "sha256": "36b7de970b119bed1b5b59abb05ceeea55e34ab70928ecdf0917a5e41d7b050d",
-      "md5": "f1cfd945186a11d13c49a7203d0544eb"
+      "sha256": "e85cb3853f321c4568eec793598d8ea8ed1b2ee1f6267567ab5d3c29794bd5df",
+      "md5": "53a3b3de4751c20c16046fcd6323b250"
     },
     "win32-x64": {
       "url": "https://github.com/smolpuff/mos-mission-manager/releases/download/v3.2.18/missions-v3-mcp.3.2.18.exe",
-      "size": 103381406,
-      "sha256": "f8b93e338e38fbc7ee0a95125b66f61819145b4237bcb57064bbeb0520e38613",
-      "md5": "8d7e8a11fa33ab163dbe551a97fa506c"
+      "size": 103381407,
+      "sha256": "0ccb5021cb7c21b8efe361bb6f3bdc254c908fcd5bd7f65193bfe6d1a469728f",
+      "md5": "53ab7a290582522d20b16155aa0e5157"
     }
   }
 }
