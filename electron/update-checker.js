@@ -1,9 +1,8 @@
 "use strict";
 
-const { readLimitedJson } = require("./update-download");
+const { readLimitedJson, VERSION_JSON_URL } = require("./update-download");
 
-const UPDATE_JSON_URL =
-  "https://raw.githubusercontent.com/smolpuff/mos-mission-manager/main/version.json";
+const UPDATE_JSON_URL = VERSION_JSON_URL;
 const UPDATE_CHECK_TIMEOUT_MS = 8000;
 
 function normalizeVersionParts(value) {

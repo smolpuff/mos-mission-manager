@@ -18,6 +18,9 @@ const {
 } = require("electron");
 const { createRendererSecurity } = require("./security");
 const { createWalletGenerationRequest } = require("./wallet-generation");
+const { createSignerService } = require("../src/signer");
+const { importWalletAndVerify } = require("../src/wallet-import");
+let walletOperationBusy = false;
 const {
   fetchOnchainFundingWalletSummary,
 } = require("../src/wallet/onchain-summary");
@@ -168,7 +171,7 @@ let logHistoryBytes = 0;
 let nextLogId = 1;
 const pendingBackendRequests = new Map();
 const requestGeneratedWallet = createWalletGenerationRequest(
-  () => requestBackend("signer_create_generated_wallet", {}, { waitForCompletion: true }),
+  () => runDesktopWalletOperation("signer_create_generated_wallet"),
   { onSlow: () => pushSystemLog("Wallet generation has exceeded 30 seconds; waiting up to 60 seconds for its result.") },
 );
 let temporarySlotUnlockBackend = null;
@@ -4332,6 +4335,7 @@ function hardenWindow(win) {
 }
 
 function startBackend(options = {}) {
+  if (walletOperationBusy) throw new Error("Wait for the wallet operation to finish.");
   if (updateShutdownInProgress) throw new Error("The app is restarting for an update.");
   if (backendStatus.running && backend) {
     return { ...backendStatus };
@@ -4903,6 +4907,61 @@ async function sendBackendCommand(command) {
   backend.stdin.write(`${trimmed}\n`);
   pushOutput("stdin", `> ${trimmed}\n`);
   return true;
+}
+
+async function runDesktopWalletOperation(action, key) {
+  if (walletOperationBusy) throw new Error("A wallet operation is already running.");
+  if (action === "signer_import_wallet" &&
+      (typeof key !== "string" || !key.trim() || key.length > 32768)) {
+    throw new Error("Enter a private key, recovery phrase, or keypair JSON.");
+  }
+  walletOperationBusy = true;
+  try {
+    if (backendStatus.running && backend) {
+      const result = await requestBackend(action, action === "signer_import_wallet" ? { key } : {}, { waitForCompletion: true });
+      if (result?.ok && action !== "signer_reveal_backup") {
+        backendStatus.signerWallet = result.walletAddress || result.created?.walletAddress;
+        backendStatus.fundingWalletSummary = null;
+        publishStatus();
+      }
+      return result;
+    }
+    const { config, parseFailed } = readDesktopConfigWithMeta();
+    if (parseFailed) throw new Error("Fix config.json before using wallet tools.");
+    const ctx = { config, configPath: getConfigPath(), signerMode: config.signerMode || "manual",
+      signerUnlockFailures: 0, signerUnlockAllowedAt: 0 };
+    // Local wallet tools never start the runner or make MCP requests.
+    const signer = createSignerService(ctx, { logWithTimestamp: pushSystemLog, logDebug: () => {} });
+    const save = () => applyDesktopConfigPatch({ signer: ctx.config.signer, signerMode: ctx.signerMode });
+    try {
+      let result;
+      if (action === "signer_import_wallet") {
+        result = await importWalletAndVerify({ signer, ctx, key, save });
+      } else if (action === "signer_create_generated_wallet") {
+        signer.setSignerMode("app_wallet", "ui_create");
+        const created = await signer.createGeneratedWallet();
+        await save();
+        result = { ok: true, created };
+      } else if (action === "signer_reveal_backup") {
+        return { ok: true, backup: await signer.revealWalletBackup() };
+      } else {
+        throw new Error("Unsupported wallet operation.");
+      }
+      backendStatus.signerMode = ctx.signerMode;
+      backendStatus.signerLocked = true;
+      backendStatus.signerReady = false;
+      backendStatus.signerStatus = ctx.signerStatus;
+      backendStatus.signerWallet = ctx.signerConfig.walletAddress;
+      backendStatus.fundingWalletSummary = null;
+      publishStatus();
+      return result;
+    } finally {
+      signer.shutdown();
+    }
+  } finally {
+    key = "";
+    walletOperationBusy = false;
+  }
 }
 
 async function requestBackend(action, payload = {}, options = {}) {
@@ -6190,14 +6249,7 @@ app.whenReady().then(async () => {
   });
   handleTrustedIpc("signer:reveal-backup", async (event) => {
     pushSystemLog("Reveal app wallet backup requested.");
-    const payload = await requestBackend(
-      "signer_reveal_backup",
-      {},
-      {
-        ensureRunning: true,
-        timeoutMs: 12000,
-      },
-    );
+    const payload = await runDesktopWalletOperation("signer_reveal_backup");
     // The window may have navigated or closed while decryption was pending.
     rendererSecurity.assertTrustedSender(event, { controlOnly: true });
     return payload;
@@ -6207,6 +6259,9 @@ app.whenReady().then(async () => {
     const payload = await requestGeneratedWallet();
     rendererSecurity.assertTrustedSender(event, { controlOnly: true });
     return payload;
+  }, { controlOnly: true });
+  handleTrustedIpc("signer:import-wallet", async (_event, key) => {
+    return await runDesktopWalletOperation("signer_import_wallet", key);
   }, { controlOnly: true });
   handleTrustedIpc("onboarding:fetch-account", async () => {
     pushSystemLog("Onboarding account sync started.");
@@ -6262,7 +6317,14 @@ app.whenReady().then(async () => {
     const walletId =
       walletSummary?.walletId || backendStatus.currentUserWalletId || "unknown";
 
-    const missions = normalizeMissionList(loaded?.missionsResult || {}).map(
+    const accountMissions = normalizeMissionList(loaded?.missionsResult || {});
+    const missionNftByAccount = new Map();
+    for (const nft of normalizeNftList(loaded?.nftResult || {})) {
+      const account = String(nft?.account || nft?.nftAccount || nft?.tokenAddress || "").trim();
+      if (account) missionNftByAccount.set(account, nft);
+    }
+    const accountSlots = computeGuiMissionSlotsShared(accountMissions, { missionNftByAccount });
+    const missions = accountMissions.map(
       (mission, index) => ({
         id:
           mission?.assignedMissionId ||
@@ -6286,6 +6348,9 @@ app.whenReady().then(async () => {
           ? Number(mission.slot)
           : null,
         hasAssignedNft: missionHasAssignedNft(mission),
+        assignedNftAccount: missionAssignedNftAccount(mission),
+        assignedNft: accountSlots.find((entry) => entry.slot === Number(mission?.slot))?.assignedNft || null,
+        assignedNftImage: accountSlots.find((entry) => entry.slot === Number(mission?.slot))?.assignedNftImage || null,
         isActive: missionIsActive(mission),
         image:
           mission?.assignedNftImage ||

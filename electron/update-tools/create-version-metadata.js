@@ -8,7 +8,7 @@ const { releaseAssetUrl, selectArtifact } = require("../update-download");
 const { version } = require("../../package.json");
 
 async function main([mode, output, ...inputs]) {
-  const manifest = { schemaVersion: 1, version, artifacts: {} };
+  const manifest = { ...require("../../version.json"), schemaVersion: 1, version, artifacts: {} };
   if (mode === "artifact") {
     const [arch, file] = inputs;
     if (!["arm64", "x64"].includes(arch) || !/\.(zip|exe)$/i.test(file || "")) throw new Error("Expected architecture and ZIP/portable EXE path.");
@@ -32,7 +32,7 @@ async function main([mode, output, ...inputs]) {
     }
     for (const arch of ["arm64", "x64"]) selectArtifact(manifest, version, "darwin", arch);
     selectArtifact(manifest, version, "win32", "x64");
-  } else throw new Error("Usage: create-update-manifest.js artifact OUTPUT ARCH ZIP_OR_EXE | merge OUTPUT FRAGMENTS...");
+  } else throw new Error("Usage: create-version-metadata.js artifact OUTPUT ARCH ZIP_OR_EXE | merge OUTPUT FRAGMENTS...");
   fs.writeFileSync(output, JSON.stringify(manifest, null, 2) + "\n");
 }
 

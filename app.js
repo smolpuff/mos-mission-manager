@@ -32,6 +32,9 @@ const {
 const ctx = createContext();
 const logger = createLogger(ctx);
 const signer = createSignerService(ctx, logger);
+const { importWalletAndVerify } = require("./src/wallet-import");
+const { persistSignerConfig } = require("./src/config");
+let walletImportBusy = false;
 const mcp = createMcpClient(ctx, logger);
 let checks = null;
 const rentals = createRentalCoordinator({
@@ -303,6 +306,7 @@ if (process.env.PBP_GUI_BRIDGE === "1" && typeof process.send === "function") {
         return;
       }
       if (action === "signer_create_generated_wallet") {
+        if (walletImportBusy) throw new Error("Wait for wallet import to finish.");
         if (!signer || typeof signer.createGeneratedWallet !== "function") {
           throw new Error("Signer service unavailable.");
         }
@@ -312,6 +316,22 @@ if (process.env.PBP_GUI_BRIDGE === "1" && typeof process.send === "function") {
         const created = await signer.createGeneratedWallet();
         flushConfig(ctx, logger.logDebug);
         sendGuiResponse(requestId, { ok: true, created });
+        return;
+      }
+      if (action === "signer_import_wallet") {
+        if (walletImportBusy) throw new Error("A wallet import is already running.");
+        walletImportBusy = true;
+        try {
+          const result = await runWithWatcherYield("wallet import", () => importWalletAndVerify({
+            signer, ctx, key: message.payload?.key, save: () => persistSignerConfig(ctx),
+          }));
+          ctx.fundingWalletSummary = null;
+          sendGuiResponse(requestId, result);
+          emitGuiState();
+        } finally {
+          if (message.payload) message.payload.key = "";
+          walletImportBusy = false;
+        }
         return;
       }
       if (action === "prepare_slot4_unlock") {

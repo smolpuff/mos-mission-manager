@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import ToggleSwitch from "../components/ToggleSwitch/app";
 import solIcon from "../img/icon-sm__sol.svg";
 import pbpIcon from "../img/icon-sm__pbp.webp";
@@ -40,6 +40,41 @@ export default function SettingsPage({
   updateCheckMessage,
 }) {
   const [copyAddressLabel, setCopyAddressLabel] = useState("Copy");
+  const [importOpen, setImportOpen] = useState(false);
+  const [importKey, setImportKey] = useState("");
+  const [importBusy, setImportBusy] = useState(false);
+  const [importError, setImportError] = useState("");
+  const [importResult, setImportResult] = useState(null);
+  const importInFlight = useRef(false);
+  const closeImport = () => {
+    if (importInFlight.current) return;
+    setImportKey("");
+    setImportError("");
+    setImportResult(null);
+    setImportOpen(false);
+  };
+  const importWallet = async (event) => {
+    event.preventDefault();
+    if (importInFlight.current || !importKey.trim()) return;
+    importInFlight.current = true;
+    setImportBusy(true);
+    setImportError("");
+    let key = importKey;
+    setImportKey("");
+    try {
+      if (!bridge?.importWallet) throw new Error("Wallet import is unavailable in this build.");
+      const result = await bridge.importWallet(key);
+      if (!result?.ok) throw new Error(result?.error || "Wallet import failed.");
+      setImportResult(result);
+      if (bridge.refreshWalletSummary) void bridge.refreshWalletSummary().catch(() => {});
+    } catch (error) {
+      setImportError(error.message || "Wallet import failed.");
+    } finally {
+      key = "";
+      importInFlight.current = false;
+      setImportBusy(false);
+    }
+  };
   const [showUpToDateState, setShowUpToDateState] = useState(false);
   const [nftCollections, setNftCollections] = useState([]);
   const [nftCollectionsLoading, setNftCollectionsLoading] = useState(false);
@@ -298,6 +333,14 @@ export default function SettingsPage({
                   </div>
                 ) : null}
               </div>
+              <div className="flex flex-wrap gap-2 self-end">
+              <button
+                type="button"
+                onClick={() => { setImportOpen(true); setImportError(""); setImportResult(null); }}
+                className="text-xs px-2.5 py-1 border border-white/20 rounded-sm hover:bg-white/10 transition-colors active:translate-y-0.5"
+              >
+                Import Wallet
+              </button>
               <button
                 type="button"
                 onClick={() => void openSecretModal()}
@@ -305,6 +348,7 @@ export default function SettingsPage({
               >
                 View Secret Keys
               </button>
+              </div>
             </div>
           </div>
         ) : null}
@@ -485,6 +529,41 @@ export default function SettingsPage({
           </div>
         </div>
       </div>
+      {importOpen && (
+        <div className="fixed inset-0 z-60 grid place-items-center bg-black/60 p-4" onMouseDown={(event) => { if (event.target === event.currentTarget) closeImport(); }}
+          onKeyDown={(event) => { if (event.key === "Escape") { event.stopPropagation(); closeImport(); } }}>
+          <div role="dialog" aria-modal="true" aria-labelledby="import-wallet-title" aria-busy={importBusy}
+            className="w-full max-w-lg rounded-xl border-2 border-[#1D1C27] bg-[#24222e] p-4 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between gap-3">
+              <h2 id="import-wallet-title" className="text-lg font-semibold">Import Wallet</h2>
+              <button type="button" className="btn btn-clear btn-sm" disabled={importBusy} onClick={closeImport} aria-label="Close import wallet">✕</button>
+            </div>
+            {importResult ? (
+              <div className="space-y-3">
+                <p className="text-sm text-success" role="status">Wallet imported. Unlock and lock verified.</p>
+                <p className="text-xs text-slate-300 break-all">{importResult.walletAddress}</p>
+                <button type="button" className="btn btn-gradient btn-sm" onClick={closeImport}>Done</button>
+              </div>
+            ) : (
+              <form onSubmit={importWallet} className="space-y-3">
+                <div role="note" className="rounded-md border border-warning/30 bg-warning/10 p-3 text-sm text-slate-200">
+                  Import at your own risk. Never import your main wallet. Use a dedicated wallet with only the funds you’re willing to risk if something goes wrong.
+                </div>
+                <p className="text-sm text-slate-300">Import a dedicated app wallet. This replaces the current app wallet.</p>
+                <label htmlFor="import-wallet-key" className="block text-xs text-slate-300">Private key, recovery phrase, or keypair JSON</label>
+                <textarea id="import-wallet-key" autoFocus autoComplete="off" spellCheck={false} maxLength={32768} rows={4}
+                  className="textarea w-full bg-black/30 border-white/20 font-mono text-sm" value={importKey}
+                  disabled={importBusy} onChange={(event) => setImportKey(event.target.value)} />
+                {importError && <p role="alert" className="text-sm text-error">{importError}</p>}
+                <div className="flex justify-end gap-2">
+                  <button type="button" className="btn btn-clear btn-sm" disabled={importBusy} onClick={closeImport}>Cancel</button>
+                  <button type="submit" className="btn btn-gradient btn-sm" disabled={importBusy || !importKey.trim()}>{importBusy ? "Importing and verifying..." : "Import"}</button>
+                </div>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
     </section>
   );
 }

@@ -6,6 +6,8 @@ const crypto = require("node:crypto");
 const { Readable, Transform } = require("node:stream");
 const { pipeline } = require("node:stream/promises");
 
+const VERSION_JSON_URL = "https://raw.githubusercontent.com/smolpuff/mos-mission-manager/main/version.json";
+
 const REPOSITORY = "smolpuff/mos-mission-manager";
 const MAX_DOWNLOAD_BYTES = 2 * 1024 ** 3;
 const VERSION_PATTERN = /^\d+\.\d+\.\d+$/;
@@ -84,9 +86,10 @@ function selectArtifact(manifest, version, platform, arch) {
 }
 
 async function getReleaseArtifact(version, platform, arch, fetchImpl) {
-  const response = await fetchReleaseAsset(releaseAssetUrl(version, "desktop-update.json"), {
-    fetchImpl, signal: AbortSignal.timeout(8000),
+  const response = await (fetchImpl || globalThis.fetch)(VERSION_JSON_URL, {
+    signal: AbortSignal.timeout(8000), cache: "no-store",
   });
+  if (!response.ok) throw new Error(`Version metadata request failed (HTTP ${response.status}).`);
   return selectArtifact(await readLimitedJson(response), version, platform, arch);
 }
 
@@ -127,5 +130,5 @@ async function downloadArtifact(artifact, destination, { fetchImpl, onProgress =
   }
 }
 
-module.exports = { REPOSITORY, VERSION_PATTERN, releaseAssetUrl, validateAssetUrl,
+module.exports = { VERSION_JSON_URL, REPOSITORY, VERSION_PATTERN, releaseAssetUrl, validateAssetUrl,
   fetchReleaseAsset, readLimitedJson, selectArtifact, getReleaseArtifact, downloadArtifact };

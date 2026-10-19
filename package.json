@@ -56,7 +56,7 @@
       ]
     },
     "win": {
-      "artifactName": "${productName}-${version}-${arch}-portable.${ext}",
+      "artifactName": "${productName}.${version}.${ext}",
       "icon": "electron/icons/icon.png",
       "signAndEditExecutable": false,
       "target": [

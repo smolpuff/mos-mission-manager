@@ -48,10 +48,10 @@ async function main() {
   const appData = path.join(root, "appData");
   const settings = path.join(appData, "missions-v3-mcp");
   const installed = path.join(root, "installed", "Missions Update Test.exe");
-  const candidate = path.join(root, "next", `missions-v3-mcp-${nextVersion}-x64-portable.exe`);
+  const candidate = path.join(root, "next", `missions-v3-mcp.${nextVersion}.exe`);
   const launchesFile = path.join(root, "launches.jsonl");
   const token = crypto.randomBytes(16).toString("hex");
-  const requests = { version: 0, manifest: 0, executable: 0, bytes: 0 };
+  const requests = { version: 0, executable: 0, bytes: 0 };
   const states = [];
   let manifest, launched, receipt, result;
   const server = http.createServer(async (request, response) => {
@@ -61,15 +61,11 @@ async function main() {
       if (route === "version") {
         requests.version++;
         response.setHeader("Content-Type", "application/json");
-        response.end(JSON.stringify({ version: nextVersion,
+        response.end(JSON.stringify({ ...manifest, version: nextVersion,
           downloadUrl: `https://github.com/smolpuff/mos-mission-manager/releases/tag/v${nextVersion}`,
           notes: ["LOCAL UPDATE TEST: private app and settings.",
             `Watch ${version} download, replace its portable EXE, and reopen as test version ${nextVersion}.`,
             "Your normal app, wallets and login are untouched."] }));
-      } else if (route === "manifest") {
-        requests.manifest++;
-        response.setHeader("Content-Type", "application/json");
-        response.end(JSON.stringify(manifest));
       } else if (route === "executable") {
         requests.executable++;
         response.writeHead(200, { "Content-Length": (await fs.stat(candidate)).size, "Content-Type": "application/octet-stream" });
@@ -85,7 +81,6 @@ async function main() {
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   const origin = `http://127.0.0.1:${server.address().port}/${token}`;
   const routes = { [UPDATE_JSON_URL]: `${origin}/version`,
-    [releaseAssetUrl(nextVersion, "desktop-update.json")]: `${origin}/manifest`,
     [releaseAssetUrl(nextVersion, path.basename(candidate))]: `${origin}/executable` };
   const bootstrap = `"use strict";
 const { app } = require('electron');
@@ -172,7 +167,7 @@ app.on('ready', () => fs.appendFileSync(${JSON.stringify(launchesFile)}, JSON.st
         `--config.directories.output=${output}`, `--config.extraMetadata.version=${buildVersion}`, "--config.compression=store"]);
       if (label === "current") {
         await fs.mkdir(path.dirname(installed));
-        await fs.copyFile(path.join(output, `missions-v3-mcp-${buildVersion}-x64-portable.exe`), installed);
+        await fs.copyFile(path.join(output, `missions-v3-mcp.${buildVersion}.exe`), installed);
       }
     }
     const expected = { url: releaseAssetUrl(nextVersion, path.basename(candidate)), size: (await fs.stat(candidate)).size,
@@ -181,7 +176,7 @@ app.on('ready', () => fs.appendFileSync(${JSON.stringify(launchesFile)}, JSON.st
     const oldHash = await hash(installed);
     await fs.mkdir(settings, { recursive: true });
     await fs.writeFile(path.join(settings, "config.json"), JSON.stringify({ autoUpdateCheckEnabled: true, appUpdateVerification: token }));
-    await fs.writeFile(path.join(root, "desktop-update.json"), JSON.stringify(manifest, null, 2));
+    await fs.writeFile(path.join(root, "version.json"), JSON.stringify(manifest, null, 2));
     const env = { ...process.env };
     for (const name of ["ELECTRON_RUN_AS_NODE", "NODE_ENV", "PBP_DESKTOP_DEV_MODE", "PBP_STANDALONE_CLI", "VITE_DEV_SERVER_URL"]) delete env[name];
     const appLog = await fs.open(path.join(root, "app.log"), "w");

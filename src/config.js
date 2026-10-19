@@ -611,7 +611,19 @@ function flushConfig(ctx, logDebug) {
   }
 }
 
+function persistSignerConfig(ctx) {
+  ctx.config.signerMode = ctx.signerMode;
+  ctx.config.signer = ctx.signerConfig;
+  const diskConfig = fs.existsSync(ctx.configPath)
+    ? JSON.parse(fs.readFileSync(ctx.configPath, "utf8"))
+    : ctx.config;
+  writeConfigFileAtomic(ctx.configPath, {
+    ...diskConfig, signerMode: ctx.signerMode, signer: ctx.signerConfig,
+  });
+}
+
 module.exports = {
+  persistSignerConfig,
   loadConfig,
   saveConfig,
   flushConfig,

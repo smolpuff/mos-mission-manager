@@ -80,7 +80,7 @@ async function main() {
   const archive = path.join(root, `missions-v3-mcp-${nextVersion}-${process.arch}-mac.zip`);
   const cdpPort = await freePort(), token = crypto.randomBytes(16).toString("hex");
   const notes = ["Verify the existing Missions update dialog.", "Download and replace the complete application."];
-  const requests = { version: 0, manifest: 0, archive: 0, bytes: 0 };
+  const requests = { version: 0, archive: 0, bytes: 0 };
   let manifest, launched, inspector, updatedLaunch, failed = true;
   const server = http.createServer(async (request, response) => {
     try {
@@ -88,9 +88,7 @@ async function main() {
       const route = request.url.slice(token.length + 2);
       if (route === "version") {
         requests.version += 1; response.setHeader("Content-Type", "application/json");
-        response.end(JSON.stringify({ version: nextVersion, downloadUrl: `https://github.com/smolpuff/mos-mission-manager/releases/tag/v${nextVersion}`, notes }));
-      } else if (route === "manifest") {
-        requests.manifest += 1; response.setHeader("Content-Type", "application/json"); response.end(JSON.stringify(manifest));
+        response.end(JSON.stringify({ ...manifest, version: nextVersion, downloadUrl: `https://github.com/smolpuff/mos-mission-manager/releases/tag/v${nextVersion}`, notes }));
       } else if (route === "archive") {
         requests.archive += 1;
         response.writeHead(200, { "Content-Length": (await fs.stat(archive)).size, "Content-Type": "application/zip" });
@@ -102,7 +100,7 @@ async function main() {
   });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   const origin = `http://127.0.0.1:${server.address().port}/${token}`;
-  const routes = { [UPDATE_JSON_URL]: `${origin}/version`, [releaseAssetUrl(nextVersion, "desktop-update.json")]: `${origin}/manifest`,
+  const routes = { [UPDATE_JSON_URL]: `${origin}/version`,
     [releaseAssetUrl(nextVersion, path.basename(archive))]: `${origin}/archive` };
   const launches = path.join(root, "launches.jsonl");
   // Inject only external test boundaries into copies of the production ASAR:
@@ -185,7 +183,7 @@ app.on("ready", () => fs.appendFileSync(${JSON.stringify(launches)}, JSON.string
     const expected = { url: releaseAssetUrl(nextVersion, path.basename(archive)), size: (await fs.stat(archive)).size,
       sha256: await hash(archive), md5: badMd5 ? "0".repeat(32) : await hash(archive, "md5") };
     manifest = { schemaVersion: 1, version: nextVersion, artifacts: { [`darwin-${process.arch}`]: expected } };
-    await fs.writeFile(path.join(root, "desktop-update.json"), JSON.stringify(manifest, null, 2));
+    await fs.writeFile(path.join(root, "version.json"), JSON.stringify(manifest, null, 2));
     const appLog = await fs.open(path.join(root, "app.log"), "w");
     try {
       const env = { ...process.env }; for (const key of ["ELECTRON_RUN_AS_NODE", "NODE_ENV", "PBP_DESKTOP_DEV_MODE", "PBP_STANDALONE_CLI", "VITE_DEV_SERVER_URL"]) delete env[key];

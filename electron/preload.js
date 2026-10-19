@@ -43,6 +43,7 @@ contextBridge.exposeInMainWorld("missionsDesktop", {
   refreshWalletSummary: () => ipcRenderer.invoke("wallet:refresh-summary"),
   bootstrapWalletSummary: () => ipcRenderer.invoke("wallet:bootstrap-summary"),
   revealSignerBackup: () => ipcRenderer.invoke("signer:reveal-backup"),
+  importWallet: (key) => ipcRenderer.invoke("signer:import-wallet", key),
   prepareSlot4Unlock: () => ipcRenderer.invoke("slot:prepare-unlock4"),
   createGeneratedWallet: () => ipcRenderer.invoke("signer:create-generated-wallet"),
   fetchOnboardingAccount: () => ipcRenderer.invoke("onboarding:fetch-account"),

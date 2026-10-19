@@ -11,6 +11,7 @@ import StatsPage from "./StatsPage";
 import RentalsPage from "./RentalsPage";
 import NftsPage from "./NftsPage";
 import { competitionOptionValue } from "../competition-options";
+import { resolveOnboardingMissionCard } from "../onboarding-mission-card.mjs";
 import {
   createRecoveryPhraseController,
   emptyRecoveryPhraseState,
@@ -1985,12 +1986,6 @@ function ControlView() {
   ] = useState(
     normalizeSlotBooleanMap(status.missionActionEnabledBySlot, true),
   );
-  const [onboardingMissionPickerSlot, setOnboardingMissionPickerSlot] =
-    useState(null);
-  const [
-    onboardingMissionPickerPendingName,
-    setOnboardingMissionPickerPendingName,
-  ] = useState("");
   const [onboardingPreviewOnly, setOnboardingPreviewOnly] = useState(false);
   const [onboardingDataLoading, setOnboardingDataLoading] = useState(false);
   const [onboardingMissionStateReady, setOnboardingMissionStateReady] =
@@ -2699,12 +2694,6 @@ function ControlView() {
       setCreateWalletError("Wallet creation is not available in this build.");
       return;
     }
-    if (!status.running) {
-      setCreateWalletError(
-        "Wallet creation requires the backend to be running. Start missions first, then try again.",
-      );
-      return;
-    }
     setCreateWalletBusy(true);
     setCreateWalletError(null);
     try {
@@ -2807,7 +2796,7 @@ function ControlView() {
     const selectedFromCatalog = selectedName
       ? onboardingCatalogByName.get(missionKey(selectedName))
       : null;
-    return selectedFromCatalog || assigned || null;
+    return resolveOnboardingMissionCard(selectedName, selectedFromCatalog, assigned);
   };
 
   const seedMissionSelectionState = (missions = [], targetMissions = []) => {
@@ -2850,7 +2839,6 @@ function ControlView() {
           ?.missionName ||
         "",
     ).trim();
-    setOnboardingMissionPickerPendingName(currentName);
     setMissionPickerPendingName(currentName);
     setMissionPickerSlot(slotNumber);
     setMissionPickerBusy(true);
@@ -3254,15 +3242,8 @@ function ControlView() {
     setOnboardingBusy(true);
     setOnboardingAppWalletBusy(true);
     setOnboardingAppWalletError(null);
-    let startedBackendForWallet = false;
-    let walletGenerationFinished = false;
     try {
-      if (!status.running && bridge?.startBackend) {
-        await bridge.startBackend({ startPaused: true });
-        startedBackendForWallet = true;
-      }
       const created = await generateAppWallet();
-      walletGenerationFinished = true;
       if (!created?.ok) {
         throw new Error(created?.error || "Wallet creation failed.");
       }
@@ -3278,11 +3259,6 @@ function ControlView() {
       setOnboardingAppWalletError(String(error?.message || error));
       return false;
     } finally {
-      if (startedBackendForWallet && walletGenerationFinished && bridge?.stopBackend) {
-        try {
-          await bridge.stopBackend();
-        } catch {}
-      }
       setOnboardingBusy(false);
       setOnboardingAppWalletBusy(false);
     }
@@ -3807,8 +3783,9 @@ function ControlView() {
                       <div className="space-y-4">
                         <div className="rounded-md border border-warning/30 bg-warning/10 p-3 text-sm text-slate-200 flex gap-2">
                           <div>
-                            Make sure these are the missions you want to watch
-                            &amp; claim. If not, change them on the{" "}
+                            First-time setup syncs your missions from PBP. Check
+                            they’re correct, or change them on
+                            the{" "}
                             <a
                               href="https://www.pixelbypixel.studio"
                               className="text-accent underline"
@@ -3819,13 +3796,14 @@ function ControlView() {
                                 );
                               }}
                             >
-                              Pixel by Pixel Studios Missions Page
+                              PBP website
                             </a>
                             , then click{" "}
                             <span className="font-semibold">
                               Refresh mission status
-                            </span>{" "}
-                            before clicking done .
+                            </span>
+                            . You can also change them in this app after funding
+                            the wallet selected in the previous step.
                           </div>
                         </div>
 
@@ -3855,32 +3833,21 @@ function ControlView() {
                             return (
                               <div
                                 key={`onboarding-slot-${slot}`}
-                                className={`rounded-md border border-white/10 bg-black/20 p-3 h-full flex flex-col gap-2 aspect-square ${
+                                className={`card-mission ${
                                   loadingSlot || onboardingBusy
                                     ? "opacity-70"
-                                    : "cursor-pointer"
+                                    : ""
                                 }`}
-                                role="button"
-                                tabIndex={
-                                  loadingSlot || onboardingBusy ? -1 : 0
-                                }
-                                aria-disabled={loadingSlot || onboardingBusy}
-                                onClick={() => {
-                                  if (loadingSlot || onboardingBusy) return;
-                                  setOnboardingMissionPickerSlot(slot);
-                                }}
-                                onKeyDown={(event) => {
-                                  if (loadingSlot || onboardingBusy) return;
-                                  if (
-                                    event.key === "Enter" ||
-                                    event.key === " "
-                                  ) {
-                                    event.preventDefault();
-                                    setOnboardingMissionPickerSlot(slot);
-                                  }
-                                }}
+
                               >
-                                <div className="flex gap-2 justify-between">
+                                <div className={`card-mission__header transition-all ${!slotAutomationEnabled ? "card-mission__header--disabled" : ""}`}>
+                                  <MissionSlotImage
+                                    src={loadingSlot ? null : imgSrc}
+                                    hasAssignedNft={Boolean(selectedCard?.hasAssignedNft)}
+                                    missionActive={Boolean(selectedCard?.hasAssignedNft && selectedCard?.isActive)}
+                                    loading={loadingSlot}
+                                  />
+                                <div className="relative z-20 flex items-start gap-2 justify-between">
                                   <div
                                     onClick={(event) => event.stopPropagation()}
                                     onMouseDown={(event) =>
@@ -3910,8 +3877,8 @@ function ControlView() {
                                       }
                                     />
                                   </div>
-                                  <div className="flex gap flex-row justify-between items-center">
-                                    <div className="text-[11px] text-slate-400">
+                                  <div className="card-mission__status flex flex-col items-end gap-1">
+                                    <div className="card-mission__level z-10 text-[11px] flex items-center rounded-[4px] justify-center px-1.5 h-6 whitespace-nowrap opacity-100 self-end shadow-md shadow-black/20 bg-amber-500 border-orange-200 border-2 text-white text-shadow-amber-600 text-shadow-md">
                                       {selectedCard?.currentLevel !== null &&
                                       selectedCard?.currentLevel !== undefined
                                         ? `Level ${selectedCard.currentLevel}`
@@ -3919,20 +3886,12 @@ function ControlView() {
                                     </div>
                                   </div>
                                 </div>
-                                {loadingSlot ? (
-                                  <div className="grid place-items-center flex-1">
-                                    <span className="loading loading-spinner loading-sm text-success" />
+                                </div>
+                                <div className="card-mission__meta">
+                                  <div className="card-mission__title mt-0.5">
+                                    {selectedName || "No mission selected"}
                                   </div>
-                                ) : (
-                                  <div className="flex flex-col flex-1">
-                                    <div className="text-sm text-slate-100 text-left">
-                                      {selectedName || "Select mission"}
-                                    </div>
-                                    <div className="text-[11px] text-accent mt-1 text-left | hidden">
-                                      Click to change
-                                    </div>
-                                  </div>
-                                )}
+                                </div>
                               </div>
                             );
                           })}
@@ -3995,208 +3954,7 @@ function ControlView() {
                         {onboardingError}
                       </div>
                     ) : null}
-                    {onboardingMissionPickerSlot ? (
-                      <div
-                        className="fixed inset-0 z-70 grid place-items-center bg-black/55 p-4"
-                        role="dialog"
-                        aria-modal="true"
-                        onMouseDown={(event) => {
-                          if (event.target === event.currentTarget) {
-                            setOnboardingMissionPickerSlot(null);
-                          }
-                        }}
-                      >
-                        <div
-                          className="p-4 w-full rounded-xl shadow-2xl shadow-black/95 space-y-4 z-10 border-2 border-[#1D1C27]"
-                          style={{
-                            maxWidth: "760px",
-                            backgroundImage: `url(${backImg})`,
-                            backgroundSize: "cover",
-                            backgroundPosition: "center",
-                          }}
-                        >
-                          <div className="flex items-center justify-between gap-3">
-                            <div>
-                              <div className="text-lg font-semibold text-slate-100">
-                                Change Mission for 250 PBP
-                              </div>
-                              <div className="text-xs text-slate-400">
-                                Pick the mission this slot should run.
-                              </div>
-                            </div>
-                            <button
-                              type="button"
-                              className="btn btn-clear btn-sm"
-                              onClick={() => (
-                                setOnboardingMissionPickerSlot(null),
-                                setOnboardingMissionPickerPendingName("")
-                              )}
-                              title="Close"
-                            >
-                              ✕
-                            </button>
-                          </div>
-                          <div className="grid grid-cols-2 gap-2 max-h-[60vh] overflow-y-auto pr-1">
-                            {getOnboardingSlotOptions(
-                              onboardingMissionPickerSlot,
-                              onboardingMissionPickerPendingName ||
-                                getOnboardingMissionCard(
-                                  onboardingMissionPickerSlot,
-                                )?.name ||
-                                "",
-                            ).map((name) => {
-                              const mission =
-                                onboardingCatalogByName.get(missionKey(name)) ||
-                                null;
-                              const collections =
-                                resolveMissionCollections(mission);
-                              const description = String(
-                                mission?.description ||
-                                  mission?.summary ||
-                                  mission?.taskDescription ||
-                                  mission?.task_description ||
-                                  "",
-                              ).trim();
-                              const currentName = String(
-                                onboardingSlotSelections[
-                                  onboardingMissionPickerSlot
-                                ] ||
-                                  getOnboardingMissionCard(
-                                    onboardingMissionPickerSlot,
-                                  )?.name ||
-                                  "",
-                              ).trim();
-                              const isCurrent =
-                                missionKey(currentName) === missionKey(name);
-                              const isSelected =
-                                missionKey(
-                                  onboardingMissionPickerPendingName || "",
-                                ) === missionKey(name);
-                              return (
-                                <button
-                                  type="button"
-                                  key={`picker-${onboardingMissionPickerSlot}-${name}`}
-                                  className={`mission-choice-card ${
-                                    isSelected
-                                      ? "mission-choice-card--selected"
-                                      : ""
-                                  } rounded-md p-3 h-full flex gap-2 text-left`}
-                                  onClick={() => {
-                                    setOnboardingMissionPickerPendingName(name);
-                                  }}
-                                >
-                                  <input
-                                    type="radio"
-                                    name="onboarding_mission_picker_selection"
-                                    className="fake-checkbox-radio"
-                                    checked={isSelected}
-                                    onChange={() =>
-                                      setOnboardingMissionPickerPendingName(
-                                        name,
-                                      )
-                                    }
-                                    tabIndex={-1}
-                                  />
-                                  <div className="flex min-w-0 flex-1 flex-col gap-1">
-                                    {isCurrent ? (
-                                      <div className="absolute right-0 top-0 badge px-2 h-auto text-[11px] text-slate-900">
-                                        CURRENT
-                                      </div>
-                                    ) : null}
-                                    {isSelected && !isCurrent ? (
-                                      <div className="absolute right-0 top-0 badge px-2 h-auto text-[11px] text-slate-900">
-                                        SELECTED
-                                      </div>
-                                    ) : null}
-                                    <div className="text-sm text-slate-100">
-                                      <span>{name}</span>
-                                    </div>
-                                    {description ? (
-                                      <div className="text-xs leading-4 text-slate-400">
-                                        {description}
-                                      </div>
-                                    ) : null}
-                                    <div className="text-slate-400 flex flex-wrap gap-0.5">
-                                      {collections.length > 0 ? (
-                                        collections
-                                          .filter((entry) => entry?.name)
-                                          .map((entry) => (
-                                            <span
-                                              key={entry.id ?? entry.name}
-                                              className={`flex flex-col items-center justify-center overflow-hidden border-2 gap-0.5 border-white/10 rounded-full w-5 h-5 ${
-                                                onboardingOwnedCollections.has(
-                                                  normalizeCollectionKey(
-                                                    entry.name,
-                                                  ),
-                                                )
-                                                  ? "!border-success"
-                                                  : ""
-                                              }`}
-                                              title={entry.name}
-                                            >
-                                              {entry.image ? (
-                                                <img
-                                                  src={entry.image}
-                                                  alt={entry.name}
-                                                  className="w-full h-full object-cover"
-                                                  loading="lazy"
-                                                  decoding="async"
-                                                />
-                                              ) : null}
-                                            </span>
-                                          ))
-                                      ) : (
-                                        <span className="collection-unavailable">
-                                          Collection requirements unavailable
-                                        </span>
-                                      )}
-                                    </div>
-                                  </div>
-                                </button>
-                              );
-                            })}
-                          </div>
-                          <div className="flex items-center justify-between gap-3 border-t border-white/10 pt-3">
-                            <div className="min-w-0 text-xs text-slate-400">
-                              {onboardingMissionPickerPendingName
-                                ? `Selected: ${onboardingMissionPickerPendingName}`
-                                : "Select a mission before confirming."}
-                            </div>
-                            <div className="flex items-center gap-2">
-                              <button
-                                type="button"
-                                className="btn btn-clear btn-sm"
-                                onClick={() => (
-                                  setOnboardingMissionPickerSlot(null),
-                                  setOnboardingMissionPickerPendingName("")
-                                )}
-                              >
-                                Cancel
-                              </button>
-                              <button
-                                type="button"
-                                className="btn btn-gradient btn-sm text-shadow-sm text-shadow-black/40"
-                                disabled={
-                                  !String(
-                                    onboardingMissionPickerPendingName || "",
-                                  ).trim()
-                                }
-                                onClick={() => {
-                                  updateOnboardingSlotSelection(
-                                    onboardingMissionPickerSlot,
-                                    onboardingMissionPickerPendingName,
-                                  );
-                                  setOnboardingMissionPickerSlot(null);
-                                  setOnboardingMissionPickerPendingName("");
-                                }}
-                              >
-                                OK
-                              </button>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    ) : null}
+
                   </div>
                 </div>
               </div>
