@@ -10,6 +10,7 @@ releases/
 config.json.bak
 STARTUP_CALLS_ROLLBACK_NOTES.md
 test/
+tests/
 
 # macOS junk
 .DS_Store
