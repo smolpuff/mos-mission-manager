@@ -2,12 +2,7 @@
   "version": "3.2.18",
   "downloadUrl": "https://github.com/smolpuff/mos-mission-manager/releases/latest",
   "notes": [
-    "Create, import, and view app wallet recovery keys without starting missions",
-    "Added wallet import with unlock and lock verification",
-    "Fixed setup mission levels, NFT images, and mission card layout",
-    "Updates use version.json only; restored the original Windows EXE filename",
     "Added WORKING automatic updates. oopsie :D ",
-    "Hardened Mac and Windows desktop security",
     "Fixed Level 20+ NFT selection to use all mission-eligible collections while preserving lvl 20 reserved NFT priority",
     "Fixed NFT metadata handling & caching",
     "Fixed the claim UI getting stuck",
