@@ -12,5 +12,26 @@
     "Fixed NFT metadata handling & caching",
     "Fixed the claim UI getting stuck",
     "Fixed various linux things"
-  ]
+  ],
+  "schemaVersion": 1,
+  "artifacts": {
+    "darwin-arm64": {
+      "url": "https://github.com/smolpuff/mos-mission-manager/releases/download/v3.2.18/missions-v3-mcp-3.2.18-arm64-mac.zip",
+      "size": 129904519,
+      "sha256": "84a5b25c3cd9ab85cbcf44b83723dbe689026bb7dbfcffa1199f639b6a7bd043",
+      "md5": "fe29fac2ba010f7da47ff408fc886cc9"
+    },
+    "darwin-x64": {
+      "url": "https://github.com/smolpuff/mos-mission-manager/releases/download/v3.2.18/missions-v3-mcp-3.2.18-x64-mac.zip",
+      "size": 136319406,
+      "sha256": "36b7de970b119bed1b5b59abb05ceeea55e34ab70928ecdf0917a5e41d7b050d",
+      "md5": "f1cfd945186a11d13c49a7203d0544eb"
+    },
+    "win32-x64": {
+      "url": "https://github.com/smolpuff/mos-mission-manager/releases/download/v3.2.18/missions-v3-mcp.3.2.18.exe",
+      "size": 103381406,
+      "sha256": "f8b93e338e38fbc7ee0a95125b66f61819145b4237bcb57064bbeb0520e38613",
+      "md5": "8d7e8a11fa33ab163dbe551a97fa506c"
+    }
+  }
 }
