@@ -565,6 +565,8 @@ function ControlView() {
   const [createWalletOnboarding, setCreateWalletOnboarding] = useState(false);
   const [createWalletConfirm, setCreateWalletConfirm] = useState(false);
   const [createWalletBusy, setCreateWalletBusy] = useState(false);
+  const [walletGenerationSlow, setWalletGenerationSlow] = useState(false);
+  const walletGenerationRequest = useRef(null);
   const [createWalletError, setCreateWalletError] = useState(null);
   const [createWalletResult, setCreateWalletResult] = useState(null);
   const [createWalletRevealed, setCreateWalletRevealed] = useState(false);
@@ -690,7 +692,7 @@ function ControlView() {
       );
       const missingWallet =
         status.signerStatus === "app_wallet_not_imported" || !hasWallet;
-      if (missingWallet) {
+      if (missingWallet && !walletGenerationRequest.current) {
         setCreateWalletOnboarding(true);
         setCreateWalletOpen(true);
         setCreateWalletConfirm(false);
@@ -2664,6 +2666,7 @@ function ControlView() {
   };
 
   const openCreateWalletModal = ({ onboarding = false } = {}) => {
+    if (walletGenerationRequest.current) return;
     setCreateWalletOpen(true);
     setCreateWalletOnboarding(onboarding);
     setCreateWalletConfirm(false);
@@ -2675,7 +2678,22 @@ function ControlView() {
     setCreateCopiedAddrLabel(null);
   };
 
+  const generateAppWallet = () => {
+    if (walletGenerationRequest.current) return walletGenerationRequest.current;
+    setWalletGenerationSlow(false);
+    const timer = setTimeout(() => setWalletGenerationSlow(true), 30_000);
+    walletGenerationRequest.current = Promise.resolve()
+      .then(() => bridge.createGeneratedWallet())
+      .finally(() => {
+        clearTimeout(timer);
+        setWalletGenerationSlow(false);
+        walletGenerationRequest.current = null;
+      });
+    return walletGenerationRequest.current;
+  };
+
   const runCreateWallet = async () => {
+    if (createWalletBusy || createWalletResult) return;
     if (!createWalletOnboarding && !createWalletConfirm) return;
     if (!bridge?.createGeneratedWallet) {
       setCreateWalletError("Wallet creation is not available in this build.");
@@ -2690,7 +2708,7 @@ function ControlView() {
     setCreateWalletBusy(true);
     setCreateWalletError(null);
     try {
-      const res = await bridge.createGeneratedWallet();
+      const res = await generateAppWallet();
       if (!res?.ok) throw new Error(res?.error || "Wallet creation failed.");
       setCreateWalletResult(res.created || null);
       setCreateWalletRevealed(false);
@@ -3237,12 +3255,14 @@ function ControlView() {
     setOnboardingAppWalletBusy(true);
     setOnboardingAppWalletError(null);
     let startedBackendForWallet = false;
+    let walletGenerationFinished = false;
     try {
       if (!status.running && bridge?.startBackend) {
         await bridge.startBackend({ startPaused: true });
         startedBackendForWallet = true;
       }
-      const created = await bridge.createGeneratedWallet();
+      const created = await generateAppWallet();
+      walletGenerationFinished = true;
       if (!created?.ok) {
         throw new Error(created?.error || "Wallet creation failed.");
       }
@@ -3258,7 +3278,7 @@ function ControlView() {
       setOnboardingAppWalletError(String(error?.message || error));
       return false;
     } finally {
-      if (startedBackendForWallet && bridge?.stopBackend) {
+      if (startedBackendForWallet && walletGenerationFinished && bridge?.stopBackend) {
         try {
           await bridge.stopBackend();
         } catch {}
@@ -3704,12 +3724,19 @@ function ControlView() {
                                 {value === "app_wallet" &&
                                 onboardingSignerMode === "app_wallet" ? (
                                   <div className="rounded-md border border-white/10 bg-black/30 p-3 space-y-0.5 mt-2">
-                                    <div className="text-xs text-slate-300">
+                                    <div className="flex items-center gap-2 text-xs text-slate-300" role={onboardingAppWalletBusy ? "status" : undefined}>
+                                      {onboardingAppWalletBusy ? (
+                                        <span className="loading loading-spinner loading-sm shrink-0" aria-hidden="true" />
+                                      ) : null}
+                                      <span>
                                       {onboardingAppWalletBusy
-                                        ? "Generating app wallet..."
+                                        ? walletGenerationSlow
+                                          ? "Taking longer than expected. Still checking wallet creation; please keep the app open."
+                                          : "Creating and securely storing your wallet. Please keep the app open; this can take up to a minute."
                                         : onboardingAppWalletAddress
                                           ? "Wallet Address"
                                           : "Wallet will be generated when you continue."}
+                                      </span>
                                     </div>
                                     {onboardingAppWalletAddress ? (
                                       <div className="flex items-center gap-4 flex-wrap">
@@ -3771,7 +3798,7 @@ function ControlView() {
                               !String(onboardingSignerMode || "").trim()
                             }
                           >
-                            Continue
+                            {onboardingSignerMode === "app_wallet" && onboardingAppWalletError ? "Retry" : "Continue"}
                           </button>
                         </div>
                       </div>
@@ -4310,7 +4337,7 @@ function ControlView() {
               role="dialog"
               aria-modal="true"
               onMouseDown={(e) => {
-                if (e.target === e.currentTarget) setCreateWalletOpen(false);
+                if (e.target === e.currentTarget && !createWalletBusy) setCreateWalletOpen(false);
               }}
             >
               <div
@@ -4330,6 +4357,7 @@ function ControlView() {
                     type="button"
                     className="btn btn-clear btn-sm"
                     onClick={() => setCreateWalletOpen(false)}
+                    disabled={createWalletBusy}
                     title="Close"
                   >
                     ✕
@@ -4360,6 +4388,13 @@ function ControlView() {
                 )}
                 {createWalletError ? (
                   <div className="text-sm text-error">{createWalletError}</div>
+                ) : null}
+                {createWalletBusy ? (
+                  <div className="text-sm text-slate-300" role="status">
+                    {walletGenerationSlow
+                      ? "This is taking longer than expected. Still checking wallet creation; please keep the app open."
+                      : "Creating and securely storing your wallet. This can take up to a minute; please keep the app open."}
+                  </div>
                 ) : null}
                 {!createWalletResult && !createWalletOnboarding ? (
                   <label className="items-center gap-2 text-sm flex w-full max-w-full  ">
@@ -4490,7 +4525,10 @@ function ControlView() {
                       }
                       onClick={() => void runCreateWallet()}
                     >
-                      {createWalletBusy ? "Generating..." : "Generate Wallet"}
+                      {createWalletBusy ? (
+                        <span className="loading loading-spinner loading-sm" aria-hidden="true" />
+                      ) : null}
+                      {createWalletBusy ? "Generating..." : createWalletError ? "Retry" : "Generate Wallet"}
                     </button>
                   ) : (
                     <button

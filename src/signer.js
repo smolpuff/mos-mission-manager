@@ -77,6 +77,8 @@ function missionPageCooldownMsFromConfig(ctx) {
 function createSignerService(ctx, logger) {
   const { logWithTimestamp, logDebug } = logger;
   let approvalPromptHandler = null;
+  let walletGenerationPromise = null;
+  let walletGenerationDeadline = 0;
 
   function getBase58EncodedWireTransaction(transaction) {
     const wireTransactionBytes = getTransactionEncoder().encode(transaction);
@@ -388,7 +390,16 @@ function createSignerService(ctx, logger) {
 
   function execFileAsync(file, args, opts = {}) {
     return new Promise((resolve, reject) => {
-      const execOptions = { encoding: "utf8" };
+      const execOptions = { encoding: "utf8", windowsHide: true };
+      if (file === "powershell") execOptions.timeout = 30_000;
+      if (file === "powershell" && walletGenerationDeadline) {
+        const remainingMs = walletGenerationDeadline - Date.now();
+        if (remainingMs <= 0) {
+          reject(new Error("Wallet creation exceeded its 60-second limit."));
+          return;
+        }
+        execOptions.timeout = Math.min(execOptions.timeout, remainingMs);
+      }
       if (opts && typeof opts === "object" && opts.env) {
         execOptions.env = { ...process.env, ...opts.env };
       }
@@ -401,6 +412,12 @@ function createSignerService(ctx, logger) {
         execOptions,
         (error, stdout, stderr) => {
           if (error) {
+            if (error.killed && file === "powershell") {
+              reject(new Error(walletGenerationDeadline && Date.now() >= walletGenerationDeadline
+                ? "Wallet creation exceeded its 60-second limit."
+                : "Windows secure storage did not respond within 30 seconds."));
+              return;
+            }
             const message = String(
               stderr || stdout || error.message || "",
             ).trim();
@@ -1751,7 +1768,17 @@ function createSignerService(ctx, logger) {
     await importFromFile(filePath);
   }
 
-  async function createGeneratedWallet() {
+  function createGeneratedWallet() {
+    if (walletGenerationPromise) return walletGenerationPromise;
+    walletGenerationDeadline = Date.now() + 60_000;
+    walletGenerationPromise = generateWallet().finally(() => {
+      walletGenerationPromise = null;
+      walletGenerationDeadline = 0;
+    });
+    return walletGenerationPromise;
+  }
+
+  async function generateWallet() {
     logDebug("signer", "create_wallet_start", {
       signerMode: ctx.signerMode,
       walletRef: ctx.signerConfig?.walletRef || null,

@@ -17,6 +17,7 @@ const {
   session,
 } = require("electron");
 const { createRendererSecurity } = require("./security");
+const { createWalletGenerationRequest } = require("./wallet-generation");
 const {
   fetchOnchainFundingWalletSummary,
 } = require("../src/wallet/onchain-summary");
@@ -166,6 +167,10 @@ let logHistory = [];
 let logHistoryBytes = 0;
 let nextLogId = 1;
 const pendingBackendRequests = new Map();
+const requestGeneratedWallet = createWalletGenerationRequest(
+  () => requestBackend("signer_create_generated_wallet", {}, { waitForCompletion: true }),
+  { onSlow: () => pushSystemLog("Wallet generation has exceeded 30 seconds; waiting up to 60 seconds for its result.") },
+);
 let temporarySlotUnlockBackend = null;
 const maxLogHistory = 1200;
 const maxLogHistoryBytes = 4 * 1024 * 1024;
@@ -4918,7 +4923,9 @@ async function requestBackend(action, payload = {}, options = {}) {
   const timeoutMs =
     Number(options?.timeoutMs) > 0 ? Number(options.timeoutMs) : 5000;
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
+    // Generation must keep its response listener after the UI's slow-operation
+    // deadline: dropping it can hide a successful, irreversible wallet write.
+    const timer = options.waitForCompletion === true ? null : setTimeout(() => {
       pendingBackendRequests.delete(requestId);
       pushSystemLog(`Backend request timed out: ${action}.`);
       reject(new Error(`backend request timeout: ${action}`));
@@ -4939,15 +4946,25 @@ async function requestBackend(action, payload = {}, options = {}) {
     });
     const currentConfig = readDesktopConfig();
     const signerMode = normalizedDesktopSignerMode(currentConfig?.signerMode);
-    backend.send({
-      type: "pbp_request",
-      requestId,
-      action,
-      payload: {
-        ...(payload && typeof payload === "object" ? payload : {}),
-        ...(signerMode ? { __signerMode: signerMode } : {}),
-      },
-    });
+    const failSend = (error) => {
+      if (!error) return;
+      const pending = pendingBackendRequests.get(requestId);
+      pendingBackendRequests.delete(requestId);
+      pending?.reject(error);
+    };
+    try {
+      backend.send({
+        type: "pbp_request",
+        requestId,
+        action,
+        payload: {
+          ...(payload && typeof payload === "object" ? payload : {}),
+          ...(signerMode ? { __signerMode: signerMode } : {}),
+        },
+      }, failSend);
+    } catch (error) {
+      failSend(error);
+    }
   });
 }
 
@@ -6185,11 +6202,12 @@ app.whenReady().then(async () => {
     rendererSecurity.assertTrustedSender(event, { controlOnly: true });
     return payload;
   }, { controlOnly: true });
-  handleTrustedIpc("signer:create-generated-wallet", async () => {
+  handleTrustedIpc("signer:create-generated-wallet", async (event) => {
     pushSystemLog("Create generated app wallet requested.");
-    const payload = await requestBackend("signer_create_generated_wallet", {});
+    const payload = await requestGeneratedWallet();
+    rendererSecurity.assertTrustedSender(event, { controlOnly: true });
     return payload;
-  });
+  }, { controlOnly: true });
   handleTrustedIpc("onboarding:fetch-account", async () => {
     pushSystemLog("Onboarding account sync started.");
     const emitProgress = (progress, phase, message) => {
