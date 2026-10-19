@@ -6,6 +6,8 @@
  /#/
 ```
 
+[![Node.js](https://img.shields.io/badge/Node.js-24-339933?logo=nodedotjs&logoColor=white)](#requirements-for-source) [![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)](package.json) [![Windows](https://img.shields.io/badge/Windows-x64-0078D6)](https://github.com/smolpuff/mos-mission-manager/releases/latest) [![macOS](https://img.shields.io/badge/macOS-Apple_Silicon_%7C_Intel-000000?logo=apple&logoColor=white)](https://github.com/smolpuff/mos-mission-manager/releases/latest) [![Linux](https://img.shields.io/badge/Linux-AppImage-FCC624?logo=linux&logoColor=black)](#desktop-app) [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](#license)
+
 ##
 
 `missions-v3-mcp` is a an app for Pixel by Pixel mission automation over MCP. it is entirely stand-alone and does not require a gross agent to run.
