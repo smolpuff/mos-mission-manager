@@ -992,9 +992,6 @@ function ControlView() {
             : 0.01,
       });
       setFirstRunSetupComplete(config.firstRunOnboardingCompleted === true);
-      if (config.firstRunOnboardingCompleted !== true) {
-        setOnboardingPreviewOnly(false);
-      }
       setStartupConfigLoaded(true);
     });
     return () => {
@@ -1047,7 +1044,7 @@ function ControlView() {
   };
 
   const checkForNewMissionCompetition = async () => {
-    if (missionCompetitionCheckEnabled !== true) return;
+    if (!firstRunSetupComplete || onboardingOpen || missionCompetitionCheckEnabled !== true) return;
     if (!bridge?.getCompetitionCount) return;
     if (missionCompetitionCheckActiveRef.current) return;
     missionCompetitionCheckActiveRef.current = true;
@@ -1129,10 +1126,10 @@ function ControlView() {
   };
 
   useEffect(() => {
-    if (missionCompetitionCheckEnabled !== true) return;
+    if (!firstRunSetupComplete || onboardingOpen || missionCompetitionCheckEnabled !== true) return;
     if (!bridge?.getCompetitionCount) return;
     return startCompetitionChecks(checkForNewMissionCompetition);
-  }, [bridge, missionCompetitionCheckEnabled]);
+  }, [bridge, missionCompetitionCheckEnabled, firstRunSetupComplete, onboardingOpen]);
 
   useEffect(() => {
     if (currentPage !== "mish_tish") return;
@@ -1938,7 +1935,6 @@ function ControlView() {
   ] = useState(
     normalizeSlotBooleanMap(status.missionActionEnabledBySlot, true),
   );
-  const [onboardingPreviewOnly, setOnboardingPreviewOnly] = useState(false);
   const [onboardingDataLoading, setOnboardingDataLoading] = useState(false);
   const [onboardingMissionStateReady, setOnboardingMissionStateReady] =
     useState(false);
@@ -2391,18 +2387,37 @@ function ControlView() {
 
   useEffect(() => {
     if (!onboardingOpen) return undefined;
+    const dialog = document.querySelector('[data-onboarding-step]');
+    const focusableElements = () => [...dialog.querySelectorAll(
+      'button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), a[href], [tabindex="0"]',
+    )].filter(element => element.getClientRects().length > 0);
     const onKeyDown = (event) => {
-      if (event.key !== "Escape") return;
-      event.preventDefault();
-      if (onboardingStep === "update") {
-        return;
-      } else {
-        setOnboardingOpen(false);
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+      }
+      if (event.key === "Tab") {
+        const elements = focusableElements();
+        const first = elements[0] || dialog;
+        const last = elements[elements.length - 1] || dialog;
+        if (!dialog.contains(document.activeElement) || document.activeElement === dialog ||
+            (event.shiftKey ? document.activeElement === first : document.activeElement === last)) {
+          event.preventDefault();
+          (event.shiftKey ? last : first).focus();
+        }
       }
     };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [onboardingOpen, onboardingStep, updateInstalling]);
+    const keepFocusInSetup = (event) => {
+      if (!dialog.contains(event.target)) dialog.focus();
+    };
+    dialog.focus();
+    window.addEventListener("keydown", onKeyDown, true);
+    document.addEventListener("focusin", keepFocusInSetup);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown, true);
+      document.removeEventListener("focusin", keepFocusInSetup);
+    };
+  }, [onboardingOpen]);
 
   useEffect(() => {
     if (lastEvent?.type !== "throttle_notice" || lastEvent.source !== "mcp") return;
@@ -3223,9 +3238,10 @@ function ControlView() {
   };
 
   const continueOnboarding = async () => {
+    if (onboardingBusy || onboardingDataLoading || ![1, 2].includes(onboardingStep)) return;
     if (onboardingStep === 1) {
       const selectedMode = String(onboardingSignerMode || "").trim();
-      if (!selectedMode) {
+      if (!["app_wallet", "dapp", "manual"].includes(selectedMode)) {
         setOnboardingError("Select a funding type to continue.");
         return;
       }
@@ -3233,75 +3249,6 @@ function ControlView() {
         const ok = await ensureOnboardingAppWallet({ generateIfMissing: true });
         if (!ok) return;
       }
-    }
-    if (onboardingPreviewOnly) {
-      if (onboardingStep === 1) {
-        setOnboardingWalletSummary(null);
-        setOnboardingMissions([]);
-        setOnboardingMissionCatalog([]);
-        setOnboardingOwnedCollections(new Set());
-        setOnboardingSelectedMissions(new Set());
-        setOnboardingSlotSelections({});
-        setOnboardingMissionStateReady(false);
-        setOnboardingStep(2);
-      }
-      if (onboardingStep === 1 || onboardingStep === 2) {
-        if (!bridge?.fetchOnboardingAccount) {
-          setOnboardingError(
-            "Onboarding fetch is not available in this build.",
-          );
-          return;
-        }
-        setOnboardingBusy(true);
-        setOnboardingDataLoading(true);
-        setOnboardingError(null);
-        try {
-          const response = await Promise.race([
-            bridge.fetchOnboardingAccount(),
-            new Promise((_, reject) =>
-              setTimeout(
-                () => reject(new Error("Step 2 timed out. Please retry.")),
-                45000,
-              ),
-            ),
-          ]);
-          if (!response?.ok) {
-            throw new Error(response?.error || "Failed to load account info.");
-          }
-          const missions = Array.isArray(response.missions)
-            ? response.missions
-            : [];
-          const catalog = Array.isArray(response.missionCatalog)
-            ? response.missionCatalog
-            : [];
-          setOnboardingWalletSummary(response.walletSummary || null);
-          setOnboardingMissions(missions);
-          setOnboardingMissionCatalog(catalog);
-          setOnboardingOwnedCollections(
-            new Set(
-              (Array.isArray(response.ownedCollections)
-                ? response.ownedCollections
-                : []
-              )
-                .map((entry) =>
-                  normalizeCollectionKey(collectionNameFromEntry(entry)),
-                )
-                .filter(Boolean),
-            ),
-          );
-          setOnboardingSelectionState(missions);
-          setOnboardingMissionStateReady(missions.length > 0);
-          setOnboardingStep(2);
-        } catch (error) {
-          setOnboardingMissionStateReady(false);
-          setOnboardingError(String(error?.message || error));
-          setOnboardingStep(2);
-        } finally {
-          setOnboardingBusy(false);
-          setOnboardingDataLoading(false);
-        }
-      }
-      return;
     }
     if (!bridge?.fetchOnboardingAccount) {
       setOnboardingError("Onboarding fetch is not available in this build.");
@@ -3364,10 +3311,9 @@ function ControlView() {
   };
 
   const applyOnboarding = async () => {
-    if (onboardingPreviewOnly) {
-      await applyConfigPatch({ firstRunOnboardingCompleted: true });
-      setFirstRunSetupComplete(true);
-      setOnboardingOpen(false);
+    if (onboardingBusy || onboardingDataLoading || onboardingStep !== 2) return;
+    if (!["app_wallet", "dapp", "manual"].includes(onboardingSignerMode)) {
+      setOnboardingError("Select a funding type to continue.");
       return;
     }
     if (!onboardingMissionStateReady) {
@@ -3410,6 +3356,10 @@ function ControlView() {
         ).filter(Boolean),
       ),
     );
+    if (!targetMissions.length || !bridge?.applyOnboardingSelection) {
+      setOnboardingError("Sync your initial missions before completing setup.");
+      return;
+    }
     setOnboardingBusy(true);
     setOnboardingError(null);
     try {
@@ -3442,17 +3392,6 @@ function ControlView() {
       setOnboardingError(String(error?.message || error));
     } finally {
       setOnboardingBusy(false);
-    }
-  };
-
-  const dismissOnboarding = async () => {
-    if (onboardingStep === "update") return;
-    try {
-      await applyConfigPatch({ firstRunOnboardingCompleted: true });
-      setFirstRunSetupComplete(true);
-      setOnboardingOpen(false);
-    } catch (error) {
-      setOnboardingError(String(error?.message || error));
     }
   };
 
@@ -3651,7 +3590,8 @@ function ControlView() {
           {onboardingOpen ? (
             <div
               data-onboarding-step={onboardingStep}
-              className="fixed inset-0 z-60 grid place-items-center bg-black/50 p-4"
+              tabIndex={-1}
+              className="fixed inset-0 z-[10000] grid place-items-center bg-black/50 p-4"
               role="dialog"
               aria-modal="true"
             >
@@ -3676,15 +3616,6 @@ function ControlView() {
                     <div className="text-xs text-slate-400">
                       Step {onboardingStep === "update" ? 1 : onboardingStep + (onboardingUpdateIncluded ? 1 : 0)}/{onboardingUpdateIncluded ? 3 : 2}
                     </div>
-                    {onboardingStep !== "update" ? <button
-                      type="button"
-                      className="btn btn-clear btn-sm "
-                      onClick={() => void dismissOnboarding()}
-                      disabled={onboardingStep === "update" && updateInstalling}
-                      title="Close"
-                    >
-                      ✕
-                    </button> : null}
                   </div>
                 </div>
                 <div
@@ -4022,11 +3953,7 @@ function ControlView() {
                                 !onboardingMissionStateReady
                               }
                             >
-                              {onboardingPreviewOnly
-                                ? "Done"
-                                : onboardingBusy
-                                  ? "Applying..."
-                                  : "Apply"}
+                              {onboardingBusy ? "Applying..." : "Apply"}
                             </button>
                           </div>
                         </div>

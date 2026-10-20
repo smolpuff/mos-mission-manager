@@ -75,6 +75,7 @@ if (!process.versions.electron) {
   Object.defineProperty(app, "isPackaged", { value: true });
   globalThis.fetch = () => Promise.reject(new Error("Setup/update test: external traffic disabled"));
   const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
+  let competitionQueries = 0, missionSyncMode = "success";
   let checks = 0, checkRequests = 0, installRequests = 0, applyAttempts = 0;
   let updateMode = "offer", installMode = visibleDemo ? "success" : "fail", simulatedRestarts = 0;
   const checker = require("../update-checker");
@@ -119,8 +120,15 @@ if (!process.versions.electron) {
     if (channel === "config:get") await pause(800);
     if (channel === "updates:check") checkRequests++;
     if (channel === "updates:install") installRequests++;
+    if (channel === "pbp:get-competition-count") {
+      competitionQueries++;
+      return { ok: true, total: 123, active: true };
+    }
+    if (channel === "pbp:get-latest-competition") return { ok: true, competition: null };
     if (channel === "onboarding:fetch-account") {
       await pause(700);
+      if (missionSyncMode === "fail") return { ok: false, error: "Simulated mission sync failure" };
+      if (missionSyncMode === "empty") return { ok: true, missions: [], missionCatalog: [] };
       return { ok: true, missions: [{ slot: 1, name: "Test Mission", missionId: "test-mission" }], missionCatalog: [] };
     }
     if (channel === "onboarding:apply-selection") {
@@ -180,6 +188,36 @@ if (!process.versions.electron) {
       fs.writeFileSync(path.join(root, name), (await win.webContents.capturePage()).toPNG());
     };
     const noSetup = async () => assert.equal(await evaluate(`document.querySelectorAll('input[name="onboarding_signer_mode"]').length`), 0, "Wallet selection opened before the update decision");
+    const assertMandatorySetup = async step => {
+      const result = await evaluate(`(() => {
+        const dialog = document.querySelector('[data-onboarding-step]');
+        const before = dialog.dataset.onboardingStep;
+        const hasClose = [...dialog.querySelectorAll('button')].some(button =>
+          /close|skip|later|cancel|✕/i.test((button.title || '') + button.textContent));
+        window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+        dialog.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        // Simulate another app dialog inserted later in DOM at the normal layer.
+        const popup = document.createElement('div');
+        popup.style.cssText = 'position:fixed;inset:0;z-index:60';
+        document.body.appendChild(popup);
+        const aboveOtherDialogs = dialog.contains(document.elementFromPoint(innerWidth / 2, innerHeight / 2));
+        popup.remove();
+        const backgroundButton = [...document.querySelectorAll('button')].find(button => !dialog.contains(button));
+        backgroundButton?.focus();
+        // Hidden/offscreen windows do not dispatch focus events automatically.
+        backgroundButton?.dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
+        const focusContained = dialog.contains(document.activeElement);
+        return { before, hasClose, aboveOtherDialogs, focusContained };
+      })()`);
+      assert.equal(result.before, String(step));
+      assert.equal(result.hasClose, false, "Setup exposes a dismissal button");
+      assert.equal(result.aboveOtherDialogs, true, "Another dialog can cover setup");
+      assert.equal(result.focusContained, true, "Keyboard focus escaped setup");
+      await pause(50);
+      assert.equal(await evaluate(`document.querySelector('[data-onboarding-step]')?.dataset.onboardingStep`), String(step));
+      assert.notEqual(readConfig().firstRunOnboardingCompleted, true);
+      assert.equal(competitionQueries, 0, "Competition popup checked before setup finished");
+    };
     const reload = async () => {
       const loaded = new Promise(resolve => win.webContents.once("did-finish-load", resolve));
       win.reload();
@@ -201,6 +239,7 @@ if (!process.versions.electron) {
     assert.equal(await evaluate(`[...document.querySelectorAll('button')].some(button => ['Continue setup', 'Later'].includes(button.textContent.trim()))`), false);
     await evaluate(`window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`);
     assert.equal(await evaluate(`document.querySelector('[data-onboarding-step="update"]') !== null`), true, "Escape bypassed the required update");
+    await assertMandatorySetup("update");
     await screenshot("01-update-before-setup.png");
     const invalidInstall = await evaluate('window.missionsDesktop.installUpdate("998.0.0")');
     assert.match(invalidInstall.error, /offer has changed/);
@@ -221,15 +260,33 @@ if (!process.versions.electron) {
     assert.ok(!(await text()).includes("Update Available"));
     await assertStopped();
     await screenshot("03-setup-after-update.png");
-    // Complete setup, including a failed save, without another startup check.
+    await assertMandatorySetup(1);
+    assert.equal(await evaluate(`[...document.querySelectorAll('button')].find(button => button.textContent.trim() === 'Continue').disabled`), true, "Wallet choice is required");
+    await reload();
+    await waitFor(async () => (await text()).includes("Step 1/2"), "unfinished setup survives reopening");
+    await assertMandatorySetup(1);
+    // Complete setup, including failed/empty sync and failed save.
+    missionSyncMode = "fail";
     const beforeSetupChecks = checks;
     await evaluate(`document.querySelector('input[name="onboarding_signer_mode"][value="manual"]').click()`);
     await click("Continue");
     await waitFor(async () => (await text()).includes("Step 2/2"), "second setup screen");
+    await waitFor(async () => (await text()).includes("Simulated mission sync failure"), "failed sync stays in setup");
+    await assertMandatorySetup(2);
+    assert.equal(await evaluate(`[...document.querySelectorAll('button')].find(button => button.textContent.trim() === 'Apply').disabled`), true);
+    missionSyncMode = "empty";
+    await click("Refresh mission status");
+    await waitFor(() => evaluate(`[...document.querySelectorAll('button')].some(button => button.textContent.trim() === 'Refresh mission status' && !button.disabled)`), "empty sync completed");
+    assert.equal(await evaluate(`[...document.querySelectorAll('button')].find(button => button.textContent.trim() === 'Apply').disabled`), true, "Empty sync completed setup");
+    await assertMandatorySetup(2);
+    missionSyncMode = "success";
+    await click("Refresh mission status");
     await waitFor(() => evaluate("[...document.querySelectorAll('button')].some(el => el.textContent.trim() === 'Apply' && !el.disabled)"), "mission data ready");
+    await assertMandatorySetup(2);
     await click("Apply");
     await waitFor(async () => (await text()).includes("Simulated setup save failure"), "failed setup save");
     assert.notEqual(readConfig().firstRunOnboardingCompleted, true);
+    await assertMandatorySetup(2);
     await click("Apply");
     await waitFor(() => readConfig().firstRunOnboardingCompleted === true, "setup saved");
     await pause(500);
@@ -237,6 +294,7 @@ if (!process.versions.electron) {
     assert.equal(readConfig().signerMode, "manual");
     assert.deepEqual(readConfig().targetMissions, ["Test Mission"]);
     await assertStopped();
+    await waitFor(() => competitionQueries > 0, "competition checks resume after setup");
     // An unverifiable version cannot bypass the required update step.
     writeConfig({});
     updateMode = "error";
@@ -285,6 +343,9 @@ if (!process.versions.electron) {
       simulatedUpdateAndRelaunchReturnsToSetup: true,
       downloadFailureBlocksSetupUntilRetrySucceeds: true, updateCannotBeSkippedOrDismissed: true,
       failedCheckBlocksSetupUntilVerified: true, eightSecondTimeoutIgnoresLateOffer: true,
+      setupCannotCloseOnAnyStep: true, setupAboveOtherDialogs: true,
+      keyboardFocusStaysInSetup: true, unfinishedSetupSurvivesReload: true,
+      failedOrEmptyMissionSyncBlocksCompletion: true, competitionChecksWaitForSetup: true,
       failedSetupSaveStaysIncomplete: true, noDuplicateCheckAfterSetup: true,
       autoUpdatePreferenceRespected: true, runnerStayedStopped: true,
       realUpdatesInstalled: 0, simulatedRestarts,
