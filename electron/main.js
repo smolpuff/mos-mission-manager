@@ -212,7 +212,7 @@ let desktopUpdater = null;
 let desktopUpdateOffer = null;
 let updateRecoveryReported = false;
 const FUNDING_WALLET_REFRESH_MIN_INTERVAL_MS = 30000;
-const FUNDING_WALLET_PERIODIC_REFRESH_MS = 30 * 60 * 1000;
+const FUNDING_WALLET_PERIODIC_REFRESH_MS = 60 * 1000;
 const BOOTSTRAP_WALLET_REFRESH_MIN_INTERVAL_MS = 30000;
 const PAGE_PREVIEW_CACHE_TTL_MS = 2000;
 const RENTALS_PREVIEW_CACHE_TTL_MS = 120000;
@@ -6149,7 +6149,7 @@ app.whenReady().then(async () => {
   };
 
   handleTrustedIpc("wallet:refresh-summary", async () => {
-    return await refreshFundingWalletSummary({ reason: "manual" });
+    return await refreshFundingWalletSummary({ force: true, reason: "manual" });
   });
   handleTrustedIpc("wallet:bootstrap-summary", async () => {
     const now = Date.now();
@@ -7200,7 +7200,7 @@ app.whenReady().then(async () => {
   } catch {}
   if (!isStandaloneCliMode() && !fundingWalletRefreshTimer) {
     fundingWalletRefreshTimer = setInterval(() => {
-      void refreshFundingWalletSummary({ reason: "periodic_30m" });
+      void refreshFundingWalletSummary({ reason: "periodic_1m" });
     }, FUNDING_WALLET_PERIODIC_REFRESH_MS);
     fundingWalletRefreshTimer.unref?.();
   }

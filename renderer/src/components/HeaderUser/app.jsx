@@ -1,13 +1,30 @@
 import solIcon from "../../img/icon-sm__sol.svg";
 import pbpIcon from "../../img/icon-sm__pbp.webp";
 import StatusBadge from "../StatusBadge/app";
+import { useState } from "react";
 
 export default function HeaderUser({
   status,
   isAuthenticated,
   onManualClaim,
   manualCheckBusy = false,
+  onRefreshFundingBalance,
 }) {
+  const [balanceRefreshBusy, setBalanceRefreshBusy] = useState(false);
+  const [balanceRefreshError, setBalanceRefreshError] = useState(null);
+  const refreshFundingBalance = async () => {
+    if (balanceRefreshBusy) return;
+    setBalanceRefreshBusy(true);
+    setBalanceRefreshError(null);
+    try {
+      const result = await onRefreshFundingBalance();
+      if (result?.error) throw new Error(result.error);
+    } catch (error) {
+      setBalanceRefreshError(String(error?.message || error));
+    } finally {
+      setBalanceRefreshBusy(false);
+    }
+  };
   const signerMode = String(status.signerMode || "").trim();
   const fundingSummary =
     status.fundingWalletSummary?.status === "ok"
@@ -84,7 +101,7 @@ export default function HeaderUser({
               </div>
             </div>
           </div>
-        ) : fundingSummary ? (
+        ) : signerMode === "app_wallet" ? (
           <div className="user_meta__funding_wallet flex gap-3 items-center mt-1">
             <div className="text-xs ">
               Funding Wallet Balance
@@ -97,7 +114,7 @@ export default function HeaderUser({
                 <img src={solIcon} alt="Solana logo" />
 
                 <div className="text-xs">
-                  {Number(fundingSummary.sol || 0).toLocaleString(undefined, {
+                  {Number(fundingSummary?.sol || 0).toLocaleString(undefined, {
                     maximumFractionDigits: 4,
                   })}{" "}
                   SOL
@@ -107,14 +124,29 @@ export default function HeaderUser({
                 <img src={pbpIcon} alt="PBP token logo" />
 
                 <div className="text-xs">
-                  {Number(fundingSummary.pbp || 0).toLocaleString(undefined, {
+                  {Number(fundingSummary?.pbp || 0).toLocaleString(undefined, {
                     maximumFractionDigits: 2,
                   })}{" "}
                   PBP
                 </div>
               </div>
+              {typeof onRefreshFundingBalance === "function" ? (
+                <button
+                  type="button"
+                  className="btn btn-clear btn-xs p-0"
+                  onClick={refreshFundingBalance}
+                  disabled={balanceRefreshBusy}
+                  aria-label="Refresh funding wallet balance"
+                  title="Refresh funding wallet balance"
+                >
+                  <span className={balanceRefreshBusy ? "inline-block animate-spin" : ""}>↻</span>
+                </button>
+              ) : null}
             </div>
           </div>
+        ) : null}
+        {balanceRefreshError ? (
+          <div className="text-xs text-error" role="alert">{balanceRefreshError}</div>
         ) : null}
         {/* {debug && (
           <div className="debug-info text-xs opacity-80 flex gap-3">

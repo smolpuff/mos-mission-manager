@@ -1,15 +1,4 @@
-function formatCompetitionDateTime(value) {
-  const parsed = new Date(String(value || ""));
-  if (!Number.isFinite(parsed.getTime())) return String(value || "Unknown");
-  return new Intl.DateTimeFormat(undefined, {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-    timeZoneName: "short",
-  }).format(parsed);
-}
+import { formatCompetitionDateTime } from "../competition-notifications.mjs";
 
 const MAX_RECENT_COMPETITIONS = 3;
 

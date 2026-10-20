@@ -522,7 +522,7 @@ export default function SettingsPage({
                   )
                 }
                 title="Check for Mission Competitions"
-                helperText="Periodically checks the public competition count for a new event"
+                helperText="Checks at startup and every hour for a new competition"
                 styling="!text-base"
               />{" "}
             </div>

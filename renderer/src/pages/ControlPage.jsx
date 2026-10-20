@@ -11,6 +11,12 @@ import StatsPage from "./StatsPage";
 import RentalsPage from "./RentalsPage";
 import NftsPage from "./NftsPage";
 import { competitionOptionValue } from "../competition-options";
+import {
+  closeCompetitionNotificationModal,
+  formatCompetitionDateTime,
+  shouldShowCompetitionNotification,
+  startCompetitionChecks,
+} from "../competition-notifications.mjs";
 import { resolveOnboardingMissionCard } from "../onboarding-mission-card.mjs";
 import {
   createRecoveryPhraseController,
@@ -41,8 +47,6 @@ const quickCommands = [
 
 const AUTO_UPDATE_BACKGROUND_THRESHOLD_MS = 24 * 60 * 60 * 1000;
 const AUTO_UPDATE_BACKGROUND_INTERVAL_MS = 24 * 60 * 60 * 1000;
-const MISSION_COMPETITION_CHECK_THRESHOLD_MS = 24 * 60 * 60 * 1000;
-const MISSION_COMPETITION_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const COMPETITION_PAGE_REFRESH_INTERVAL_MS = 60 * 1000;
 
 function renderLogText(text) {
@@ -88,14 +92,6 @@ function missionNamesMatch(a, b) {
   return left === right || left.includes(right) || right.includes(left);
 }
 
-function stripYearFromCompetitionDate(value) {
-  return String(value || "")
-    .replace(/,\s*\d{4}\b/g, "")
-    .replace(/\b\d{4}\b/g, "")
-    .replace(/\s{2,}/g, " ")
-    .trim();
-}
-
 function parseTimeValue(value) {
   if (value === null || value === undefined) return null;
   if (typeof value === "number" && Number.isFinite(value)) return value;
@@ -137,44 +133,6 @@ function getSlotUnlockExpiresAtLabel(slotUnlockSummary) {
   );
   if (!expiresAt || expiresAt <= Date.now()) return null;
   return formatRemainingMs(expiresAt - Date.now());
-}
-
-function shouldShowCompetitionNotification({
-  competitionNumber,
-  suppressedThroughNumber,
-}) {
-  if (!Number.isFinite(Number(competitionNumber))) return false;
-  const suppressed = Number(suppressedThroughNumber);
-  if (!Number.isFinite(suppressed) || suppressed <= 0) return true;
-  return Number(competitionNumber) > suppressed;
-}
-
-async function closeCompetitionNotificationModal({
-  competitionNumber,
-  suppressCheckedRef,
-  setModal,
-  updateConfig,
-  onClosed,
-}) {
-  const suppressChecked = suppressCheckedRef?.current === true;
-  if (
-    suppressChecked &&
-    typeof updateConfig === "function" &&
-    Number.isFinite(Number(competitionNumber))
-  ) {
-    await updateConfig({
-      missionCompetitionPopupSuppressedThroughNumber: Math.floor(
-        Number(competitionNumber),
-      ),
-    });
-  }
-  if (typeof onClosed === "function") {
-    onClosed({
-      competitionNumber,
-      suppressChecked: suppressChecked === true,
-    });
-  }
-  setModal(null);
 }
 
 function MissionSlotFallback({ label, loading = false, assigning = false }) {
@@ -598,10 +556,8 @@ function ControlView() {
   const startupUpdateCheckRequestedRef = useRef(false);
   const lastUpdateCheckAtRef = useRef(null);
   const updateCheckBusyRef = useRef(false);
-  const startupCompetitionCheckRequestedRef = useRef(false);
-  const lastMissionCompetitionCheckAtRef = useRef(null);
-  const nextMissionCompetitionCheckAtRef = useRef(null);
-  const dismissedCompetitionNotificationIdsRef = useRef(new Set());
+  const missionCompetitionCheckActiveRef = useRef(false);
+  const shownCompetitionNotificationIdsRef = useRef(new Set());
   const competitionNotificationSuppressCheckedRef = useRef(false);
   const competitionNotificationCeilingNumberRef = useRef(null);
   const latestCompetitionRequestActiveRef = useRef(false);
@@ -1097,6 +1053,8 @@ function ControlView() {
   const checkForNewMissionCompetition = async () => {
     if (missionCompetitionCheckEnabled !== true) return;
     if (!bridge?.getCompetitionCount) return;
+    if (missionCompetitionCheckActiveRef.current) return;
+    missionCompetitionCheckActiveRef.current = true;
     try {
       const result = await bridge.getCompetitionCount();
       if (!result?.ok) {
@@ -1118,18 +1076,16 @@ function ControlView() {
           competitionNumber,
         ),
       });
-      if (!Number.isFinite(lastObservedNumber) || lastObservedNumber <= 0) {
-        return;
-      }
-      if (competitionNumber <= lastObservedNumber) return;
+      // Observing a competition is not consent to hide it on the next launch.
+      // Only the explicit suppression setting persists across app sessions.
       const shouldShow = shouldShowCompetitionNotification({
         competitionNumber,
+        active: result.active,
         suppressedThroughNumber:
           config.missionCompetitionPopupSuppressedThroughNumber,
+        shownThisSession: shownCompetitionNotificationIdsRef.current,
       });
-      const isDismissedThisSession =
-        dismissedCompetitionNotificationIdsRef.current.has(competitionNumber);
-      if (shouldShow && !isDismissedThisSession) {
+      if (shouldShow) {
         let notificationCompetition = null;
         if (bridge?.getLatestCompetition) {
           try {
@@ -1146,6 +1102,7 @@ function ControlView() {
             // The count notification is still useful if detail loading fails.
           }
         }
+        shownCompetitionNotificationIdsRef.current.add(competitionNumber);
         setCompetitionNotificationSuppressChecked(false);
         competitionNotificationSuppressCheckedRef.current = false;
         setCompetitionNotificationModal({
@@ -1171,69 +1128,14 @@ function ControlView() {
       // This background check is intentionally silent. Opening the Competition
       // page performs the visible active-competition fetch and reports errors.
     } finally {
-      lastMissionCompetitionCheckAtRef.current = Date.now();
-      nextMissionCompetitionCheckAtRef.current = null;
+      missionCompetitionCheckActiveRef.current = false;
     }
   };
 
   useEffect(() => {
-    if (startupCompetitionCheckRequestedRef.current) return;
     if (missionCompetitionCheckEnabled !== true) return;
     if (!bridge?.getCompetitionCount) return;
-    const timer = setTimeout(() => {
-      startupCompetitionCheckRequestedRef.current = true;
-      void checkForNewMissionCompetition();
-    }, 700);
-    return () => clearTimeout(timer);
-  }, [bridge, missionCompetitionCheckEnabled]);
-
-  useEffect(() => {
-    if (missionCompetitionCheckEnabled !== true) return;
-    if (!bridge?.getCompetitionCount) return;
-    let cancelled = false;
-    let timer = null;
-
-    const scheduleNext = () => {
-      if (cancelled) return;
-      const now = Date.now();
-      const deferredDueAt = Number.isFinite(
-        nextMissionCompetitionCheckAtRef.current,
-      )
-        ? nextMissionCompetitionCheckAtRef.current
-        : null;
-      if (deferredDueAt && deferredDueAt > now) {
-        const delay = Math.max(1000, deferredDueAt - now);
-        timer = setTimeout(async () => {
-          timer = null;
-          if (cancelled) return;
-          await checkForNewMissionCompetition();
-          scheduleNext();
-        }, delay);
-        return;
-      }
-      const thresholdDueAt =
-        sessionStartedAtRef.current + MISSION_COMPETITION_CHECK_THRESHOLD_MS;
-      const intervalDueAt = Number.isFinite(
-        lastMissionCompetitionCheckAtRef.current,
-      )
-        ? lastMissionCompetitionCheckAtRef.current +
-          MISSION_COMPETITION_CHECK_INTERVAL_MS
-        : thresholdDueAt;
-      const nextDueAt = Math.max(thresholdDueAt, intervalDueAt);
-      const delay = Math.max(1000, nextDueAt - now);
-      timer = setTimeout(async () => {
-        timer = null;
-        if (cancelled) return;
-        await checkForNewMissionCompetition();
-        scheduleNext();
-      }, delay);
-    };
-
-    scheduleNext();
-    return () => {
-      cancelled = true;
-      if (timer) clearTimeout(timer);
-    };
+    return startCompetitionChecks(checkForNewMissionCompetition);
   }, [bridge, missionCompetitionCheckEnabled]);
 
   useEffect(() => {
@@ -3526,6 +3428,7 @@ function ControlView() {
         >
           <HeaderUser
             status={status}
+            onRefreshFundingBalance={bridge?.refreshWalletSummary}
             isAuthenticated={status.isAuthenticated}
             manualCheckBusy={manualCheckBusy}
             onManualClaim={() => {
@@ -5914,7 +5817,7 @@ function ControlView() {
                     updateConfig: applyConfigPatch,
                     onClosed: ({ competitionNumber }) => {
                       if (!Number.isFinite(Number(competitionNumber))) return;
-                      dismissedCompetitionNotificationIdsRef.current.add(
+                      shownCompetitionNotificationIdsRef.current.add(
                         Number(competitionNumber),
                       );
                     },
@@ -5948,15 +5851,14 @@ function ControlView() {
                           : ""}
                       </span>
                     </div>
-                    <div className="space-y-1 text-xs text-slate-200 -mt-6 flex justify-between max-w-67.5 w-full">
+                    <div className="space-y-1 text-xs text-slate-200 mt-2">
                       <div className="text-xs text-slate-300">
-                        {stripYearFromCompetitionDate(
+                        Start: {formatCompetitionDateTime(
                           competitionNotificationModal.start || "Unknown",
                         )}
                       </div>
-                      to
                       <div className="text-xs text-slate-300">
-                        {stripYearFromCompetitionDate(
+                        End: {formatCompetitionDateTime(
                           competitionNotificationModal.end || "Unknown",
                         )}
                       </div>
@@ -5981,7 +5883,7 @@ function ControlView() {
                         onClosed: ({ competitionNumber }) => {
                           if (!Number.isFinite(Number(competitionNumber)))
                             return;
-                          dismissedCompetitionNotificationIdsRef.current.add(
+                          shownCompetitionNotificationIdsRef.current.add(
                             Number(competitionNumber),
                           );
                         },
@@ -6090,7 +5992,7 @@ function ControlView() {
                         onClosed: ({ competitionNumber }) => {
                           if (!Number.isFinite(Number(competitionNumber)))
                             return;
-                          dismissedCompetitionNotificationIdsRef.current.add(
+                          shownCompetitionNotificationIdsRef.current.add(
                             Number(competitionNumber),
                           );
                         },
