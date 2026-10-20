@@ -212,7 +212,7 @@ let desktopUpdater = null;
 let desktopUpdateOffer = null;
 let updateRecoveryReported = false;
 const FUNDING_WALLET_REFRESH_MIN_INTERVAL_MS = 30000;
-const FUNDING_WALLET_PERIODIC_REFRESH_MS = 60 * 1000;
+const FUNDING_WALLET_PERIODIC_REFRESH_MS = 30 * 60 * 1000;
 const BOOTSTRAP_WALLET_REFRESH_MIN_INTERVAL_MS = 30000;
 const PAGE_PREVIEW_CACHE_TTL_MS = 2000;
 const RENTALS_PREVIEW_CACHE_TTL_MS = 120000;
@@ -7156,7 +7156,7 @@ app.whenReady().then(async () => {
   } catch {}
   if (!isStandaloneCliMode() && !fundingWalletRefreshTimer) {
     fundingWalletRefreshTimer = setInterval(() => {
-      void refreshFundingWalletSummary({ reason: "periodic_1m" });
+      void refreshFundingWalletSummary({ reason: "periodic_30m" });
     }, FUNDING_WALLET_PERIODIC_REFRESH_MS);
     fundingWalletRefreshTimer.unref?.();
   }
