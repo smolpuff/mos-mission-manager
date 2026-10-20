@@ -5,6 +5,15 @@
 - Internal implementation needs do not authorize new product behavior. In particular, do not add update recovery dialogs or manual recovery workflows unless explicitly requested.
 - Preserve existing behavior outside the requested change. When investigating a regression, distinguish verified changes from pre-existing behavior and label hypotheses as unconfirmed.
 
+## Explicit user scope
+
+- Change only the files, behavior, and settings the user explicitly requests. Do not make unsolicited fixes, refactors, cleanups, improvements, or adjacent behavior changes.
+- Do not infer authorization to change related functionality. If an additional change outside the explicit request is necessary, explain the specific dependency and obtain the user's explicit approval before making it.
+- A request to restore a specific feature applies only to that feature. Do not restore entire files or surrounding handlers, settings, error handling, or other behavior unless the user explicitly requests them.
+- For exact restorations, compare the requested feature against the identified historical revision byte for byte and report the comparison. Do not claim that matching historical code proves a runtime bug is fixed.
+- Before finishing, inspect the diff and remove any changes made during the task that fall outside the explicit request. Preserve pre-existing user changes.
+- Do not build, install, restart, publish, or deploy unless the user explicitly requests that action.
+
 ## Desktop update metadata
 
 - Use the repository's `version.json` as the only remote update metadata source, including version, release notes, artifact URLs, and checksums.
