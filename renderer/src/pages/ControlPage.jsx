@@ -1044,7 +1044,12 @@ function ControlView() {
   };
 
   const checkForNewMissionCompetition = async () => {
-    if (!firstRunSetupComplete || onboardingOpen || missionCompetitionCheckEnabled !== true) return;
+    if (
+      !firstRunSetupComplete ||
+      onboardingOpen ||
+      missionCompetitionCheckEnabled !== true
+    )
+      return;
     if (!bridge?.getCompetitionCount) return;
     if (missionCompetitionCheckActiveRef.current) return;
     missionCompetitionCheckActiveRef.current = true;
@@ -1126,10 +1131,20 @@ function ControlView() {
   };
 
   useEffect(() => {
-    if (!firstRunSetupComplete || onboardingOpen || missionCompetitionCheckEnabled !== true) return;
+    if (
+      !firstRunSetupComplete ||
+      onboardingOpen ||
+      missionCompetitionCheckEnabled !== true
+    )
+      return;
     if (!bridge?.getCompetitionCount) return;
     return startCompetitionChecks(checkForNewMissionCompetition);
-  }, [bridge, missionCompetitionCheckEnabled, firstRunSetupComplete, onboardingOpen]);
+  }, [
+    bridge,
+    missionCompetitionCheckEnabled,
+    firstRunSetupComplete,
+    onboardingOpen,
+  ]);
 
   useEffect(() => {
     if (currentPage !== "mish_tish") return;
@@ -1386,7 +1401,15 @@ function ControlView() {
         const result = await Promise.race([
           bridge.checkForUpdates({ manual }),
           new Promise((resolve) => {
-            timeout = setTimeout(() => resolve({ ok: false, updateAvailable: false, reason: "timeout" }), 8000);
+            timeout = setTimeout(
+              () =>
+                resolve({
+                  ok: false,
+                  updateAvailable: false,
+                  reason: "timeout",
+                }),
+              8000,
+            );
           }),
         ]);
         if (result?.skipped !== true) {
@@ -1436,20 +1459,26 @@ function ControlView() {
     [bridge, startupConfigLoaded, firstRunSetupComplete, onboardingOpen],
   );
 
-  const finishStartupUpdateCheck = useCallback((result) => {
-    if (firstRunSetupComplete) return;
-    if (result?.ok && !result.updateAvailable) {
-      setStartupUpdateCheckError(null);
-      setOnboardingUpdateIncluded(false);
-      setOnboardingStep(1);
-    } else {
-      setOnboardingStep("update");
-      setOnboardingUpdateIncluded(true);
-      setStartupUpdateCheckError(result?.updateAvailable ? null :
-        "Unable to verify the latest version. Check your connection and try again.");
-    }
-    setOnboardingOpen(true);
-  }, [firstRunSetupComplete]);
+  const finishStartupUpdateCheck = useCallback(
+    (result) => {
+      if (firstRunSetupComplete) return;
+      if (result?.ok && !result.updateAvailable) {
+        setStartupUpdateCheckError(null);
+        setOnboardingUpdateIncluded(false);
+        setOnboardingStep(1);
+      } else {
+        setOnboardingStep("update");
+        setOnboardingUpdateIncluded(true);
+        setStartupUpdateCheckError(
+          result?.updateAvailable
+            ? null
+            : "Unable to verify the latest version. Check your connection and try again.",
+        );
+      }
+      setOnboardingOpen(true);
+    },
+    [firstRunSetupComplete],
+  );
 
   const retryStartupUpdateCheck = async () => {
     setStartupUpdateCheckError(null);
@@ -1466,7 +1495,13 @@ function ControlView() {
       });
     }, 300);
     return () => clearTimeout(timer);
-  }, [startupConfigLoaded, firstRunSetupComplete, onboardingOpen, runUpdateCheck, finishStartupUpdateCheck]);
+  }, [
+    startupConfigLoaded,
+    firstRunSetupComplete,
+    onboardingOpen,
+    runUpdateCheck,
+    finishStartupUpdateCheck,
+  ]);
 
   useEffect(() => bridge?.onUpdateStatus?.(setUpdateInstallStatus), [bridge]);
   useEffect(() => {
@@ -1474,7 +1509,13 @@ function ControlView() {
   }, [bridge]);
 
   const installOfferedUpdate = async () => {
-    if (!startupConfigLoaded || (onboardingOpen && onboardingStep !== "update") || updateInstalling || !updateModal) return;
+    if (
+      !startupConfigLoaded ||
+      (onboardingOpen && onboardingStep !== "update") ||
+      updateInstalling ||
+      !updateModal
+    )
+      return;
     setUpdateInstallStatus({ phase: "downloading", percent: 0 });
     try {
       const result = await bridge.installUpdate(updateModal.latestVersion);
@@ -1521,7 +1562,13 @@ function ControlView() {
       cancelled = true;
       if (timer) clearTimeout(timer);
     };
-  }, [autoUpdateCheckEnabled, bridge, firstRunSetupComplete, onboardingOpen, runUpdateCheck]);
+  }, [
+    autoUpdateCheckEnabled,
+    bridge,
+    firstRunSetupComplete,
+    onboardingOpen,
+    runUpdateCheck,
+  ]);
   const activateNormalMode = async () => {
     if (!beginModeTransition("normal")) return;
     let succeeded = false;
@@ -1896,21 +1943,37 @@ function ControlView() {
   const isStarting = status.running && !isWatching;
   const manualCheckPendingRef = useRef(false);
   const [copiedLabel, setCopiedLabel] = useState(null);
-  const [secretModalState, setSecretModalState] = useState(emptyRecoveryPhraseState);
-  const secretModalController = useMemo(() => createRecoveryPhraseController({
-    fetchBackup: () => {
-      if (!bridge?.revealSignerBackup) throw new Error("Secret key view is not available in this build.");
-      return bridge.revealSignerBackup();
-    },
-    onChange: setSecretModalState,
-  }), [bridge]);
-  useEffect(() => () => secretModalController.dispose(), [secretModalController]);
-  const { open: secretModalOpen, busy: secretModalBusy, error: secretModalError,
-    backup: secretModalBackup, revealed: secretModalRevealed } = secretModalState;
+  const [secretModalState, setSecretModalState] = useState(
+    emptyRecoveryPhraseState,
+  );
+  const secretModalController = useMemo(
+    () =>
+      createRecoveryPhraseController({
+        fetchBackup: () => {
+          if (!bridge?.revealSignerBackup)
+            throw new Error("Secret key view is not available in this build.");
+          return bridge.revealSignerBackup();
+        },
+        onChange: setSecretModalState,
+      }),
+    [bridge],
+  );
+  useEffect(
+    () => () => secretModalController.dispose(),
+    [secretModalController],
+  );
+  const {
+    open: secretModalOpen,
+    busy: secretModalBusy,
+    error: secretModalError,
+    backup: secretModalBackup,
+    revealed: secretModalRevealed,
+  } = secretModalState;
   const [secretCopiedPhraseLabel, setSecretCopiedPhraseLabel] = useState(null);
   const [secretCopiedAddrLabel, setSecretCopiedAddrLabel] = useState(null);
   const [onboardingStep, setOnboardingStep] = useState(1);
-  const [onboardingUpdateIncluded, setOnboardingUpdateIncluded] = useState(false);
+  const [onboardingUpdateIncluded, setOnboardingUpdateIncluded] =
+    useState(false);
   const [onboardingBusy, setOnboardingBusy] = useState(false);
   const [onboardingError, setOnboardingError] = useState(null);
   const [onboardingSignerMode, setOnboardingSignerMode] = useState("");
@@ -2387,10 +2450,13 @@ function ControlView() {
 
   useEffect(() => {
     if (!onboardingOpen) return undefined;
-    const dialog = document.querySelector('[data-onboarding-step]');
-    const focusableElements = () => [...dialog.querySelectorAll(
-      'button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), a[href], [tabindex="0"]',
-    )].filter(element => element.getClientRects().length > 0);
+    const dialog = document.querySelector("[data-onboarding-step]");
+    const focusableElements = () =>
+      [
+        ...dialog.querySelectorAll(
+          'button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), a[href], [tabindex="0"]',
+        ),
+      ].filter((element) => element.getClientRects().length > 0);
     const onKeyDown = (event) => {
       if (event.key === "Escape") {
         event.preventDefault();
@@ -2400,8 +2466,13 @@ function ControlView() {
         const elements = focusableElements();
         const first = elements[0] || dialog;
         const last = elements[elements.length - 1] || dialog;
-        if (!dialog.contains(document.activeElement) || document.activeElement === dialog ||
-            (event.shiftKey ? document.activeElement === first : document.activeElement === last)) {
+        if (
+          !dialog.contains(document.activeElement) ||
+          document.activeElement === dialog ||
+          (event.shiftKey
+            ? document.activeElement === first
+            : document.activeElement === last)
+        ) {
           event.preventDefault();
           (event.shiftKey ? last : first).focus();
         }
@@ -2420,7 +2491,8 @@ function ControlView() {
   }, [onboardingOpen]);
 
   useEffect(() => {
-    if (lastEvent?.type !== "throttle_notice" || lastEvent.source !== "mcp") return;
+    if (lastEvent?.type !== "throttle_notice" || lastEvent.source !== "mcp")
+      return;
     const waitSeconds = Number(lastEvent.waitSeconds || 0) || null;
     const retryAt = Number(lastEvent.retryAt || 0) || null;
     const modalKey = [
@@ -2769,7 +2841,11 @@ function ControlView() {
     const selectedFromCatalog = selectedName
       ? onboardingCatalogByName.get(missionKey(selectedName))
       : null;
-    return resolveOnboardingMissionCard(selectedName, selectedFromCatalog, assigned);
+    return resolveOnboardingMissionCard(
+      selectedName,
+      selectedFromCatalog,
+      assigned,
+    );
   };
 
   const seedMissionSelectionState = (missions = [], targetMissions = []) => {
@@ -3238,7 +3314,12 @@ function ControlView() {
   };
 
   const continueOnboarding = async () => {
-    if (onboardingBusy || onboardingDataLoading || ![1, 2].includes(onboardingStep)) return;
+    if (
+      onboardingBusy ||
+      onboardingDataLoading ||
+      ![1, 2].includes(onboardingStep)
+    )
+      return;
     if (onboardingStep === 1) {
       const selectedMode = String(onboardingSignerMode || "").trim();
       if (!["app_wallet", "dapp", "manual"].includes(selectedMode)) {
@@ -3397,104 +3478,116 @@ function ControlView() {
 
   const updateOfferContent = updateModal ? (
     <>
-                <div className="text-sm text-slate-200">
-                  <div>
-                    Version{" "}
-                    <span className="font-semibold">
-                      {updateModal.latestVersion || "unknown"}
-                    </span>{" "}
-                    is available for download.
-                  </div>
-                  {!firstRunSetupComplete ? (
-                    <div className="mt-2">The latest version is required to continue. MCP changes can make older versions incompatible.</div>
-                  ) : null}
-                </div>
-                <div className="rounded-md border border-white/10 bg-black/20 p-2 text-xs text-slate-100 whitespace-pre-wrap">
-                  {Array.isArray(updateModal.notes) &&
-                  updateModal.notes.length > 0 ? (
-                    <ul className="list-disc pl-0 list-inside">
-                      {updateModal.notes.map((note, index) => (
-                        <li key={index}>{note}</li>
-                      ))}
-                    </ul>
-                  ) : (
-                    "No update notes :(."
-                  )}
-                </div>
+      <div className="text-sm text-slate-200">
+        <div>
+          Version{" "}
+          <span className="font-semibold">
+            {updateModal.latestVersion || "unknown"}
+          </span>{" "}
+          is available for download.
+        </div>
+        {!firstRunSetupComplete ? (
+          <div className="mt-2">
+            The latest version is required to continue. MCP changes can make
+            older versions incompatible.
+          </div>
+        ) : null}
+      </div>
+      <div className="rounded-md border border-white/10 bg-black/20 p-2 text-xs text-slate-100 whitespace-pre-wrap">
+        {Array.isArray(updateModal.notes) && updateModal.notes.length > 0 ? (
+          <ul className="list-disc pl-0 list-inside">
+            {updateModal.notes.map((note, index) => (
+              <li key={index}>{note}</li>
+            ))}
+          </ul>
+        ) : (
+          "No update notes :(."
+        )}
+      </div>
 
-                {updateInstalling ? (
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between gap-2 text-xs text-slate-200">
-                      <span role="status">
-                        {updateInstallStatus.phase === "downloading"
-                          ? "Downloading update…"
-                          : updateInstallStatus.phase === "verifying"
-                            ? "Verifying download…"
-                            : updateInstallStatus.phase === "preparing"
-                              ? "Preparing update…"
-                              : "Restarting…"}
-                      </span>
-                      <span>
-                        {updateInstallStatus.phase === "downloading"
-                          ? updateDownloadPercent
-                          : 100}
-                        %
-                      </span>
-                    </div>
-                    <div
-                      role="progressbar"
-                      aria-label="Update download"
-                      aria-valuemin={0}
-                      aria-valuemax={100}
-                      aria-valuenow={
-                        updateInstallStatus.phase === "downloading"
-                          ? updateDownloadPercent
-                          : 100
-                      }
-                      className="h-2 overflow-hidden rounded-full bg-white/10"
-                    >
-                      <div
-                        className="h-full rounded-full bg-gradient-to-r from-emerald-300 to-fuchsia-300 transition-[width] duration-200"
-                        style={{
-                          width: `${updateInstallStatus.phase === "downloading" ? updateDownloadPercent : 100}%`,
-                        }}
-                      />
-                    </div>
-                  </div>
-                ) : null}
-                {updateInstallStatus?.phase === "error" ? (
-                  <div role="alert" className="rounded-md border border-error/40 bg-error/10 p-3 text-sm">
-                    {updateInstallStatus.error || "Unable to install the update."} {firstRunSetupComplete ? "You can retry or continue for now." : "Update required before setup can continue. Please retry."}
-                  </div>
-                ) : null}
-                <div className="flex items-center justify-end gap-2">
-                  {firstRunSetupComplete ? <button
-                    type="button"
-                    className="btn btn-clear btn-sm"
-                    disabled={updateInstalling}
-                    onClick={continueAfterUpdateOffer}
-                  >
-                    Cancel
-                  </button> : null}
-                  <button
-                    type="button"
-                    className="btn btn-gradient btn-sm text-shadow-sm text-shadow-black/40"
-                    disabled={updateInstalling}
-                    onClick={installOfferedUpdate}
-                  >
-                    {updateInstallStatus?.phase === "downloading"
-                      ? `Downloading… ${updateInstallStatus.percent || 0}%`
-                      : updateInstallStatus?.phase === "verifying"
-                        ? "Verifying…"
-                        : updateInstallStatus?.phase === "preparing"
-                          ? "Preparing…"
-                          : updateInstallStatus?.phase === "restarting"
-                            ? "Restarting…"
-                            : updateInstallStatus?.phase === "error"
-                              ? "Retry update"
-                              : firstRunSetupComplete ? "Download and restart" : "Update now"}
-                  </button>
-                </div>
+      {updateInstalling ? (
+        <div className="space-y-2">
+          <div className="flex items-center justify-between gap-2 text-xs text-slate-200">
+            <span role="status">
+              {updateInstallStatus.phase === "downloading"
+                ? "Downloading update…"
+                : updateInstallStatus.phase === "verifying"
+                  ? "Verifying download…"
+                  : updateInstallStatus.phase === "preparing"
+                    ? "Preparing update…"
+                    : "Restarting…"}
+            </span>
+            <span>
+              {updateInstallStatus.phase === "downloading"
+                ? updateDownloadPercent
+                : 100}
+              %
+            </span>
+          </div>
+          <div
+            role="progressbar"
+            aria-label="Update download"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={
+              updateInstallStatus.phase === "downloading"
+                ? updateDownloadPercent
+                : 100
+            }
+            className="h-2 overflow-hidden rounded-full bg-white/10"
+          >
+            <div
+              className="h-full rounded-full bg-gradient-to-r from-emerald-300 to-fuchsia-300 transition-[width] duration-200"
+              style={{
+                width: `${updateInstallStatus.phase === "downloading" ? updateDownloadPercent : 100}%`,
+              }}
+            />
+          </div>
+        </div>
+      ) : null}
+      {updateInstallStatus?.phase === "error" ? (
+        <div
+          role="alert"
+          className="rounded-md border border-error/40 bg-error/10 p-3 text-sm"
+        >
+          {updateInstallStatus.error || "Unable to install the update."}{" "}
+          {firstRunSetupComplete
+            ? "You can retry or continue for now."
+            : "Update required before setup can continue. Please retry."}
+        </div>
+      ) : null}
+      <div className="flex items-center justify-end gap-2">
+        {firstRunSetupComplete ? (
+          <button
+            type="button"
+            className="btn btn-clear btn-sm"
+            disabled={updateInstalling}
+            onClick={continueAfterUpdateOffer}
+          >
+            Cancel
+          </button>
+        ) : null}
+        <button
+          type="button"
+          className="btn btn-gradient btn-sm text-shadow-sm text-shadow-black/40"
+          disabled={updateInstalling}
+          onClick={installOfferedUpdate}
+        >
+          {updateInstallStatus?.phase === "downloading"
+            ? `Downloading… ${updateInstallStatus.percent || 0}%`
+            : updateInstallStatus?.phase === "verifying"
+              ? "Verifying…"
+              : updateInstallStatus?.phase === "preparing"
+                ? "Preparing…"
+                : updateInstallStatus?.phase === "restarting"
+                  ? "Restarting…"
+                  : updateInstallStatus?.phase === "error"
+                    ? "Retry update"
+                    : firstRunSetupComplete
+                      ? "Download and restart"
+                      : "Update now"}
+        </button>
+      </div>
     </>
   ) : null;
 
@@ -3614,7 +3707,11 @@ function ControlView() {
                   </div>
                   <div className="flex items-center gap-2">
                     <div className="text-xs text-slate-400">
-                      Step {onboardingStep === "update" ? 1 : onboardingStep + (onboardingUpdateIncluded ? 1 : 0)}/{onboardingUpdateIncluded ? 3 : 2}
+                      Step{" "}
+                      {onboardingStep === "update"
+                        ? 1
+                        : onboardingStep + (onboardingUpdateIncluded ? 1 : 0)}
+                      /{onboardingUpdateIncluded ? 3 : 2}
                     </div>
                   </div>
                 </div>
@@ -3628,16 +3725,31 @@ function ControlView() {
                   }}
                 >
                   <div ref={onboardingBodyRef} className="space-y-3">
-                    {onboardingStep === "update" ? updateModal ? updateOfferContent : (
-                      <div className="space-y-3">
-                        <div className="text-sm text-slate-200">The latest version is required to continue. MCP changes can make older versions incompatible.</div>
-                        {startupUpdateCheckError ? <div role="alert" className="text-sm text-error">{startupUpdateCheckError}</div> : null}
-                        <div className="flex justify-end">
-                          <button className="btn btn-gradient btn-sm" disabled={updateCheckBusy} onClick={retryStartupUpdateCheck}>
-                            {updateCheckBusy ? "Checking…" : "Retry check"}
-                          </button>
+                    {onboardingStep === "update" ? (
+                      updateModal ? (
+                        updateOfferContent
+                      ) : (
+                        <div className="space-y-3">
+                          <div className="text-sm text-slate-200">
+                            The latest version is required to continue. MCP
+                            changes can make older versions incompatible.
+                          </div>
+                          {startupUpdateCheckError ? (
+                            <div role="alert" className="text-sm text-error">
+                              {startupUpdateCheckError}
+                            </div>
+                          ) : null}
+                          <div className="flex justify-end">
+                            <button
+                              className="btn btn-gradient btn-sm"
+                              disabled={updateCheckBusy}
+                              onClick={retryStartupUpdateCheck}
+                            >
+                              {updateCheckBusy ? "Checking…" : "Retry check"}
+                            </button>
+                          </div>
                         </div>
-                      </div>
+                      )
                     ) : null}
                     {onboardingStep === 1 ? (
                       <div className="space-y-4">
@@ -3714,18 +3826,28 @@ function ControlView() {
                                 {value === "app_wallet" &&
                                 onboardingSignerMode === "app_wallet" ? (
                                   <div className="rounded-md border border-white/10 bg-black/30 p-3 space-y-0.5 mt-2">
-                                    <div className="flex items-center gap-2 text-xs text-slate-300" role={onboardingAppWalletBusy ? "status" : undefined}>
+                                    <div
+                                      className="flex items-center gap-2 text-xs text-slate-300"
+                                      role={
+                                        onboardingAppWalletBusy
+                                          ? "status"
+                                          : undefined
+                                      }
+                                    >
                                       {onboardingAppWalletBusy ? (
-                                        <span className="loading loading-spinner loading-sm shrink-0" aria-hidden="true" />
+                                        <span
+                                          className="loading loading-spinner loading-sm shrink-0"
+                                          aria-hidden="true"
+                                        />
                                       ) : null}
                                       <span>
-                                      {onboardingAppWalletBusy
-                                        ? walletGenerationSlow
-                                          ? "Taking longer than expected. Still checking wallet creation; please keep the app open."
-                                          : "Creating and securely storing your wallet. Please keep the app open; this can take up to a minute."
-                                        : onboardingAppWalletAddress
-                                          ? "Wallet Address"
-                                          : "Wallet will be generated when you continue."}
+                                        {onboardingAppWalletBusy
+                                          ? walletGenerationSlow
+                                            ? "Taking longer than expected. Still checking wallet creation; please keep the app open."
+                                            : "Creating and securely storing your wallet. Please keep the app open; this can take up to a minute."
+                                          : onboardingAppWalletAddress
+                                            ? "Wallet Address"
+                                            : "Wallet will be generated when you continue."}
                                       </span>
                                     </div>
                                     {onboardingAppWalletAddress ? (
@@ -3788,7 +3910,10 @@ function ControlView() {
                               !String(onboardingSignerMode || "").trim()
                             }
                           >
-                            {onboardingSignerMode === "app_wallet" && onboardingAppWalletError ? "Retry" : "Continue"}
+                            {onboardingSignerMode === "app_wallet" &&
+                            onboardingAppWalletError
+                              ? "Retry"
+                              : "Continue"}
                           </button>
                         </div>
                       </div>
@@ -3798,8 +3923,7 @@ function ControlView() {
                         <div className="rounded-md border border-warning/30 bg-warning/10 p-3 text-sm text-slate-200 flex gap-2">
                           <div>
                             First-time setup syncs your missions from PBP. Check
-                            they’re correct, or change them on
-                            the{" "}
+                            they’re correct, or change them on the{" "}
                             <a
                               href="https://www.pixelbypixel.studio"
                               className="text-accent underline"
@@ -3852,54 +3976,62 @@ function ControlView() {
                                     ? "opacity-70"
                                     : ""
                                 }`}
-
                               >
-                                <div className={`card-mission__header transition-all ${!slotAutomationEnabled ? "card-mission__header--disabled" : ""}`}>
+                                <div
+                                  className={`card-mission__header transition-all ${!slotAutomationEnabled ? "card-mission__header--disabled" : ""}`}
+                                >
                                   <MissionSlotImage
                                     src={loadingSlot ? null : imgSrc}
-                                    hasAssignedNft={Boolean(selectedCard?.hasAssignedNft)}
-                                    missionActive={Boolean(selectedCard?.hasAssignedNft && selectedCard?.isActive)}
+                                    hasAssignedNft={Boolean(
+                                      selectedCard?.hasAssignedNft,
+                                    )}
+                                    missionActive={Boolean(
+                                      selectedCard?.hasAssignedNft &&
+                                      selectedCard?.isActive,
+                                    )}
                                     loading={loadingSlot}
                                   />
-                                <div className="relative z-20 flex items-start gap-2 justify-between">
-                                  <div
-                                    onClick={(event) => event.stopPropagation()}
-                                    onMouseDown={(event) =>
-                                      event.stopPropagation()
-                                    }
-                                    onKeyDown={(event) =>
-                                      event.stopPropagation()
-                                    }
-                                  >
-                                    <ToggleSwitch
-                                      switchID={`onboarding-slot-action-enabled-${slot}`}
-                                      checked={slotAutomationEnabled}
-                                      title=""
-                                      styling="hidden"
-                                      size="tiny"
-                                      tinyStateText
-                                      switchWrapClassName="slot-card-toggle-muted"
-                                      disabled={onboardingBusy}
-                                      onChange={(event) =>
-                                        setOnboardingMissionActionEnabledBySlot(
-                                          (current) => ({
-                                            ...current,
-                                            [String(slot)]:
-                                              event.target.checked,
-                                          }),
-                                        )
+                                  <div className="relative z-20 flex items-start gap-2 justify-between">
+                                    <div
+                                      onClick={(event) =>
+                                        event.stopPropagation()
                                       }
-                                    />
-                                  </div>
-                                  <div className="card-mission__status flex flex-col items-end gap-1">
-                                    <div className="card-mission__level z-10 text-[11px] flex items-center rounded-[4px] justify-center px-1.5 h-6 whitespace-nowrap opacity-100 self-end shadow-md shadow-black/20 bg-amber-500 border-orange-200 border-2 text-white text-shadow-amber-600 text-shadow-md">
-                                      {selectedCard?.currentLevel !== null &&
-                                      selectedCard?.currentLevel !== undefined
-                                        ? `Level ${selectedCard.currentLevel}`
-                                        : "Level —"}
+                                      onMouseDown={(event) =>
+                                        event.stopPropagation()
+                                      }
+                                      onKeyDown={(event) =>
+                                        event.stopPropagation()
+                                      }
+                                    >
+                                      <ToggleSwitch
+                                        switchID={`onboarding-slot-action-enabled-${slot}`}
+                                        checked={slotAutomationEnabled}
+                                        title=""
+                                        styling="hidden"
+                                        size="tiny"
+                                        tinyStateText
+                                        switchWrapClassName="slot-card-toggle-muted"
+                                        disabled={onboardingBusy}
+                                        onChange={(event) =>
+                                          setOnboardingMissionActionEnabledBySlot(
+                                            (current) => ({
+                                              ...current,
+                                              [String(slot)]:
+                                                event.target.checked,
+                                            }),
+                                          )
+                                        }
+                                      />
+                                    </div>
+                                    <div className="card-mission__status flex flex-col items-end gap-1">
+                                      <div className="card-mission__level z-10 text-[11px] flex items-center rounded-[4px] justify-center px-1.5 h-6 whitespace-nowrap opacity-100 self-end shadow-md shadow-black/20 bg-amber-500 border-orange-200 border-2 text-white text-shadow-amber-600 text-shadow-md">
+                                        {selectedCard?.currentLevel !== null &&
+                                        selectedCard?.currentLevel !== undefined
+                                          ? `Level ${selectedCard.currentLevel}`
+                                          : "Level —"}
+                                      </div>
                                     </div>
                                   </div>
-                                </div>
                                 </div>
                                 <div className="card-mission__meta">
                                   <div className="card-mission__title mt-0.5">
@@ -3964,7 +4096,6 @@ function ControlView() {
                         {onboardingError}
                       </div>
                     ) : null}
-
                   </div>
                 </div>
               </div>
@@ -4015,7 +4146,9 @@ function ControlView() {
                       <button
                         type="button"
                         className="btn btn-clear btn-xs"
-                        onClick={() => void secretModalController.toggleReveal()}
+                        onClick={() =>
+                          void secretModalController.toggleReveal()
+                        }
                         disabled={secretModalBusy}
                         title={secretModalRevealed ? "Hide" : "Reveal"}
                       >
@@ -4105,7 +4238,8 @@ function ControlView() {
               role="dialog"
               aria-modal="true"
               onMouseDown={(e) => {
-                if (e.target === e.currentTarget && !createWalletBusy) setCreateWalletOpen(false);
+                if (e.target === e.currentTarget && !createWalletBusy)
+                  setCreateWalletOpen(false);
               }}
             >
               <div
@@ -4294,9 +4428,16 @@ function ControlView() {
                       onClick={() => void runCreateWallet()}
                     >
                       {createWalletBusy ? (
-                        <span className="loading loading-spinner loading-sm" aria-hidden="true" />
+                        <span
+                          className="loading loading-spinner loading-sm"
+                          aria-hidden="true"
+                        />
                       ) : null}
-                      {createWalletBusy ? "Generating..." : createWalletError ? "Retry" : "Generate Wallet"}
+                      {createWalletBusy
+                        ? "Generating..."
+                        : createWalletError
+                          ? "Retry"
+                          : "Generate Wallet"}
                     </button>
                   ) : (
                     <button
@@ -4875,7 +5016,7 @@ function ControlView() {
                               />
                             </div>
                             <span className="flex flex-col gap-0 text-sm">
-                              Custom mission reset level
+                              Mission reset level
                               <span className="text-[11px] text-slate-400 leading-tight font-normal  ">
                                 {isMissionMode
                                   ? "Will reset missions at this level"
@@ -5960,12 +6101,14 @@ function ControlView() {
                     </div>
                     <div className="space-y-1 text-xs text-slate-200 mt-2">
                       <div className="text-xs text-slate-300">
-                        Start: {formatCompetitionDateTime(
+                        Start:{" "}
+                        {formatCompetitionDateTime(
                           competitionNotificationModal.start || "Unknown",
                         )}
                       </div>
                       <div className="text-xs text-slate-300">
-                        End: {formatCompetitionDateTime(
+                        End:{" "}
+                        {formatCompetitionDateTime(
                           competitionNotificationModal.end || "Unknown",
                         )}
                       </div>
