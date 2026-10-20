@@ -431,7 +431,9 @@ function ControlView() {
   const [configuredTargetMissions, setConfiguredTargetMissions] = useState([]);
   const [autoUpdateCheckEnabled, setAutoUpdateCheckEnabledState] =
     useState(true);
-  // Stay blocked until config has loaded and setup has successfully finished.
+  // Check for updates before opening setup on a fresh install.
+  const [startupConfigLoaded, setStartupConfigLoaded] = useState(false);
+  const [startupUpdateCheckError, setStartupUpdateCheckError] = useState(null);
   const [firstRunSetupComplete, setFirstRunSetupComplete] = useState(false);
   const [onboardingOpen, setOnboardingOpen] = useState(false);
   const [lastUpdateCheckAt, setLastUpdateCheckAt] = useState(null);
@@ -992,8 +994,8 @@ function ControlView() {
       setFirstRunSetupComplete(config.firstRunOnboardingCompleted === true);
       if (config.firstRunOnboardingCompleted !== true) {
         setOnboardingPreviewOnly(false);
-        setOnboardingOpen(true);
       }
+      setStartupConfigLoaded(true);
     });
     return () => {
       cancelled = true;
@@ -1373,14 +1375,23 @@ function ControlView() {
     });
   };
   const runUpdateCheck = useCallback(
-    async ({ manual = false } = {}) => {
-      if (!firstRunSetupComplete || onboardingOpen) return null;
+    async ({ manual = false, startup = false } = {}) => {
+      if (!startupConfigLoaded || (onboardingOpen && !startup)) return null;
+      if (!startup && !firstRunSetupComplete) return null;
       if (!bridge?.checkForUpdates || updateCheckBusyRef.current) return null;
       updateCheckBusyRef.current = true;
       setUpdateCheckBusy(true);
       if (manual) setUpdateCheckMessage(null);
+      let timeout;
       try {
-        const result = await bridge.checkForUpdates({ manual });
+        // Also bound the IPC wait so setup cannot be stranded by a stalled
+        // main-process response. Ignore any offer that arrives after timeout.
+        const result = await Promise.race([
+          bridge.checkForUpdates({ manual }),
+          new Promise((resolve) => {
+            timeout = setTimeout(() => resolve({ ok: false, updateAvailable: false, reason: "timeout" }), 8000);
+          }),
+        ]);
         if (result?.skipped !== true) {
           const checkedAt = Date.now();
           lastUpdateCheckAtRef.current = checkedAt;
@@ -1398,6 +1409,11 @@ function ControlView() {
                   .map((note) => note.trim())
                   .filter(Boolean),
           });
+          if (startup && !firstRunSetupComplete) {
+            setOnboardingUpdateIncluded(true);
+            setOnboardingStep("update");
+            setOnboardingOpen(true);
+          }
           if (manual) setUpdateCheckMessage("Update available.");
           return result;
         }
@@ -1415,23 +1431,45 @@ function ControlView() {
         }
         return null;
       } finally {
+        clearTimeout(timeout);
         updateCheckBusyRef.current = false;
         setUpdateCheckBusy(false);
       }
     },
-    [bridge, firstRunSetupComplete, onboardingOpen],
+    [bridge, startupConfigLoaded, firstRunSetupComplete, onboardingOpen],
   );
 
+  const finishStartupUpdateCheck = useCallback((result) => {
+    if (firstRunSetupComplete) return;
+    if (result?.ok && !result.updateAvailable) {
+      setStartupUpdateCheckError(null);
+      setOnboardingUpdateIncluded(false);
+      setOnboardingStep(1);
+    } else {
+      setOnboardingStep("update");
+      setOnboardingUpdateIncluded(true);
+      setStartupUpdateCheckError(result?.updateAvailable ? null :
+        "Unable to verify the latest version. Check your connection and try again.");
+    }
+    setOnboardingOpen(true);
+  }, [firstRunSetupComplete]);
+
+  const retryStartupUpdateCheck = async () => {
+    setStartupUpdateCheckError(null);
+    finishStartupUpdateCheck(await runUpdateCheck({ startup: true }));
+  };
+
   useEffect(() => {
-    if (!firstRunSetupComplete || onboardingOpen) return;
+    if (!startupConfigLoaded || onboardingOpen) return;
     if (startupUpdateCheckRequestedRef.current) return;
-    if (!bridge?.checkForUpdates) return;
     const timer = setTimeout(() => {
       startupUpdateCheckRequestedRef.current = true;
-      void runUpdateCheck({ manual: false });
+      void runUpdateCheck({ startup: true }).then((result) => {
+        finishStartupUpdateCheck(result);
+      });
     }, 300);
     return () => clearTimeout(timer);
-  }, [bridge, firstRunSetupComplete, onboardingOpen, runUpdateCheck]);
+  }, [startupConfigLoaded, firstRunSetupComplete, onboardingOpen, runUpdateCheck, finishStartupUpdateCheck]);
 
   useEffect(() => bridge?.onUpdateStatus?.(setUpdateInstallStatus), [bridge]);
   useEffect(() => {
@@ -1439,7 +1477,7 @@ function ControlView() {
   }, [bridge]);
 
   const installOfferedUpdate = async () => {
-    if (!firstRunSetupComplete || onboardingOpen || updateInstalling) return;
+    if (!startupConfigLoaded || (onboardingOpen && onboardingStep !== "update") || updateInstalling || !updateModal) return;
     setUpdateInstallStatus({ phase: "downloading", percent: 0 });
     try {
       const result = await bridge.installUpdate(updateModal.latestVersion);
@@ -1447,8 +1485,13 @@ function ControlView() {
         throw new Error(result?.error || "Unable to update the app.");
     } catch (error) {
       setUpdateInstallStatus({ phase: "error", error: error.message });
-      window.alert(error.message);
     }
+  };
+
+  const continueAfterUpdateOffer = () => {
+    if (updateInstalling || !firstRunSetupComplete) return;
+    setUpdateModal(null);
+    setUpdateInstallStatus(null);
   };
 
   useEffect(() => {
@@ -1870,6 +1913,7 @@ function ControlView() {
   const [secretCopiedPhraseLabel, setSecretCopiedPhraseLabel] = useState(null);
   const [secretCopiedAddrLabel, setSecretCopiedAddrLabel] = useState(null);
   const [onboardingStep, setOnboardingStep] = useState(1);
+  const [onboardingUpdateIncluded, setOnboardingUpdateIncluded] = useState(false);
   const [onboardingBusy, setOnboardingBusy] = useState(false);
   const [onboardingError, setOnboardingError] = useState(null);
   const [onboardingSignerMode, setOnboardingSignerMode] = useState("");
@@ -2350,11 +2394,15 @@ function ControlView() {
     const onKeyDown = (event) => {
       if (event.key !== "Escape") return;
       event.preventDefault();
-      setOnboardingOpen(false);
+      if (onboardingStep === "update") {
+        return;
+      } else {
+        setOnboardingOpen(false);
+      }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [onboardingOpen]);
+  }, [onboardingOpen, onboardingStep, updateInstalling]);
 
   useEffect(() => {
     if (lastEvent?.type !== "throttle_notice" || lastEvent.source !== "mcp") return;
@@ -2416,6 +2464,8 @@ function ControlView() {
     onboardingBusy,
     onboardingDataLoading,
     onboardingError,
+    updateInstallStatus?.phase,
+    startupUpdateCheckError,
     onboardingMissionCatalog.length,
     onboardingMissions.length,
   ]);
@@ -3396,6 +3446,7 @@ function ControlView() {
   };
 
   const dismissOnboarding = async () => {
+    if (onboardingStep === "update") return;
     try {
       await applyConfigPatch({ firstRunOnboardingCompleted: true });
       setFirstRunSetupComplete(true);
@@ -3404,6 +3455,109 @@ function ControlView() {
       setOnboardingError(String(error?.message || error));
     }
   };
+
+  const updateOfferContent = updateModal ? (
+    <>
+                <div className="text-sm text-slate-200">
+                  <div>
+                    Version{" "}
+                    <span className="font-semibold">
+                      {updateModal.latestVersion || "unknown"}
+                    </span>{" "}
+                    is available for download.
+                  </div>
+                  {!firstRunSetupComplete ? (
+                    <div className="mt-2">The latest version is required to continue. MCP changes can make older versions incompatible.</div>
+                  ) : null}
+                </div>
+                <div className="rounded-md border border-white/10 bg-black/20 p-2 text-xs text-slate-100 whitespace-pre-wrap">
+                  {Array.isArray(updateModal.notes) &&
+                  updateModal.notes.length > 0 ? (
+                    <ul className="list-disc pl-0 list-inside">
+                      {updateModal.notes.map((note, index) => (
+                        <li key={index}>{note}</li>
+                      ))}
+                    </ul>
+                  ) : (
+                    "No update notes :(."
+                  )}
+                </div>
+
+                {updateInstalling ? (
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between gap-2 text-xs text-slate-200">
+                      <span role="status">
+                        {updateInstallStatus.phase === "downloading"
+                          ? "Downloading update…"
+                          : updateInstallStatus.phase === "verifying"
+                            ? "Verifying download…"
+                            : updateInstallStatus.phase === "preparing"
+                              ? "Preparing update…"
+                              : "Restarting…"}
+                      </span>
+                      <span>
+                        {updateInstallStatus.phase === "downloading"
+                          ? updateDownloadPercent
+                          : 100}
+                        %
+                      </span>
+                    </div>
+                    <div
+                      role="progressbar"
+                      aria-label="Update download"
+                      aria-valuemin={0}
+                      aria-valuemax={100}
+                      aria-valuenow={
+                        updateInstallStatus.phase === "downloading"
+                          ? updateDownloadPercent
+                          : 100
+                      }
+                      className="h-2 overflow-hidden rounded-full bg-white/10"
+                    >
+                      <div
+                        className="h-full rounded-full bg-gradient-to-r from-emerald-300 to-fuchsia-300 transition-[width] duration-200"
+                        style={{
+                          width: `${updateInstallStatus.phase === "downloading" ? updateDownloadPercent : 100}%`,
+                        }}
+                      />
+                    </div>
+                  </div>
+                ) : null}
+                {updateInstallStatus?.phase === "error" ? (
+                  <div role="alert" className="rounded-md border border-error/40 bg-error/10 p-3 text-sm">
+                    {updateInstallStatus.error || "Unable to install the update."} {firstRunSetupComplete ? "You can retry or continue for now." : "Update required before setup can continue. Please retry."}
+                  </div>
+                ) : null}
+                <div className="flex items-center justify-end gap-2">
+                  {firstRunSetupComplete ? <button
+                    type="button"
+                    className="btn btn-clear btn-sm"
+                    disabled={updateInstalling}
+                    onClick={continueAfterUpdateOffer}
+                  >
+                    Cancel
+                  </button> : null}
+                  <button
+                    type="button"
+                    className="btn btn-gradient btn-sm text-shadow-sm text-shadow-black/40"
+                    disabled={updateInstalling}
+                    onClick={installOfferedUpdate}
+                  >
+                    {updateInstallStatus?.phase === "downloading"
+                      ? `Downloading… ${updateInstallStatus.percent || 0}%`
+                      : updateInstallStatus?.phase === "verifying"
+                        ? "Verifying…"
+                        : updateInstallStatus?.phase === "preparing"
+                          ? "Preparing…"
+                          : updateInstallStatus?.phase === "restarting"
+                            ? "Restarting…"
+                            : updateInstallStatus?.phase === "error"
+                              ? "Retry update"
+                              : firstRunSetupComplete ? "Download and restart" : "Update now"}
+                  </button>
+                </div>
+    </>
+  ) : null;
 
   return (
     <main className="shell flex flex-col">
@@ -3496,6 +3650,7 @@ function ControlView() {
           ) : null}
           {onboardingOpen ? (
             <div
+              data-onboarding-step={onboardingStep}
               className="fixed inset-0 z-60 grid place-items-center bg-black/50 p-4"
               role="dialog"
               aria-modal="true"
@@ -3511,22 +3666,25 @@ function ControlView() {
               >
                 <div className="flex items-center justify-between gap-3">
                   <div className="text-lg font-semibold">
-                    {onboardingStep == 2
-                      ? "Select your Target Missions"
-                      : "Select your Funding Wallet/Source"}
+                    {onboardingStep === "update"
+                      ? "Update required"
+                      : onboardingStep === 2
+                        ? "Select your Target Missions"
+                        : "Select your Funding Wallet/Source"}
                   </div>
                   <div className="flex items-center gap-2">
                     <div className="text-xs text-slate-400">
-                      Step {onboardingStep}/2
+                      Step {onboardingStep === "update" ? 1 : onboardingStep + (onboardingUpdateIncluded ? 1 : 0)}/{onboardingUpdateIncluded ? 3 : 2}
                     </div>
-                    <button
+                    {onboardingStep !== "update" ? <button
                       type="button"
                       className="btn btn-clear btn-sm "
                       onClick={() => void dismissOnboarding()}
+                      disabled={onboardingStep === "update" && updateInstalling}
                       title="Close"
                     >
                       ✕
-                    </button>
+                    </button> : null}
                   </div>
                 </div>
                 <div
@@ -3539,6 +3697,17 @@ function ControlView() {
                   }}
                 >
                   <div ref={onboardingBodyRef} className="space-y-3">
+                    {onboardingStep === "update" ? updateModal ? updateOfferContent : (
+                      <div className="space-y-3">
+                        <div className="text-sm text-slate-200">The latest version is required to continue. MCP changes can make older versions incompatible.</div>
+                        {startupUpdateCheckError ? <div role="alert" className="text-sm text-error">{startupUpdateCheckError}</div> : null}
+                        <div className="flex justify-end">
+                          <button className="btn btn-gradient btn-sm" disabled={updateCheckBusy} onClick={retryStartupUpdateCheck}>
+                            {updateCheckBusy ? "Checking…" : "Retry check"}
+                          </button>
+                        </div>
+                      </div>
+                    ) : null}
                     {onboardingStep === 1 ? (
                       <div className="space-y-4">
                         <div className="text-sm text-slate-300">
@@ -6016,15 +6185,14 @@ function ControlView() {
               </div>
             </div>
           ) : null}
-          {updateModal ? (
+          {updateModal && firstRunSetupComplete ? (
             <div
               className="fixed inset-0 z-60 grid place-items-center bg-black/50 p-4"
               role="dialog"
               aria-modal="true"
               onMouseDown={(e) => {
                 if (e.target === e.currentTarget && !updateInstalling) {
-                  setUpdateModal(null);
-                  setUpdateInstallStatus(null);
+                  continueAfterUpdateOffer();
                 }
               }}
             >
@@ -6041,97 +6209,7 @@ function ControlView() {
                   <div className="text-lg font-semibold">Update Available</div>
                 </div>
 
-                <div className="text-sm text-slate-200">
-                  <div>
-                    Version{" "}
-                    <span className="font-semibold">
-                      {updateModal.latestVersion || "unknown"}
-                    </span>{" "}
-                    is available for download.
-                  </div>
-                </div>
-                <div className="rounded-md border border-white/10 bg-black/20 p-2 text-xs text-slate-100 whitespace-pre-wrap">
-                  {Array.isArray(updateModal.notes) &&
-                  updateModal.notes.length > 0 ? (
-                    <ul className="list-disc pl-0 list-inside">
-                      {updateModal.notes.map((note, index) => (
-                        <li key={index}>{note}</li>
-                      ))}
-                    </ul>
-                  ) : (
-                    "No update notes :(."
-                  )}
-                </div>
-
-                {updateInstalling ? (
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between gap-2 text-xs text-slate-200">
-                      <span role="status">
-                        {updateInstallStatus.phase === "downloading"
-                          ? "Downloading update…"
-                          : updateInstallStatus.phase === "verifying"
-                            ? "Verifying download…"
-                            : updateInstallStatus.phase === "preparing"
-                              ? "Preparing update…"
-                              : "Restarting…"}
-                      </span>
-                      <span>
-                        {updateInstallStatus.phase === "downloading"
-                          ? updateDownloadPercent
-                          : 100}
-                        %
-                      </span>
-                    </div>
-                    <div
-                      role="progressbar"
-                      aria-label="Update download"
-                      aria-valuemin={0}
-                      aria-valuemax={100}
-                      aria-valuenow={
-                        updateInstallStatus.phase === "downloading"
-                          ? updateDownloadPercent
-                          : 100
-                      }
-                      className="h-2 overflow-hidden rounded-full bg-white/10"
-                    >
-                      <div
-                        className="h-full rounded-full bg-gradient-to-r from-emerald-300 to-fuchsia-300 transition-[width] duration-200"
-                        style={{
-                          width: `${updateInstallStatus.phase === "downloading" ? updateDownloadPercent : 100}%`,
-                        }}
-                      />
-                    </div>
-                  </div>
-                ) : null}
-                <div className="flex items-center justify-end gap-2">
-                  <button
-                    type="button"
-                    className="btn btn-clear btn-sm"
-                    disabled={updateInstalling}
-                    onClick={() => {
-                      setUpdateModal(null);
-                      setUpdateInstallStatus(null);
-                    }}
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn-gradient btn-sm text-shadow-sm text-shadow-black/40"
-                    disabled={updateInstalling}
-                    onClick={installOfferedUpdate}
-                  >
-                    {updateInstallStatus?.phase === "downloading"
-                      ? `Downloading… ${updateInstallStatus.percent || 0}%`
-                      : updateInstallStatus?.phase === "verifying"
-                        ? "Verifying…"
-                        : updateInstallStatus?.phase === "preparing"
-                          ? "Preparing…"
-                          : updateInstallStatus?.phase === "restarting"
-                            ? "Restarting…"
-                            : "Download and restart"}
-                  </button>
-                </div>
+                {updateOfferContent}
               </div>
             </div>
           ) : null}

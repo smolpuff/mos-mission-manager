@@ -133,6 +133,7 @@ jobs:
         run: |
           npm test
           npm run test:desktop-security
+          npm run test:setup-updates
           npm run test:mac-update -- --auto
 
       - name: Upload macOS release files
@@ -164,10 +165,10 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           pattern: version-metadata-*
-          path: update-metadata
+          path: ${{ runner.temp }}/update-metadata
           merge-multiple: true
       - name: Require all supported platform artifacts
-        run: node electron/update-tools/create-version-metadata.js merge version.json update-metadata/version-metadata-arm64.json update-metadata/version-metadata-x64.json update-metadata/version-metadata-win32-x64.json
+        run: node electron/update-tools/create-version-metadata.js merge version.json "${{ runner.temp }}/update-metadata/version-metadata-arm64.json" "${{ runner.temp }}/update-metadata/version-metadata-x64.json" "${{ runner.temp }}/update-metadata/version-metadata-win32-x64.json"
       - name: Verify uploaded assets and publish the complete release
         uses: actions/github-script@v7
         with:

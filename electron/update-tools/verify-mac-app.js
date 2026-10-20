@@ -177,7 +177,7 @@ app.on("ready", () => fs.appendFileSync(${JSON.stringify(launches)}, JSON.string
     await pack(candidate, nextVersion);
     const oldHash = await hash(path.join(installed, archiveRelative)), nextHash = await hash(path.join(candidate, archiveRelative));
     await fs.mkdir(settings, { recursive: true });
-    await fs.writeFile(path.join(settings, "config.json"), JSON.stringify({ autoUpdateCheckEnabled: true, appUpdateVerification: token }));
+    await fs.writeFile(path.join(settings, "config.json"), JSON.stringify({ firstRunOnboardingCompleted: true, autoUpdateCheckEnabled: true, appUpdateVerification: token }));
     console.log(`Packing the actual ${nextVersion} application ZIP…`);
     await run("/usr/bin/ditto", ["-c", "-k", "--keepParent", candidate, archive], { timeout: 120000 });
     const expected = { url: releaseAssetUrl(nextVersion, path.basename(archive)), size: (await fs.stat(archive)).size,

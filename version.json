@@ -3,7 +3,10 @@
   "downloadUrl": "https://github.com/smolpuff/mos-mission-manager/releases/latest",
   "notes": [
     "Faster assigning when claim is out of normal watch loop",
-    "Fixed season stats dates just for momo :D"
+    "Fixed season stats dates. lol",
+    "First first-run + update available bug",
+    "Fixed trying to use rental when reaching end of paged nft listing instead of looping through all pages",
+    "Require the latest app before first-time setup to stay compatible with MCP changes."
   ],
   "schemaVersion": 1,
   "artifacts": {

@@ -5999,11 +5999,7 @@ app.whenReady().then(async () => {
   handleTrustedIpc("updates:check", async (_event, payload = {}) => {
     const config = readDesktopConfig();
     const manual = payload?.manual === true;
-    if (config.firstRunOnboardingCompleted !== true) {
-      return { ok: true, skipped: true, reason: "setup_incomplete",
-        currentVersion: app.getVersion(), updateAvailable: false };
-    }
-    if (!manual && !autoUpdateCheckEnabledFromConfig(config)) {
+    if (!manual && config.firstRunOnboardingCompleted === true && !autoUpdateCheckEnabledFromConfig(config)) {
       return {
         ok: true,
         skipped: true,
@@ -6017,9 +6013,6 @@ app.whenReady().then(async () => {
   handleTrustedIpc("updates:install", async (event, version) => {
     if (!desktopUpdater || event.sender !== controlWindow?.webContents || event.senderFrame !== event.sender.mainFrame) {
       return { ok: false, error: "In-app updates are available in packaged Mac and Windows apps." };
-    }
-    if (readDesktopConfig().firstRunOnboardingCompleted !== true) {
-      return { ok: false, error: "Finish initial setup before installing an update." };
     }
     if (typeof version !== "string" || version !== desktopUpdateOffer?.latestVersion) {
       return { ok: false, error: "This update offer has changed. Check for updates again." };

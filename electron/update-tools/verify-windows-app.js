@@ -175,7 +175,7 @@ app.on('ready', () => fs.appendFileSync(${JSON.stringify(launchesFile)}, JSON.st
     manifest = { schemaVersion: 1, version: nextVersion, artifacts: { "win32-x64": expected } };
     const oldHash = await hash(installed);
     await fs.mkdir(settings, { recursive: true });
-    await fs.writeFile(path.join(settings, "config.json"), JSON.stringify({ autoUpdateCheckEnabled: true, appUpdateVerification: token }));
+    await fs.writeFile(path.join(settings, "config.json"), JSON.stringify({ firstRunOnboardingCompleted: true, autoUpdateCheckEnabled: true, appUpdateVerification: token }));
     await fs.writeFile(path.join(root, "version.json"), JSON.stringify(manifest, null, 2));
     const env = { ...process.env };
     for (const name of ["ELECTRON_RUN_AS_NODE", "NODE_ENV", "PBP_DESKTOP_DEV_MODE", "PBP_STANDALONE_CLI", "VITE_DEV_SERVER_URL"]) delete env[name];
