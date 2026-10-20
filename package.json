@@ -48,7 +48,7 @@
       "package.json"
     ],
     "mac": {
-      "artifactName": "${productName}-${version}-${arch}-mac.${ext}",
+      "artifactName": "${productName}-${arch}-mac.${ext}",
       "icon": "electron/icons/icon.png",
       "category": "public.app-category.utilities",
       "target": [

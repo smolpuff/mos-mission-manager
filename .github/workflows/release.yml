@@ -127,7 +127,7 @@ jobs:
           npx electron-builder --mac dir zip --${{ matrix.arch }} --publish never
 
       - name: Generate verified update metadata
-        run: node electron/update-tools/create-version-metadata.js artifact ${{ runner.temp }}/version-metadata-${{ matrix.arch }}.json ${{ matrix.arch }} release/missions-v3-mcp-$(node -p "require('./package.json').version")-${{ matrix.arch }}-mac.zip
+        run: node electron/update-tools/create-version-metadata.js artifact ${{ runner.temp }}/version-metadata-${{ matrix.arch }}.json ${{ matrix.arch }} release/missions-v3-mcp-${{ matrix.arch }}-mac.zip
 
       - name: Verify regression tests and native Mac update lifecycle
         run: |
@@ -189,6 +189,15 @@ jobs:
               if (!uploaded || uploaded.state !== 'uploaded' || uploaded.size !== artifact.size ||
                   (uploaded.digest && uploaded.digest !== `sha256:${artifact.sha256}`)) {
                 throw new Error(`Uploaded release artifact does not match verified metadata: ${name}`);
+              }
+            }
+            // Retire superseded versioned Mac downloads only after both new
+            // architecture-specific ZIPs have passed the metadata checks.
+            const expectedNames = new Set(Object.values(manifest.artifacts).map(artifact =>
+              decodeURIComponent(new URL(artifact.url).pathname.split('/').pop())));
+            for (const asset of release.assets) {
+              if (/^missions-v3-mcp-.*-mac\.zip$/.test(asset.name) && !expectedNames.has(asset.name)) {
+                await github.rest.repos.deleteReleaseAsset({ ...context.repo, asset_id: asset.id });
               }
             }
             await github.rest.repos.updateRelease({ ...context.repo, release_id: release.id,
