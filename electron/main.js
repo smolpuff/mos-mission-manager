@@ -1584,19 +1584,15 @@ function currentAnalyticsIdentity() {
       ? backendStatus.currentUserWalletSummary
       : {};
   return {
-    walletId: normalizeTelemetryIdentityValue(
-      backendStatus.currentUserWalletId ||
-        summary.walletId ||
-        summary.wallet_id ||
-        null,
-    ),
-    nickname: normalizeTelemetryIdentityValue(
-      backendStatus.currentUserDisplayName ||
-        summary.displayName ||
-        summary.display_name ||
-        summary.username ||
-        null,
-    ),
+    walletId:
+      normalizeTelemetryIdentityValue(backendStatus.currentUserWalletId) ||
+      normalizeTelemetryIdentityValue(summary.walletId) ||
+      normalizeTelemetryIdentityValue(summary.wallet_id),
+    nickname:
+      normalizeTelemetryIdentityValue(backendStatus.currentUserDisplayName) ||
+      normalizeTelemetryIdentityValue(summary.displayName) ||
+      normalizeTelemetryIdentityValue(summary.display_name) ||
+      normalizeTelemetryIdentityValue(summary.username),
   };
 }
 

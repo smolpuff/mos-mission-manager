@@ -1,6 +1,27 @@
 @import "tailwindcss";
 @plugin "daisyui";
 
+@font-face {
+  font-family: "Inter";
+  src: url("/fonts/InterVariable.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Inter";
+  src: url("/fonts/InterVariable-Italic.woff2") format("woff2");
+  font-style: italic;
+  font-weight: 100 900;
+  font-display: swap;
+}
+
+@theme {
+  --font-sans: "Inter", sans-serif,
+    "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+}
+
 @plugin "daisyui/theme" {
   name: "dark";
   default: true;
@@ -37,6 +58,11 @@
   --noise: 0;
 }
 @layer base {
+  html,
+  body {
+    font-family: "Inter", sans-serif;
+  }
+
   :root {
     color-scheme: dark;
     padding: 0;
@@ -80,6 +106,10 @@
   .btn,
   button {
     @apply !cursor-default;
+  }
+
+  .mission-modes button:not(:disabled) {
+    @apply !cursor-pointer;
   }
 
   .btn-clear {
@@ -1197,11 +1227,94 @@ button.btn.btn-gradient {
   }
 }
 
+.finish-target-reveal {
+  display: grid;
+  flex-shrink: 0;
+  grid-template-rows: 0fr;
+  margin-top: 0;
+  opacity: 0;
+  transform: translateY(8px);
+  transition: grid-template-rows 260ms ease, margin-top 260ms ease,
+    opacity 220ms ease, transform 260ms ease;
+}
+
+.finish-target-reveal-content {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.finish-target-reveal[data-open="true"] {
+  grid-template-rows: 1fr;
+  margin-top: 8px;
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.finish-target-reveal[data-open="true"] > .finish-target-reveal-content {
+  overflow: visible;
+}
+
+.mission-modes .mission-mode-copy {
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 2px 4px rgba(0, 0, 0, 0.12);
+  transition: color 150ms ease, opacity 150ms ease;
+}
+
+.mission-modes button:not(.active) .mission-mode-copy {
+  opacity: 0.8;
+}
+
+.mission-modes button.active .mission-mode-copy {
+  color: #fff;
+}
+
+.mission-modes button:not(:disabled):hover .mission-mode-copy {
+  color: #fff;
+  opacity: 1;
+}
+
+.mission-modes .mode__name {
+  margin-bottom: 5px;
+}
+
+.mission-modes button > .mode-selected-pill {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 5;
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: linear-gradient(105deg,
+      var(--color-success),
+      var(--color-info),
+      var(--color-primary),
+      var(--color-secondary),
+      var(--color-accent));
+  color: #1a1924;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+  pointer-events: none;
+}
+
+
+.mission-modes button:not(.active)::after {
+  background: linear-gradient(120deg,
+      rgba(255, 255, 255, 0.22) 40%,
+      rgba(255, 255, 255, 0.09) 100%);
+  opacity: 0.3;
+  transition: opacity 150ms ease;
+}
+
+.mission-modes button:not(.active):not(:disabled):hover::after {
+  opacity: 1;
+}
+
 .mission-modes button.active {
-  @apply bg-white/10;
+  @apply bg-white/5;
   box-shadow:
     0 0 0 1px rgba(255, 255, 255, 0.03),
-    0 10px 30px rgba(0, 0, 0, 0.28);
+    0 2px 5px rgba(0, 0, 0, 0.2),
+    0 5px 12px rgba(0, 0, 0, 0.25);
 }
 
 .mission-modes button.active::after {
@@ -1273,6 +1386,14 @@ button.btn.btn-gradient {
 .num-ticker__item {
   grid-area: 1 / 1;
   line-height: 1;
+}
+
+.mission-stats .num-ticker {
+  height: 1lh;
+}
+
+.mission-stats .num-ticker__item {
+  line-height: inherit;
 }
 
 .num-ticker__item--in-up {
@@ -1915,11 +2036,14 @@ button.btn.btn-gradient {
   container-type: inline-size;
   position: relative;
 
+  &::before {
+    z-index: 0;
+  }
+
   .mission-mode-copy {
     position: relative;
     z-index: 2;
-    transition: z-index 0s linear 180ms;
-    @apply text-shadow-md text-shadow-black/15;
+    transition: color 150ms ease, opacity 150ms ease, z-index 0s linear 180ms;
   }
 
   .mo-fire {
@@ -1928,11 +2052,11 @@ button.btn.btn-gradient {
     bottom: -2.25rem;
     width: 285%;
     height: auto;
-    z-index: 0;
+    z-index: 1;
     pointer-events: none;
 
-    opacity: 0.6;
-    transform: translateX(-50%) translateY(24px) scaleY(0.58);
+    opacity: 0.35;
+    transform: translateX(-50%) translateY(14px) scaleY(0.68);
     transform-origin: 50% 100%;
     filter: drop-shadow(0 0 0 rgba(255, 80, 80, 0));
 
@@ -1970,8 +2094,7 @@ button.btn.btn-gradient {
     }
 
     .mo-fire {
-      opacity: 0.92;
-      transform: translateX(-50%) translateY(14px) scaleY(0.68);
+      opacity: 0.43;
       /* filter: drop-shadow(0 0 10px rgba(255, 80, 80, 0.4)); */
       filter: drop-shadow(0 0 10px rgba(255, 80, 80, 0.5)) drop-shadow(0 0 18px rgba(255, 140, 40, 0.16));
 

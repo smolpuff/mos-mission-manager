@@ -1,3 +1,4 @@
+import LoadingSpinner from "../components/LoadingSpinner";
 import NavMain from "../components/nav/app";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import WindowChrome from "../components/WindowChrome/app";
@@ -140,12 +141,12 @@ function MissionSlotFallback({ label, loading = false, assigning = false }) {
     <div className="mission-image-placeholder">
       {loading ? (
         <span className="inline-flex flex-col items-center gap-2 text-center text-white/70">
-          <span className="loading loading-spinner loading-md text-white/40" />
+          <LoadingSpinner />
           {label ? <span>{label}</span> : null}
         </span>
       ) : assigning ? (
         <span className="inline-flex items-center gap-2 text-white/80">
-          <span className="loading loading-spinner loading-sm text-white/50" />
+          <LoadingSpinner />
           <span>Assigning...</span>
         </span>
       ) : (
@@ -239,7 +240,7 @@ function MissionSlotImage({
         <div className="mission-image-placeholder">{placeholderLabel}</div>
       ) : null}
       {showSpinner && activeSrc ? (
-        <span className="loading loading-spinner loading-xs text-white/30 absolute top-2 right-2 z-20" />
+        <LoadingSpinner className="absolute top-2 right-2 z-20" />
       ) : null}
     </>
   );
@@ -1632,20 +1633,14 @@ function ControlView() {
     setMissionModeButtonLevel(resetLevel);
     setResetLevelInput(resetLevel);
     const cooldownMaxPbp = Number(nftResetMaxPbp);
-    let restoredNftResetEnabled = true;
-    try {
-      const response = await bridge?.getConfig?.();
-      const stored = response?.config?.nftCooldownResetMissionModeEnabled;
-      if (typeof stored === "boolean") restoredNftResetEnabled = stored;
-    } catch {}
-    setNftResetEnabled(restoredNftResetEnabled);
+    setNftResetEnabled(true);
     try {
       await applyConfigPatch({
         autoModeEnabled: false,
         missionModeEnabled: true,
         missionModeResetLevel: resetLevel,
-        nftCooldownResetEnabled: restoredNftResetEnabled,
-        nftCooldownResetMissionModeEnabled: restoredNftResetEnabled,
+        nftCooldownResetEnabled: true,
+        nftCooldownResetMissionModeEnabled: true,
         nftCooldownResetMaxPbp:
           Number.isFinite(cooldownMaxPbp) && cooldownMaxPbp >= 0
             ? cooldownMaxPbp
@@ -1714,6 +1709,9 @@ function ControlView() {
     if (!Number.isFinite(next) || next <= 0) return;
     setMissionModeButtonLevel(String(Math.floor(next)));
   }, [lastCommand, missionModeButtonLevelEditing]);
+  const walletDataLoading = !Array.isArray(
+    status.currentUserWalletSummary?.balances,
+  );
   const walletTiles = useMemo(() => {
     const balances = Array.isArray(status.currentUserWalletSummary?.balances)
       ? status.currentUserWalletSummary.balances
@@ -3835,10 +3833,7 @@ function ControlView() {
                                       }
                                     >
                                       {onboardingAppWalletBusy ? (
-                                        <span
-                                          className="loading loading-spinner loading-sm shrink-0"
-                                          aria-hidden="true"
-                                        />
+                                        <LoadingSpinner />
                                       ) : null}
                                       <span>
                                         {onboardingAppWalletBusy
@@ -4059,15 +4054,17 @@ function ControlView() {
                               disabled={onboardingBusy || onboardingDataLoading}
                             >
                               <span className="inline-flex items-center gap-1.5">
-                                <svg
-                                  xmlns="http://www.w3.org/2000/svg"
-                                  viewBox="0 0 640 640"
-                                  className={`w-4 h-4 ${onboardingDataLoading ? "animate-spin" : ""}`}
-                                  fill="currentColor"
-                                  aria-hidden="true"
-                                >
-                                  <path d="M320 96c123.7 0 224 100.3 224 224s-100.3 224-224 224S96 443.7 96 320c0-34.1 7.6-66.5 21.3-95.5l44.9 22.4C151.2 268 144 293.4 144 320c0 97.2 78.8 176 176 176s176-78.8 176-176S417.2 144 320 144c-47.4 0-90.4 18.7-122.1 49.2l58.1 58.1L112 304V160l51.8 51.8C203.2 163.2 258.3 96 320 96z" />
-                                </svg>
+                                {onboardingDataLoading ? <LoadingSpinner /> : (
+                                  <svg
+                                    xmlns="http://www.w3.org/2000/svg"
+                                    viewBox="0 0 640 640"
+                                    className="w-4 h-4"
+                                    fill="currentColor"
+                                    aria-hidden="true"
+                                  >
+                                    <path d="M320 96c123.7 0 224 100.3 224 224s-100.3 224-224 224S96 443.7 96 320c0-34.1 7.6-66.5 21.3-95.5l44.9 22.4C151.2 268 144 293.4 144 320c0 97.2 78.8 176 176 176s176-78.8 176-176S417.2 144 320 144c-47.4 0-90.4 18.7-122.1 49.2l58.1 58.1L112 304V160l51.8 51.8C203.2 163.2 258.3 96 320 96z" />
+                                  </svg>
+                                )}
                                 <span>
                                   {onboardingDataLoading
                                     ? "Refreshing..."
@@ -4166,15 +4163,15 @@ function ControlView() {
                           </svg>
                         ) : (
                           <svg
-                            xmlns="http://www.w3.org/2000/svg"
-                            viewBox="0 0 640 640"
-                            className="w-4 h-4"
-                            fill="currentColor"
-                            aria-hidden="true"
-                          >
-                            <path d="M320 224c-53 0-96 43-96 96s43 96 96 96 96-43 96-96-43-96-96-96zm0 48c26.5 0 48 21.5 48 48s-21.5 48-48 48-48-21.5-48-48 21.5-48 48-48z" />
-                            <path d="M320 144C199.6 144 108.8 214.9 64 320c44.8 105.1 135.6 176 256 176s211.2-70.9 256-176c-44.8-105.1-135.6-176-256-176zm0 304c-93.9 0-169.9-52.3-210.7-128C150.1 244.3 226.1 192 320 192s169.9 52.3 210.7 128C489.9 395.7 413.9 448 320 448z" />
-                          </svg>
+                              xmlns="http://www.w3.org/2000/svg"
+                              viewBox="0 0 640 640"
+                              className="w-4 h-4"
+                              fill="currentColor"
+                              aria-hidden="true"
+                            >
+                              <path d="M320 224c-53 0-96 43-96 96s43 96 96 96 96-43 96-96-43-96-96-96zm0 48c26.5 0 48 21.5 48 48s-21.5 48-48 48-48-21.5-48-48 21.5-48 48-48z" />
+                              <path d="M320 144C199.6 144 108.8 214.9 64 320c44.8 105.1 135.6 176 256 176s211.2-70.9 256-176c-44.8-105.1-135.6-176-256-176zm0 304c-93.9 0-169.9-52.3-210.7-128C150.1 244.3 226.1 192 320 192s169.9 52.3 210.7 128C489.9 395.7 413.9 448 320 448z" />
+                            </svg>
                         )}
                       </button>
                       <button
@@ -4428,10 +4425,7 @@ function ControlView() {
                       onClick={() => void runCreateWallet()}
                     >
                       {createWalletBusy ? (
-                        <span
-                          className="loading loading-spinner loading-sm"
-                          aria-hidden="true"
-                        />
+                        <LoadingSpinner />
                       ) : null}
                       {createWalletBusy
                         ? "Generating..."
@@ -4478,7 +4472,7 @@ function ControlView() {
               sessionStartedAtMs={sessionStartedAtRef.current}
             />
           ) : null}
-          <div className={currentPage === "nfts" ? "h-full" : "hidden"}>
+          <div className={currentPage === "nfts" ? "min-h-0 flex-1 overflow-hidden" : "hidden"}>
             <NftsPage bridge={bridge} signerMode={status.signerMode} />
           </div>
           {currentPage === "rentals" ? <RentalsPage bridge={bridge} /> : null}
@@ -4512,37 +4506,37 @@ function ControlView() {
                     </div>
                   </div>
                   <div className="flex items-center justify-center">
-                    <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-base ">
+                    <div className="mission-stats grid grid-cols-2 gap-x-6 gap-y-1 text-base leading-6">
                       {/* <div className="w-full col-span-2 text-sm">Session</div> */}
-                      <div>
-                        🎯{" "}
-                        <strong>
+                      <div className="flex items-center gap-1">
+                        <span>🎯</span>
+                        <strong className="flex items-center">
                           <SlideNumber value={missionStats.active || 0} />
-                        </strong>{" "}
-                        Active
+                        </strong>
+                        <span>Active</span>
                       </div>
-                      <div>
-                        💎{" "}
-                        <strong>
+                      <div className="flex items-center gap-1">
+                        <span>💎</span>
+                        <strong className="flex items-center">
                           <SlideNumber
                             value={missionStats.nftsAvailable || 0}
                           />
-                        </strong>{" "}
-                        NFTs ready
+                        </strong>
+                        <span>NFTs ready</span>
                       </div>
-                      <div>
-                        🥞{" "}
-                        <strong>
+                      <div className="flex items-center gap-1">
+                        <span>🥞</span>
+                        <strong className="flex items-center">
                           <SlideNumber value={missionStats.claimable || 0} />
-                        </strong>{" "}
-                        Claimable
+                        </strong>
+                        <span>Claimable</span>
                       </div>
-                      <div>
-                        🤑{" "}
-                        <strong>
+                      <div className="flex items-center gap-1">
+                        <span>🤑</span>
+                        <strong className="flex items-center">
                           <SlideNumber value={missionStats.claimed || 0} />
-                        </strong>{" "}
-                        Claimed
+                        </strong>
+                        <span>Claimed</span>
                       </div>
                     </div>
                   </div>
@@ -4551,16 +4545,17 @@ function ControlView() {
 
               <section className=" flex-1">
                 <div className="grid grid-cols-2 gap-2 h-full">
-                  <div className="h-full flex gap-2 flex-col  mission-modes ">
-                    <div className="grid grid-rows-auto gap-2 h-full transition-all ">
+                  <div className="h-full min-h-0 flex flex-col mission-modes">
+                    <div className="grid grid-rows-3 gap-2 min-h-0 flex-1">
                       <button
-                        className={` w-full card  h-auto flex-1 @container items-center justify-center overflow-hidden transition-all transition-size !p-4 ${isAutoMode ? "active" : ""}`}
+                        className={` w-full card  h-auto flex-1 @container items-center justify-center overflow-hidden transition-all !p-4 ${isAutoMode ? "active" : ""}`}
                         onClick={() => void activateAutoMode()}
                         disabled={modeTransitionBusy}
                         type="button"
                       >
+                        {isAutoMode ? <span className="mode-selected-pill">Selected</span> : null}
                         <div className="mission-mode-copy space-y-1">
-                          <div className="mode__name font-bold text-lg leading-4">
+                          <div className="mode__name font-semibold text-lg leading-4">
                             Auto Mode
                           </div>
                           <div className="text-xs">
@@ -4574,8 +4569,9 @@ function ControlView() {
                         disabled={modeTransitionBusy}
                         type="button"
                       >
-                        <div className="space-y-1 text-shadow-md text-shadow-black/15">
-                          <div className="z-10 mode__name font-bold text-lg leading-4">
+                        {isNormalMode ? <span className="mode-selected-pill">Selected</span> : null}
+                        <div className="mission-mode-copy space-y-1">
+                          <div className="z-10 mode__name font-semibold text-lg leading-4">
                             Manual Mode
                           </div>
                           <div className="text-xs">
@@ -4592,8 +4588,9 @@ function ControlView() {
                         type="button"
                         id="mission-mode-mm_button"
                       >
+                        {isMissionMode ? <span className="mode-selected-pill">Selected</span> : null}
                         <div className="mission-mode-copy space-y-1">
-                          <div className="mode__name font-bold text-lg leading-4">
+                          <div className="mode__name font-semibold text-lg leading-4">
                             Mission Mode
                           </div>
                           <div className="text-xs">
@@ -4884,48 +4881,57 @@ function ControlView() {
                       </button>
                     </div>
                     <div
-                      className={`w-full flex h-auto justify-between !p-0 items-center ${competitionRangeLockDisabled ? "hidden grayscale opacity-60" : ""}`}
+                      className="finish-target-reveal"
+                      data-open={!competitionRangeLockDisabled}
+                      aria-hidden={competitionRangeLockDisabled}
+                      inert={competitionRangeLockDisabled}
                     >
-                      <div className="relative z-20 w-full">
-                        <ToggleSwitch
-                          switchID="enableCompetitionRangeLock"
-                          checked={competitionRangeLockEnabled}
-                          title="Finish Target"
-                          tooltip="Stops claiming new missions while your competition rank is inside the target range. Mission Mode only."
-                          styling="text-xs flex !flex-row"
-                          disabled={competitionRangeLockDisabled}
-                          onChange={(event) =>
-                            void setCompetitionRangeLock(event.target.checked)
-                          }
-                        />
-                      </div>
-                      <div className="relative z-20 w-full m-0 flex gap-3 items-center text-xs -translate-y-0.5">
-                        <div class="flex items-center rounded-full border border-white/15 px-0 py-1">
-                          <input
-                            type="text"
-                            value={competitionRangeLockMinRank}
-                            onChange={(event) =>
-                              void setCompetitionRangeLockMin(
-                                event.target.value,
-                              )
-                            }
-                            disabled={competitionRangeLockInputsDisabled}
-                            class="w-7.5 border-0 bg-transparent p-0 text-center text-xs !text-white outline-none disabled:opacity-50"
-                          />
-                          <span class=" text-xs text-white/70">-</span>
-                          <input
-                            type="text"
-                            value={competitionRangeLockMaxRank}
-                            onChange={(event) =>
-                              void setCompetitionRangeLockMax(
-                                event.target.value,
-                              )
-                            }
-                            disabled={competitionRangeLockInputsDisabled}
-                            class="w-7.5 border-0 bg-transparent p-0 text-center text-xs !text-white outline-none disabled:opacity-50"
-                          />
+                      <div className="finish-target-reveal-content">
+                        <div
+                          className="w-full flex h-auto justify-between !p-0 items-center"
+                        >
+                          <div className="relative z-20 w-full">
+                            <ToggleSwitch
+                              switchID="enableCompetitionRangeLock"
+                              checked={competitionRangeLockEnabled}
+                              title="Finish Target"
+                              tooltip="Stops claiming new missions while your competition rank is inside the target range. Mission Mode only."
+                              styling="text-xs flex !flex-row"
+                              disabled={competitionRangeLockDisabled}
+                              onChange={(event) =>
+                                void setCompetitionRangeLock(event.target.checked)
+                              }
+                            />
+                          </div>
+                          <div className="relative z-20 w-full m-0 flex gap-3 items-center text-xs -translate-y-0.5">
+                            <div class="flex items-center rounded-full border border-white/15 px-0 py-1">
+                              <input
+                                type="text"
+                                value={competitionRangeLockMinRank}
+                                onChange={(event) =>
+                                  void setCompetitionRangeLockMin(
+                                    event.target.value,
+                                  )
+                                }
+                                disabled={competitionRangeLockInputsDisabled}
+                                class="w-7.5 border-0 bg-transparent p-0 text-center text-xs !text-white outline-none disabled:opacity-50"
+                              />
+                              <span class=" text-xs text-white/70">-</span>
+                              <input
+                                type="text"
+                                value={competitionRangeLockMaxRank}
+                                onChange={(event) =>
+                                  void setCompetitionRangeLockMax(
+                                    event.target.value,
+                                  )
+                                }
+                                disabled={competitionRangeLockInputsDisabled}
+                                class="w-7.5 border-0 bg-transparent p-0 text-center text-xs !text-white outline-none disabled:opacity-50"
+                              />
+                            </div>
+                            Range
+                          </div>
                         </div>
-                        Range
                       </div>
                     </div>
                   </div>
@@ -5028,11 +5034,12 @@ function ControlView() {
                           </div>
                         </>
                         <div
-                          className={`mt-1 w-full flex items-center  gap-3 ${!isMissionMode ? "grayscale opacity-60" : ""}`}
+                          className="mt-1 w-full flex items-center gap-3"
                         >
                           <div className="flex-1 items-center">
                             <ToggleSwitch
                               switchID="enableNFTReset"
+                              switchWrapClassName={!isMissionMode ? "grayscale opacity-60" : ""}
                               checked={isMissionMode ? nftResetEnabled : false}
                               title="NFT CD resets"
                               styling=" flex  leading-4"
@@ -5052,7 +5059,7 @@ function ControlView() {
                             />
                           </div>
                           <div
-                            className={` w-26 flex items-center text-xs ${!isMissionMode ? "grayscale opacity-60" : ""}`}
+                            className={` w-26 flex items-center text-xs ${!isMissionMode ? "grayscale opacity-[0.36]" : ""}`}
                           >
                             <label className=" -translate-y-0.5  flex items-center gap-2  text-[11px] leading-none">
                               <div className="relative flex items-center">
@@ -5078,11 +5085,15 @@ function ControlView() {
                         </div>
                       </div>
                     </div>
-                    <div className="grid  grid-cols-2 gap-x-2 gap-y-1 mx-8  mb-5 user__wallet-balance  mt-auto items-center">
+                    <div
+                      className="relative grid grid-cols-2 gap-x-2 gap-y-1 mx-8 mb-5 user__wallet-balance mt-auto items-center"
+                      aria-busy={walletDataLoading}
+                    >
                       {walletTiles.map((tile) => (
                         <div
                           key={tile.key}
-                          className="flex gap-2 items-center user__wallet-balance-item"
+                          className={`flex gap-2 items-center user__wallet-balance-item ${walletDataLoading ? "opacity-20" : ""}`}
+                          aria-hidden={walletDataLoading || undefined}
                         >
                           <img
                             src={tile.icon}
@@ -5127,6 +5138,15 @@ function ControlView() {
                           </div>
                         </div>
                       ))}
+                      {walletDataLoading ? (
+                        <div
+                          className="absolute inset-0 flex flex-col items-center justify-center gap-1.5 text-xs text-slate-100"
+                          role="status"
+                        >
+                          <LoadingSpinner />
+                          <span>Loading wallet balances…</span>
+                        </div>
+                      ) : null}
                     </div>
                   </div>
                 </div>
@@ -5579,7 +5599,7 @@ function ControlView() {
                 ) : null}
                 {missionPickerBusy ? (
                   <div className="grid h-48 place-items-center">
-                    <span className="loading loading-spinner loading-md text-success" />
+                    <LoadingSpinner />
                   </div>
                 ) : (
                   <div className="grid grid-cols-2 gap-2  overflow-y-auto pr-1">

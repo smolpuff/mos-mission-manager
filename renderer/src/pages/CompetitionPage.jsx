@@ -1,3 +1,4 @@
+import LoadingSpinner from "../components/LoadingSpinner";
 import { formatCompetitionDateTime } from "../competition-notifications.mjs";
 
 const MAX_RECENT_COMPETITIONS = 3;
@@ -41,9 +42,9 @@ export default function CompetitionPage({
 
   if (showPageLoading) {
     return (
-      <section className="h-160 flex flex-col gap-3">
+      <section className="min-h-0 flex-1 flex flex-col gap-3 overflow-hidden">
         <div className="text-sm text-slate-400 mt-3 flex items-center gap-2">
-          <span className="loading loading-spinner loading-sm text-success" />
+          <LoadingSpinner />
           <span>Loading competition...</span>
         </div>
       </section>
@@ -51,10 +52,10 @@ export default function CompetitionPage({
   }
 
   return (
-    <section className="h-170 flex flex-col gap-3">
-      <div className="competition__header grid gap-4 grid-cols-2 items-center">
-        <div className="-mt-6">
-          <h1 className="text-2xl font-normal competition__h leading-tight flex gap-2">
+    <section className="min-h-0 flex-1 flex flex-col gap-3 overflow-hidden">
+      <div className="competition__header grid gap-x-4 grid-cols-[max-content_minmax(0,1fr)] items-center shrink-0 -mt-2">
+        <div className="contents">
+          <h1 className="text-2xl font-normal competition__h leading-tight flex gap-2 !mt-0 row-start-1 col-start-1">
             Competition
             <span className="competition__number self-center">
               {selectedCompetition?.competitionNumber
@@ -62,7 +63,7 @@ export default function CompetitionPage({
                 : ""}
             </span>{" "}
           </h1>
-          <div className="flex gap-4 items-center">
+          <div className="flex gap-4 items-center row-start-2 col-span-2">
             {competitionNumbers.length > 1 ? (
               <select
                 className="select select-sm  bg-black/50 focus-within:bg-black border-white/10 text-slate-100 w-auto"
@@ -100,7 +101,7 @@ export default function CompetitionPage({
             </button>
           </div>
         </div>
-        <div className="gap-1 text-xs justify-self-end flex flex-col flex-0">
+        <div className="gap-1 text-xs justify-self-end self-center row-start-1 col-start-2 flex flex-col flex-0">
           <div>
             Start{" "}
             {formatCompetitionDateTime(
@@ -116,7 +117,7 @@ export default function CompetitionPage({
         </div>
       </div>
 
-      <div className="card gap-4 competition__missions">
+      <div className="card gap-4 competition__missions shrink-0">
         <div className="text-sm text-slate-400 hidden">Missions</div>
         {competitionMissions.length ? (
           <ul className="text-sm list-disc pl-5 space-y-0.5 flex flex-wrap">
@@ -131,12 +132,12 @@ export default function CompetitionPage({
         )}
       </div>
 
-      <div className="flex gap-4 h-120   overflow-x-visible overflow-y-hidden">
+      <div className="flex gap-4 min-h-0 flex-1 overflow-x-visible overflow-y-hidden">
         <div className="gap-4 rounded-lg w-full h-full min-h-0 flex flex-col">
           {latestCompetitionError ? (
-            <div className="text-sm text-red-300">{latestCompetitionError}</div>
+            <div className="text-sm text-red-300 shrink-0">{latestCompetitionError}</div>
           ) : null}
-          <div className="h-full min-h-0 flex flex-col gap-3">
+          <div className="flex-1 min-h-0 flex flex-col gap-3">
             {selectedCompetition.debug?.challenge ? (
               <div className="text-sm text-amber-200">
                 Headless scrape looks blocked (
@@ -239,7 +240,7 @@ export default function CompetitionPage({
             </div>
           </div>
         </div>
-        <div className="space-y-1 max-w-50 w-full">
+        <div className="space-y-1 max-w-50 w-full min-h-0 overflow-y-auto">
           <div className="text-sm text-slate-400 mish-gradient !text-2xl">
             Prizes
           </div>

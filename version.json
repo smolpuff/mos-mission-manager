@@ -1,7 +1,11 @@
 {
-  "version": "3.2.18",
+  "version": "3.3.0",
   "downloadUrl": "https://github.com/smolpuff/mos-mission-manager/releases/latest",
-  "notes": ["Improved first-time setup validation"],
+  "notes": [
+    "Improved first-time setup validation",
+    "Added wallet balance loading spinner",
+    "Various UI improvements"
+  ],
   "schemaVersion": 1,
   "artifacts": {
     "darwin-arm64": {

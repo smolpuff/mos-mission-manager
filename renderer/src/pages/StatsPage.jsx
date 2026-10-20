@@ -493,9 +493,12 @@ export default function StatsPage({ status }) {
         : rangeKey === "7d"
           ? "Last 7days"
           : analyticsSeasonLabel(rangeKey) || "All Time";
-  const currentUserWalletId = String(
-    safeStatus.currentUserWalletId || "",
-  ).trim();
+  const currentUserWalletId = [
+    safeStatus.currentUserWalletId,
+    safeStatus.currentUserWalletSummary?.walletId,
+    safeStatus.currentUserWalletSummary?.wallet_id,
+  ].map((value) => String(value || "").trim())
+    .find((value) => value && !["unknown", "null", "undefined"].includes(value.toLowerCase())) || "";
   const nftInventoryUsage = Array.isArray(safeStatus.nftUsageStats)
     ? safeStatus.nftUsageStats
     : [];

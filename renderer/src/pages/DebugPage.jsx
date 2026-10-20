@@ -230,8 +230,8 @@ export default function DebugPage({
   );
 
   return (
-    <section className="space-y-2">
-      <div className="card gap-1.5 !p-3">
+    <section className="h-full min-h-0 flex flex-col gap-2 overflow-hidden">
+      <div className="card gap-1.5 !p-3 shrink-0">
         <div className="flex items-start justify-between gap-1.5">
           <div>
             <h2 className="text-md font-normal leading-tight">
@@ -301,8 +301,8 @@ export default function DebugPage({
         </div>
       </div>
 
-      <div className="card gap-1.5 !p-3">
-        <div className="flex min-w-0 items-center justify-between gap-1.5">
+      <div className="card gap-1.5 !p-3 min-h-0 flex-1 flex flex-col overflow-hidden">
+        <div className="flex min-w-0 items-center justify-between gap-1.5 shrink-0">
           <div className="flex min-w-0 items-baseline gap-2">
             <h2 className="shrink-0 text-md font-normal leading-tight">
               Throttle Debug
@@ -333,7 +333,7 @@ export default function DebugPage({
             </button>
           </div>
         </div>
-        <div className="grid gap-2 md:grid-cols-3">
+        <div className="grid gap-2 md:grid-cols-3 shrink-0">
           <div className="rounded-lg border border-white/10 bg-black/20 p-2">
             <div className="text-[10px] uppercase tracking-wide text-slate-400">
               Throttle Count
@@ -369,13 +369,7 @@ export default function DebugPage({
         <div
           ref={logViewportRef}
           onScroll={handleLogScroll}
-          className="mt-2 overflow-x-hidden overflow-y-auto rounded-md border border-white/10 bg-black/30 p-2"
-          style={{
-            height: "400px",
-            minHeight: "240px",
-            overflowX: "hidden",
-            overflowY: "auto",
-          }}
+          className="mt-2 min-h-0 flex-1 overflow-x-hidden overflow-y-auto rounded-md border border-white/10 bg-black/30 p-2"
         >
           {throttleLogError ? (
             <div className="mb-2 rounded-md border border-amber-400/20 bg-amber-400/5 px-2 py-1 text-[10px] text-amber-300">
