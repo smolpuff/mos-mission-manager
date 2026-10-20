@@ -4584,6 +4584,14 @@ function createChecksService(ctx, logger, mcp, services = {}) {
       const alreadyAssignedNftAccounts = new Set(assignedNftOwners.keys());
       const rentalCoordinatorAvailable =
         rentalCoordinatorEnabled() && skipRentalCoordinator !== true;
+      if (skipRentalCoordinator !== true) {
+        // Revalidate owned inventory before allowing a previous pass's
+        // rental demand to keep the background rental worker running.
+        rentalDemandMissionKeys = new Set();
+        if (rentals) {
+          rentals.setDemand(false, { reason: `${reason}_owned_inventory_check` });
+        }
+      }
       let ownedCooldownFollowupRequested = false;
       logDebug("assign", "assignment_order_policy", {
         reason,
@@ -4615,25 +4623,52 @@ function createChecksService(ctx, logger, mcp, services = {}) {
           }
           const nftPageOffset = assignmentPassNftScan.offset;
           try {
-            let nftResult = await mcp.mcpToolCall("get_mission_nfts", {
-              assignedMissionId: missionId,
-              limit: MISSION_NFT_PAGE_LIMIT,
-              offset: nftPageOffset,
-            });
-            let nfts = normalizeNftList(nftResult);
-            const pageNftCount = nfts.length;
-            // A persisted rotation offset can outlive a shrinking inventory.
-            // Wrap in this pass so an empty tail page cannot defer ready NFTs
-            // on page zero for another watcher cycle.
-            const wrappedFromOffset =
-              nfts.length === 0 && nftPageOffset > 0 ? nftPageOffset : null;
-            if (wrappedFromOffset !== null) {
-              nftResult = await mcp.mcpToolCall("get_mission_nfts", {
+            const scannedOffsets = new Set();
+            const seenAccounts = new Set();
+            let pageOffset = nftPageOffset;
+            let pageNftCount = 0;
+            let wrappedFromOffset = null;
+            let ownedScanComplete = false;
+            let nfts = [];
+            while (!scannedOffsets.has(pageOffset)) {
+              scannedOffsets.add(pageOffset);
+              const nftResult = await mcp.mcpToolCall("get_mission_nfts", {
                 assignedMissionId: missionId,
                 limit: MISSION_NFT_PAGE_LIMIT,
-                offset: 0,
+                offset: pageOffset,
               });
-              nfts = normalizeNftList(nftResult);
+              const page = normalizeNftList(nftResult);
+              pageNftCount = page.length;
+              const newNfts = page.filter((nft) => {
+                const account = nftAccountId(nft);
+                if (!account || seenAccounts.has(account)) return false;
+                seenAccounts.add(account);
+                return true;
+              });
+              if (page.length > 0 && newNfts.length === 0) {
+                throw new Error(
+                  "Owned NFT pagination repeated accounts; deferring assignment until inventory can be checked.",
+                );
+              }
+              nfts.push(...newNfts);
+              const nextOffset =
+                page.length >= MISSION_NFT_PAGE_LIMIT
+                  ? pageOffset + MISSION_NFT_PAGE_LIMIT
+                  : 0;
+              ownedScanComplete = scannedOffsets.has(nextOffset);
+              const hasReadyOwned = newNfts.some((nft) =>
+                nftIsAvailable(nft) &&
+                !alreadyAssignedNftAccounts.has(nftAccountId(nft)) &&
+                !ownedNftRejectedForOwnership(nftAccountId(nft)),
+              );
+              if (hasReadyOwned || ownedScanComplete) break;
+              // A nonempty tail page is not proof that earlier pages have
+              // no ready owned NFTs. Wrap and finish checking them before
+              // allowing rentals or paid cooldown resets.
+              if (nextOffset === 0 && nftPageOffset > 0) {
+                wrappedFromOffset = nftPageOffset;
+              }
+              pageOffset = nextOffset;
             }
             // The mission-filtered result is authoritative for eligibility.
             // Wallet cache data may enrich those same accounts with collection
@@ -4648,9 +4683,11 @@ function createChecksService(ctx, logger, mcp, services = {}) {
               mission,
               ok: true,
               nfts,
-              pageNftCount: wrappedFromOffset === null ? pageNftCount : nfts.length,
-              nftPageOffset: wrappedFromOffset === null ? nftPageOffset : 0,
+              pageNftCount,
+              nftPageOffset: pageOffset,
               wrappedFromOffset,
+              ownedScanComplete,
+              scannedOffsets: Array.from(scannedOffsets),
             };
           } catch (error) {
             return {
@@ -4701,6 +4738,8 @@ function createChecksService(ctx, logger, mcp, services = {}) {
                 (account) => account && alreadyAssignedNftAccounts.has(account),
               ).length,
             snapshotPhase: "pre_assignment",
+            ownedScanComplete: snapshot.ownedScanComplete,
+            scannedOffsets: snapshot.scannedOffsets,
           });
           const readyAssignedElsewhere = snapshot.nfts
             .filter(nftIsAvailable)
@@ -4889,7 +4928,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
           logWithTimestamp(
             `[ASSIGN] ✅ ${name}: found ${readyOwnedCandidates.length} ready owned NFT candidate(s); queued ${selectedReadyOwnedCandidates.length} least-used candidate(s) for assignment.`,
           );
-        } else if (nftPageHasMore) {
+        } else if (!inventorySnapshot.ownedScanComplete) {
           logWithTimestamp(
             `[ASSIGN] ⏭️ ${name}: checking the next owned NFT page before rentals or cooldown resets.`,
           );

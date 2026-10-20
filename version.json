@@ -1,7 +1,10 @@
 {
   "version": "3.2.18",
   "downloadUrl": "https://github.com/smolpuff/mos-mission-manager/releases/latest",
-  "notes": ["Faster claim and assigning when out of normal watch loop"],
+  "notes": [
+    "Faster assigning when claim is out of normal watch loop",
+    "Fixed season stats dates just for momo :D"
+  ],
   "schemaVersion": 1,
   "artifacts": {
     "darwin-arm64": {
