@@ -34,8 +34,8 @@ const {
 } = require("./competitionRangeLock");
 const { checkForUpdates } = require("./update-checker");
 const { normalizeAnalyticsRange, analyticsRangeBounds, isInAnalyticsRange } = require("./analytics-ranges");
-const { MacUpdater, acknowledgeMacUpdate, updateRecoveryMessage } = require("./mac-updater");
-const { WindowsUpdater, acknowledgeWindowsUpdate, windowsRecoveryMessage } = require("./windows-updater");
+const { MacUpdater, acknowledgeMacUpdate } = require("./mac-updater");
+const { WindowsUpdater, acknowledgeWindowsUpdate } = require("./windows-updater");
 const { createMcpClient } = require("../src/mcp/client");
 const {
   normalizeMissionList,
@@ -210,7 +210,7 @@ let appQuitInFlight = false;
 let updateShutdownInProgress = false;
 let desktopUpdater = null;
 let desktopUpdateOffer = null;
-let updateRecoveryReported = false;
+let updateUiReadyReported = false;
 const FUNDING_WALLET_REFRESH_MIN_INTERVAL_MS = 30000;
 const FUNDING_WALLET_PERIODIC_REFRESH_MS = 60 * 1000;
 const BOOTSTRAP_WALLET_REFRESH_MIN_INTERVAL_MS = 30000;
@@ -6027,16 +6027,12 @@ app.whenReady().then(async () => {
     }
   });
   handleTrustedIpc("updates:ui-ready", async (event) => {
-    if (!desktopUpdater || updateRecoveryReported || event.senderFrame !== event.sender.mainFrame ||
+    if (!desktopUpdater || updateUiReadyReported || event.senderFrame !== event.sender.mainFrame ||
         ![controlWindow?.webContents, cliWindow?.webContents].includes(event.sender)) return;
-    updateRecoveryReported = true;
+    updateUiReadyReported = true;
     try {
       await (process.platform === "darwin" ? acknowledgeMacUpdate : acknowledgeWindowsUpdate)({ userData: app.getPath("userData"), execPath: process.execPath,
         version: app.getVersion(), argv: process.argv });
-      const recovery = process.platform === "darwin"
-        ? await updateRecoveryMessage(app.getPath("userData"), process.execPath)
-        : await windowsRecoveryMessage(app.getPath("userData"));
-      if (recovery) void dialog.showMessageBox({ type: "warning", title: "Update recovery", message: recovery });
     } catch (error) { pushSystemLog(`Update acknowledgement failed: ${error.message}`); }
   });
   const refreshFundingWalletSummary = async ({ force = false, reason = "manual" } = {}) => {

@@ -76,7 +76,6 @@ async function cleanupPreviousTransaction(receipt) {
   if (processAlive(receipt.ownerPid) || processAlive(helperPid)) return;
   const lock = path.join(path.dirname(receipt.target), `.${path.basename(receipt.target)}.update-lock`);
   // Never break a stale lock automatically: another instance could be taking ownership.
-  // Its recovery instructions remain available until the user clears it with all copies closed.
   if (await exists(lock)) return;
   if (!["preparing", "ready", "complete", "cancelled", "commit_timeout", "exit_timeout", "replace_failed", "rolled_back"].includes(receipt.state)) return;
   await fs.rm(receipt.directory, { recursive: true, force: true });
@@ -88,20 +87,6 @@ async function acknowledgeMacUpdate({ userData, execPath, version, argv }) {
       !["opening", "startup_timeout"].includes(receipt.state)) return;
   await fs.writeFile(path.join(receipt.directory, "healthy.next"), `${receipt.token} ${version}`, { mode: 0o600 });
   await fs.rename(path.join(receipt.directory, "healthy.next"), path.join(receipt.directory, "healthy"));
-}
-
-async function updateRecoveryMessage(userData, execPath) {
-  const receipt = await readTransaction(userData, execPath);
-  if (!receipt || receipt.state === "complete") return null;
-  if (receipt.state === "opening" &&
-      (await fs.readFile(path.join(receipt.directory, "healthy"), "utf8").catch(() => "")) === `${receipt.token} ${receipt.version}`) return null;
-  if (await exists(path.join(receipt.directory, "backup.app"))) {
-    return `The previous update needs checking. Its backup is at ${path.join(receipt.directory, "backup.app")}. Quit the app before restoring it. Details: ${path.join(receipt.directory, "RECOVERY.txt")}`;
-  }
-  if (["rolled_back", "replace_failed", "cancelled", "commit_timeout", "exit_timeout"].includes(receipt.state)) {
-    return "The previous update was not completed. Your existing app was kept; you can try again.";
-  }
-  return null;
 }
 
 class MacUpdater {
@@ -120,7 +105,7 @@ class MacUpdater {
       await validateMacBundle(target, require("../package.json").version, this.arch);
       const previous = await readTransaction(this.userData, this.execPath);
       if (previous && await exists(path.join(previous.directory, "backup.app"))) {
-        throw new Error(await updateRecoveryMessage(this.userData, this.execPath));
+        throw new Error("A previous update is unfinished. Close all app copies and reinstall the latest release.");
       }
       await cleanupPreviousTransaction(previous);
       lock = path.join(path.dirname(target), `.${path.basename(target)}.update-lock`);
@@ -136,11 +121,6 @@ class MacUpdater {
       await fs.writeFile(path.join(directory, "transaction.json"), JSON.stringify(receipt), { mode: 0o600 });
       await fs.mkdir(this.userData, { recursive: true });
       await fs.writeFile(receiptPath(this.userData), JSON.stringify(receipt), { mode: 0o600 });
-      await fs.writeFile(path.join(directory, "RECOVERY.txt"),
-        `Update to ${version}\nOriginal app: ${target}\nBackup: ${directory}/backup.app\n` +
-        `If startup failed, quit all copies of the app before restoring backup.app to the original location.\n` +
-        `Do not delete the backup until the new app works. See state and helper.log in this folder.\n` +
-        `If an interrupted update left a lock, remove ${lock} only after all app and update-helper processes have exited.\n`);
       status("downloading", { percent: 0 });
       const artifact = await getReleaseArtifact(version, "darwin", this.arch, this.fetchImpl);
       const archive = path.join(directory, "update.zip");
@@ -195,5 +175,5 @@ class MacUpdater {
   }
 }
 
-module.exports = { MacUpdater, getMacTarget, validateMacBundle, acknowledgeMacUpdate, updateRecoveryMessage,
+module.exports = { MacUpdater, getMacTarget, validateMacBundle, acknowledgeMacUpdate,
   readTransaction, cleanupPreviousTransaction, BUNDLE_NAME, BUNDLE_ID };

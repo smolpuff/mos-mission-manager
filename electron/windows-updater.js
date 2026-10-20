@@ -52,15 +52,6 @@ async function acknowledgeWindowsUpdate({ userData, version, argv }) {
   await fs.rename(path.join(receipt.directory, "healthy.next"), path.join(receipt.directory, "healthy"));
 }
 
-async function windowsRecoveryMessage(userData) {
-  const receipt = await readWindowsTransaction(userData);
-  if (!receipt || receipt.state === "complete") return null;
-  if (receipt.state === "opening" && (await fs.readFile(path.join(receipt.directory, "healthy"), "utf8").catch(() => "")) === `${receipt.token} ${receipt.version}`) return null;
-  if (await exists(path.join(receipt.directory, "backup.exe"))) return `The update needs checking. Quit all app copies before restoring ${path.join(receipt.directory, "backup.exe")} to ${receipt.target}. See ${path.join(receipt.directory, "RECOVERY.txt")}.`;
-  if (["rolled_back", "replace_failed", "cancelled", "commit_timeout", "exit_timeout"].includes(receipt.state)) return "The previous update did not complete. Your original app was kept; you can retry.";
-  return null;
-}
-
 class WindowsUpdater {
   constructor({ userData, arch, onStatus = () => {} }) { Object.assign(this, { userData, arch, onStatus }); this.busy = false; }
   async install(version, { stopGracefully, quit }) {
@@ -70,7 +61,7 @@ class WindowsUpdater {
     try {
       const target = await getWindowsTarget();
       const previous = await readWindowsTransaction(this.userData);
-      if (previous && await exists(path.join(previous.directory, "backup.exe"))) throw new Error(await windowsRecoveryMessage(this.userData));
+      if (previous && await exists(path.join(previous.directory, "backup.exe"))) throw new Error("A previous update is unfinished. Close all app copies and reinstall the latest release.");
       lock = path.join(path.dirname(target), `.${path.basename(target)}.update-lock`);
       await fs.mkdir(lock).catch(() => { throw new Error(`Another update is active, or the app's folder is not writable. Check ${lock} after closing all copies.`); });
       token = crypto.randomBytes(16).toString("hex");
@@ -79,7 +70,6 @@ class WindowsUpdater {
       const receipt = { target, directory, token, version, ownerPid: process.pid };
       await fs.writeFile(path.join(directory, "transaction.json"), JSON.stringify(receipt));
       await fs.writeFile(path.join(this.userData, "desktop-update-transaction.json"), JSON.stringify(receipt));
-      await fs.writeFile(path.join(directory, "RECOVERY.txt"), `Original file: ${target}\r\nBackup: ${directory}\\backup.exe\r\nQuit all app/launcher/helper processes before restoring the backup or removing a stale lock at ${lock}. Keep the backup until the new app works.\r\n`);
       this.onStatus({ phase: "downloading", percent: 0 });
       const artifact = await getReleaseArtifact(version, "win32", this.arch);
       const download = path.join(directory, "download.exe");
@@ -146,4 +136,4 @@ class WindowsUpdater {
     } finally { if (!committed) this.busy = false; }
   }
 }
-module.exports = { WindowsUpdater, acknowledgeWindowsUpdate, windowsRecoveryMessage };
+module.exports = { WindowsUpdater, acknowledgeWindowsUpdate };
