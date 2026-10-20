@@ -1433,7 +1433,14 @@ function createMcpClient(ctx, logger) {
         }
         finalizeToolCallEntry(toolCallEntry, "ok");
         const minIntervalMs = Number(TOOL_MIN_INTERVAL_MS.get(toolName) || 0);
-        if (toolName !== "get_rentable_nfts" && minIntervalMs > 0) {
+        // Watch and rental deadlines are already reserved at dispatch.
+        // Extending them after a successful response adds the request's
+        // duration to the wait. Server Retry-After deadlines remain separate.
+        if (
+          toolName !== "get_rentable_nfts" &&
+          toolName !== "watch_and_claim" &&
+          minIntervalMs > 0
+        ) {
           persistToolCooldown(
             toolName,
             Date.now() + minIntervalMs + THROTTLE_SAFETY_BUFFER_MS,
@@ -1482,13 +1489,8 @@ function createMcpClient(ctx, logger) {
               detail: "Call skipped because an MCP cooldown was already active.",
               stack: captureStack(3),
             });
-            emitThrottleNotice({
-              trigger: error.toolName || toolName,
-              message: error.message,
-              waitSeconds: Number(error.retryAfterSeconds || 0) || null,
-              retryAt: Number(error.retryAt || 0) || null,
-              detail: `Triggered by: ${String(error.reason || "pre_call")}`,
-            });
+            // Local pacing (including remembered server deadlines) belongs
+            // in diagnostics. Only a new server rejection opens the dialog.
           } else {
             logWithTimestamp(
               `[MCP] ⏳ ${toolName} rate limited. Retry after ${error.retryAfterSeconds}s.`,

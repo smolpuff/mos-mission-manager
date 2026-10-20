@@ -1,0 +1,19 @@
+import seasons from "../../src/analytics-seasons.json" with { type: "json" };
+
+export function availableAnalyticsSeasons() {
+  return Object.entries(seasons);
+}
+
+export function currentAnalyticsSeasonKey(now = Date.now()) {
+  return Object.entries(seasons).find(
+    ([, season]) => now >= Date.parse(season.start) && now < Date.parse(season.end),
+  )?.[0] || null;
+}
+
+export function analyticsSeasonLabel(key, now = Date.now()) {
+  const season = seasons[key];
+  if (!season) return null;
+  return key === currentAnalyticsSeasonKey(now)
+    ? `This season (${key.replace(/^season/, "")})`
+    : season.label;
+}

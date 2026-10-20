@@ -1,6 +1,6 @@
 {
   "name": "missions-v3-mcp",
-  "version": "3.2.18",
+  "version": "3.2.19",
   "main": "electron/main.js",
   "scripts": {
     "test": "node --test",
@@ -23,7 +23,8 @@
     "build:mac:x64": "node scripts/build-sea.js mac x64 && node scripts/build-mac-app.js x64",
     "build:mac:verify": "codesign -dv binaries/missions-mcp-macos-arm64-$npm_package_version.app",
     "build:win": "npm run bundle && node scripts/build-sea.js win x64",
-    "zip:builds": "node scripts/zip-builds.js"
+    "zip:builds": "node scripts/zip-builds.js",
+    "test:setup-updates": "npm run desktop:build && node electron/update-tools/verify-setup-updates.js"
   },
   "build": {
     "appId": "dephlect.pbp-missions.desktop",

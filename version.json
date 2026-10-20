@@ -1,13 +1,7 @@
 {
   "version": "3.2.18",
   "downloadUrl": "https://github.com/smolpuff/mos-mission-manager/releases/latest",
-  "notes": [
-    "Added WORKING automatic updates. oopsie :D ",
-    "Fixed Level 20+ NFT selection to use all mission-eligible collections while preserving lvl 20 reserved NFT priority",
-    "Fixed NFT metadata handling & caching",
-    "Fixed the claim UI getting stuck",
-    "Fixed various linux things"
-  ],
+  "notes": ["Faster claim and assigning when out of normal watch loop"],
   "schemaVersion": 1,
   "artifacts": {
     "darwin-arm64": {

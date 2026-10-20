@@ -3792,9 +3792,10 @@ function createWatchService(
             const directClaims = Array.isArray(directClaimResult?.claims)
               ? directClaimResult.claims
               : [];
-            const directClaimed = directClaims.filter(
-              (claim) => claim?.success !== false,
-            ).length;
+            const directClaimed = Math.max(
+              Number(directClaimResult?.claimed || 0),
+              directClaims.filter((claim) => claim?.success !== false).length,
+            );
             if (directClaimed <= 0) {
               return directClaimResult;
             }
@@ -3803,7 +3804,8 @@ function createWatchService(
               beforeSnapshot: beforeDirectClaimSnapshot,
               claimed: directClaimed,
               claims: directClaims,
-              assignReason: "watch_gap_direct_claim",
+              // Use the same post-claim assignment rules as the main loop.
+              assignReason: "post_claim_watch_gap_direct_claim",
               claimLogLabel: "Gap claimed",
               assignIntro:
                 "[ASSIGN] ▶ Post-gap-claim assign check (immediate)...",
@@ -4393,7 +4395,7 @@ function createWatchService(
         beforeSnapshot,
         claimed: Number(claimResult?.claimed || 0),
         claims: Array.isArray(claimResult?.claims) ? claimResult.claims : [],
-        assignReason: "manual",
+        assignReason: "post_claim_manual",
         claimLogLabel: "Manual claimed",
         assignIntro: "[ASSIGN] ▶ Post-claim assign check (immediate)...",
         initialMissionResult:

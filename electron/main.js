@@ -1458,38 +1458,6 @@ function readResourceUsageSnapshot() {
   }
 }
 
-function parseRetrySecondsFromMessage(message) {
-  const text = String(message || "").trim();
-  if (!text) return null;
-  const match = text.match(/retry (?:in|after) (\d+)s/i);
-  if (!match) return null;
-  const seconds = Number(match[1]);
-  return Number.isFinite(seconds) && seconds > 0 ? seconds : null;
-}
-
-function publishThrottleNotice({
-  source = "unknown",
-  trigger = "unknown",
-  message = "",
-  waitSeconds = null,
-  detail = null,
-} = {}) {
-  const retrySeconds =
-    Number.isFinite(Number(waitSeconds)) && Number(waitSeconds) > 0
-      ? Math.ceil(Number(waitSeconds))
-      : parseRetrySecondsFromMessage(message);
-  publishEvent({
-    type: "throttle_notice",
-    source,
-    trigger,
-    message: String(message || "The app was rate limited.").trim(),
-    waitSeconds: retrySeconds,
-    retryAt: retrySeconds ? Date.now() + retrySeconds * 1000 : null,
-    detail: detail ? String(detail).trim() : null,
-    at: Date.now(),
-  });
-}
-
 function clearStopTimer() {
   if (stopTimer) {
     clearTimeout(stopTimer);
@@ -6031,6 +5999,10 @@ app.whenReady().then(async () => {
   handleTrustedIpc("updates:check", async (_event, payload = {}) => {
     const config = readDesktopConfig();
     const manual = payload?.manual === true;
+    if (config.firstRunOnboardingCompleted !== true) {
+      return { ok: true, skipped: true, reason: "setup_incomplete",
+        currentVersion: app.getVersion(), updateAvailable: false };
+    }
     if (!manual && !autoUpdateCheckEnabledFromConfig(config)) {
       return {
         ok: true,
@@ -6045,6 +6017,9 @@ app.whenReady().then(async () => {
   handleTrustedIpc("updates:install", async (event, version) => {
     if (!desktopUpdater || event.sender !== controlWindow?.webContents || event.senderFrame !== event.sender.mainFrame) {
       return { ok: false, error: "In-app updates are available in packaged Mac and Windows apps." };
+    }
+    if (readDesktopConfig().firstRunOnboardingCompleted !== true) {
+      return { ok: false, error: "Finish initial setup before installing an update." };
     }
     if (typeof version !== "string" || version !== desktopUpdateOffer?.latestVersion) {
       return { ok: false, error: "This update offer has changed. Check for updates again." };
@@ -6123,17 +6098,6 @@ app.whenReady().then(async () => {
         // Don't crash the renderer on RPC rate limits; keep the last known good summary.
         const message = String(error?.message || error);
         pushSystemLog(`Funding wallet summary refresh failed: ${message}`);
-        if (
-          /rate limited|http 429|too many requests|retry after|retry in/i.test(
-            message,
-          )
-        ) {
-          publishThrottleNotice({
-            source: "rpc",
-            trigger: "funding_wallet_refresh",
-            message,
-          });
-        }
         publishStatus();
         return {
           walletId: null,
@@ -6561,7 +6525,6 @@ app.whenReady().then(async () => {
       missionActionEnabledBySlot: normalizeMissionActionEnabledBySlot(
         payload?.missionActionEnabledBySlot,
       ),
-      firstRunOnboardingCompleted: true,
     };
     const next = applyDesktopConfigPatch(configPatch);
     if (typeof next.signerMode === "string") {

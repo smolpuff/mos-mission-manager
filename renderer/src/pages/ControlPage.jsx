@@ -431,6 +431,9 @@ function ControlView() {
   const [configuredTargetMissions, setConfiguredTargetMissions] = useState([]);
   const [autoUpdateCheckEnabled, setAutoUpdateCheckEnabledState] =
     useState(true);
+  // Stay blocked until config has loaded and setup has successfully finished.
+  const [firstRunSetupComplete, setFirstRunSetupComplete] = useState(false);
+  const [onboardingOpen, setOnboardingOpen] = useState(false);
   const [lastUpdateCheckAt, setLastUpdateCheckAt] = useState(null);
   const [
     missionCompetitionCheckEnabled,
@@ -986,6 +989,7 @@ function ControlView() {
             ? configuredSol
             : 0.01,
       });
+      setFirstRunSetupComplete(config.firstRunOnboardingCompleted === true);
       if (config.firstRunOnboardingCompleted !== true) {
         setOnboardingPreviewOnly(false);
         setOnboardingOpen(true);
@@ -1001,16 +1005,6 @@ function ControlView() {
       setCurrentPage("missions");
     }
   }, [currentPage, debugPageVisible]);
-
-  useEffect(() => {
-    if (startupUpdateCheckRequestedRef.current) return;
-    if (!bridge?.checkForUpdates) return;
-    const timer = setTimeout(() => {
-      startupUpdateCheckRequestedRef.current = true;
-      void runUpdateCheck({ manual: false });
-    }, 300);
-    return () => clearTimeout(timer);
-  }, [bridge]);
 
   const refreshLatestCompetition = async (requestedNumber = null) => {
     if (!bridge?.getLatestCompetition) {
@@ -1380,6 +1374,7 @@ function ControlView() {
   };
   const runUpdateCheck = useCallback(
     async ({ manual = false } = {}) => {
+      if (!firstRunSetupComplete || onboardingOpen) return null;
       if (!bridge?.checkForUpdates || updateCheckBusyRef.current) return null;
       updateCheckBusyRef.current = true;
       setUpdateCheckBusy(true);
@@ -1424,8 +1419,19 @@ function ControlView() {
         setUpdateCheckBusy(false);
       }
     },
-    [bridge],
+    [bridge, firstRunSetupComplete, onboardingOpen],
   );
+
+  useEffect(() => {
+    if (!firstRunSetupComplete || onboardingOpen) return;
+    if (startupUpdateCheckRequestedRef.current) return;
+    if (!bridge?.checkForUpdates) return;
+    const timer = setTimeout(() => {
+      startupUpdateCheckRequestedRef.current = true;
+      void runUpdateCheck({ manual: false });
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [bridge, firstRunSetupComplete, onboardingOpen, runUpdateCheck]);
 
   useEffect(() => bridge?.onUpdateStatus?.(setUpdateInstallStatus), [bridge]);
   useEffect(() => {
@@ -1433,7 +1439,7 @@ function ControlView() {
   }, [bridge]);
 
   const installOfferedUpdate = async () => {
-    if (updateInstalling) return;
+    if (!firstRunSetupComplete || onboardingOpen || updateInstalling) return;
     setUpdateInstallStatus({ phase: "downloading", percent: 0 });
     try {
       const result = await bridge.installUpdate(updateModal.latestVersion);
@@ -1446,6 +1452,7 @@ function ControlView() {
   };
 
   useEffect(() => {
+    if (!firstRunSetupComplete || onboardingOpen) return;
     if (autoUpdateCheckEnabled !== true) return;
     if (!bridge?.checkForUpdates) return;
     let cancelled = false;
@@ -1474,7 +1481,7 @@ function ControlView() {
       cancelled = true;
       if (timer) clearTimeout(timer);
     };
-  }, [autoUpdateCheckEnabled, bridge, runUpdateCheck]);
+  }, [autoUpdateCheckEnabled, bridge, firstRunSetupComplete, onboardingOpen, runUpdateCheck]);
   const activateNormalMode = async () => {
     if (!beginModeTransition("normal")) return;
     let succeeded = false;
@@ -1862,7 +1869,6 @@ function ControlView() {
     backup: secretModalBackup, revealed: secretModalRevealed } = secretModalState;
   const [secretCopiedPhraseLabel, setSecretCopiedPhraseLabel] = useState(null);
   const [secretCopiedAddrLabel, setSecretCopiedAddrLabel] = useState(null);
-  const [onboardingOpen, setOnboardingOpen] = useState(false);
   const [onboardingStep, setOnboardingStep] = useState(1);
   const [onboardingBusy, setOnboardingBusy] = useState(false);
   const [onboardingError, setOnboardingError] = useState(null);
@@ -2351,7 +2357,7 @@ function ControlView() {
   }, [onboardingOpen]);
 
   useEffect(() => {
-    if (lastEvent?.type !== "throttle_notice") return;
+    if (lastEvent?.type !== "throttle_notice" || lastEvent.source !== "mcp") return;
     const waitSeconds = Number(lastEvent.waitSeconds || 0) || null;
     const retryAt = Number(lastEvent.retryAt || 0) || null;
     const modalKey = [
@@ -3310,6 +3316,7 @@ function ControlView() {
   const applyOnboarding = async () => {
     if (onboardingPreviewOnly) {
       await applyConfigPatch({ firstRunOnboardingCompleted: true });
+      setFirstRunSetupComplete(true);
       setOnboardingOpen(false);
       return;
     }
@@ -3360,7 +3367,6 @@ function ControlView() {
         signerMode: onboardingSignerMode,
         targetMissions: targetMissions.length > 0 ? targetMissions : undefined,
         missionActionEnabledBySlot: onboardingMissionActionEnabledBySlot,
-        firstRunOnboardingCompleted: true,
       });
       setMissionActionEnabledBySlot({
         ...onboardingMissionActionEnabledBySlot,
@@ -3379,6 +3385,8 @@ function ControlView() {
       if (shouldRestartRunner && bridge?.restartBackend) {
         await bridge.restartBackend();
       }
+      await applyConfigPatch({ firstRunOnboardingCompleted: true });
+      setFirstRunSetupComplete(true);
       setOnboardingOpen(false);
     } catch (error) {
       setOnboardingError(String(error?.message || error));
@@ -3390,8 +3398,11 @@ function ControlView() {
   const dismissOnboarding = async () => {
     try {
       await applyConfigPatch({ firstRunOnboardingCompleted: true });
-    } catch {}
-    setOnboardingOpen(false);
+      setFirstRunSetupComplete(true);
+      setOnboardingOpen(false);
+    } catch (error) {
+      setOnboardingError(String(error?.message || error));
+    }
   };
 
   return (

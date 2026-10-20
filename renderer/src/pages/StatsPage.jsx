@@ -4,15 +4,13 @@ import tcIcon from "../img/icon_tc.webp";
 import { useEffect, useState } from "react";
 import useDesktopBridge from "../components/useDesktopBridge";
 import { canonicalCollectionLabel } from "../collection-images";
-import analyticsSeasons from "../../../src/analytics-seasons.json";
+import {
+  availableAnalyticsSeasons,
+  currentAnalyticsSeasonKey,
+  analyticsSeasonLabel,
+} from "../analytics-seasons.mjs";
 
 const DETAILED_STATS_URL_BASE = "https://missions.lol/missions-analytics/";
-
-function availableAnalyticsSeasons(now = Date.now()) {
-  return Object.entries(analyticsSeasons).filter(
-    ([, season]) => now >= Date.parse(season.start),
-  );
-}
 
 function formatNumber(value, max = 2) {
   const n = Number(value || 0);
@@ -358,7 +356,9 @@ export default function StatsPage({ status }) {
   const availableSeasons = availableAnalyticsSeasons();
   const refreshKey = analyticsRefreshKey(safeStatus.analytics);
   const [statsTab, setStatsTab] = useState("overview");
-  const [overviewRangeKey, setOverviewRangeKey] = useState("season71");
+  const [overviewRangeKey, setOverviewRangeKey] = useState(
+    () => currentAnalyticsSeasonKey() || "all",
+  );
   const [nftRangeKey, setNftRangeKey] = useState("all");
   const rangeKey = statsTab === "nfts" ? nftRangeKey : overviewRangeKey;
   const setRangeKey =
@@ -492,9 +492,7 @@ export default function StatsPage({ status }) {
         ? "Last 24hrs"
         : rangeKey === "7d"
           ? "Last 7days"
-          : rangeKey === "season71"
-            ? "This season (71)"
-            : analyticsSeasons[rangeKey]?.label || "All Time";
+          : analyticsSeasonLabel(rangeKey) || "All Time";
   const currentUserWalletId = String(
     safeStatus.currentUserWalletId || "",
   ).trim();
@@ -731,15 +729,15 @@ export default function StatsPage({ status }) {
                   className="select select-sm w-36 border-white/10 bg-black/50 text-slate-100 focus-within:bg-black"
                   value={rangeKey}
                   onChange={(event) =>
-                    setRangeKey(String(event.target.value || "season71"))
+                    setRangeKey(String(event.target.value || "all"))
                   }
                   disabled={loading || actionBusy}
                 >
                   <option value="24h">Last 24hrs</option>
                   <option value="7d">Last 7days</option>
-                  {availableSeasons.map(([key, season]) => (
+                  {availableSeasons.map(([key]) => (
                     <option key={key} value={key}>
-                      {key === "season71" ? "This season (71)" : season.label}
+                      {analyticsSeasonLabel(key)}
                     </option>
                   ))}
                   <option value="all">All time</option>
@@ -918,15 +916,15 @@ export default function StatsPage({ status }) {
                 className="select select-sm  bg-black/50 focus-within:bg-black border-white/10 text-slate-100 w-36"
                 value={rangeKey}
                 onChange={(event) =>
-                  setRangeKey(String(event.target.value || "season71"))
+                  setRangeKey(String(event.target.value || "all"))
                 }
                 disabled={loading || actionBusy}
               >
                 <option value="24h">Last 24hrs</option>
                 <option value="7d">Last 7days</option>
-                {availableSeasons.map(([key, season]) => (
+                {availableSeasons.map(([key]) => (
                   <option key={key} value={key}>
-                    {key === "season71" ? "This season (71)" : season.label}
+                    {analyticsSeasonLabel(key)}
                   </option>
                 ))}
                 <option value="all">All time</option>
