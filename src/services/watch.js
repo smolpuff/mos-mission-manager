@@ -4752,8 +4752,6 @@ function createWatchService(
         }
       } catch (error) {
         const msg = String(error?.message || "");
-        authEvent(ctx.tokenFilePath, "watch.cycle.error", { error, missionMode: ctx.missionModeEnabled === true,
-          authenticated: ctx.isAuthenticated, popupWaitMs: mcp.getAuthPopupDelayMs?.() || 0 }, { failure: true });
         const isAbort =
           /request aborted|aborterror|aborted/i.test(msg) ||
           error?.name === "AbortError";
@@ -4763,6 +4761,8 @@ function createWatchService(
         }
         const isAuthError =
           /missing token|401|403|unauthorized|forbidden|auth|login/i.test(msg);
+        authEvent(ctx.tokenFilePath, "watch.cycle.error", { error, missionMode: ctx.missionModeEnabled === true,
+          authenticated: ctx.isAuthenticated, popupWaitMs: mcp.getAuthPopupDelayMs?.() || 0 }, { failure: isAuthError });
         if (isAuthError) {
           ctx.isAuthenticated = false;
           logWithTimestamp(`[AUTH] ❌ Session/auth error during watch: ${msg}`);
@@ -4773,6 +4773,8 @@ function createWatchService(
               forceBrowser: true,
               automatic: true,
               background: true,
+              reason: "watch_auth_error",
+              triggerError: msg,
             });
             if (loginOk) {
               const checksOk = await checks.runInitialChecks();

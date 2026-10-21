@@ -51,6 +51,9 @@ jobs:
           npm config set fetch-retry-maxtimeout 120000
       - name: Install dependencies
         run: npm ci
+      - name: Verify failure-only auth diagnostics
+        if: matrix.platform == 'mac' && matrix.arch == 'arm64'
+        run: node --test lib/auth-diagnostics.test.js
       - name: Build diagnostic app
         run: |
           npm run desktop:build

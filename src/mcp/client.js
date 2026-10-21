@@ -993,7 +993,7 @@ function createMcpClient(ctx, logger, dependencies = {}) {
   }
 
   async function performAuthRecovery(reason) {
-    trace("client.recovery.begin", { reason }, { failure: true });
+    trace("client.recovery.begin", { reason });
     setMcpConnection("reconnecting");
     for (let attempt = 1; attempt <= REFRESH_RETRY_ATTEMPTS; attempt += 1) {
       const waitMs = Math.max(0, nextRefreshAttemptAt - Date.now());
@@ -1018,6 +1018,8 @@ function createMcpClient(ctx, logger, dependencies = {}) {
       forceBrowser: true,
       automatic: true,
       background: true,
+      reason: "renewal_failed",
+      recoveryReason: reason,
     });
     if (!loginOk) {
       setMcpConnection("expired", { error: "login_failed" });
@@ -1706,8 +1708,10 @@ function createMcpClient(ctx, logger, dependencies = {}) {
     const { forceInteractive = false, forceBrowser = false } = opts;
     const credentialsAtStart = tokenFileSummary(ctx.tokenFilePath);
     const refreshSignalAtStart = Number(ctx.authRefreshSignal || 0);
-    trace("client.login.begin", { forceInteractive, forceBrowser, automatic: opts.automatic === true,
-      caller: new Error().stack, credentials: tokenFileSummary(ctx.tokenFilePath) });
+    const loginTrigger = { forceInteractive, forceBrowser, automatic: opts.automatic === true,
+      reason: opts.reason || "startup_or_requested_login", recoveryReason: opts.recoveryReason,
+      triggerError: opts.triggerError, caller: new Error().stack, credentials: credentialsAtStart };
+    trace("client.login.begin", loginTrigger);
     const canInteractive = ctx.interactiveAuth || forceInteractive;
 
     logWithTimestamp("[AUTH] Starting login flow...");
@@ -1736,7 +1740,7 @@ function createMcpClient(ctx, logger, dependencies = {}) {
         printAuthUrl: false,
         beforeOpenBrowser: () => {
           const permit = popupPolicy.claimWindow();
-          trace("client.login.window_claim", permit);
+          trace("client.login.window_claim", { ...permit, trigger: loginTrigger }, { failure: permit.allowed === true });
           return permit;
         },
         onAuthUrl: (url) => {

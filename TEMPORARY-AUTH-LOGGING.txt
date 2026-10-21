@@ -26,20 +26,33 @@ IDs, roles, sequence numbers, request IDs and token fingerprints identify who
 used which credentials. Logs rotate at approximately 5 MiB, retaining .1 and
 .2 backups. New logs are created with owner-only permissions where supported.
 
-When a failure occurs, a PBP AUTH INCIDENT BEGIN block automatically includes
-the preceding 120 events from that process. Subsequent events carry the same
-incident ID. A successful authenticated tool request ends that incident.
-Unresolved incidents remain open; logging continues through retries/login.
+Successful token reads, HTTP calls and proactive renewals are NOT written to
+disk. A rolling in-memory buffer keeps up to 120 preceding events, capped at
+256 KiB per process. A real failure OR an authorization browser launch writes
+a PBP AUTH INCIDENT BEGIN block with that context and runtime information.
+While a report is open, only failures, auth recovery/login steps and the final
+successful authenticated request are written. Ordinary calls and token reads
+stay buffered. Recovery closes the report and disk logging goes quiet again.
+Normal proactive renewal starting is not a failure.
+
+Every popup report includes its initiating call stack, reason (renewal_failed,
+watch_auth_error, or startup_or_requested_login), triggering watch error where
+applicable, credential fingerprints/expiry/file state, popup eligibility and
+actual browser launch result. Even a direct library/CLI browser launch writes
+a report, so an unexpected authorization window cannot silently go unrecorded.
 
 Captured: token presence, file path/stat/read/write failures, credential and
 client fingerprints, granted scopes, expiry timestamps, decoded JWT timing
 fields (not signature validation), local time/server Date/timezone, metadata
-discovery and selected endpoints, every authenticated request/response status,
-provider error bodies (up to 16,000 characters per string), OAuth error codes
+discovery and selected endpoints, the failing request/response status,
+provider response text in rawResponse (full text with original whitespace/SSE
+framing, without the former 16,000-character cutoff), OAuth error codes
 and descriptions, Retry-After, WWW-Authenticate, provider request IDs, network
 error causes/stacks, refresh attempts, replacement refresh-token fingerprints,
 credential changes during a refresh, browser launch outcomes, callback state
 matching, token exchange/save outcomes, and watcher recovery decisions.
+Response headers and status text are included. Credential values are still
+redacted, including in rawResponse; exact text means everything except secrets.
 
 Raw access/refresh/registration tokens, authorization headers, auth codes,
 PKCE secrets and callback state values are redacted. Successful mission/NFT
