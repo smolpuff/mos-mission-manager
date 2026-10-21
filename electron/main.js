@@ -11,6 +11,7 @@ const {
   BrowserWindow,
   dialog,
   Menu,
+  Tray,
 //   Tray,
 //   nativeImage,
 //   net: electronNet,
@@ -24,6 +25,8 @@ const { createWalletGenerationRequest } = require("./wallet-generation");
 // const { createMacMenuBar } = require("./mac-menu-bar");
 // const { startFromMenuBar } = require("./menu-bar-state");
 const { createWalletRefreshScheduler } = require("./wallet-refresh-scheduler");
+const { createWindowsTray } = require("./windows-tray");
+const { startFromWindowsTray } = require("./windows-tray-state");
 const { createSignerService } = require("../src/signer");
 const { importWalletAndVerify } = require("../src/wallet-import");
 let walletOperationBusy = false;
@@ -160,6 +163,17 @@ function desktopWindowFrameOptions() {
 let controlWindow = null;
 let cliWindow = null;
 let splashWindow = null;
+let windowsTrayRunnerActions = null;
+const windowsTray = createWindowsTray({
+  platform: process.platform,
+  Tray, Menu, icon: WINDOWS_WINDOW_ICON,
+  getWindow: () => controlWindow,
+  isQuitting: () => appQuitInFlight || telemetryQuitInProgress,
+  start: () => windowsTrayRunnerActions.start(),
+  stop: () => windowsTrayRunnerActions.stop(),
+  quit: () => requestAppQuit("windows_tray_quit"),
+  onError: (error) => pushSystemLog(`Tray action failed: ${String(error?.message || error)}`),
+});
 // let menuBarRunnerActions = null;
 // const macMenuBar = createMacMenuBar({
 //   platform: process.platform,
@@ -1069,6 +1083,7 @@ function logConfigPatch(source, patch = {}) {
 }
 
 function publishStatus() {
+  windowsTray.updateStatus(backendStatus);
 //   macMenuBar.updateStatus(backendStatus);
   publish("backend:status", { ...backendStatus });
 }
@@ -5345,6 +5360,7 @@ async function createControlWindow() {
   });
 
 //   controlWindow.on("close", (event) => macMenuBar.closeWindow(event));
+  controlWindow.on("close", (event) => windowsTray.closeWindow(event));
   controlWindow.on("closed", () => {
     controlWindow = null;
   });
@@ -5635,6 +5651,10 @@ async function createCliWindow() {
 if (["darwin", "win32"].includes(process.platform) && app.isPackaged && !isDesktopDevMode()) {
   if (!app.requestSingleInstanceLock()) app.exit(0);
   app.on("second-instance", () => {
+    if (windowsTray.isEnabled()) {
+      windowsTray.openWindow();
+      return;
+    }
     const window = controlWindow || cliWindow;
     if (window && !window.isDestroyed()) { window.show(); window.focus(); }
   });
@@ -5683,6 +5703,14 @@ app.whenReady().then(async () => {
     return stopBackend();
   };
   handleTrustedIpc("backend:stop", async () => stopDesktopBackend());
+  windowsTrayRunnerActions = {
+    start: () => startFromWindowsTray({
+      getConfig: async () => ({ config: readDesktopConfig() }),
+      startBackend: startDesktopBackend,
+      sendCommand: sendBackendCommand,
+    }, backendStatus),
+    stop: stopDesktopBackend,
+  };
 //   menuBarRunnerActions = {
 //     start: () => startFromMenuBar({
 //       getConfig: async () => ({ config: readDesktopConfig() }),
@@ -5798,6 +5826,7 @@ app.whenReady().then(async () => {
       currentMode: backendStatus.currentMode,
     };
     const next = applyDesktopConfigPatch(patch || {});
+    if (!isStandaloneCliMode()) windowsTray.sync(next.windowsTrayEnabled === true);
 //     if (!isStandaloneCliMode()) macMenuBar.sync(next.macMenuBarEnabled === true);
     if (typeof next.autoModeEnabled === "boolean") {
       backendStatus.autoModeEnabled = next.autoModeEnabled;
@@ -7158,7 +7187,8 @@ app.whenReady().then(async () => {
       ) {
 //        if (macMenuBar.isEnabled()) win.close();
 //        else requestAppQuit("window_close");
-        requestAppQuit("window_close");
+        if (windowsTray.isEnabled()) win.close();
+        else requestAppQuit("window_close");
       } else {
         win.close();
       }
@@ -7189,6 +7219,7 @@ app.whenReady().then(async () => {
   } else {
     createSplashWindow();
     await createControlWindow();
+    windowsTray.sync(readDesktopConfig().windowsTrayEnabled === true);
 //     macMenuBar.sync(readDesktopConfig().macMenuBarEnabled === true);
   }
   if (!isStandaloneCliMode()) await bootstrapStartupMissionSlots();
@@ -7242,6 +7273,10 @@ app.whenReady().then(async () => {
   }
 
   app.on("activate", async () => {
+    if (windowsTray.isEnabled()) {
+      windowsTray.openWindow();
+      return;
+    }
 //     if (macMenuBar.isEnabled()) {
 //       macMenuBar.openWindow();
 //       return;
@@ -7260,6 +7295,7 @@ app.on("window-all-closed", () => {
 });
 
 app.on("before-quit", (event) => {
+  windowsTray.destroy();
   fundingWalletRefreshScheduler?.stop();
   if (telemetryQuitInProgress) {
     return;

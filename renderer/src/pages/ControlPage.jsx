@@ -430,6 +430,7 @@ function ControlView() {
   const [competitionRangeLockPollSeconds, setCompetitionRangeLockPollSeconds] =
     useState("150");
   const [configuredTargetMissions, setConfiguredTargetMissions] = useState([]);
+  const [windowsTrayEnabled, setWindowsTrayEnabled] = useState(false);
 //   const [macMenuBarEnabled, setMacMenuBarEnabledState] = useState(false);
   const [autoUpdateCheckEnabled, setAutoUpdateCheckEnabledState] =
     useState(true);
@@ -953,6 +954,7 @@ function ControlView() {
         setAutoUpdateCheckEnabledState(true);
       }
 //       setMacMenuBarEnabledState(config.macMenuBarEnabled === true);
+      setWindowsTrayEnabled(config.windowsTrayEnabled === true);
       if (typeof config.missionCompetitionCheckEnabled === "boolean") {
         setMissionCompetitionCheckEnabledState(
           config.missionCompetitionCheckEnabled,
@@ -1344,6 +1346,11 @@ function ControlView() {
 //   };
   const clearUpdateCheckMessage = () => {
     setUpdateCheckMessage(null);
+  };
+  const changeWindowsTrayEnabled = async (enabled) => {
+    const next = enabled === true;
+    await applyConfigPatch({ windowsTrayEnabled: next });
+    setWindowsTrayEnabled(next);
   };
   const setMissionCompetitionCheckEnabled = async (enabled) => {
     const next = enabled === true;
@@ -3655,6 +3662,8 @@ function ControlView() {
               openSecretModal={openSecretModal}
               openCreateWalletModal={openCreateWalletModal}
               autoUpdateCheckEnabled={autoUpdateCheckEnabled}
+              windowsTrayEnabled={windowsTrayEnabled}
+              setWindowsTrayEnabled={changeWindowsTrayEnabled}
 //               macMenuBarEnabled={macMenuBarEnabled}
 //               setMacMenuBarEnabled={setMacMenuBarEnabled}
               lastUpdateCheckAt={lastUpdateCheckAt}

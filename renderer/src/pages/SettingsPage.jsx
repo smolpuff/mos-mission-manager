@@ -24,6 +24,8 @@ export default function SettingsPage({
   openSecretModal,
   openCreateWalletModal,
   autoUpdateCheckEnabled,
+  windowsTrayEnabled,
+  setWindowsTrayEnabled,
 //   macMenuBarEnabled,
 //   setMacMenuBarEnabled,
   lastUpdateCheckAt,
@@ -456,6 +458,19 @@ export default function SettingsPage({
                 </div>
               </div>
             </div>
+
+            {bridge?.platform === "win32" && (
+              <div className="pb-2">
+                <ToggleSwitch
+                  switchID="windowsTrayEnabled"
+                  checked={windowsTrayEnabled === true}
+                  onChange={(e) => void setWindowsTrayEnabled(e.target.checked)}
+                  title="Keep Running in System Tray"
+                  helperText="Closing the window keeps Missions running. Right-click its tray icon to start or stop, view your four missions, reopen, or quit."
+                  styling="!text-base"
+                />
+              </div>
+            )}
 
             {/* Mac menu bar temporarily disabled.
             {bridge?.platform === "darwin" && (
