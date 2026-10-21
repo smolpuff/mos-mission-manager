@@ -162,3 +162,6 @@ release/
 missions-analytics/
 PAYLOAD_NOTES.md
 VERCEL_APP_AUDIT_PLAN.md
+
+# Local diagnostic build output
+/release-auth-debug/

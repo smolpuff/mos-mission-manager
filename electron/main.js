@@ -11,6 +11,9 @@ const {
   BrowserWindow,
   dialog,
   Menu,
+//   Tray,
+//   nativeImage,
+//   net: electronNet,
   ipcMain,
   clipboard,
   shell,
@@ -18,6 +21,9 @@ const {
 } = require("electron");
 const { createRendererSecurity } = require("./security");
 const { createWalletGenerationRequest } = require("./wallet-generation");
+// const { createMacMenuBar } = require("./mac-menu-bar");
+// const { startFromMenuBar } = require("./menu-bar-state");
+const { createWalletRefreshScheduler } = require("./wallet-refresh-scheduler");
 const { createSignerService } = require("../src/signer");
 const { importWalletAndVerify } = require("../src/wallet-import");
 let walletOperationBusy = false;
@@ -154,6 +160,18 @@ function desktopWindowFrameOptions() {
 let controlWindow = null;
 let cliWindow = null;
 let splashWindow = null;
+// let menuBarRunnerActions = null;
+// const macMenuBar = createMacMenuBar({
+//   platform: process.platform,
+//   app, Tray, Menu, nativeImage,
+//   getWindow: () => controlWindow,
+//   start: () => menuBarRunnerActions.start(),
+//   stop: () => menuBarRunnerActions.stop(),
+//   loadImage: loadMenuBarImage,
+//   onError: (error) => pushSystemLog(`Menu bar action failed: ${String(error?.message || error)}`),
+//   isQuitting: () => appQuitInFlight || telemetryQuitInProgress,
+//   quit: () => requestAppQuit("menu_bar_quit"),
+// });
 const rendererSecurity = createRendererSecurity({
   rendererPath: rendererIndexPath,
   devServerUrl: RENDERER_DEV_URL,
@@ -181,7 +199,7 @@ const maxLogHistory = 1200;
 const maxLogHistoryBytes = 4 * 1024 * 1024;
 let fundingWalletSummaryRefreshPromise = null;
 let fundingWalletSummaryLastAttemptAt = 0;
-let fundingWalletRefreshTimer = null;
+let fundingWalletRefreshScheduler = null;
 let bootstrapWalletSummaryPromise = null;
 let bootstrapWalletSummaryLastAttemptAt = 0;
 let startupMissionBootstrapPromise = null;
@@ -214,7 +232,6 @@ let desktopUpdater = null;
 let desktopUpdateOffer = null;
 let updateUiReadyReported = false;
 const FUNDING_WALLET_REFRESH_MIN_INTERVAL_MS = 30000;
-const FUNDING_WALLET_PERIODIC_REFRESH_MS = 30 * 60 * 1000;
 const BOOTSTRAP_WALLET_REFRESH_MIN_INTERVAL_MS = 30000;
 const PAGE_PREVIEW_CACHE_TTL_MS = 2000;
 const RENTALS_PREVIEW_CACHE_TTL_MS = 120000;
@@ -1052,6 +1069,7 @@ function logConfigPatch(source, patch = {}) {
 }
 
 function publishStatus() {
+//   macMenuBar.updateStatus(backendStatus);
   publish("backend:status", { ...backendStatus });
 }
 
@@ -5290,6 +5308,14 @@ function syncCompetitionRangeLockScheduler() {
   scheduleCompetitionRangeLockTick(0);
 }
 
+// async function loadMenuBarImage(url) {
+//   const response = await electronNet.fetch(url, { signal: AbortSignal.timeout(15000) });
+//   if (!response.ok) throw new Error(`NFT image request failed: HTTP ${response.status}`);
+//   const icon = nativeImage.createFromBuffer(Buffer.from(await response.arrayBuffer()));
+//   if (icon.isEmpty()) throw new Error("NFT image could not be decoded");
+//   return icon.resize({ width: 32, height: 32, quality: "best" });
+// }
+//
 async function createControlWindow() {
   controlWindow = new BrowserWindow({
     width: 800,
@@ -5318,6 +5344,7 @@ async function createControlWindow() {
     },
   });
 
+//   controlWindow.on("close", (event) => macMenuBar.closeWindow(event));
   controlWindow.on("closed", () => {
     controlWindow = null;
   });
@@ -5622,7 +5649,7 @@ app.whenReady().then(async () => {
       arch: process.arch, onStatus: (status) => publish("updates:status", status) });
   }
   backendStatus.nftUsageStats = loadPersistedNftUsageStats();
-  handleTrustedIpc("backend:start", async (_event, options = {}) => {
+  const startDesktopBackend = async (options = {}) => {
     const actionBackend = temporarySlotUnlockBackend;
     const isTemporarySlotUnlockBackend =
       actionBackend &&
@@ -5641,8 +5668,9 @@ app.whenReady().then(async () => {
       return { ...backendStatus };
     }
     return startBackend(options);
-  });
-  handleTrustedIpc("backend:stop", async () => {
+  };
+  handleTrustedIpc("backend:start", async (_event, options = {}) => startDesktopBackend(options));
+  const stopDesktopBackend = async () => {
     const actionBackend = temporarySlotUnlockBackend;
     if (
       actionBackend &&
@@ -5653,7 +5681,16 @@ app.whenReady().then(async () => {
       pushSystemLog("Queued runner start cancelled.");
     }
     return stopBackend();
-  });
+  };
+  handleTrustedIpc("backend:stop", async () => stopDesktopBackend());
+//   menuBarRunnerActions = {
+//     start: () => startFromMenuBar({
+//       getConfig: async () => ({ config: readDesktopConfig() }),
+//       startBackend: startDesktopBackend,
+//       sendCommand: sendBackendCommand,
+//     }, backendStatus),
+//     stop: stopDesktopBackend,
+//   };
   handleTrustedIpc("backend:restart", async () => {
     const actionBackend = temporarySlotUnlockBackend;
     if (
@@ -5761,6 +5798,7 @@ app.whenReady().then(async () => {
       currentMode: backendStatus.currentMode,
     };
     const next = applyDesktopConfigPatch(patch || {});
+//     if (!isStandaloneCliMode()) macMenuBar.sync(next.macMenuBarEnabled === true);
     if (typeof next.autoModeEnabled === "boolean") {
       backendStatus.autoModeEnabled = next.autoModeEnabled;
     }
@@ -6086,6 +6124,7 @@ app.whenReady().then(async () => {
     if (!walletAddress) {
       backendStatus.fundingWalletSummary = null;
       backendStatus.signerMode = config.signerMode || backendStatus.signerMode;
+      fundingWalletRefreshScheduler?.schedule();
       publishStatus();
       return { walletId: null, displayName: null, fundingWalletSummary: null };
     }
@@ -6101,6 +6140,7 @@ app.whenReady().then(async () => {
         backendStatus.signerMode =
           config.signerMode || backendStatus.signerMode;
         backendStatus.fundingWalletSummary = summary.fundingWalletSummary;
+        fundingWalletRefreshScheduler?.schedule();
         pushSystemLog(`Funding wallet summary refresh complete (${reason}).`);
         publishStatus();
         return summary;
@@ -6108,6 +6148,7 @@ app.whenReady().then(async () => {
         // Don't crash the renderer on RPC rate limits; keep the last known good summary.
         const message = String(error?.message || error);
         pushSystemLog(`Funding wallet summary refresh failed: ${message}`);
+        fundingWalletRefreshScheduler?.schedule(true);
         publishStatus();
         return {
           walletId: null,
@@ -6121,6 +6162,12 @@ app.whenReady().then(async () => {
     })();
     return fundingWalletSummaryRefreshPromise;
   };
+
+  if (!isStandaloneCliMode()) {
+    fundingWalletRefreshScheduler = createWalletRefreshScheduler({
+      refresh: (reason) => refreshFundingWalletSummary({ force: true, reason }),
+    });
+  }
 
   handleTrustedIpc("wallet:refresh-summary", async () => {
     return await refreshFundingWalletSummary({ force: true, reason: "manual" });
@@ -7109,6 +7156,8 @@ app.whenReady().then(async () => {
         !controlWindow.isDestroyed() &&
         win === controlWindow
       ) {
+//        if (macMenuBar.isEnabled()) win.close();
+//        else requestAppQuit("window_close");
         requestAppQuit("window_close");
       } else {
         win.close();
@@ -7140,6 +7189,7 @@ app.whenReady().then(async () => {
   } else {
     createSplashWindow();
     await createControlWindow();
+//     macMenuBar.sync(readDesktopConfig().macMenuBarEnabled === true);
   }
   if (!isStandaloneCliMode()) await bootstrapStartupMissionSlots();
   try {
@@ -7161,21 +7211,19 @@ app.whenReady().then(async () => {
       try {
         backendStatus.fundingWalletSummary =
           await fetchOnchainFundingWalletSummary(walletAddress);
+        fundingWalletRefreshScheduler?.schedule();
       } catch {
-        // Keep it null; the user can trigger refresh later (or it will refresh
-        // after token-affecting actions).
+        // Retry the first failed retrieval in five minutes, then use the normal delay.
         backendStatus.fundingWalletSummary = null;
+        fundingWalletRefreshScheduler?.schedule(true);
       }
     } else {
       backendStatus.fundingWalletSummary = null;
+      fundingWalletRefreshScheduler?.schedule();
     }
     publishStatus();
-  } catch {}
-  if (!isStandaloneCliMode() && !fundingWalletRefreshTimer) {
-    fundingWalletRefreshTimer = setInterval(() => {
-      void refreshFundingWalletSummary({ reason: "periodic_30m" });
-    }, FUNDING_WALLET_PERIODIC_REFRESH_MS);
-    fundingWalletRefreshTimer.unref?.();
+  } catch {
+    fundingWalletRefreshScheduler?.schedule(true);
   }
   if (!isStandaloneCliMode()) {
     const closeSplash = () => {
@@ -7194,6 +7242,10 @@ app.whenReady().then(async () => {
   }
 
   app.on("activate", async () => {
+//     if (macMenuBar.isEnabled()) {
+//       macMenuBar.openWindow();
+//       return;
+//     }
     if (BrowserWindow.getAllWindows().length === 0) {
       if (isStandaloneCliMode()) await createCliWindow();
       else await createControlWindow();
@@ -7208,10 +7260,7 @@ app.on("window-all-closed", () => {
 });
 
 app.on("before-quit", (event) => {
-  if (fundingWalletRefreshTimer) {
-    clearInterval(fundingWalletRefreshTimer);
-    fundingWalletRefreshTimer = null;
-  }
+  fundingWalletRefreshScheduler?.stop();
   if (telemetryQuitInProgress) {
     return;
   }

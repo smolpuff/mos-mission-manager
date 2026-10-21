@@ -24,6 +24,8 @@ export default function SettingsPage({
   openSecretModal,
   openCreateWalletModal,
   autoUpdateCheckEnabled,
+//   macMenuBarEnabled,
+//   setMacMenuBarEnabled,
   lastUpdateCheckAt,
   setAutoUpdateCheckEnabled,
   clearUpdateCheckMessage,
@@ -454,6 +456,21 @@ export default function SettingsPage({
                 </div>
               </div>
             </div>
+
+            {/* Mac menu bar temporarily disabled.
+            {bridge?.platform === "darwin" && (
+              <div className="pb-2">
+                <ToggleSwitch
+                  switchID="macMenuBarEnabled"
+                  checked={macMenuBarEnabled === true}
+                  onChange={(e) => void setMacMenuBarEnabled(e.target.checked === true)}
+                  title="Keep Running in Menu Bar"
+                  helperText="Closing the window keeps Missions running and hides its Dock icon. Open or quit Missions from the menu bar."
+                  styling="!text-base"
+                />
+              </div>
+            )}
+            */}
 
             <div className="flex flex-wrap items-start justify-between gap-3 pb-2 ">
               <div className="space-y-1">

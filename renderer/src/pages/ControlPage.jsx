@@ -430,6 +430,7 @@ function ControlView() {
   const [competitionRangeLockPollSeconds, setCompetitionRangeLockPollSeconds] =
     useState("150");
   const [configuredTargetMissions, setConfiguredTargetMissions] = useState([]);
+//   const [macMenuBarEnabled, setMacMenuBarEnabledState] = useState(false);
   const [autoUpdateCheckEnabled, setAutoUpdateCheckEnabledState] =
     useState(true);
   // Check for updates before opening setup on a fresh install.
@@ -951,6 +952,7 @@ function ControlView() {
       } else {
         setAutoUpdateCheckEnabledState(true);
       }
+//       setMacMenuBarEnabledState(config.macMenuBarEnabled === true);
       if (typeof config.missionCompetitionCheckEnabled === "boolean") {
         setMissionCompetitionCheckEnabledState(
           config.missionCompetitionCheckEnabled,
@@ -1335,6 +1337,11 @@ function ControlView() {
     setAutoUpdateCheckEnabledState(next);
     await applyConfigPatch({ autoUpdateCheckEnabled: next });
   };
+//   const setMacMenuBarEnabled = async (enabled) => {
+//     const next = enabled === true;
+//     await applyConfigPatch({ macMenuBarEnabled: next });
+//     setMacMenuBarEnabledState(next);
+//   };
   const clearUpdateCheckMessage = () => {
     setUpdateCheckMessage(null);
   };
@@ -3648,6 +3655,8 @@ function ControlView() {
               openSecretModal={openSecretModal}
               openCreateWalletModal={openCreateWalletModal}
               autoUpdateCheckEnabled={autoUpdateCheckEnabled}
+//               macMenuBarEnabled={macMenuBarEnabled}
+//               setMacMenuBarEnabled={setMacMenuBarEnabled}
               lastUpdateCheckAt={lastUpdateCheckAt}
               setAutoUpdateCheckEnabled={setAutoUpdateCheckEnabled}
               clearUpdateCheckMessage={clearUpdateCheckMessage}
