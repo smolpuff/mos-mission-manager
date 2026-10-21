@@ -6,20 +6,26 @@ const crypto = require("node:crypto");
 const { Readable, Transform } = require("node:stream");
 const { pipeline } = require("node:stream/promises");
 
-const VERSION_JSON_URL = "https://raw.githubusercontent.com/smolpuff/mos-mission-manager/main/version.json";
+const installedPackage = require("../package.json");
+const betaBuild = installedPackage.pbpAuthDiagnostics === true || /^\d+\.\d+\.\d+(?:b[1-9]\d*|-beta\.[1-9]\d*)$/.test(installedPackage.version);
+const VERSION_JSON_URL = `https://raw.githubusercontent.com/smolpuff/mos-mission-manager/${betaBuild ? "beta" : "main"}/version.json`;
 
 const REPOSITORY = "smolpuff/mos-mission-manager";
 const MAX_DOWNLOAD_BYTES = 2 * 1024 ** 3;
-const VERSION_PATTERN = /^\d+\.\d+\.\d+$/;
+const VERSION_PATTERN = /^\d+\.\d+\.\d+(?:-beta\.[1-9]\d*)?$/;
+
+function releaseTag(version) {
+  if (!VERSION_PATTERN.test(version)) throw new Error("Unsupported update version.");
+  return `v${version.replace(/-beta\.(\d+)$/, "b$1")}`;
+}
 
 function releaseAssetUrl(version, name) {
-  if (!VERSION_PATTERN.test(version)) throw new Error("Unsupported update version.");
-  return `https://github.com/${REPOSITORY}/releases/download/v${version}/${encodeURIComponent(name)}`;
+  return `https://github.com/${REPOSITORY}/releases/download/${releaseTag(version)}/${encodeURIComponent(name)}`;
 }
 
 function validateAssetUrl(value, version) {
   const url = new URL(value);
-  const prefix = `/` + REPOSITORY + `/releases/download/v${version}/`;
+  const prefix = `/` + REPOSITORY + `/releases/download/${releaseTag(version)}/`;
   if (url.protocol !== "https:" || url.hostname !== "github.com" || url.port ||
       url.username || url.password || url.search || url.hash ||
       !url.pathname.startsWith(prefix) ||

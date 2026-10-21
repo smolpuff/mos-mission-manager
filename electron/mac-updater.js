@@ -6,7 +6,7 @@ const crypto = require("node:crypto");
 const { spawn, execFile } = require("node:child_process");
 const { promisify } = require("node:util");
 const run = promisify(execFile);
-const { getReleaseArtifact, downloadArtifact } = require("./update-download");
+const { getReleaseArtifact, downloadArtifact, VERSION_PATTERN } = require("./update-download");
 const { extractAppZip } = require("./update-extract");
 
 const BUNDLE_NAME = "missions-v3-mcp.app";
@@ -59,7 +59,7 @@ async function readTransaction(userData, execPath) {
     const receipt = JSON.parse(await fs.readFile(receiptPath(userData), "utf8"));
     const target = await getMacTarget(execPath);
     if (receipt.target !== target || !/^[a-f0-9]{32}$/.test(receipt.token) ||
-        !/^\d+\.\d+\.\d+$/.test(receipt.version) ||
+        !VERSION_PATTERN.test(receipt.version) ||
         path.dirname(receipt.directory) !== path.dirname(target) ||
         !path.basename(receipt.directory).startsWith(`.${path.basename(target)}.update-`)) return null;
     if (await fs.realpath(receipt.directory) !== receipt.directory) return null;
