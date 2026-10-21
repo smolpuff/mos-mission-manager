@@ -56,6 +56,10 @@ it builds for the current operating system. Output is in release-auth-debug/.
 Normal version.json metadata
 and package version are not changed. No app installation/restart is needed
 to produce the artifacts.
+GitHub beta tags such as v3.3.0b1 run .github/workflows/beta-release.yml from
+the beta commit, publishing diagnostic Windows and Mac artifacts as a
+prerelease. They do not run the stable workflow or update main/version.json.
+Release filenames use 3.3.0b1; Electron's internal version uses 3.3.0-beta.1.
 
 REQUESTED TEMPORARY MITIGATION
 
@@ -78,7 +82,8 @@ REMOVAL
 
 Remove lib/auth-diagnostics.js, lib/auth-diagnostics.test.js and this note.
 Remove electron/auth-debug-builder.cjs and electron/build-auth-debug.js when
-the private build is no longer needed. Remove the diagnostic build flag,
+the private build is no longer needed, along with .github/workflows/beta-release.yml.
+Remove the diagnostic build flag,
 preload methods, auth-log IPC handlers, and conditional Debug page UI.
 Remove TEMP_AUTH_DIAGNOSTICS imports/calls and diagnostic-only parameters in:
   lib/mcp.js

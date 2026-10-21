@@ -1,0 +1,138 @@
+name: Build Beta Diagnostic Release
+
+on:
+  push:
+    tags:
+      - "v*b*"
+
+permissions:
+  contents: read
+
+env:
+  PBP_AUTH_BETA_VERSION: ${{ github.ref_name }}
+
+jobs:
+  build:
+    name: Build ${{ matrix.platform }} ${{ matrix.arch }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            platform: win
+            arch: x64
+            target: portable
+          - os: macos-latest
+            platform: mac
+            arch: arm64
+            target: zip
+          - os: macos-latest
+            platform: mac
+            arch: x64
+            target: zip
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Require a beta branch commit
+        run: git merge-base --is-ancestor "$GITHUB_SHA" origin/beta
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Configure npm retries
+        run: |
+          npm config set fetch-retries 5
+          npm config set fetch-retry-mintimeout 20000
+          npm config set fetch-retry-maxtimeout 120000
+      - name: Install dependencies
+        run: npm ci
+      - name: Build diagnostic app
+        run: |
+          npm run desktop:build
+          npx electron-builder --config electron/auth-debug-builder.cjs --${{ matrix.platform }} ${{ matrix.target }} --${{ matrix.arch }} --publish never
+      - name: Keep intermediate builder metadata in runner temporary directory
+        if: always()
+        run: |
+          node <<'JS'
+          const fs = require('node:fs');
+          const path = require('node:path');
+          const output = 'release-auth-debug';
+          if (fs.existsSync(output)) {
+            for (const name of fs.readdirSync(output).filter(name => /\.ya?ml$/.test(name))) {
+              fs.renameSync(path.join(output, name), path.join(process.env.RUNNER_TEMP, name));
+            }
+          }
+          JS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: beta-${{ matrix.platform }}-${{ matrix.arch }}
+          path: |
+            release-auth-debug/*.exe
+            release-auth-debug/*.zip
+          if-no-files-found: error
+
+  publish:
+    name: Publish beta prerelease
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: beta-*
+          path: ${{ runner.temp }}/beta-release
+          merge-multiple: true
+      - name: Generate beta version.json and release notes
+        run: |
+          node <<'JS'
+          const fs = require('node:fs');
+          const path = require('node:path');
+          const crypto = require('node:crypto');
+          const tag = process.env.PBP_AUTH_BETA_VERSION;
+          const match = tag.match(/^v(\d+\.\d+\.\d+b[1-9]\d*)$/);
+          if (!match) throw new Error('Invalid beta release tag');
+          const version = match[1];
+          const base = `https://github.com/${process.env.GITHUB_REPOSITORY}/releases`;
+          const output = path.join(process.env.RUNNER_TEMP, 'beta-release');
+          const notes = [
+            'Temporary PBP authorization diagnostic logging, enabled by default.',
+            'Debug tabs: PBP Authorization first and selected by default, plus Throttling.',
+            'Ten seconds between failed token renewal attempts, including between batches.',
+            'New authorization windows limited to five minutes normally or two minutes in Mission Mode.',
+            'Use Debug > PBP Authorization > Open log folder to collect logs for manual sending.',
+          ];
+          const artifacts = {};
+          for (const [key, file] of [
+            ['win32-x64', `missions-v3-mcp.${version}.exe`],
+            ['darwin-arm64', `missions-v3-mcp-${version}-arm64-mac.zip`],
+            ['darwin-x64', `missions-v3-mcp-${version}-x64-mac.zip`],
+          ]) {
+            const contents = fs.readFileSync(path.join(output, file));
+            artifacts[key] = {
+              url: `${base}/download/${tag}/${file}`,
+              size: contents.length,
+              sha256: crypto.createHash('sha256').update(contents).digest('hex'),
+              md5: crypto.createHash('md5').update(contents).digest('hex'),
+            };
+          }
+          fs.writeFileSync(path.join(output, 'version.json'), JSON.stringify({
+            schemaVersion: 1, version, downloadUrl: `${base}/tag/${tag}`, notes, artifacts,
+          }, null, 2) + '\n');
+          fs.writeFileSync(path.join(process.env.RUNNER_TEMP, 'beta-notes.md'),
+            notes.map(note => `- ${note}`).join('\n') + '\n');
+          JS
+      - name: Publish 3-platform diagnostic prerelease
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "$PBP_AUTH_BETA_VERSION" --verify-tag --title "${PBP_AUTH_BETA_VERSION#v}" --prerelease --latest=false --notes-file "$RUNNER_TEMP/beta-notes.md" "$RUNNER_TEMP/beta-release/"*
