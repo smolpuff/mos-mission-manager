@@ -580,7 +580,7 @@ function ControlView() {
   const isAutoMode = modeSelection === "auto";
   const isMissionLikeMode = isMissionMode || isAutoMode;
   const isNormalMode = modeSelection === "normal";
-  const debugPageVisible = debug === true;
+  const debugPageVisible = debug === true || bridge?.authDiagnosticsBuild === true;
   const competitionRangeLockDisabled = !isMissionMode;
   const competitionRangeLockInputsDisabled =
     competitionRangeLockDisabled || !competitionRangeLockEnabled;
@@ -3591,7 +3591,7 @@ function ControlView() {
 
   return (
     <main className="shell flex flex-col">
-      <WindowChrome title="missions-v3-mcp" styling="min-w-full" />
+      <WindowChrome title={bridge?.authDiagnosticsBuild ? "missions-v3-mcp · AUTH DEBUG" : "missions-v3-mcp"} styling="min-w-full" />
 
       <div
         className="flex min-h-0 flex-1 gap-0 w-full overflow-hidden"

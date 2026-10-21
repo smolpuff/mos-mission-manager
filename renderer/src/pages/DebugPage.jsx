@@ -49,6 +49,10 @@ export default function DebugPage({
   lastEvent,
 }) {
   const bridge = useDesktopBridge();
+  const authDiagnostics = bridge?.authDiagnosticsBuild === true;
+  const readDebugLog = authDiagnostics ? bridge?.getAuthDebugLog : bridge?.getThrottleDebugLog;
+  const removeDebugLog = authDiagnostics ? bridge?.deleteAuthDebugLog : bridge?.deleteThrottleDebugLog;
+  const [authSummary, setAuthSummary] = useState({});
   const [resourceUsage, setResourceUsage] = useState(null);
   const [resourceUsageBusy, setResourceUsageBusy] = useState(false);
   const [resourceUsageError, setResourceUsageError] = useState("");
@@ -58,11 +62,21 @@ export default function DebugPage({
   const [throttleLogError, setThrottleLogError] = useState("");
   const logViewportRef = useRef(null);
   const pinnedToBottomRef = useRef(true);
-  const canAccessThrottleLog = Boolean(bridge?.getThrottleDebugLog);
+  const canAccessThrottleLog = Boolean(readDebugLog);
 
   const applyThrottleLogResult = (result, fallbackPath = "") => {
     setThrottleLogPath(String(result?.path || fallbackPath || ""));
     setThrottleLog(String(result?.text || ""));
+    if (authDiagnostics) {
+      const entries = String(result?.text || "").split("\n").flatMap(line => {
+        try { const entry = JSON.parse(line); return entry.event ? [entry] : []; } catch { return []; }
+      });
+      const last = entries.at(-1);
+      const failed = entries.findLast(entry => entry.error || entry.status >= 400);
+      const lastError = failed?.error?.message || failed?.body?.error_description || failed?.body?.error;
+      setAuthSummary({ count: (String(result?.text || "").match(/PBP AUTH INCIDENT .* BEGIN/g) || []).length,
+        lastEvent: last?.event, lastAt: Date.parse(last?.at || ""), lastError: typeof lastError === "string" ? lastError : lastError ? JSON.stringify(lastError) : "" });
+    }
     setThrottleLogError(
       result?.ok === false
         ? String(result?.error || "Failed to read log.")
@@ -127,12 +141,13 @@ export default function DebugPage({
 
   useEffect(() => {
     let cancelled = false;
+    let timer;
     const loadThrottleLog = async () => {
       if (!canAccessThrottleLog) return;
       setThrottleLogBusy(true);
       setThrottleLogError("");
       try {
-        const result = await bridge.getThrottleDebugLog();
+        const result = await readDebugLog();
         if (cancelled) return;
         applyThrottleLogResult(result, throttleLogPath);
       } catch (error) {
@@ -143,19 +158,21 @@ export default function DebugPage({
       }
     };
     void loadThrottleLog();
+    if (authDiagnostics) timer = setInterval(loadThrottleLog, RESOURCE_POLL_INTERVAL_MS);
     return () => {
       cancelled = true;
+      if (timer) clearInterval(timer);
     };
-  }, [bridge, canAccessThrottleLog]);
+  }, [bridge, canAccessThrottleLog, authDiagnostics]);
 
   useEffect(() => {
-    if (lastEvent?.type !== "throttle_notice") return;
+    if (authDiagnostics || lastEvent?.type !== "throttle_notice") return;
     if (!canAccessThrottleLog) return;
     let cancelled = false;
     const reloadThrottleLog = async () => {
       setThrottleLogBusy(true);
       try {
-        const result = await bridge.getThrottleDebugLog();
+        const result = await readDebugLog();
         if (cancelled) return;
         applyThrottleLogResult(result, throttleLogPath);
       } catch (error) {
@@ -176,7 +193,7 @@ export default function DebugPage({
     setThrottleLogBusy(true);
     setThrottleLogError("");
     try {
-      const result = await bridge.getThrottleDebugLog();
+      const result = await readDebugLog();
       applyThrottleLogResult(result, throttleLogPath);
     } catch (error) {
       setThrottleLogError(String(error?.message || error));
@@ -187,11 +204,11 @@ export default function DebugPage({
 
   const deleteThrottleLog = async () => {
     if (!canAccessThrottleLog) return;
-    if (!bridge?.deleteThrottleDebugLog) return;
+    if (!removeDebugLog) return;
     setThrottleLogBusy(true);
     setThrottleLogError("");
     try {
-      const result = await bridge.deleteThrottleDebugLog();
+      const result = await removeDebugLog();
       setThrottleLogPath(String(result?.path || throttleDebug?.logPath || ""));
       if (result?.ok === false) {
         setThrottleLogError(String(result?.error || "Failed to delete log."));
@@ -305,7 +322,7 @@ export default function DebugPage({
         <div className="flex min-w-0 items-center justify-between gap-1.5 shrink-0">
           <div className="flex min-w-0 items-baseline gap-2">
             <h2 className="shrink-0 text-md font-normal leading-tight">
-              Throttle Debug
+              {authDiagnostics ? "PBP Authorization" : "Throttle Debug"}
             </h2>
             <div
               className="min-w-0 flex-1 truncate text-[10px] uppercase leading-none text-slate-400"
@@ -315,6 +332,12 @@ export default function DebugPage({
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-1.5">
+            {authDiagnostics && (
+              <button type="button" className="shrink-0 rounded-md border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] leading-tight text-slate-100 hover:border-white/20 hover:bg-white/10"
+                onClick={() => bridge.openAuthLogFolder().catch(error => setThrottleLogError(String(error?.message || error)))}>
+                Open log folder
+              </button>
+            )}
             <button
               type="button"
               className="shrink-0 rounded-md border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] leading-tight text-slate-100 hover:border-white/20 hover:bg-white/10 disabled:opacity-50"
@@ -336,30 +359,30 @@ export default function DebugPage({
         <div className="grid gap-2 md:grid-cols-3 shrink-0">
           <div className="rounded-lg border border-white/10 bg-black/20 p-2">
             <div className="text-[10px] uppercase tracking-wide text-slate-400">
-              Throttle Count
+              {authDiagnostics ? "Auth incidents" : "Throttle Count"}
             </div>
             <div className="mt-1 text-xl leading-none text-white">
-              {Number(throttleDebug?.count || 0)}
+              {Number((authDiagnostics ? authSummary.count : throttleDebug?.count) || 0)}
             </div>
           </div>
           <div className="rounded-lg border border-white/10 bg-black/20 p-2">
             <div className="text-[10px] uppercase tracking-wide text-slate-400">
-              Last Tool
+              {authDiagnostics ? "Latest event" : "Last Tool"}
             </div>
             <div className="mt-1 wrap-break-word font-mono text-[11px] leading-snug text-white">
-              {throttleLabel(throttleDebug)}
+              {authDiagnostics ? authSummary.lastEvent || "—" : throttleLabel(throttleDebug)}
             </div>
           </div>
           <div className="rounded-lg border border-white/10 bg-black/20 p-2">
             <div className="text-[10px] uppercase tracking-wide text-slate-400">
-              Last Throttle
+              {authDiagnostics ? "Last activity" : "Last Throttle"}
             </div>
             <div className="mt-1 text-[11px] leading-snug text-white">
-              {formatTimestamp(throttleDebug?.lastAt)}
+              {formatTimestamp(authDiagnostics ? authSummary.lastAt : throttleDebug?.lastAt)}
             </div>
             <div className="mt-1 text-[10px] leading-snug text-slate-300">
-              {throttleDebug?.lastType || "—"}
-              {Number.isFinite(Number(throttleDebug?.lastWaitSeconds))
+              {authDiagnostics ? authSummary.lastError || "—" : throttleDebug?.lastType || "—"}
+              {!authDiagnostics && Number.isFinite(Number(throttleDebug?.lastWaitSeconds))
                 ? ` • wait ${Number(throttleDebug.lastWaitSeconds)}s`
                 : ""}
             </div>
@@ -386,7 +409,7 @@ export default function DebugPage({
               lineHeight: 1.35,
             }}
           >
-            {throttleLog || "No throttle log entries yet."}
+            {throttleLog || (authDiagnostics ? "No authorization log entries yet." : "No throttle log entries yet.")}
           </pre>
         </div>
       </div>

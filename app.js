@@ -734,7 +734,7 @@ async function runStartupSequence() {
       );
       ctx.startupFxProgress = 35;
       loginOk = await runWithProgressPulse(
-        () => mcp.runLoginFlow({ forceInteractive: true }),
+        () => mcp.runLoginFlow({ forceInteractive: true, automatic: true }),
         ctx,
         { floor: 35, ceiling: 54, step: 1 },
       );
@@ -744,7 +744,7 @@ async function runStartupSequence() {
         logger.formatTaggedLog("STARTUP", "🔐", "Running required login..."),
       );
       ctx.startupFxProgress = 35;
-      loginOk = await runWithProgressPulse(() => mcp.runLoginFlow(), ctx, {
+      loginOk = await runWithProgressPulse(() => mcp.runLoginFlow({ automatic: true }), ctx, {
         floor: 35,
         ceiling: 54,
         step: 1,
@@ -764,7 +764,7 @@ async function runStartupSequence() {
         );
         ctx.startupFxProgress = 35;
         loginOk = await runWithProgressPulse(
-          () => mcp.runLoginFlow({ forceInteractive: true }),
+          () => mcp.runLoginFlow({ forceInteractive: true, automatic: true }),
           ctx,
           { floor: 35, ceiling: 54, step: 1 },
         );
@@ -802,7 +802,7 @@ async function runStartupSequence() {
         );
         ctx.startupFxProgress = 90;
         const fallbackOk = await runWithProgressPulse(
-          () => mcp.runLoginFlow({ forceInteractive: true }),
+          () => mcp.runLoginFlow({ forceInteractive: true, automatic: true }),
           ctx,
           { floor: 90, ceiling: 96, step: 1 },
         );

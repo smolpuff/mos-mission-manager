@@ -13,6 +13,7 @@ function isDesktopDevMode() {
 contextBridge.exposeInMainWorld("missionsDesktop", {
   platform: process.platform,
   desktopDevMode: isDesktopDevMode(),
+  authDiagnosticsBuild: process.argv.includes("--pbp-auth-diagnostics"),
   startBackend: (options) => ipcRenderer.invoke("backend:start", options),
   stopBackend: () => ipcRenderer.invoke("backend:stop"),
   restartBackend: () => ipcRenderer.invoke("backend:restart"),
@@ -20,6 +21,9 @@ contextBridge.exposeInMainWorld("missionsDesktop", {
   getState: (options) => ipcRenderer.invoke("backend:get-state", options),
   getThrottleDebugLog: () => ipcRenderer.invoke("debug:get-throttle-log"),
   deleteThrottleDebugLog: () => ipcRenderer.invoke("debug:delete-throttle-log"),
+  getAuthDebugLog: () => ipcRenderer.invoke("debug:get-auth-log"),
+  deleteAuthDebugLog: () => ipcRenderer.invoke("debug:delete-auth-log"),
+  openAuthLogFolder: () => ipcRenderer.invoke("debug:open-auth-log-folder"),
   getResourceUsage: () => ipcRenderer.invoke("debug:get-resource-usage"),
   getAnalyticsView: (rangeKey) => ipcRenderer.invoke("analytics:get-view", rangeKey),
   resetAnalyticsRange: (rangeKey) =>
