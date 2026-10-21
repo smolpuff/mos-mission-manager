@@ -32,7 +32,7 @@ async function watchFailure(t, message) {
     async mcpToolCall(tool) {
       assert.equal(tool, "watch_and_claim");
       watchCalls += 1;
-      throw new Error(message);
+      throw message instanceof Error ? message : new Error(message);
     },
     async runLoginFlow(options) { loginCalls.push(options); return false; },
   };
@@ -59,14 +59,9 @@ for (const message of [
   "Not authenticated",
   "Unauthenticated",
   "Authentication failed",
-  "Authorization failed",
-  "Auth error",
   "Login required",
   "missing token",
-  "tool call failed: HTTP 401",
-  "tool call failed: HTTP 403",
   "Unauthorized",
-  "Forbidden",
 ]) {
   test(`watcher still reauthenticates for ${message}`, async (t) => {
     const { ctx, loginCalls } = await watchFailure(t, message);
@@ -75,5 +70,43 @@ for (const message of [
     assert.equal(loginCalls[0].forceInteractive, true);
     assert.equal(loginCalls[0].forceBrowser, true);
     assert.equal(loginCalls[0].reason, "watch_auth_error");
+  });
+}
+
+for (const message of [
+  "watch_and_claim failed for mission 14013",
+  "NFT 40399 could not be loaded",
+  "Forbidden",
+  "Authorization failed",
+  "Auth error",
+  "Authentication service temporarily unavailable",
+  "Authorization server returned HTTP 503",
+  "Login page image failed to load",
+  "RPC error: {\"code\":-32000,\"message\":\"HTTP 40123 is an identifier\"}",
+  "tool call failed: HTTP 401",
+]) {
+  test(`watcher does not infer authentication failure from ${message}`, async (t) => {
+    const { ctx, loginCalls } = await watchFailure(t, message);
+    assert.equal(ctx.isAuthenticated, true);
+    assert.deepEqual(loginCalls, []);
+  });
+}
+
+for (const status of [401]) {
+  test(`watcher retains recovery for actual HTTP ${status}`, async (t) => {
+    const { ctx, loginCalls } = await watchFailure(t,
+      Object.assign(new Error(`tool call failed: HTTP ${status}`), { status }));
+    assert.equal(ctx.isAuthenticated, false);
+    assert.equal(loginCalls.length, 1);
+  });
+}
+
+for (const error of [
+  Object.assign(new Error("Permission denied"), { status: 403 }),
+]) {
+  test("watcher preserves authentication on permission denial", async (t) => {
+    const { ctx, loginCalls } = await watchFailure(t, error);
+    assert.equal(ctx.isAuthenticated, true);
+    assert.deepEqual(loginCalls, []);
   });
 }

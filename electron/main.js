@@ -37,6 +37,7 @@ const { normalizeAnalyticsRange, analyticsRangeBounds, isInAnalyticsRange } = re
 const { MacUpdater, acknowledgeMacUpdate } = require("./mac-updater");
 const { WindowsUpdater, acknowledgeWindowsUpdate } = require("./windows-updater");
 const { createMcpClient } = require("../src/mcp/client");
+const { isAuthenticationError } = require("../lib/auth-errors");
 const {
   normalizeMissionList,
   normalizeMissionCatalogList,
@@ -1203,7 +1204,7 @@ async function bootstrapStartupMissionSlots() {
           { url: "https://pixelbypixel.studio/mcp" },
         );
       } catch (error) {
-        if (!isAuthFailureMessage(error?.message)) throw error;
+        if (!isAuthenticationError(error)) throw error;
         pushSystemLog("Startup mission sync skipped until login is available.");
         backendStatus.isAuthenticated = false;
         return { ok: false, skipped: "auth_required" };
@@ -4136,12 +4137,6 @@ function missionCollectionEntries(mission = {}) {
   return out;
 }
 
-function isAuthFailureMessage(message) {
-  return /401|403|unauthorized|forbidden|missing token|invalid token/i.test(
-    String(message || ""),
-  );
-}
-
 async function runOnboardingPopupLogin({} = {}) {
   const ok = await desktopMcp.runLoginFlow({
     forceInteractive: true,
@@ -6194,7 +6189,7 @@ app.whenReady().then(async () => {
         pushSystemLog("Bootstrap wallet summary complete.");
         return result;
       } catch (error) {
-        if (!isAuthFailureMessage(error?.message)) {
+        if (!isAuthenticationError(error)) {
           pushSystemLog(
             `Bootstrap wallet summary failed: ${String(error?.message || error)}`,
           );
@@ -6273,7 +6268,7 @@ app.whenReady().then(async () => {
     try {
       loaded = await loadAccount();
     } catch (error) {
-      if (!isAuthFailureMessage(error?.message)) throw error;
+      if (!isAuthenticationError(error)) throw error;
       pushSystemLog("Onboarding sync requires login. Opening browser login.");
       emitProgress(20, "login", "Login required");
       await runOnboardingPopupLogin({
@@ -6785,7 +6780,7 @@ app.whenReady().then(async () => {
         );
         return result;
       } catch (error) {
-        if (!isAuthFailureMessage(error?.message)) {
+        if (!isAuthenticationError(error)) {
           pushSystemLog(
             `Rentals page refresh failed: ${String(error?.message || error)}`,
           );
@@ -6925,7 +6920,7 @@ app.whenReady().then(async () => {
         );
         return hydrateCachedNftList(nftListCache, nftListCacheAt);
       } catch (error) {
-        if (!isAuthFailureMessage(error?.message)) {
+        if (!isAuthenticationError(error)) {
           pushSystemLog(
             `NFT page refresh failed: ${String(error?.message || error)}`,
           );

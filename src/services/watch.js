@@ -2,6 +2,7 @@
 
 // TEMP_AUTH_DIAGNOSTICS: remove after the renewal incident is diagnosed.
 const { authEvent } = require("../../lib/auth-diagnostics");
+const { isAuthenticationError } = require("../../lib/auth-errors");
 
 const {
   normalizeMissionList,
@@ -4759,10 +4760,7 @@ function createWatchService(
           logDebug("watch", "⏹️ cycle_aborted", { message: msg });
           break;
         }
-        // "authenticated user" also appears in non-auth errors such as an
-        // already-active watch request; it must not force browser login.
-        const isAuthError =
-          /missing token|401|403|unauthorized|forbidden|\b(?:auth(?:entication|orization)?|not authenticated|unauthenticated)\b|login/i.test(msg);
+        const isAuthError = isAuthenticationError(error);
         authEvent(ctx.tokenFilePath, "watch.cycle.error", { error, missionMode: ctx.missionModeEnabled === true,
           authenticated: ctx.isAuthenticated, popupWaitMs: mcp.getAuthPopupDelayMs?.() || 0 }, { failure: isAuthError });
         if (isAuthError) {
