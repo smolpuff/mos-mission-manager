@@ -108,7 +108,7 @@ jobs:
           const base = `https://github.com/${process.env.GITHUB_REPOSITORY}/releases`;
           const output = path.join(process.env.RUNNER_TEMP, 'beta-release');
           const notes = [
-            'Temporary PBP authorization diagnostic logging, enabled by default.',
+            'Reports only when failed authorization forces a browser popup; routine calls and throttling stay quiet.',
             'Debug tabs: PBP Authorization first and selected by default, plus Throttling.',
             'Ten seconds between failed token renewal attempts, including between batches.',
             'New authorization windows limited to five minutes normally or two minutes in Mission Mode.',

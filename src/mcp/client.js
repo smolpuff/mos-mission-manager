@@ -1740,7 +1740,12 @@ function createMcpClient(ctx, logger, dependencies = {}) {
         printAuthUrl: false,
         beforeOpenBrowser: () => {
           const permit = popupPolicy.claimWindow();
-          trace("client.login.window_claim", { ...permit, trigger: loginTrigger }, { failure: permit.allowed === true });
+          const forcedReauthorization = opts.automatic === true && (
+            opts.reason === "renewal_failed" || opts.reason === "watch_auth_error" || credentialsAtStart.present === true
+          );
+          trace("client.login.window_claim", { ...permit, trigger: loginTrigger }, {
+            reauthorization: permit.allowed === true && forcedReauthorization,
+          });
           return permit;
         },
         onAuthUrl: (url) => {
