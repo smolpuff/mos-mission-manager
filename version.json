@@ -1,30 +1,37 @@
 {
-  "version": "3.3.0",
-  "downloadUrl": "https://github.com/smolpuff/mos-mission-manager/releases/latest",
-  "notes": [
-    "Improved first-time setup validation",
-    "Added wallet balance loading spinner",
-    "Various UI improvements"
-  ],
   "schemaVersion": 1,
+  "version": "3.3.0-beta.5",
+  "downloadUrl": "https://github.com/smolpuff/mos-mission-manager/releases/tag/v3.3.0b5",
+  "notes": [
+    "Fixed unnecessary browser login popups when PBP reports an already-active watch_and_claim request for an authenticated user.",
+    "Watch contention now keeps the session authenticated and follows the normal retry path instead of forcing login.",
+    "Genuine authentication error handling and the five-minute/two-minute browser popup cooldown are unchanged.",
+    "Beta builds now check beta/version.json for beta-only updates; stable builds keep their existing update feed.",
+    "Install this beta manually once when upgrading from b4 or earlier; subsequent beta updates support numbered beta versions.",
+    "Reports only when failed authorization forces a browser popup; routine calls and throttling stay quiet.",
+    "Debug tabs: PBP Authorization first and selected by default, plus Throttling.",
+    "Ten seconds between failed token renewal attempts, including between batches.",
+    "New authorization windows limited to five minutes normally or two minutes in Mission Mode.",
+    "Use Debug > PBP Authorization > Open log folder to collect logs for manual sending."
+  ],
   "artifacts": {
+    "win32-x64": {
+      "url": "https://github.com/smolpuff/mos-mission-manager/releases/download/v3.3.0b5/missions-v3-mcp.3.3.0b5.exe",
+      "size": 104138541,
+      "sha256": "3787b8190bdd888e96b247db96f89a4fb9eb2bedc5c4bd603c795dd52f7f9eba",
+      "md5": "a18b3cd9dae3377853c611286c08c42c"
+    },
     "darwin-arm64": {
-      "url": "https://github.com/smolpuff/mos-mission-manager/releases/download/v3.2.18/missions-v3-mcp-arm64-mac.zip",
-      "size": 129909438,
-      "sha256": "7b2a8c9ab86e483fce3e414b3a3e01bdb80de1119b453b0b0618315eb7993a00",
-      "md5": "83d11b40e189ee3f4b80d12d7a97f318"
+      "url": "https://github.com/smolpuff/mos-mission-manager/releases/download/v3.3.0b5/missions-v3-mcp-3.3.0b5-arm64-mac.zip",
+      "size": 130663935,
+      "sha256": "5ad4103116ba028e3552c4145084071c689e0097d6c94a83f5747d10496ed866",
+      "md5": "dc22e00b66b2b09d88ffadab35ff35b9"
     },
     "darwin-x64": {
-      "url": "https://github.com/smolpuff/mos-mission-manager/releases/download/v3.2.18/missions-v3-mcp-x64-mac.zip",
-      "size": 136324327,
-      "sha256": "81b8b31bfce321ed543ced5a238aafebace2ccddab147a2a36b3344a30a95bf5",
-      "md5": "df875690b3e23950d68fdcfadefe38ba"
-    },
-    "win32-x64": {
-      "url": "https://github.com/smolpuff/mos-mission-manager/releases/download/v3.2.18/missions-v3-mcp.3.2.18.exe",
-      "size": 103384054,
-      "sha256": "f054fcb8432f7d1977a12cf8d2f9f23673551a2ba2c61ff690cbbe2757095707",
-      "md5": "f01e13f5c8fd3e501015147d0641a5a9"
+      "url": "https://github.com/smolpuff/mos-mission-manager/releases/download/v3.3.0b5/missions-v3-mcp-3.3.0b5-x64-mac.zip",
+      "size": 137078917,
+      "sha256": "dc3cd5c24e177afce38fcc5078c2f40aac50c170910eab2b359709218257cd93",
+      "md5": "7e01ce0df78e189650c87269cb6fdbc2"
     }
   }
 }
