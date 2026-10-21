@@ -53,7 +53,7 @@ jobs:
         run: npm ci
       - name: Verify failure-only auth diagnostics
         if: matrix.platform == 'mac' && matrix.arch == 'arm64'
-        run: node --test lib/auth-diagnostics.test.js src/services/watch-auth.test.js src/services/watch-gap-claims.test.js src/mcp/client-cooldown.test.js electron/update-tools/beta-update.test.js
+        run: node --test lib/auth-diagnostics.test.js src/services/watch-auth.test.js src/services/watch-gap-claims.test.js src/mcp/client-cooldown.test.js
       - name: Build diagnostic app
         run: |
           npm run desktop:build
@@ -104,16 +104,13 @@ jobs:
           const tag = process.env.PBP_AUTH_BETA_VERSION;
           const match = tag.match(/^v(\d+\.\d+\.\d+b[1-9]\d*)$/);
           if (!match) throw new Error('Invalid beta release tag');
-          const artifactVersion = match[1];
-          const version = artifactVersion.replace(/b(\d+)$/, '-beta.$1');
+          const version = match[1];
           const base = `https://github.com/${process.env.GITHUB_REPOSITORY}/releases`;
           const output = path.join(process.env.RUNNER_TEMP, 'beta-release');
           const notes = [
             'Fixed unnecessary browser login popups when PBP reports an already-active watch_and_claim request for an authenticated user.',
-            'Watch contention now keeps the session authenticated and follows the normal retry path instead of forcing login.',
-            'Genuine authentication error handling and the five-minute/two-minute browser popup cooldown are unchanged.',
-            'Beta builds now check beta/version.json for beta-only updates; stable builds keep their existing update feed.',
-            'Install this beta manually once when upgrading from b4 or earlier; subsequent beta updates support numbered beta versions.',
+            'Watch contention now preserves the authenticated session and uses the existing retry behavior.',
+            'Token refresh, genuine authentication error handling, and the five-minute/two-minute browser popup cooldown are unchanged.',
             'Reports only when failed authorization forces a browser popup; routine calls and throttling stay quiet.',
             'Debug tabs: PBP Authorization first and selected by default, plus Throttling.',
             'Ten seconds between failed token renewal attempts, including between batches.',
@@ -122,9 +119,9 @@ jobs:
           ];
           const artifacts = {};
           for (const [key, file] of [
-            ['win32-x64', `missions-v3-mcp.${artifactVersion}.exe`],
-            ['darwin-arm64', `missions-v3-mcp-${artifactVersion}-arm64-mac.zip`],
-            ['darwin-x64', `missions-v3-mcp-${artifactVersion}-x64-mac.zip`],
+            ['win32-x64', `missions-v3-mcp.${version}.exe`],
+            ['darwin-arm64', `missions-v3-mcp-${version}-arm64-mac.zip`],
+            ['darwin-x64', `missions-v3-mcp-${version}-x64-mac.zip`],
           ]) {
             const contents = fs.readFileSync(path.join(output, file));
             artifacts[key] = {
@@ -145,21 +142,3 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release create "$PBP_AUTH_BETA_VERSION" --verify-tag --title "${PBP_AUTH_BETA_VERSION#v}" --prerelease --latest=false --notes-file "$RUNNER_TEMP/beta-notes.md" "$RUNNER_TEMP/beta-release/"*
-      - name: Publish verified metadata to the beta updater feed
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          node <<'JS'
-          const fs = require('node:fs');
-          const path = require('node:path');
-          const { execFileSync } = require('node:child_process');
-          const api = `repos/${process.env.GITHUB_REPOSITORY}/contents/version.json`;
-          const current = JSON.parse(execFileSync('gh', ['api', `${api}?ref=beta`], { encoding: 'utf8' }));
-          const request = path.join(process.env.RUNNER_TEMP, 'beta-feed-request.json');
-          fs.writeFileSync(request, JSON.stringify({
-            branch: 'beta', sha: current.sha,
-            message: `Update beta version.json for ${process.env.PBP_AUTH_BETA_VERSION}`,
-            content: fs.readFileSync(path.join(process.env.RUNNER_TEMP, 'beta-release', 'version.json')).toString('base64'),
-          }));
-          execFileSync('gh', ['api', '--method', 'PUT', api, '--input', request], { stdio: 'inherit' });
-          JS
