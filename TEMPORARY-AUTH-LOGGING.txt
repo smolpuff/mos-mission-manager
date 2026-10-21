@@ -53,6 +53,9 @@ credential changes during a refresh, browser launch outcomes, callback state
 matching, token exchange/save outcomes, and watcher recovery decisions.
 Response headers and status text are included. Credential values are still
 redacted, including in rawResponse; exact text means everything except secrets.
+Every failing response repeats its request endpoint, method, tool/arguments
+and credential fingerprint, so all failed attempts remain individually useful.
+Expected 404s from optional OAuth metadata discovery stay buffered.
 
 Raw access/refresh/registration tokens, authorization headers, auth codes,
 PKCE secrets and callback state values are redacted. Successful mission/NFT
