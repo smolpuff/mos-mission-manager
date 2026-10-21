@@ -49,7 +49,9 @@ export default function DebugPage({
   lastEvent,
 }) {
   const bridge = useDesktopBridge();
-  const authDiagnostics = bridge?.authDiagnosticsBuild === true;
+  const authDiagnosticBuild = bridge?.authDiagnosticsBuild === true;
+  const [debugTab, setDebugTab] = useState("auth");
+  const authDiagnostics = authDiagnosticBuild && debugTab === "auth";
   const readDebugLog = authDiagnostics ? bridge?.getAuthDebugLog : bridge?.getThrottleDebugLog;
   const removeDebugLog = authDiagnostics ? bridge?.deleteAuthDebugLog : bridge?.deleteThrottleDebugLog;
   const [authSummary, setAuthSummary] = useState({});
@@ -157,6 +159,9 @@ export default function DebugPage({
         if (!cancelled) setThrottleLogBusy(false);
       }
     };
+    setThrottleLog("");
+    setThrottleLogPath("");
+    pinnedToBottomRef.current = true;
     void loadThrottleLog();
     if (authDiagnostics) timer = setInterval(loadThrottleLog, RESOURCE_POLL_INTERVAL_MS);
     return () => {
@@ -186,7 +191,7 @@ export default function DebugPage({
     return () => {
       cancelled = true;
     };
-  }, [bridge, lastEvent, canAccessThrottleLog]);
+  }, [bridge, lastEvent, canAccessThrottleLog, authDiagnostics]);
 
   const refreshThrottleLog = async () => {
     if (!canAccessThrottleLog) return;
@@ -321,9 +326,29 @@ export default function DebugPage({
       <div className="card gap-1.5 !p-3 min-h-0 flex-1 flex flex-col overflow-hidden">
         <div className="flex min-w-0 items-center justify-between gap-1.5 shrink-0">
           <div className="flex min-w-0 items-baseline gap-2">
-            <h2 className="shrink-0 text-md font-normal leading-tight">
-              {authDiagnostics ? "PBP Authorization" : "Throttle Debug"}
-            </h2>
+            {authDiagnosticBuild ? (
+              <div className="join shrink-0 rounded-sm overflow-hidden border border-white/10" role="group" aria-label="Debug view">
+                {[["auth", "PBP Authorization"], ["throttle", "Throttling"]].map(([tab, label]) => (
+                  <button
+                    key={tab}
+                    type="button"
+                    className={`btn btn-xs join-item rounded-none border-0 px-2 font-normal ${
+                      debugTab === tab
+                        ? "bg-violet-600 text-white hover:bg-violet-500"
+                        : "btn-black"
+                    }`}
+                    aria-pressed={debugTab === tab}
+                    onClick={() => setDebugTab(tab)}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <h2 className="shrink-0 text-md font-normal leading-tight">
+                Throttle Debug
+              </h2>
+            )}
             <div
               className="min-w-0 flex-1 truncate text-[10px] uppercase leading-none text-slate-400"
               title={throttleLogPath || ""}

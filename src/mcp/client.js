@@ -18,6 +18,7 @@ function createMcpClient(ctx, logger, dependencies = {}) {
   const popupPolicy = createAuthPopupPolicy(ctx);
   let recoveryPromise = null;
   let loginPromise = null;
+  let nextRefreshAttemptAt = 0;
   authRuntime(ctx.tokenFilePath, { version: ctx.APP_VERSION, role: ctx.authDiagnosticRole || "runner",
     logFile: path.join(path.dirname(ctx.configPath || ctx.tokenFilePath), "pbp-auth-debug.log") });
   function trace(event, details = {}, options) {
@@ -28,7 +29,7 @@ function createMcpClient(ctx, logger, dependencies = {}) {
   const AUTH_REQUEST_TIMEOUT_MS = 30000;
   const MCP_REQUEST_TIMEOUT_MS = 30000;
   const REFRESH_RETRY_ATTEMPTS = 3;
-  const REFRESH_RETRY_DELAY_MS = 1000;
+  const REFRESH_RETRY_DELAY_MS = 10000;
   // The deployed service refreshes passive mission data once per minute.
   const USER_MISSIONS_CACHE_TTL_MS = 60_000;
   const THROTTLE_SAFETY_BUFFER_MS = 2_000;
@@ -995,16 +996,17 @@ function createMcpClient(ctx, logger, dependencies = {}) {
     trace("client.recovery.begin", { reason }, { failure: true });
     setMcpConnection("reconnecting");
     for (let attempt = 1; attempt <= REFRESH_RETRY_ATTEMPTS; attempt += 1) {
+      const waitMs = Math.max(0, nextRefreshAttemptAt - Date.now());
+      if (waitMs > 0) {
+        trace("client.refresh.retry_wait", { reason, attempt, waitMs });
+        await new Promise((resolve) => setTimeout(resolve, waitMs));
+      }
       const refreshed = await tryRefresh(`${reason}_retry_${attempt}`);
+      nextRefreshAttemptAt = refreshed ? 0 : Date.now() + REFRESH_RETRY_DELAY_MS;
       if (refreshed) return true;
       logWithTimestamp(
         `[AUTH] ❌ Token refresh failed (${attempt}/${REFRESH_RETRY_ATTEMPTS}).`,
       );
-      if (attempt < REFRESH_RETRY_ATTEMPTS) {
-        await new Promise((resolve) =>
-          setTimeout(resolve, REFRESH_RETRY_DELAY_MS),
-        );
-      }
     }
 
     logWithTimestamp(
