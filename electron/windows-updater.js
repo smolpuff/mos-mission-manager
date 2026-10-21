@@ -4,7 +4,7 @@ const fs = require("node:fs/promises");
 const path = require("node:path");
 const crypto = require("node:crypto");
 const { spawn } = require("node:child_process");
-const { getReleaseArtifact, downloadArtifact } = require("./update-download");
+const { getReleaseArtifact, downloadArtifact, VERSION_PATTERN } = require("./update-download");
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const exists = (file) => fs.access(file).then(() => true, () => false);
 
@@ -35,7 +35,7 @@ async function readWindowsTransaction(userData) {
   try {
     const receipt = JSON.parse(await fs.readFile(path.join(userData, "desktop-update-transaction.json"), "utf8"));
     const target = await getWindowsTarget();
-    if (receipt.target !== target || !/^[a-f0-9]{32}$/.test(receipt.token) || !/^\d+\.\d+\.\d+$/.test(receipt.version) ||
+    if (receipt.target !== target || !/^[a-f0-9]{32}$/.test(receipt.token) || !VERSION_PATTERN.test(receipt.version) ||
         path.dirname(receipt.directory) !== path.dirname(target) || !path.basename(receipt.directory).startsWith(`.${path.basename(target)}.update-`) ||
         await fs.realpath(receipt.directory) !== receipt.directory) return null;
     const journal = JSON.parse(await fs.readFile(path.join(receipt.directory, "transaction.json"), "utf8"));

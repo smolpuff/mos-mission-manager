@@ -4,7 +4,6 @@ on:
   push:
     tags:
       - "v*b*"
-      - "v3.3.1"
 
 permissions:
   contents: read
@@ -54,7 +53,7 @@ jobs:
         run: npm ci
       - name: Verify failure-only auth diagnostics
         if: matrix.platform == 'mac' && matrix.arch == 'arm64'
-        run: node --test lib/auth-errors.test.js lib/auth-diagnostics.test.js src/services/watch-auth.test.js src/services/watch-gap-claims.test.js src/mcp/client-auth-errors.test.js src/mcp/client-cooldown.test.js
+        run: npm test
       - name: Build diagnostic app
         run: |
           npm run desktop:build
@@ -103,16 +102,19 @@ jobs:
           const path = require('node:path');
           const crypto = require('node:crypto');
           const tag = process.env.PBP_AUTH_BETA_VERSION;
-          const match = tag.match(/^v(\d+\.\d+\.\d+(?:b[1-9]\d*)?)$/);
+          const match = tag.match(/^v(\d+\.\d+\.\d+b[1-9]\d*)$/);
           if (!match) throw new Error('Invalid beta release tag');
-          const version = match[1];
+          const artifactVersion = match[1];
+          const version = artifactVersion.replace(/b(\d+)$/, '-beta.$1');
           const base = `https://github.com/${process.env.GITHUB_REPOSITORY}/releases`;
           const output = path.join(process.env.RUNNER_TEMP, 'beta-release');
           const notes = [
             'Fixed false login prompts across the runner and desktop: unrelated IDs or text containing 401, 403, auth, or login no longer count as authentication failures.',
             'Permission-only 403 responses and temporary token-renewal outages, timeouts, and rate limits no longer force browser login.',
             'Genuine credential rejection still attempts silent renewal; revoked or missing refresh credentials retain gated browser authentication.',
-            'Numeric beta 3.3.1 is available through the existing in-app updater. The original five-minute/two-minute browser cooldown remains in place.',
+            'Beta builds now use beta/version.json for numbered beta updates; production builds continue to use main/version.json.',
+            'Install b7 manually once from older betas; b7 and later can detect and install future numbered betas through the existing updater.',
+            'The original five-minute/two-minute browser popup cooldown remains in place.',
             'Reports only when failed authorization forces a browser popup; routine calls and throttling stay quiet.',
             'Debug tabs: PBP Authorization first and selected by default, plus Throttling.',
             'Ten seconds between failed token renewal attempts, including between batches.',
@@ -121,9 +123,9 @@ jobs:
           ];
           const artifacts = {};
           for (const [key, file] of [
-            ['win32-x64', `missions-v3-mcp.${version}.exe`],
-            ['darwin-arm64', `missions-v3-mcp-${version}-arm64-mac.zip`],
-            ['darwin-x64', `missions-v3-mcp-${version}-x64-mac.zip`],
+            ['win32-x64', `missions-v3-mcp.${artifactVersion}.exe`],
+            ['darwin-arm64', `missions-v3-mcp-${artifactVersion}-arm64-mac.zip`],
+            ['darwin-x64', `missions-v3-mcp-${artifactVersion}-x64-mac.zip`],
           ]) {
             const contents = fs.readFileSync(path.join(output, file));
             artifacts[key] = {
@@ -144,8 +146,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release create "$PBP_AUTH_BETA_VERSION" --verify-tag --title "${PBP_AUTH_BETA_VERSION#v}" --prerelease --latest=false --notes-file "$RUNNER_TEMP/beta-notes.md" "$RUNNER_TEMP/beta-release/"*
-      - name: Publish numeric beta to the existing updater feed
-        if: github.ref_name == 'v3.3.1'
+      - name: Publish verified metadata to the beta updater feed
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -155,11 +156,13 @@ jobs:
           const { execFileSync } = require('node:child_process');
           const { compareVersions } = require('./electron/update-checker');
           const api = `repos/${process.env.GITHUB_REPOSITORY}/contents/version.json`;
-          const current = JSON.parse(execFileSync('gh', ['api', `${api}?ref=main`], { encoding: 'utf8' }));
+          const current = JSON.parse(execFileSync('gh', ['api', `${api}?ref=beta`], { encoding: 'utf8' }));
           const previous = JSON.parse(Buffer.from(current.content, 'base64').toString('utf8'));
           const metadata = fs.readFileSync(path.join(process.env.RUNNER_TEMP, 'beta-release', 'version.json'));
           const manifest = JSON.parse(metadata);
-          if (`v${manifest.version}` !== process.env.PBP_AUTH_BETA_VERSION || compareVersions(previous.version, manifest.version) > 0) {
+          const currentBeta = /^\d+\.\d+\.\d+(?:b\d+|-beta\.\d+)$/.test(previous.version);
+          if (`v${manifest.version.replace(/-beta\.(\d+)$/, 'b$1')}` !== process.env.PBP_AUTH_BETA_VERSION ||
+              (currentBeta && compareVersions(previous.version, manifest.version) > 0)) {
             throw new Error('Refusing mismatched or older update metadata');
           }
           const release = JSON.parse(execFileSync('gh', ['api', `repos/${process.env.GITHUB_REPOSITORY}/releases/tags/${process.env.PBP_AUTH_BETA_VERSION}`], { encoding: 'utf8' }));
@@ -173,8 +176,8 @@ jobs:
           }
           const request = path.join(process.env.RUNNER_TEMP, 'update-feed-request.json');
           fs.writeFileSync(request, JSON.stringify({
-            branch: 'main', sha: current.sha,
-            message: `Publish verified updater metadata for ${process.env.PBP_AUTH_BETA_VERSION} beta`,
+            branch: 'beta', sha: current.sha,
+            message: `Publish verified beta updater metadata for ${process.env.PBP_AUTH_BETA_VERSION}`,
             content: metadata.toString('base64'),
           }));
           execFileSync('gh', ['api', '--method', 'PUT', api, '--input', request], { stdio: 'inherit' });
