@@ -10,6 +10,21 @@ function formatLastChecked(value) {
   return new Date(ts).toLocaleString();
 }
 
+function SettingsHelp({ children }) {
+  return (
+    <span
+      className="control-tooltip settings-help"
+      role="img"
+      aria-label={children}
+      tabIndex={0}
+      data-tooltip={children}
+      onClick={(event) => event.preventDefault()}
+    >
+      ?
+    </span>
+  );
+}
+
 export default function SettingsPage({
   fundingEnabled,
   fundingSource,
@@ -25,9 +40,11 @@ export default function SettingsPage({
   openCreateWalletModal,
   autoUpdateCheckEnabled,
   windowsTrayEnabled,
+  autoStartWatchingEnabled,
+  setAutoStartWatchingEnabled,
   setWindowsTrayEnabled,
-//   macMenuBarEnabled,
-//   setMacMenuBarEnabled,
+  //   macMenuBarEnabled,
+  //   setMacMenuBarEnabled,
   lastUpdateCheckAt,
   setAutoUpdateCheckEnabled,
   clearUpdateCheckMessage,
@@ -66,11 +83,14 @@ export default function SettingsPage({
     let key = importKey;
     setImportKey("");
     try {
-      if (!bridge?.importWallet) throw new Error("Wallet import is unavailable in this build.");
+      if (!bridge?.importWallet)
+        throw new Error("Wallet import is unavailable in this build.");
       const result = await bridge.importWallet(key);
-      if (!result?.ok) throw new Error(result?.error || "Wallet import failed.");
+      if (!result?.ok)
+        throw new Error(result?.error || "Wallet import failed.");
       setImportResult(result);
-      if (bridge.refreshWalletSummary) void bridge.refreshWalletSummary().catch(() => {});
+      if (bridge.refreshWalletSummary)
+        void bridge.refreshWalletSummary().catch(() => {});
     } catch (error) {
       setImportError(error.message || "Wallet import failed.");
     } finally {
@@ -338,20 +358,24 @@ export default function SettingsPage({
                 ) : null}
               </div>
               <div className="flex flex-wrap gap-2 self-end">
-              <button
-                type="button"
-                onClick={() => { setImportOpen(true); setImportError(""); setImportResult(null); }}
-                className="text-xs px-2.5 py-1 border border-white/20 rounded-sm hover:bg-white/10 transition-colors active:translate-y-0.5"
-              >
-                Import Wallet
-              </button>
-              <button
-                type="button"
-                onClick={() => void openSecretModal()}
-                className="text-xs px-2.5 py-1 bg-[#9661E2] max-w-max rounded-sm hover:bg-[#5F0DD5] transition-colors active:translate-y-0.5 place-self-end"
-              >
-                View Secret Keys
-              </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setImportOpen(true);
+                    setImportError("");
+                    setImportResult(null);
+                  }}
+                  className="text-xs px-2.5 py-1 border border-white/20 rounded-sm hover:bg-white/10 transition-colors active:translate-y-0.5"
+                >
+                  Import Wallet
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void openSecretModal()}
+                  className="text-xs px-2.5 py-1 bg-[#9661E2] max-w-max rounded-sm hover:bg-[#5F0DD5] transition-colors active:translate-y-0.5 place-self-end"
+                >
+                  View Secret Keys
+                </button>
               </div>
             </div>
           </div>
@@ -359,16 +383,23 @@ export default function SettingsPage({
       </div>
       <div className="mt-2">
         <div className="card gap-5">
-          <div className="flex flex-col gap-2 divide-white/10 divide-y">
-            <div className="pb-2">
+          <div className="flex flex-col gap-1.5 divide-white/10 divide-y">
+            <div className="pb-1.5">
               <div
                 className={`flex flex-nowrap items-start gap-5 ${isMissionMode ? "cursor-not-allowed" : ""}`}
               >
                 <label
                   htmlFor="nftAssignmentOrder"
-                  className={`text-xs text-white whitespace-nowrap mt-1 ${isMissionMode ? "cursor-not-allowed opacity-60" : ""}`}
+                  className={`inline-flex items-center gap-1.5 text-xs text-white whitespace-nowrap mt-1 ${isMissionMode ? "cursor-not-allowed opacity-60" : ""}`}
                 >
-                  Assign By
+                  Assign NFTs By
+                  <SettingsHelp>
+                    {isMissionMode
+                      ? "Locked in Mission Mode — uses every eligible NFT before repeating"
+                      : nftAssignmentOrder === "rotate_least_used"
+                        ? "Uses every eligible NFT before repeating"
+                        : "NFTs assignment order"}
+                  </SettingsHelp>
                 </label>
                 <div className="flex flex-row flex-nowrap items-start gap-2">
                   <div className="flex flex-col items-start">
@@ -404,22 +435,10 @@ export default function SettingsPage({
                       </option>
                       <option value="normal">Normal order</option>
                     </select>
-                    {isMissionMode ? (
-                      <span className="mt-1 text-[11px] leading-tight text-slate-400">
-                        Locked in Mission Mode — uses every eligible NFT before
-                        repeating
-                      </span>
-                    ) : (
-                      <span className="mt-1 text-[11px] leading-tight text-slate-400">
-                        {nftAssignmentOrder === "rotate_least_used"
-                          ? "Uses every eligible NFT before repeating"
-                          : "NFTs assignment order"}
-                      </span>
-                    )}
                   </div>
                   {!isMissionMode &&
                   nftAssignmentOrder === "collection_first" ? (
-                    <div className="flex flex-col items-start">
+                    <div className="flex items-center gap-1.5">
                       <select
                         id="nftAssignmentCollection"
                         value={nftAssignmentCollection || ""}
@@ -450,24 +469,51 @@ export default function SettingsPage({
                           </option>
                         ))}
                       </select>
-                      <span className="mt-1 text-[11px] leading-tight text-slate-400">
+                      <SettingsHelp>
                         Preferred until no usable NFTs remain
-                      </span>
+                      </SettingsHelp>
                     </div>
                   ) : null}
                 </div>
               </div>
             </div>
 
+            <div className="pb-1.5">
+              <ToggleSwitch
+                switchID="autoStartWatchingEnabled"
+                size="tiny"
+                switchWrapClassName="settings-toggle"
+                checked={autoStartWatchingEnabled === true}
+                onChange={(event) => void setAutoStartWatchingEnabled(event.target.checked)}
+                title={
+                  <span className="inline-flex items-center gap-1.5">
+                    Start watching missions when the app opens
+                    <SettingsHelp>Automatically starts watching missions in your saved mode, two seconds after the app window appears.</SettingsHelp>
+                  </span>
+                }
+                styling="!text-[15px] leading-tight"
+              />
+            </div>
+
             {bridge?.platform === "win32" && (
-              <div className="pb-2">
+              <div className="pb-1.5">
                 <ToggleSwitch
                   switchID="windowsTrayEnabled"
+                  size="tiny"
+                  switchWrapClassName="settings-toggle"
                   checked={windowsTrayEnabled === true}
                   onChange={(e) => void setWindowsTrayEnabled(e.target.checked)}
-                  title="Keep Running in System Tray"
-                  helperText="Closing the window keeps Missions running. Right-click its tray icon to start or stop, view your four missions, reopen, or quit."
-                  styling="!text-base"
+                  title={
+                    <span className="inline-flex items-center gap-1.5">
+                      Keep Running in System Tray
+                      <SettingsHelp>
+                        Closing the window keeps Missions running. Right-click
+                        its tray icon to start or stop, view your four missions,
+                        reopen, or quit.
+                      </SettingsHelp>
+                    </span>
+                  }
+                  styling="!text-[15px] leading-tight"
                 />
               </div>
             )}
@@ -487,10 +533,35 @@ export default function SettingsPage({
             )}
             */}
 
-            <div className="flex flex-wrap items-start justify-between gap-3 pb-2 ">
+            <div>
+              <ToggleSwitch
+                switchID="missionCompetitionCheckEnabled"
+                size="tiny"
+                switchWrapClassName="settings-toggle"
+                checked={missionCompetitionCheckEnabled === true}
+                onChange={(e) =>
+                  void setMissionCompetitionCheckEnabled(
+                    e.target.checked === true,
+                  )
+                }
+                title={
+                  <span className="inline-flex items-center gap-1.5">
+                    Check for Mission Competitions
+                    <SettingsHelp>
+                      Checks at startup and every hour for a new competition
+                    </SettingsHelp>
+                  </span>
+                }
+                styling="!text-[15px] leading-tight"
+              />{" "}
+            </div>
+
+            <div className="flex flex-wrap items-start justify-between gap-2 pb-1.5">
               <div className="space-y-1">
                 <ToggleSwitch
                   switchID="autoUpdateCheckEnabled"
+                  size="tiny"
+                  switchWrapClassName="settings-toggle"
                   checked={autoUpdateCheckEnabled === true}
                   onChange={(e) =>
                     void setAutoUpdateCheckEnabled(e.target.checked === true)
@@ -498,13 +569,16 @@ export default function SettingsPage({
                   title={
                     <span className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
                       <span>Check for App Updates</span>
+                      <SettingsHelp>
+                        Automatically checks for a new version at launch and
+                        periodically there-after
+                      </SettingsHelp>
                       <span className="text-[11px] font-normal text-slate-400">
                         (Last checked: {formatLastChecked(lastUpdateCheckAt)})
                       </span>
                     </span>
                   }
-                  helperText="Automatically checks for a new version at launch and periodically there-after"
-                  styling="!text-base"
+                  styling="!text-[15px] leading-tight"
                 />
               </div>
               <div className="flex items-center gap-2 ">
@@ -543,53 +617,112 @@ export default function SettingsPage({
                 </div>
               ) : null}
             </div>
-
-            <div>
-              <ToggleSwitch
-                switchID="missionCompetitionCheckEnabled"
-                checked={missionCompetitionCheckEnabled === true}
-                onChange={(e) =>
-                  void setMissionCompetitionCheckEnabled(
-                    e.target.checked === true,
-                  )
-                }
-                title="Check for Mission Competitions"
-                helperText="Checks at startup and every hour for a new competition"
-                styling="!text-base"
-              />{" "}
-            </div>
           </div>
         </div>
       </div>
       {importOpen && (
-        <div className="fixed inset-0 z-60 grid place-items-center bg-black/60 p-4" onMouseDown={(event) => { if (event.target === event.currentTarget) closeImport(); }}
-          onKeyDown={(event) => { if (event.key === "Escape") { event.stopPropagation(); closeImport(); } }}>
-          <div role="dialog" aria-modal="true" aria-labelledby="import-wallet-title" aria-busy={importBusy}
-            className="w-full max-w-lg rounded-xl border-2 border-[#1D1C27] bg-[#24222e] p-4 shadow-2xl space-y-4">
+        <div
+          className="fixed inset-0 z-60 grid place-items-center bg-black/60 p-4"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) closeImport();
+          }}
+          onKeyDown={(event) => {
+            if (event.key === "Escape") {
+              event.stopPropagation();
+              closeImport();
+            }
+          }}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="import-wallet-title"
+            aria-busy={importBusy}
+            className="w-full max-w-lg rounded-xl border-2 border-[#1D1C27] bg-[#24222e] p-4 shadow-2xl space-y-4"
+          >
             <div className="flex items-center justify-between gap-3">
-              <h2 id="import-wallet-title" className="text-lg font-semibold">Import Wallet</h2>
-              <button type="button" className="btn btn-clear btn-sm" disabled={importBusy} onClick={closeImport} aria-label="Close import wallet">✕</button>
+              <h2 id="import-wallet-title" className="text-lg font-semibold">
+                Import Wallet
+              </h2>
+              <button
+                type="button"
+                className="btn btn-clear btn-sm"
+                disabled={importBusy}
+                onClick={closeImport}
+                aria-label="Close import wallet"
+              >
+                ✕
+              </button>
             </div>
             {importResult ? (
               <div className="space-y-3">
-                <p className="text-sm text-success" role="status">Wallet imported. Unlock and lock verified.</p>
-                <p className="text-xs text-slate-300 break-all">{importResult.walletAddress}</p>
-                <button type="button" className="btn btn-gradient btn-sm" onClick={closeImport}>Done</button>
+                <p className="text-sm text-success" role="status">
+                  Wallet imported. Unlock and lock verified.
+                </p>
+                <p className="text-xs text-slate-300 break-all">
+                  {importResult.walletAddress}
+                </p>
+                <button
+                  type="button"
+                  className="btn btn-gradient btn-sm"
+                  onClick={closeImport}
+                >
+                  Done
+                </button>
               </div>
             ) : (
               <form onSubmit={importWallet} className="space-y-3">
-                <div role="note" className="rounded-md border border-warning/30 bg-warning/10 p-3 text-sm text-slate-200">
-                  Import at your own risk. Never import your main wallet. Use a dedicated wallet with only the funds you’re willing to risk if something goes wrong.
+                <div
+                  role="note"
+                  className="rounded-md border border-warning/30 bg-warning/10 p-3 text-sm text-slate-200"
+                >
+                  Import at your own risk. Never import your main wallet. Use a
+                  dedicated wallet with only the funds you’re willing to risk if
+                  something goes wrong.
                 </div>
-                <p className="text-sm text-slate-300">Import a dedicated app wallet. This replaces the current app wallet.</p>
-                <label htmlFor="import-wallet-key" className="block text-xs text-slate-300">Private key, recovery phrase, or keypair JSON</label>
-                <textarea id="import-wallet-key" autoFocus autoComplete="off" spellCheck={false} maxLength={32768} rows={4}
-                  className="textarea w-full bg-black/30 border-white/20 font-mono text-sm" value={importKey}
-                  disabled={importBusy} onChange={(event) => setImportKey(event.target.value)} />
-                {importError && <p role="alert" className="text-sm text-error">{importError}</p>}
+                <p className="text-sm text-slate-300">
+                  Import a dedicated app wallet. This replaces the current app
+                  wallet.
+                </p>
+                <label
+                  htmlFor="import-wallet-key"
+                  className="block text-xs text-slate-300"
+                >
+                  Private key, recovery phrase, or keypair JSON
+                </label>
+                <textarea
+                  id="import-wallet-key"
+                  autoFocus
+                  autoComplete="off"
+                  spellCheck={false}
+                  maxLength={32768}
+                  rows={4}
+                  className="textarea w-full bg-black/30 border-white/20 font-mono text-sm"
+                  value={importKey}
+                  disabled={importBusy}
+                  onChange={(event) => setImportKey(event.target.value)}
+                />
+                {importError && (
+                  <p role="alert" className="text-sm text-error">
+                    {importError}
+                  </p>
+                )}
                 <div className="flex justify-end gap-2">
-                  <button type="button" className="btn btn-clear btn-sm" disabled={importBusy} onClick={closeImport}>Cancel</button>
-                  <button type="submit" className="btn btn-gradient btn-sm" disabled={importBusy || !importKey.trim()}>{importBusy ? "Importing and verifying..." : "Import"}</button>
+                  <button
+                    type="button"
+                    className="btn btn-clear btn-sm"
+                    disabled={importBusy}
+                    onClick={closeImport}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="btn btn-gradient btn-sm"
+                    disabled={importBusy || !importKey.trim()}
+                  >
+                    {importBusy ? "Importing and verifying..." : "Import"}
+                  </button>
                 </div>
               </form>
             )}

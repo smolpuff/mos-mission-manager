@@ -2,6 +2,7 @@
 
 const fs = require("fs");
 const path = require("path");
+const { debugLogContext, formatDebugLogContext } = require("../../lib/debug-log-context");
 // TEMP_AUTH_DIAGNOSTICS: remove after the renewal incident is diagnosed.
 const { authEvent, authFetch, authResponse, authRuntime, tokenSummary, tokenFileSummary } = require("../../lib/auth-diagnostics");
 const { createAuthPopupPolicy } = require("../../lib/auth-popup");
@@ -21,7 +22,9 @@ function createMcpClient(ctx, logger, dependencies = {}) {
   let loginPromise = null;
   let nextRefreshAttemptAt = 0;
   let lastRefreshFailure = null;
+  const getDebugLogContext = () => debugLogContext(ctx.getDebugLogContext ? ctx.getDebugLogContext() : ctx);
   authRuntime(ctx.tokenFilePath, { version: ctx.APP_VERSION, role: ctx.authDiagnosticRole || "runner",
+    getDebugLogContext,
     logFile: path.join(path.dirname(ctx.configPath || ctx.tokenFilePath), "pbp-auth-debug.log") });
   function trace(event, details = {}, options) {
     authEvent(ctx.tokenFilePath, event, { missionMode: ctx.missionModeEnabled === true,
@@ -318,6 +321,7 @@ function createMcpClient(ctx, logger, dependencies = {}) {
       `THROTTLE EVENT #${seq}`,
       "=".repeat(88),
       `timestamp: ${new Date(now).toISOString()}`,
+      ...formatDebugLogContext(getDebugLogContext()),
       `type: ${event.type || "unknown"}`,
       `requestedTool: ${event.requestedTool || "unknown"}`,
       `triggerTool: ${event.triggerTool || "unknown"}`,

@@ -556,7 +556,7 @@ export default function NftsPage({ bridge, signerMode = "" }) {
       <div className="grid grid-cols-1 md:grid-cols-[200px_auto] gap-4 shrink-0">
         <div className="card p-4 border border-white/10 bg-black/30 relative">
           <div className="text-sm uppercase text-slate-300 ">My NFTs</div>
-          <div className="text-3xl font-semibold text-slate-100 mt-1">
+          <div className="text-2xl font-semibold text-slate-100 mt-1">
             {data.total === null ? "—" : Number(data.total || 0).toLocaleString()}
           </div>
           <div className="text-sm text-success mt-1">

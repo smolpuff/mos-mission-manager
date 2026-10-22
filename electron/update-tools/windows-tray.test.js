@@ -56,15 +56,22 @@ test("closing hides the retained window without stopping or quitting", () => {
   assert.equal(f.controller.isEnabled(), true);
 });
 
-test("Open and double-click restore taskbar access and a minimized window", () => {
+test("Open, single-click and right-click restore taskbar access and a minimized window", () => {
   const f = fixture();
   f.controller.sync(true);
   f.minimize();
   f.item("open").click();
   assert.deepEqual(f.calls, [["skip-taskbar", false], "restore", "show", "focus"]);
   f.calls.length = 0;
-  f.instances[0].events["double-click"]();
+  f.instances[0].events["click"]();
+  assert.equal(f.instances[0].events["double-click"], undefined);
   assert.deepEqual(f.calls, [["skip-taskbar", false], "show", "focus"]);
+  f.calls.length = 0;
+  f.minimize();
+  const menu = f.instances[0].menu;
+  f.instances[0].events["right-click"]();
+  assert.deepEqual(f.calls, [["skip-taskbar", false], "restore", "show", "focus"]);
+  assert.equal(f.instances[0].menu, menu);
 });
 
 test("disabling restores the window before destroying its tray access", () => {
@@ -82,13 +89,13 @@ test("menu status updates Start/Stop, four mission rows, and literal ampersands"
   const f = fixture();
   f.controller.updateStatus({ running: false });
   f.controller.sync(true);
-  assert.equal(f.item("runner-action").label, "Start");
+  assert.equal(f.item("runner-action").label, "▶ Start");
   await f.item("runner-action").click();
   assert.deepEqual(f.calls, ["start"]);
   f.controller.updateStatus({ running: true, watcherRunning: true,
     guiMissionSlots: [{ slot: 1, missionName: "A & B", missionLevel: 15, missionActive: true, assignedNft: "nft", progress: 3, goal: 10 }] });
-  assert.equal(f.item("runner-status").label, "Watching missions…");
-  assert.equal(f.item("runner-action").label, "Stop");
+  assert.equal(f.item("runner-status").label, "🟢 Watching missions…");
+  assert.equal(f.item("runner-action").label, "⏹ Stop");
   assert.match(f.item("mission-1").label, /A && B · Level 15 · Active · 3 \/ 10 \(30%\)/);
   assert.equal(f.instances[0].menu.items.filter((row) => row.id?.startsWith("mission-")).length, 4);
   await f.item("runner-action").click();

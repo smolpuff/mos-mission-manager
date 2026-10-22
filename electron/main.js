@@ -27,6 +27,7 @@ const { createWalletGenerationRequest } = require("./wallet-generation");
 const { createWalletRefreshScheduler } = require("./wallet-refresh-scheduler");
 const { createWindowsTray } = require("./windows-tray");
 const { startFromWindowsTray } = require("./windows-tray-state");
+const { scheduleStartupWatching } = require("./startup-watcher");
 const { createSignerService } = require("../src/signer");
 const { importWalletAndVerify } = require("../src/wallet-import");
 let walletOperationBusy = false;
@@ -74,7 +75,6 @@ const {
 } = require("../src/mission-slot-policy");
 
 const ROOT_DIR = path.resolve(__dirname, "..");
-const AUTH_DIAGNOSTIC_BUILD = require("../package.json").pbpAuthDiagnostics === true;
 const RENDERER_DEV_URL =
   process.env.VITE_DEV_SERVER_URL || "http://127.0.0.1:5179";
 const rendererIndexPath = path.join(ROOT_DIR, "dist", "index.html");
@@ -161,6 +161,7 @@ function desktopWindowFrameOptions() {
 }
 
 let controlWindow = null;
+let cancelStartupWatching = () => {};
 let cliWindow = null;
 let splashWindow = null;
 let windowsTrayRunnerActions = null;
@@ -330,6 +331,10 @@ const desktopMcpCtx = {
   tokenFilePath: path.join(os.homedir(), ".pbp-mcp", "token.json"),
   // TEMP_AUTH_DIAGNOSTICS: share the runner's diagnostic log location.
   authDiagnosticRole: "desktop",
+  getDebugLogContext() {
+    return { ...backendStatus, signerConfig: readDesktopConfig().signer,
+      resourceUsage: readResourceUsageSnapshot() };
+  },
   configPath: path.join(getBackendWorkingDirectory(), "config.json"),
   get missionModeEnabled() {
     return backendStatus.running
@@ -1345,6 +1350,13 @@ function updateBackendStateFromIpc(payload) {
         if (
           hasUsableFundingSummary(currentSummary) &&
           !hasUsableFundingSummary(nextSummary)
+        ) {
+          continue;
+        }
+        // A manual desktop refresh can be newer than the runner's cached balance.
+        if (
+          currentSummary?.address === nextSummary?.address &&
+          Number(currentSummary?.checkedAt || 0) > Number(nextSummary?.checkedAt || 0)
         ) {
           continue;
         }
@@ -4352,7 +4364,7 @@ function startBackend(options = {}) {
     currentConfig?.watchLoopEnabled === true;
   const startPausedForOnboarding = options?.startPaused === true;
   const startupSnapshotPath = writeStartupSnapshotFile();
-  backend = fork(path.join(ROOT_DIR, "app.js"), ["--plain-output", ...(AUTH_DIAGNOSTIC_BUILD ? ["--debug"] : [])], {
+  backend = fork(path.join(ROOT_DIR, "app.js"), ["--plain-output"], {
     cwd: getBackendWorkingDirectory(),
     env: {
       ...process.env,
@@ -5350,7 +5362,6 @@ async function createControlWindow() {
     show: false,
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
-      additionalArguments: AUTH_DIAGNOSTIC_BUILD ? ["--pbp-auth-diagnostics"] : [],
       contextIsolation: true,
       nodeIntegration: false,
       devTools: DESKTOP_DEVTOOLS_ENABLED,
@@ -5755,17 +5766,14 @@ app.whenReady().then(async () => {
   });
   handleTrustedIpc("debug:get-throttle-log", async () => readThrottleDebugLog());
   handleTrustedIpc("debug:get-auth-log", async () => {
-    if (!AUTH_DIAGNOSTIC_BUILD) throw new Error("Auth diagnostic build required.");
     return readThrottleDebugLog(path.join(getBackendWorkingDirectory(), "pbp-auth-debug.log"));
   });
   handleTrustedIpc("debug:delete-auth-log", async () => {
-    if (!AUTH_DIAGNOSTIC_BUILD) throw new Error("Auth diagnostic build required.");
     const file = path.join(getBackendWorkingDirectory(), "pbp-auth-debug.log");
     for (const suffix of [".1", ".2"]) deleteThrottleDebugLog(file + suffix);
     return deleteThrottleDebugLog(file);
   });
   handleTrustedIpc("debug:open-auth-log-folder", async () => {
-    if (!AUTH_DIAGNOSTIC_BUILD) throw new Error("Auth diagnostic build required.");
     const directory = getBackendWorkingDirectory();
     const file = path.join(directory, "pbp-auth-debug.log");
     if (fs.existsSync(file)) shell.showItemInFolder(file);
@@ -7219,6 +7227,15 @@ app.whenReady().then(async () => {
   } else {
     createSplashWindow();
     await createControlWindow();
+    controlWindow.once("show", () => {
+      cancelStartupWatching = scheduleStartupWatching({
+        getConfig: readDesktopConfig,
+        getStatus: () => backendStatus,
+        isQuitting: () => appQuitInFlight || telemetryQuitInProgress || updateShutdownInProgress,
+        startWatching: () => windowsTrayRunnerActions.start(),
+        onError: error => pushSystemLog(`Automatic mission watching failed: ${String(error?.message || error)}`),
+      });
+    });
     windowsTray.sync(readDesktopConfig().windowsTrayEnabled === true);
 //     macMenuBar.sync(readDesktopConfig().macMenuBarEnabled === true);
   }
@@ -7295,6 +7312,7 @@ app.on("window-all-closed", () => {
 });
 
 app.on("before-quit", (event) => {
+  cancelStartupWatching();
   windowsTray.destroy();
   fundingWalletRefreshScheduler?.stop();
   if (telemetryQuitInProgress) {

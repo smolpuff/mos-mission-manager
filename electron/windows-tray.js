@@ -38,29 +38,30 @@ function createWindowsTray({ platform, Tray, Menu, icon, getWindow, isQuitting, 
     const stats = status.currentMissionStats || {};
     const snapshot = {
       runner: runnerLabel(status),
-      action: busy ? "Please wait…" : status.running ? "Stop" : "Start",
+      action: busy ? "⏳ Please wait…" : status.running ? "⏹ Stop" : "▶ Start",
       busy,
-      stats: [
-        ["Active", stats.active], ["NFTs ready", stats.nftsAvailable],
-        ["Claimable", stats.claimable], ["Claimed", stats.claimed],
-      ].map(([label, value]) => `${label}: ${Number(value || 0).toLocaleString()}`),
+      stats: status.running ? [
+        ["🎯 Active", stats.active], ["💎 NFTs ready", stats.nftsAvailable],
+        ["🥞 Claimable", stats.claimable], ["🤑 Claimed", stats.claimed],
+      ].map(([label, value]) => `${label}: ${Number(value || 0).toLocaleString()}`)
+        : ["Start Missions to see live stats."],
       missions: missionRows(status),
     };
     const signature = JSON.stringify(snapshot);
     if (signature === rendered) return;
     const text = (value) => value.replace(/&/g, "&&");
     const menu = Menu.buildFromTemplate([
-      { id: "runner-status", label: snapshot.runner, enabled: false },
+      { id: "runner-status", label: `${!status.running ? "🔴" : status.watchLoopEnabled === false ? "🟡" : "🟢"} ${snapshot.runner}`, enabled: false },
       { id: "runner-action", label: snapshot.action, enabled: !busy, click: toggleRunner },
       { type: "separator" },
       ...snapshot.stats.map((label) => ({ label, enabled: false })),
       { type: "separator" },
       ...snapshot.missions.map((label, index) => ({ id: `mission-${index + 1}`, label: text(label), enabled: false })),
       { type: "separator" },
-      { id: "open", label: "Open Missions", click: openWindow },
-      { id: "quit", label: "Quit Missions", click: quit },
+      { id: "open", label: "🪟 Show Missions App", click: openWindow },
+      { id: "quit", label: "❌ Quit Missions App", click: quit },
     ]);
-    tray.setToolTip(`Missions — ${snapshot.runner}`);
+    tray.setToolTip(`Missions App — ${snapshot.runner}`);
     tray.setContextMenu(menu);
     rendered = signature;
   }
@@ -70,7 +71,8 @@ function createWindowsTray({ platform, Tray, Menu, icon, getWindow, isQuitting, 
     if (enabled === true) {
       if (tray) return;
       tray = new Tray(icon);
-      tray.on("double-click", openWindow);
+      tray.on("click", openWindow);
+      tray.on("right-click", openWindow);
       rendered = "";
       updateStatus(status);
     } else if (tray) {

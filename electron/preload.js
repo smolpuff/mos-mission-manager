@@ -13,7 +13,6 @@ function isDesktopDevMode() {
 contextBridge.exposeInMainWorld("missionsDesktop", {
   platform: process.platform,
   desktopDevMode: isDesktopDevMode(),
-  authDiagnosticsBuild: process.argv.includes("--pbp-auth-diagnostics"),
   startBackend: (options) => ipcRenderer.invoke("backend:start", options),
   stopBackend: () => ipcRenderer.invoke("backend:stop"),
   restartBackend: () => ipcRenderer.invoke("backend:restart"),

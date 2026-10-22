@@ -431,6 +431,7 @@ function ControlView() {
     useState("150");
   const [configuredTargetMissions, setConfiguredTargetMissions] = useState([]);
   const [windowsTrayEnabled, setWindowsTrayEnabled] = useState(false);
+  const [autoStartWatchingEnabled, setAutoStartWatchingEnabledState] = useState(false);
 //   const [macMenuBarEnabled, setMacMenuBarEnabledState] = useState(false);
   const [autoUpdateCheckEnabled, setAutoUpdateCheckEnabledState] =
     useState(true);
@@ -582,7 +583,7 @@ function ControlView() {
   const isAutoMode = modeSelection === "auto";
   const isMissionLikeMode = isMissionMode || isAutoMode;
   const isNormalMode = modeSelection === "normal";
-  const debugPageVisible = debug === true || bridge?.authDiagnosticsBuild === true;
+  const debugPageVisible = debug === true;
   const competitionRangeLockDisabled = !isMissionMode;
   const competitionRangeLockInputsDisabled =
     competitionRangeLockDisabled || !competitionRangeLockEnabled;
@@ -955,6 +956,7 @@ function ControlView() {
       }
 //       setMacMenuBarEnabledState(config.macMenuBarEnabled === true);
       setWindowsTrayEnabled(config.windowsTrayEnabled === true);
+      setAutoStartWatchingEnabledState(config.autoStartWatchingEnabled === true);
       if (typeof config.missionCompetitionCheckEnabled === "boolean") {
         setMissionCompetitionCheckEnabledState(
           config.missionCompetitionCheckEnabled,
@@ -1351,6 +1353,11 @@ function ControlView() {
     const next = enabled === true;
     await applyConfigPatch({ windowsTrayEnabled: next });
     setWindowsTrayEnabled(next);
+  };
+  const setAutoStartWatchingEnabled = async (enabled) => {
+    const next = enabled === true;
+    await applyConfigPatch({ autoStartWatchingEnabled: next });
+    setAutoStartWatchingEnabledState(next);
   };
   const setMissionCompetitionCheckEnabled = async (enabled) => {
     const next = enabled === true;
@@ -3605,7 +3612,7 @@ function ControlView() {
 
   return (
     <main className="shell flex flex-col">
-      <WindowChrome title={bridge?.authDiagnosticsBuild ? "missions-v3-mcp · AUTH DEBUG" : "missions-v3-mcp"} styling="min-w-full" />
+      <WindowChrome title="missions-v3-mcp" styling="min-w-full" />
 
       <div
         className="flex min-h-0 flex-1 gap-0 w-full overflow-hidden"
@@ -3663,6 +3670,8 @@ function ControlView() {
               openCreateWalletModal={openCreateWalletModal}
               autoUpdateCheckEnabled={autoUpdateCheckEnabled}
               windowsTrayEnabled={windowsTrayEnabled}
+              autoStartWatchingEnabled={autoStartWatchingEnabled}
+              setAutoStartWatchingEnabled={setAutoStartWatchingEnabled}
               setWindowsTrayEnabled={changeWindowsTrayEnabled}
 //               macMenuBarEnabled={macMenuBarEnabled}
 //               setMacMenuBarEnabled={setMacMenuBarEnabled}

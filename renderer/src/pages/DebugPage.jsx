@@ -49,9 +49,8 @@ export default function DebugPage({
   lastEvent,
 }) {
   const bridge = useDesktopBridge();
-  const authDiagnosticBuild = bridge?.authDiagnosticsBuild === true;
   const [debugTab, setDebugTab] = useState("auth");
-  const authDiagnostics = authDiagnosticBuild && debugTab === "auth";
+  const authDiagnostics = debugTab === "auth";
   const readDebugLog = authDiagnostics ? bridge?.getAuthDebugLog : bridge?.getThrottleDebugLog;
   const removeDebugLog = authDiagnostics ? bridge?.deleteAuthDebugLog : bridge?.deleteThrottleDebugLog;
   const [authSummary, setAuthSummary] = useState({});
@@ -326,7 +325,6 @@ export default function DebugPage({
       <div className="card gap-1.5 !p-3 min-h-0 flex-1 flex flex-col overflow-hidden">
         <div className="flex min-w-0 items-center justify-between gap-1.5 shrink-0">
           <div className="flex min-w-0 items-baseline gap-2">
-            {authDiagnosticBuild ? (
               <div className="join shrink-0 rounded-sm overflow-hidden border border-white/10" role="group" aria-label="Debug view">
                 {[["auth", "PBP Authorization"], ["throttle", "Throttling"]].map(([tab, label]) => (
                   <button
@@ -344,11 +342,6 @@ export default function DebugPage({
                   </button>
                 ))}
               </div>
-            ) : (
-              <h2 className="shrink-0 text-md font-normal leading-tight">
-                Throttle Debug
-              </h2>
-            )}
             <div
               className="min-w-0 flex-1 truncate text-[10px] uppercase leading-none text-slate-400"
               title={throttleLogPath || ""}
