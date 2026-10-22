@@ -432,7 +432,7 @@ function ControlView() {
   const [configuredTargetMissions, setConfiguredTargetMissions] = useState([]);
   const [windowsTrayEnabled, setWindowsTrayEnabled] = useState(false);
   const [autoStartWatchingEnabled, setAutoStartWatchingEnabledState] = useState(false);
-//   const [macMenuBarEnabled, setMacMenuBarEnabledState] = useState(false);
+  const [macMenuBarEnabled, setMacMenuBarEnabledState] = useState(false);
   const [autoUpdateCheckEnabled, setAutoUpdateCheckEnabledState] =
     useState(true);
   // Check for updates before opening setup on a fresh install.
@@ -954,7 +954,7 @@ function ControlView() {
       } else {
         setAutoUpdateCheckEnabledState(true);
       }
-//       setMacMenuBarEnabledState(config.macMenuBarEnabled === true);
+      setMacMenuBarEnabledState(config.macMenuBarEnabled === true);
       setWindowsTrayEnabled(config.windowsTrayEnabled === true);
       setAutoStartWatchingEnabledState(config.autoStartWatchingEnabled === true);
       if (typeof config.missionCompetitionCheckEnabled === "boolean") {
@@ -1341,11 +1341,11 @@ function ControlView() {
     setAutoUpdateCheckEnabledState(next);
     await applyConfigPatch({ autoUpdateCheckEnabled: next });
   };
-//   const setMacMenuBarEnabled = async (enabled) => {
-//     const next = enabled === true;
-//     await applyConfigPatch({ macMenuBarEnabled: next });
-//     setMacMenuBarEnabledState(next);
-//   };
+  const setMacMenuBarEnabled = async (enabled) => {
+    const next = enabled === true;
+    await applyConfigPatch({ macMenuBarEnabled: next });
+    setMacMenuBarEnabledState(next);
+  };
   const clearUpdateCheckMessage = () => {
     setUpdateCheckMessage(null);
   };
@@ -3673,8 +3673,8 @@ function ControlView() {
               autoStartWatchingEnabled={autoStartWatchingEnabled}
               setAutoStartWatchingEnabled={setAutoStartWatchingEnabled}
               setWindowsTrayEnabled={changeWindowsTrayEnabled}
-//               macMenuBarEnabled={macMenuBarEnabled}
-//               setMacMenuBarEnabled={setMacMenuBarEnabled}
+              macMenuBarEnabled={macMenuBarEnabled}
+              setMacMenuBarEnabled={setMacMenuBarEnabled}
               lastUpdateCheckAt={lastUpdateCheckAt}
               setAutoUpdateCheckEnabled={setAutoUpdateCheckEnabled}
               clearUpdateCheckMessage={clearUpdateCheckMessage}

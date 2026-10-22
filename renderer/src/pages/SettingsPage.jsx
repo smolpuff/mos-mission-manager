@@ -43,8 +43,8 @@ export default function SettingsPage({
   autoStartWatchingEnabled,
   setAutoStartWatchingEnabled,
   setWindowsTrayEnabled,
-  //   macMenuBarEnabled,
-  //   setMacMenuBarEnabled,
+  macMenuBarEnabled,
+  setMacMenuBarEnabled,
   lastUpdateCheckAt,
   setAutoUpdateCheckEnabled,
   clearUpdateCheckMessage,
@@ -518,20 +518,24 @@ export default function SettingsPage({
               </div>
             )}
 
-            {/* Mac menu bar temporarily disabled.
             {bridge?.platform === "darwin" && (
-              <div className="pb-2">
+              <div className="pb-1.5">
                 <ToggleSwitch
                   switchID="macMenuBarEnabled"
+                  size="tiny"
+                  switchWrapClassName="settings-toggle"
                   checked={macMenuBarEnabled === true}
                   onChange={(e) => void setMacMenuBarEnabled(e.target.checked === true)}
-                  title="Keep Running in Menu Bar"
-                  helperText="Closing the window keeps Missions running and hides its Dock icon. Open or quit Missions from the menu bar."
-                  styling="!text-base"
+                  title={
+                    <span className="inline-flex items-center gap-1.5">
+                      Keep Running in Menu Bar
+                      <SettingsHelp>Closing the window keeps Missions running and hides its Dock icon. Click its menu bar icon to start or stop watching missions, view your four missions, show the app, or quit.</SettingsHelp>
+                    </span>
+                  }
+                  styling="!text-[15px] leading-tight"
                 />
               </div>
             )}
-            */}
 
             <div>
               <ToggleSwitch

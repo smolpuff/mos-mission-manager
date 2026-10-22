@@ -1,121 +1,166 @@
-// Mac menu bar temporarily disabled; retained for later work.
-// "use strict";
-//
-// const test = require("node:test");
-// const assert = require("node:assert/strict");
-// const { createMacMenuBar } = require("../mac-menu-bar");
-//
-// function setup(platform = "darwin") {
-//   const calls = [];
-//   let menu;
-//   let quitting = false;
-//   let popoverVisible = false;
-//   const popover = {
-//     isDestroyed: () => false,
-//     isVisible: () => popoverVisible,
-//     getSize: () => [380, 500],
-//     setPosition: (x, y) => calls.push(["position", x, y]),
-//     on() {},
-//     hide: () => { popoverVisible = false; calls.push("popover.hide"); },
-//     show: () => { popoverVisible = true; calls.push("popover.show"); },
-//     focus: () => calls.push("popover.focus"),
-//     destroy: () => calls.push("popover.destroy"),
-//   };
-//   const win = {
-//     isDestroyed: () => false,
-//     isMinimized: () => true,
-//     hide: () => calls.push("hide"),
-//     restore: () => calls.push("restore"),
-//     show: () => calls.push("show"),
-//     focus: () => calls.push("focus"),
-//   };
-//   const controller = createMacMenuBar({
-//     platform,
-//     app: { dock: { show: () => calls.push("dock.show"), hide: () => calls.push("dock.hide") } },
-//     Tray: class {
-//       constructor() { calls.push("tray.create"); }
-//       setToolTip() {}
-//       setContextMenu(value) { menu = value; }
-//       on() {}
-//       getBounds() { return { x: 990, y: 0, width: 20, height: 24 }; }
-//       destroy() { calls.push("tray.destroy"); }
-//     },
-//     Menu: { buildFromTemplate: (value) => { menu = value; return value; } },
-//     screen: { getDisplayMatching: () => ({ workArea: { x: 0, y: 24, width: 1024, height: 768 } }) },
-//     createPopover: async (onCreated) => { onCreated(popover); return popover; },
-//     nativeImage: { createFromPath: () => ({ setTemplateImage() {} }) },
-//     getWindow: () => win,
-//     isQuitting: () => quitting,
-//     quit: () => calls.push("quit"),
-//   });
-//   return { controller, calls, getMenu: () => menu, setQuitting: () => { quitting = true; } };
-// }
-//
-// test("menu bar mode is opt-in and has no effect on Windows or Linux", () => {
-//   for (const platform of ["darwin", "win32", "linux"]) {
-//     const { controller, calls } = setup(platform);
-//     controller.sync(false);
-//     assert.equal(controller.closeWindow({ preventDefault() { assert.fail("close intercepted"); } }), false);
-//     if (platform !== "darwin") controller.sync(true);
-//     assert.equal(controller.isEnabled(), false);
-//     assert.deepEqual(calls, []);
-//   }
-// });
-//
-// test("closing to the menu bar retains the window and reopening restores it and the Dock", () => {
-//   const { controller, calls, getMenu } = setup();
-//   controller.sync(true);
-//   controller.sync(true);
-//   assert.equal(calls.filter((value) => value === "tray.create").length, 1);
-//   assert.equal(controller.closeWindow({ preventDefault: () => calls.push("preventDefault") }), true);
-//   assert.deepEqual(calls.slice(1), ["preventDefault", "hide", "dock.hide"]);
-//   getMenu().find((item) => item.label === "Open Missions").click();
-//   assert.deepEqual(calls.slice(-4), ["dock.show", "restore", "show", "focus"]);
-//   assert.equal(controller.isEnabled(), true);
-// });
-//
-// test("disabling the setting restores access before removing the menu bar item", () => {
-//   const { controller, calls } = setup();
-//   controller.sync(true);
-//   controller.closeWindow({ preventDefault() {} });
-//   controller.sync(false);
-//   assert.deepEqual(calls.slice(-5), ["dock.show", "restore", "show", "focus", "tray.destroy"]);
-//   assert.equal(controller.isEnabled(), false);
-// });
-//
-// test("explicit quit uses the existing quit callback and never intercepts window closure", () => {
-//   const { controller, calls, getMenu, setQuitting } = setup();
-//   controller.sync(true);
-//   getMenu().find((item) => item.label === "Quit Missions").click();
-//   assert.equal(calls.at(-1), "quit");
-//   setQuitting();
-//   assert.equal(controller.closeWindow({ preventDefault() { assert.fail("quit intercepted"); } }), false);
-//   assert.equal(calls.includes("hide"), false);
-// });
-//
-// test("popover stays within the display and toggles without showing the Dock", async () => {
-//   const { controller, calls } = setup();
-//   controller.sync(true);
-//   await controller.togglePopover();
-//   assert.deepEqual(calls.slice(-3), [["position", 644, 24], "popover.show", "popover.focus"]);
-//   assert.equal(calls.includes("dock.show"), false);
-//   await controller.togglePopover();
-//   assert.equal(calls.at(-1), "popover.hide");
-//   controller.sync(false);
-//   assert.ok(calls.includes("popover.destroy"));
-// });
-//
-// test("native menu reflects running, starting, paused, and stopped states", () => {
-//   const { controller, getMenu } = setup();
-//   controller.sync(true);
-//   for (const [status, label] of [
-//     [{ running: false }, "Stopped"],
-//     [{ running: true }, "Starting…"],
-//     [{ running: true, watcherRunning: true }, "Watching missions..."],
-//     [{ running: true, watcherRunning: true, watchLoopEnabled: false }, "Paused"],
-//   ]) {
-//     controller.updateStatus(status);
-//     assert.equal(getMenu()[0].label, `Runner: ${label}`);
-//     assert.equal(getMenu()[0].enabled, false);
-//   }
-// });
+"use strict";
+
+const test = require("node:test");
+const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
+const { createMacMenuBar } = require("../mac-menu-bar");
+const { createWindowsTray } = require("../windows-tray");
+const { flushConfig } = require("../../src/config");
+
+function fixture(platform = "darwin", factory = createMacMenuBar) {
+  const calls = [];
+  const instances = [];
+  let quitting = false;
+  let minimized = false;
+  let start = async () => { calls.push("start"); };
+  let imagePath;
+  const template = { setTemplateImage(value) { this.isTemplate = value; } };
+  const win = {
+    isDestroyed: () => false, isMinimized: () => minimized,
+    restore() { calls.push("restore"); minimized = false; },
+    show() { calls.push("show"); }, hide() { calls.push("hide"); }, focus() { calls.push("focus"); },
+    setSkipTaskbar(value) { calls.push(["skip-taskbar", value]); },
+  };
+  const controller = factory({
+    platform, icon: "app.png",
+    app: { dock: { show() { calls.push("dock.show"); }, hide() { calls.push("dock.hide"); } } },
+    nativeImage: { createFromPath(value) { imagePath = value; return template; } },
+    Tray: class {
+      constructor(icon) { this.icon = icon; this.events = {}; instances.push(this); }
+      on(event, handler) { this.events[event] = handler; }
+      setToolTip(value) { this.tooltip = value; }
+      setContextMenu(menu) { this.menu = menu; }
+      destroy() { calls.push("destroy"); }
+    },
+    Menu: { buildFromTemplate: items => ({ items }) },
+    getWindow: () => win, isQuitting: () => quitting,
+    start: () => start(), stop: async () => { calls.push("stop"); },
+    quit() { quitting = true; calls.push("quit"); },
+    onError(error) { calls.push(["error", error.message]); },
+  });
+  return { controller, calls, instances, template, win, imagePath: () => imagePath,
+    item: id => instances.at(-1).menu.items.find(item => item.id === id),
+    minimize: () => { minimized = true; }, setStart: action => { start = action; } };
+}
+
+test("Mac menu bar is off by default and only available on macOS", () => {
+  for (const platform of ["darwin", "win32", "linux"]) {
+    const f = fixture(platform);
+    f.controller.sync(false);
+    assert.equal(f.instances.length, 0);
+    assert.equal(f.controller.closeWindow({ preventDefault() { assert.fail("disabled close intercepted"); } }), false);
+    f.controller.sync(true);
+    assert.equal(f.controller.isEnabled(), platform === "darwin");
+    if (platform === "darwin") {
+      assert.equal(f.template.isTemplate, true);
+      assert.ok(f.imagePath().endsWith("menuBarTemplate.png"));
+    }
+  }
+});
+
+test("Mac menus match Windows controls, stats and four mission summaries", () => {
+  const mac = fixture();
+  const win = fixture("win32", createWindowsTray);
+  mac.controller.sync(true);
+  win.controller.sync(true);
+  const statuses = [
+    {},
+    { running: true },
+    { running: true, watcherRunning: true, currentMissionStats: { active: 4, nftsAvailable: 7, claimable: 2, claimed: 9 },
+      guiMissionSlots: [{ slot: 1, missionName: "A & B", missionLevel: 15, missionActive: true, assignedNft: "NFT", progress: 3, goal: 10 }] },
+    { running: true, watchLoopEnabled: false },
+    { running: false, slotUnlockSummary: { canUnlockMore: true, nextUnlockSlot: 4 } },
+  ];
+  const presentation = f => f.instances[0].menu.items.map(({ id, label, enabled, type, icon }) => ({
+    id, label: label?.replace(/&&/g, "&"), enabled, type, icon,
+  }));
+  for (const status of statuses) {
+    mac.controller.updateStatus(status);
+    win.controller.updateStatus(status);
+    assert.deepEqual(presentation(mac), presentation(win));
+    assert.equal(mac.instances[0].tooltip, win.instances[0].tooltip);
+    assert.equal(mac.instances[0].menu.items.filter(item => item.id?.startsWith("mission-")).length, 4);
+  }
+  mac.controller.updateStatus(statuses[2]);
+  assert.ok(mac.item("mission-1").label.includes("A & B"));
+  assert.equal(mac.item("mission-1").icon, undefined);
+});
+
+test("Mac close retains the window, and single-click and Show restore the Dock and app", () => {
+  const f = fixture();
+  f.controller.sync(true);
+  f.controller.closeWindow({ preventDefault() { f.calls.push("prevent-close"); } });
+  assert.deepEqual(f.calls, ["prevent-close", "hide", "dock.hide"]);
+  f.calls.length = 0;
+  f.minimize();
+  f.instances[0].events["mouse-down"]();
+  assert.deepEqual(f.calls, ["dock.show", "restore", "show", "focus"]);
+  assert.equal(f.instances[0].events["double-click"], undefined);
+  f.calls.length = 0;
+  f.item("open").click();
+  assert.deepEqual(f.calls, ["dock.show", "show", "focus"]);
+  f.calls.length = 0;
+  f.instances[0].events["right-click"]();
+  assert.deepEqual(f.calls, ["dock.show", "show", "focus"]);
+});
+
+test("disabling Mac menu bar mode restores app access before removing the icon", () => {
+  const f = fixture();
+  f.controller.sync(true);
+  f.controller.closeWindow({ preventDefault() {} });
+  f.calls.length = 0;
+  f.controller.sync(false);
+  assert.deepEqual(f.calls, ["dock.show", "show", "focus", "destroy"]);
+  assert.equal(f.controller.isEnabled(), false);
+});
+
+test("Mac menu Start and Stop call the existing runner actions; Quit bypasses close interception", async () => {
+  const f = fixture();
+  f.controller.sync(true);
+  await f.item("runner-action").click();
+  assert.deepEqual(f.calls, ["start"]);
+  f.controller.updateStatus({ running: true });
+  await f.item("runner-action").click();
+  assert.deepEqual(f.calls, ["start", "stop"]);
+  f.item("quit").click();
+  assert.equal(f.calls.at(-1), "quit");
+  assert.equal(f.controller.closeWindow({ preventDefault() { assert.fail("quit intercepted"); } }), false);
+});
+
+test("Mac runner controls reject duplicate actions and recover from a failed start", async () => {
+  const f = fixture();
+  let reject;
+  f.setStart(() => new Promise((_resolve, fail) => { f.calls.push("start"); reject = fail; }));
+  f.controller.sync(true);
+  const pending = f.item("runner-action").click();
+  assert.equal(f.item("runner-action").enabled, false);
+  await f.item("runner-action").click();
+  assert.deepEqual(f.calls, ["start"]);
+  reject(new Error("start failed"));
+  await pending;
+  assert.equal(f.item("runner-action").enabled, true);
+  assert.deepEqual(f.calls.at(-1), ["error", "start failed"]);
+});
+
+test("unchanged Mac status does not recreate the menu or icon", () => {
+  const f = fixture();
+  f.controller.sync(true);
+  const menu = f.instances[0].menu;
+  f.controller.sync(true);
+  f.controller.updateStatus({ unrelated: true });
+  assert.equal(f.instances.length, 1);
+  assert.equal(f.instances[0].menu, menu);
+});
+
+test("runner config writes preserve the Mac setting changed in Settings", t => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mac-menu-bar-"));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const configPath = path.join(directory, "config.json");
+  for (const enabled of [true, false]) {
+    fs.writeFileSync(configPath, JSON.stringify({ macMenuBarEnabled: enabled }));
+    flushConfig({ configPath, config: { macMenuBarEnabled: !enabled } }, () => {});
+    assert.equal(JSON.parse(fs.readFileSync(configPath, "utf8")).macMenuBarEnabled, enabled);
+  }
+});
