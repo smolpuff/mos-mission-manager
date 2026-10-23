@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import ToggleSwitch from "../components/ToggleSwitch/app";
+import WalletOptionCards from "../components/WalletOptionCards";
 import solIcon from "../img/icon-sm__sol.svg";
 import pbpIcon from "../img/icon-sm__pbp.webp";
 import { canonicalCollectionLabel } from "../collection-images";
@@ -183,68 +184,21 @@ export default function SettingsPage({
           </div>
 
           {fundingEnabled && (
-            <div className="signer-type">
-              <label className="signer-type__app items-start ">
-                <input
-                  type="radio"
-                  name="funding_source"
-                  value="app_wallet"
-                  className="fake-checkbox-radio"
-                  checked={fundingSource === "app_wallet"}
-                  onChange={(e) =>
-                    void (async () => {
-                      setFundingSource(e.target.value);
-                      await setSignerMode("app_wallet");
-                    })()
-                  }
-                />
-                <div className="space-y-2">
-                  <div className="flex gap-2 items-center w-full justify-between">
-                    <h2 className="text-base text-white">App Wallet</h2>
-                    <span className="badge h-min uppercase border-transparent bg-white text-black text-[11px] place-self-center ">
-                      Full Automation
-                    </span>
-                  </div>
-                  <span className=" text-xs text-slate-300  ">
-                    A dedicated self-custody wallet specifically for this app.
-                    No approval needed.
-                  </span>
-                  <div className="flex font-semibold gap-2 mt-3  text-slate-300">
-                    <img src={solIcon} className="w-4 h-4" alt="Solana logo" />
-                    Requires funding for transactions
-                  </div>
-                </div>
-              </label>
-              <label className="signer-type__browser items-start ">
-                <input
-                  type="radio"
-                  name="funding_source"
-                  value="browser"
-                  className="fake-checkbox-radio"
-                  checked={fundingSource === "browser"}
-                  onChange={(e) =>
-                    void (async () => {
-                      setFundingSource(e.target.value);
-                      await setSignerMode("dapp");
-                    })()
-                  }
-                />
-                <div className="space-y-2">
-                  <h2 className="text-base text-white">Browser Wallet</h2>
-                  <span className="signer-type_description text-xs  text-slate-300">
-                    Transactions open in your browser wallet and must be
-                    manually approved.
-                  </span>
-                </div>
-              </label>
-            </div>
+            <WalletOptionCards
+              value={fundingSource === "browser" ? "dapp" : "app_wallet"}
+              name="funding_source"
+              onChange={(value) => void (async () => {
+                setFundingSource(value === "dapp" ? "browser" : "app_wallet");
+                await setSignerMode(value);
+              })()}
+            />
           )}
         </div>
 
         {fundingEnabled && fundingSource === "app_wallet" ? (
           <div className="space-y-2">
             <h3 className="flex gap-4 sm border-b border-white/20 pb-1 justify-between items-center">
-              <div>App Wallet Details</div>
+              <div>In-App Wallet Details</div>
               <button
                 className="btn btn-xs bg-error font-normal border-error rounded-sm not-disabled:hover:bg-error-content transition-all opacity-70 hover:opacity-100 active:translate-y-0.5"
                 onClick={() => openCreateWalletModal()}
@@ -253,6 +207,7 @@ export default function SettingsPage({
                 Generate New Wallet
               </button>
             </h3>
+            <p className="text-xs text-slate-300">You own this wallet and its keys are stored on your computer. Fund it with PBP + a little SOL for automatic resets. Back up your recovery phrase using View Secret Keys.</p>
             <div className="flex items-center justify-between gap-2 leading-none">
               <label
                 htmlFor="user__wallet-addres"
@@ -353,7 +308,7 @@ export default function SettingsPage({
                 </div>
                 {!fundingWalletSummary ? (
                   <div className="text-xs text-slate-400 mt-1">
-                    Loading app wallet summary...
+                    Loading in-app wallet summary...
                   </div>
                 ) : null}
               </div>
@@ -626,7 +581,7 @@ export default function SettingsPage({
       </div>
       {importOpen && (
         <div
-          className="fixed inset-0 z-60 grid place-items-center bg-black/60 p-4"
+          className="fixed inset-0 z-60 grid place-items-center bg-black/70 p-4"
           onMouseDown={(event) => {
             if (event.target === event.currentTarget) closeImport();
           }}
@@ -685,7 +640,7 @@ export default function SettingsPage({
                   something goes wrong.
                 </div>
                 <p className="text-sm text-slate-300">
-                  Import a dedicated app wallet. This replaces the current app
+                  Import a dedicated in-app wallet. This replaces the current in-app
                   wallet.
                 </p>
                 <label

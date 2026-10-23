@@ -775,7 +775,7 @@ export default function NftsPage({ bridge, signerMode = "" }) {
       </div>
       {detailModal ? (
         <div
-          className="fixed inset-0 z-60 grid place-items-center bg-black/70 p-4"
+          className="fixed inset-0 z-60 grid place-items-center bg-black/80 p-4"
           role="dialog"
           aria-modal="true"
           onMouseDown={(event) => {
@@ -889,7 +889,7 @@ export default function NftsPage({ bridge, signerMode = "" }) {
       ) : null}
       {resetModal ? (
         <div
-          className="fixed inset-0 z-60 grid place-items-center bg-black/50 p-4"
+          className="fixed inset-0 z-60 grid place-items-center bg-black/60 p-4"
           role="dialog"
           aria-modal="true"
           onMouseDown={(event) => {

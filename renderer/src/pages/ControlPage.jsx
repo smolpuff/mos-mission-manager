@@ -1,6 +1,7 @@
 import LoadingSpinner from "../components/LoadingSpinner";
 import NavMain from "../components/nav/app";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import WindowChrome from "../components/WindowChrome/app";
 import HeaderUser from "../components/HeaderUser/app";
 import useBackendState from "../components/useBackendState/app";
@@ -8,6 +9,8 @@ import ToggleSwitch from "../components/ToggleSwitch/app";
 import CompetitionPage from "./CompetitionPage";
 import DebugPage from "./DebugPage";
 import SettingsPage from "./SettingsPage";
+import SetupWalletStep from "../components/SetupWalletStep";
+import InterfaceTour from "../components/InterfaceTour";
 import StatsPage from "./StatsPage";
 import RentalsPage from "./RentalsPage";
 import NftsPage from "./NftsPage";
@@ -440,6 +443,12 @@ function ControlView() {
   const [startupUpdateCheckError, setStartupUpdateCheckError] = useState(null);
   const [firstRunSetupComplete, setFirstRunSetupComplete] = useState(false);
   const [onboardingOpen, setOnboardingOpen] = useState(false);
+  const [interfaceTourOpen, setInterfaceTourOpen] = useState(false);
+  const [tourModePreview, setTourModePreview] = useState(null);
+  const closeInterfaceTour = useCallback(() => {
+    setInterfaceTourOpen(false);
+    setTourModePreview(null);
+  }, []);
   const [lastUpdateCheckAt, setLastUpdateCheckAt] = useState(null);
   const [
     missionCompetitionCheckEnabled,
@@ -492,7 +501,7 @@ function ControlView() {
   const [missionModeButtonLevel, setMissionModeButtonLevel] = useState(
     resolveResetLevelInput(status, "mission"),
   );
-  const [resetLevelInput, setResetLevelInput] = useState(
+  const [resetLevelInputState, setResetLevelInput] = useState(
     resolveResetLevelInput(
       status,
       status.autoModeEnabled === true
@@ -502,6 +511,9 @@ function ControlView() {
           : "normal",
     ),
   );
+  const resetLevelInput = tourModePreview
+    ? resolveResetLevelInput(status, tourModePreview)
+    : resetLevelInputState;
   const [missionModeButtonLevelEditing, setMissionModeButtonLevelEditing] =
     useState(false);
   const [missionActionEnabledBySlot, setMissionActionEnabledBySlot] = useState(
@@ -579,10 +591,11 @@ function ControlView() {
   const currentModeSelectionRef = useRef(modeSelection);
   const modeTransitionActiveRef = useRef(false);
   const latestBackendModeRef = useRef("normal");
-  const isMissionMode = modeSelection === "mission";
-  const isAutoMode = modeSelection === "auto";
+  const visibleModeSelection = tourModePreview || modeSelection;
+  const isMissionMode = visibleModeSelection === "mission";
+  const isAutoMode = visibleModeSelection === "auto";
   const isMissionLikeMode = isMissionMode || isAutoMode;
-  const isNormalMode = modeSelection === "normal";
+  const isNormalMode = visibleModeSelection === "normal";
   const debugPageVisible = debug === true;
   const competitionRangeLockDisabled = !isMissionMode;
   const competitionRangeLockInputsDisabled =
@@ -1996,6 +2009,7 @@ function ControlView() {
   const [onboardingBusy, setOnboardingBusy] = useState(false);
   const [onboardingError, setOnboardingError] = useState(null);
   const [onboardingSignerMode, setOnboardingSignerMode] = useState("");
+  const [onboardingWalletFundingAcknowledged, setOnboardingWalletFundingAcknowledged] = useState(false);
   const [onboardingAppWalletBusy, setOnboardingAppWalletBusy] = useState(false);
   const [onboardingAppWalletError, setOnboardingAppWalletError] =
     useState(null);
@@ -2028,8 +2042,6 @@ function ControlView() {
     useState(false);
   const [missionPickerError, setMissionPickerError] = useState(null);
   const [collectionImageByKey, setCollectionImageByKey] = useState({});
-  const [onboardingBodyHeight, setOnboardingBodyHeight] = useState(null);
-  const onboardingBodyRef = useRef(null);
   const autoFundingRefreshAttemptedRef = useRef(false);
   const onboardingCatalogByName = useMemo(() => {
     const map = new Map();
@@ -2550,42 +2562,6 @@ function ControlView() {
       clearInterval(tickTimer);
     };
   }, [throttleModal]);
-
-  useEffect(() => {
-    if (!onboardingOpen) {
-      setOnboardingBodyHeight(null);
-      return;
-    }
-    const body = onboardingBodyRef.current;
-    if (!body) return;
-    const next = body.scrollHeight;
-    setOnboardingBodyHeight((prev) => (prev == null ? next : prev));
-    const raf = requestAnimationFrame(() => {
-      setOnboardingBodyHeight(next);
-    });
-    return () => cancelAnimationFrame(raf);
-  }, [
-    onboardingOpen,
-    onboardingStep,
-    onboardingBusy,
-    onboardingDataLoading,
-    onboardingError,
-    updateInstallStatus?.phase,
-    startupUpdateCheckError,
-    onboardingMissionCatalog.length,
-    onboardingMissions.length,
-  ]);
-
-  useEffect(() => {
-    if (!onboardingOpen) return undefined;
-    const body = onboardingBodyRef.current;
-    if (!body || typeof ResizeObserver === "undefined") return undefined;
-    const observer = new ResizeObserver(() => {
-      setOnboardingBodyHeight(body.scrollHeight);
-    });
-    observer.observe(body);
-    return () => observer.disconnect();
-  }, [onboardingOpen]);
 
   const openCliWindow = () => {
     setIsCliActive(true);
@@ -3342,10 +3318,14 @@ function ControlView() {
     if (onboardingStep === 1) {
       const selectedMode = String(onboardingSignerMode || "").trim();
       if (!["app_wallet", "dapp", "manual"].includes(selectedMode)) {
-        setOnboardingError("Select a funding type to continue.");
+        setOnboardingError("Choose a wallet option to continue.");
         return;
       }
       if (selectedMode === "app_wallet") {
+        if (!onboardingWalletFundingAcknowledged) {
+          setOnboardingError("Confirm that you understand the In-App Wallet needs SOL and PBP for resets.");
+          return;
+        }
         const ok = await ensureOnboardingAppWallet({ generateIfMissing: true });
         if (!ok) return;
       }
@@ -3398,7 +3378,12 @@ function ControlView() {
         ),
       );
       setOnboardingSelectionState(missions);
-      setOnboardingMissionStateReady(missions.length > 0);
+      const hasSyncedTargets = missions.some((mission) => {
+        const slot = Number(mission?.slot);
+        return Number.isInteger(slot) && slot >= 1 && slot <= 4 && isLikelyRealMissionName(mission?.name);
+      });
+      if (!hasSyncedTargets) throw new Error("No target missions were synced. Retry sync to continue.");
+      setOnboardingMissionStateReady(true);
       setOnboardingStep(2);
     } catch (error) {
       setOnboardingMissionStateReady(false);
@@ -3413,7 +3398,7 @@ function ControlView() {
   const applyOnboarding = async () => {
     if (onboardingBusy || onboardingDataLoading || onboardingStep !== 2) return;
     if (!["app_wallet", "dapp", "manual"].includes(onboardingSignerMode)) {
-      setOnboardingError("Select a funding type to continue.");
+      setOnboardingError("Choose a wallet option to continue.");
       return;
     }
     if (!onboardingMissionStateReady) {
@@ -3488,6 +3473,8 @@ function ControlView() {
       await applyConfigPatch({ firstRunOnboardingCompleted: true });
       setFirstRunSetupComplete(true);
       setOnboardingOpen(false);
+      setCurrentPage("missions");
+      setInterfaceTourOpen(true);
     } catch (error) {
       setOnboardingError(String(error?.message || error));
     } finally {
@@ -3705,51 +3692,51 @@ function ControlView() {
               />
             </div>
           ) : null}
-          {onboardingOpen ? (
+          {interfaceTourOpen && !onboardingOpen ? (
+            <InterfaceTour onClose={closeInterfaceTour} onModePreview={setTourModePreview} />
+          ) : null}
+          {onboardingOpen ? createPortal(
             <div
               data-onboarding-step={onboardingStep}
               tabIndex={-1}
-              className="fixed inset-0 z-[10000] grid place-items-center bg-black/50 p-4"
+              className="setup-wizard-overlay fixed inset-0 z-[10000] grid place-items-center overflow-hidden bg-black/60 p-4"
               role="dialog"
               aria-modal="true"
+              aria-labelledby="setup-wizard-title"
             >
               <div
-                className="p-4  w-full rounded-xl shadow-2xl shadow-black/95 space-y-4 z-10 border-2 border-[#1D1C27]  transition-all duration-250 ease-out"
+                className="setup-wizard p-4 w-full min-w-0 rounded-xl shadow-2xl shadow-black/95 z-10 border-2 border-[#1D1C27] flex flex-col gap-4 overflow-hidden max-h-[calc(100dvh-32px)]"
                 style={{
-                  maxWidth: onboardingStep === 2 ? "680px" : "680px",
+                  maxWidth: "680px",
                   backgroundImage: `url(${backImg})`,
                   backgroundSize: "cover",
                   backgroundPosition: "center",
                 }}
               >
-                <div className="flex items-center justify-between gap-3">
-                  <div className="text-lg font-semibold">
+                <div className="space-y-3 shrink-0">
+                  <ol className="flex items-center gap-4 text-xs text-slate-400" aria-label="Setup progress">
+                    {[
+                      ...(onboardingUpdateIncluded ? [{ step: "update", label: "Update" }] : []),
+                      { step: 1, label: "Wallet" },
+                      { step: 2, label: "Missions" },
+                    ].map((item, index) => (
+                      <li key={item.step} className="flex items-center gap-2" aria-current={onboardingStep === item.step ? "step" : undefined}>
+                        <span className={`flex h-5 w-5 items-center justify-center rounded-full ${onboardingStep === item.step ? "bg-success text-black" : "border border-white/20"}`}>{index + 1}</span>
+                        <span className={onboardingStep === item.step ? "text-white" : undefined}>{item.label}</span>
+                      </li>
+                    ))}
+                  </ol>
+                  <h2 id="setup-wizard-title" className="text-lg font-semibold">
                     {onboardingStep === "update"
                       ? "Update required"
                       : onboardingStep === 2
-                        ? "Select your Target Missions"
-                        : "Select your Funding Wallet/Source"}
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <div className="text-xs text-slate-400">
-                      Step{" "}
-                      {onboardingStep === "update"
-                        ? 1
-                        : onboardingStep + (onboardingUpdateIncluded ? 1 : 0)}
-                      /{onboardingUpdateIncluded ? 3 : 2}
-                    </div>
-                  </div>
+                        ? "Review your missions"
+                        : "Wallets & approvals"}
+                  </h2>
                 </div>
-                <div
-                  className="overflow-hidden transition-[height] duration-250 ease-out"
-                  style={{
-                    height:
-                      onboardingBodyHeight == null
-                        ? "auto"
-                        : `${onboardingBodyHeight}px`,
-                  }}
-                >
-                  <div ref={onboardingBodyRef} className="space-y-3">
+                {/* Reserve space for the native buttons’ 8px glow without creating scrollbars. */}
+                <div className="setup-wizard-content -m-2 min-h-0 min-w-0 overflow-x-hidden overflow-y-auto overscroll-contain p-2">
+                  <div className="min-w-0 space-y-3">
                     {onboardingStep === "update" ? (
                       updateModal ? (
                         updateOfferContent
@@ -3778,196 +3765,95 @@ function ControlView() {
                     ) : null}
                     {onboardingStep === 1 ? (
                       <div className="space-y-4">
-                        <div className="text-sm text-slate-300">
-                          Choose wallet funding type.
-                        </div>
-                        <div className="signer-type flex-col">
-                          {[
-                            [
-                              "app_wallet",
-                              "App Wallet",
-                              "A dedicated, self-custodial in-app burner wallet for automated signing.",
-                            ],
-
-                            [
-                              "dapp",
-                              "Browse Wallet",
-                              "You must approve each transaction in your browser when the browser window opens.",
-                            ],
-                            [
-                              "manual",
-                              "Manual",
-                              "A browser window will open for you to mauanlly reset.",
-                            ],
-                          ].map(([value, title, desc]) => (
-                            <label
-                              key={value}
-                              className="signer-type__app items-start"
-                            >
-                              <input
-                                type="radio"
-                                name="onboarding_signer_mode"
-                                value={value}
-                                className="fake-checkbox-radio"
-                                checked={onboardingSignerMode === value}
-                                onChange={() => {
-                                  setOnboardingSignerMode(value);
-                                  setOnboardingError(null);
-                                  if (value === "app_wallet") {
-                                    void ensureOnboardingAppWallet({
-                                      generateIfMissing: true,
-                                    });
-                                  } else {
-                                    setOnboardingAppWalletError(null);
-                                    setOnboardingAppWalletAddress("");
-                                  }
-                                }}
-                              />
-                              <div className="space-y-1 w-full">
-                                <div className="flex gap-2 items-center w-full justify-between">
-                                  <div className="text-base text-white">
-                                    {title}
-                                  </div>
-                                  {value === "app_wallet" ? (
-                                    <span className="badge h-min uppercase border-transparent bg-white text-black text-[11px] place-self-center ">
-                                      Full Automation
-                                    </span>
-                                  ) : null}
-                                </div>
-                                <div className="text-xs text-slate-300">
-                                  {desc}
-                                </div>
-                                {value === "app_wallet" ? (
-                                  <div className="flex font-semibold gap-2 mt-3  text-slate-300">
-                                    <img
-                                      src={solIcon}
-                                      className="w-4 h-4"
-                                      alt="Solana logo"
-                                    />{" "}
-                                    Requires PBP & small SOL amount for
-                                    transactions. Address found in settings.
-                                  </div>
-                                ) : null}
-                                {value === "app_wallet" &&
-                                onboardingSignerMode === "app_wallet" ? (
-                                  <div className="rounded-md border border-white/10 bg-black/30 p-3 space-y-0.5 mt-2">
-                                    <div
-                                      className="flex items-center gap-2 text-xs text-slate-300"
-                                      role={
-                                        onboardingAppWalletBusy
-                                          ? "status"
-                                          : undefined
-                                      }
-                                    >
-                                      {onboardingAppWalletBusy ? (
-                                        <LoadingSpinner />
-                                      ) : null}
-                                      <span>
-                                        {onboardingAppWalletBusy
-                                          ? walletGenerationSlow
-                                            ? "Taking longer than expected. Still checking wallet creation; please keep the app open."
-                                            : "Creating and securely storing your wallet. Please keep the app open; this can take up to a minute."
-                                          : onboardingAppWalletAddress
-                                            ? "Wallet Address"
-                                            : "Wallet will be generated when you continue."}
-                                      </span>
-                                    </div>
-                                    {onboardingAppWalletAddress ? (
-                                      <div className="flex items-center gap-4 flex-wrap">
-                                        <div className=" break-all flex min-h-13 w-full items-center gap-3 rounded-lg border border-accent/50 bg-accent/10 p-2 px-3">
-                                          {onboardingAppWalletAddress}
-                                        </div>
-                                        <button
-                                          type="button"
-                                          className="fill-white flex items-center gap-1 font-normal text-xs px-0 py-0 h-min btn btn-clear hover:fill-accent hover:text-accent hover:cursor-pointer"
-                                          onClick={() => {
-                                            const value =
-                                              onboardingAppWalletAddress;
-                                            if (!value) return;
-                                            void copyText(value).then((ok) => {
-                                              setCopiedLabel(
-                                                ok ? "Copied" : "Copy failed",
-                                              );
-                                              setTimeout(
-                                                () => setCopiedLabel(null),
-                                                1200,
-                                              );
-                                            });
-                                          }}
-                                        >
-                                          <svg
-                                            xmlns="http://www.w3.org/2000/svg"
-                                            viewBox="0 0 640 640"
-                                            className="w-4 h-4"
-                                          >
-                                            <path d="M352 544L128 544C110.3 544 96 529.7 96 512L96 288C96 270.3 110.3 256 128 256L176 256L176 224L128 224C92.7 224 64 252.7 64 288L64 512C64 547.3 92.7 576 128 576L352 576C387.3 576 416 547.3 416 512L416 464L384 464L384 512C384 529.7 369.7 544 352 544zM288 384C270.3 384 256 369.7 256 352L256 128C256 110.3 270.3 96 288 96L512 96C529.7 96 544 110.3 544 128L544 352C544 369.7 529.7 384 512 384L288 384zM224 352C224 387.3 252.7 416 288 416L512 416C547.3 416 576 387.3 576 352L576 128C576 92.7 547.3 64 512 64L288 64C252.7 64 224 92.7 224 128L224 352z" />
-                                          </svg>
-                                          Copy
-                                        </button>
-                                      </div>
-                                    ) : null}
-                                    <div className="text-[11px] text-slate-400">
-                                      Your recovery keys can also be found in
-                                      the Settings.
-                                    </div>
-                                    {onboardingAppWalletError ? (
-                                      <div className="text-xs text-error">
-                                        {onboardingAppWalletError}
-                                      </div>
-                                    ) : null}
-                                  </div>
-                                ) : null}
-                              </div>
-                            </label>
-                          ))}
-                        </div>
-
-                        <div className="flex justify-end">
-                          <button
-                            type="button"
-                            className="btn btn-gradient btn-sm text-shadow-sm text-shadow-black/40"
-                            onClick={() => void continueOnboarding()}
-                            disabled={
-                              onboardingBusy ||
-                              !String(onboardingSignerMode || "").trim()
+                        <p className="text-sm text-slate-300">Choose how resets are handled.</p>
+                        <SetupWalletStep
+                          value={onboardingSignerMode}
+                          fundingAcknowledged={onboardingWalletFundingAcknowledged}
+                          onFundingAcknowledgedChange={setOnboardingWalletFundingAcknowledged}
+                          onSelect={(value) => {
+                            if (value !== onboardingSignerMode) setOnboardingWalletFundingAcknowledged(false);
+                            setOnboardingSignerMode(value);
+                            setOnboardingError(null);
+                            if (value === "app_wallet") {
+                              void ensureOnboardingAppWallet({ generateIfMissing: true });
+                            } else {
+                              setOnboardingAppWalletError(null);
+                              setOnboardingAppWalletAddress("");
                             }
-                          >
-                            {onboardingSignerMode === "app_wallet" &&
-                            onboardingAppWalletError
-                              ? "Retry"
-                              : "Continue"}
-                          </button>
-                        </div>
+                          }}
+                          onContinue={() => void continueOnboarding()}
+                          busy={onboardingBusy}
+                          walletBusy={onboardingAppWalletBusy}
+                          walletSlow={walletGenerationSlow}
+                          address={onboardingAppWalletAddress}
+                          walletError={onboardingAppWalletError}
+                          copiedLabel={copiedLabel}
+                          onCopy={() => {
+                            if (!onboardingAppWalletAddress) return;
+                            void copyText(onboardingAppWalletAddress).then((ok) => {
+                              setCopiedLabel(ok ? "Copied" : "Copy failed");
+                              setTimeout(() => setCopiedLabel(null), 1200);
+                            });
+                          }}
+                        />
                       </div>
                     ) : null}
                     {onboardingStep === 2 ? (
-                      <div className="space-y-4">
-                        <div className="rounded-md border border-warning/30 bg-warning/10 p-3 text-sm text-slate-200 flex gap-2">
-                          <div>
-                            First-time setup syncs your missions from PBP. Check
-                            they’re correct, or change them on the{" "}
-                            <a
-                              href="https://www.pixelbypixel.studio"
-                              className="text-accent underline"
-                              onClick={(event) => {
-                                event.preventDefault();
-                                void openExternalUrl(
-                                  "https://www.pixelbypixel.studio",
-                                );
-                              }}
-                            >
-                              PBP website
-                            </a>
-                            , then click{" "}
-                            <span className="font-semibold">
-                              Refresh mission status
-                            </span>
-                            . You can also change them in this app after funding
-                            the wallet selected in the previous step.
+                      <section className="min-w-0 space-y-4">
+                        <div className="rounded-md border border-white/10 bg-black/20 p-3">
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2 text-sm text-white">
+                              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="h-4 w-4 shrink-0 text-accent" aria-label="Marble" role="img">
+                                <circle cx="12" cy="12" r="9" />
+                                <path d="M7 4.5c7 1 1 7 6 9s5 3 3 6M4 10c3 5 8-1 9-6" />
+                              </svg>
+                              <span className="truncate">{onboardingWalletSummary?.displayName || status.currentUserDisplayName || "Your PBP account"}</span>
+                            </div>
+                            <div className="text-xs text-slate-400">PBP account</div>
                           </div>
+                            <button
+                              type="button"
+                              className="btn btn-clear btn-sm"
+                              onClick={() => void continueOnboarding()}
+                              disabled={onboardingBusy || onboardingDataLoading}
+                            >
+                              <span className="inline-flex items-center gap-1.5">
+                                {onboardingDataLoading ? <LoadingSpinner /> : (
+                                  <svg
+                                    xmlns="http://www.w3.org/2000/svg"
+                                    viewBox="0 0 640 640"
+                                    className="w-4 h-4"
+                                    fill="currentColor"
+                                    aria-hidden="true"
+                                  >
+                                    <path d="M320 96c123.7 0 224 100.3 224 224s-100.3 224-224 224S96 443.7 96 320c0-34.1 7.6-66.5 21.3-95.5l44.9 22.4C151.2 268 144 293.4 144 320c0 97.2 78.8 176 176 176s176-78.8 176-176S417.2 144 320 144c-47.4 0-90.4 18.7-122.1 49.2l58.1 58.1L112 304V160l51.8 51.8C203.2 163.2 258.3 96 320 96z" />
+                                  </svg>
+                                )}
+                                <span>
+                                  {onboardingDataLoading
+                                    ? "Refreshing..."
+                                    : onboardingError
+                                      ? "Retry sync"
+                                      : "Refresh mission status"}
+                                </span>
+                              </span>
+                            </button>
                         </div>
-
-                        <div className="grid grid-cols-4 gap-2">
+                        </div>
+                        <p className="text-sm text-slate-300">
+                          First-time setup syncs your missions from PBP. Check they’re correct, or change them on the{" "}
+                          <a
+                            href="https://www.pixelbypixel.studio"
+                            className="text-accent underline"
+                            onClick={(event) => {
+                              event.preventDefault();
+                              void openExternalUrl("https://www.pixelbypixel.studio");
+                            }}
+                          >PBP website</a>, then click <span className="font-semibold">Refresh mission status</span>.
+                          You can also change them in the app.
+                        </p>
+                        <div className="grid min-w-0 grid-cols-4 gap-2">
                           {[1, 2, 3, 4].map((slot) => {
                             const assigned =
                               onboardingMissions.find(
@@ -4064,41 +3950,13 @@ function ControlView() {
                             );
                           })}
                         </div>
-                        <div className="flex justify-between">
+                        <div className="flex items-center justify-between gap-3">
                           <button
                             type="button"
                             className="btn btn-clear btn-sm px-0"
                             onClick={() => setOnboardingStep(1)}
                             disabled={onboardingBusy}
-                          >
-                            Back
-                          </button>
-                          <div class="flex gap-2">
-                            <button
-                              type="button"
-                              className="btn btn-clear btn-sm"
-                              onClick={() => void continueOnboarding()}
-                              disabled={onboardingBusy || onboardingDataLoading}
-                            >
-                              <span className="inline-flex items-center gap-1.5">
-                                {onboardingDataLoading ? <LoadingSpinner /> : (
-                                  <svg
-                                    xmlns="http://www.w3.org/2000/svg"
-                                    viewBox="0 0 640 640"
-                                    className="w-4 h-4"
-                                    fill="currentColor"
-                                    aria-hidden="true"
-                                  >
-                                    <path d="M320 96c123.7 0 224 100.3 224 224s-100.3 224-224 224S96 443.7 96 320c0-34.1 7.6-66.5 21.3-95.5l44.9 22.4C151.2 268 144 293.4 144 320c0 97.2 78.8 176 176 176s176-78.8 176-176S417.2 144 320 144c-47.4 0-90.4 18.7-122.1 49.2l58.1 58.1L112 304V160l51.8 51.8C203.2 163.2 258.3 96 320 96z" />
-                                  </svg>
-                                )}
-                                <span>
-                                  {onboardingDataLoading
-                                    ? "Refreshing..."
-                                    : "Refresh mission status"}
-                                </span>
-                              </span>
-                            </button>
+                          >Back</button>
                             <button
                               type="button"
                               className="btn btn-gradient btn-sm text-shadow-sm text-shadow-black/40"
@@ -4109,11 +3967,10 @@ function ControlView() {
                                 !onboardingMissionStateReady
                               }
                             >
-                              {onboardingBusy ? "Applying..." : "Apply"}
+                              {onboardingBusy && !onboardingDataLoading ? "Saving..." : "Confirm & finish"}
                             </button>
-                          </div>
                         </div>
-                      </div>
+                      </section>
                     ) : null}
                     {onboardingError ? (
                       <div className="rounded-md border border-error/40 bg-error/10 p-2 text-sm text-slate-100">
@@ -4123,11 +3980,12 @@ function ControlView() {
                   </div>
                 </div>
               </div>
-            </div>
+            </div>,
+            document.body,
           ) : null}
           {secretModalOpen ? (
             <div
-              className="fixed inset-0 z-60 grid place-items-center bg-black/50 p-4"
+              className="fixed inset-0 z-60 grid place-items-center bg-black/60 p-4"
               role="dialog"
               aria-modal="true"
               onMouseDown={(e) => {
@@ -4258,7 +4116,7 @@ function ControlView() {
           ) : null}
           {createWalletOpen ? (
             <div
-              className="fixed inset-0 z-60 grid place-items-center bg-black/50 p-4"
+              className="fixed inset-0 z-60 grid place-items-center bg-black/60 p-4"
               role="dialog"
               aria-modal="true"
               onMouseDown={(e) => {
@@ -5565,7 +5423,7 @@ function ControlView() {
           )}
           {missionPickerSlot ? (
             <div
-              className="fixed inset-0 z-60 grid place-items-center bg-black/55 p-4"
+              className="fixed inset-0 z-60 grid place-items-center bg-black/65 p-4"
               role="dialog"
               aria-modal="true"
               onMouseDown={(event) => {
@@ -5826,7 +5684,7 @@ function ControlView() {
           ) : null}
           {resetErrorModal ? (
             <div
-              className="fixed inset-0 z-60 grid place-items-center bg-black/50 p-4"
+              className="fixed inset-0 z-60 grid place-items-center bg-black/60 p-4"
               role="dialog"
               aria-modal="true"
               onMouseDown={(e) => {
@@ -5929,7 +5787,7 @@ function ControlView() {
           ) : null}
           {slotUnlockModalOpen ? (
             <div
-              className="fixed inset-0 z-60 grid place-items-center bg-black/50 p-4"
+              className="fixed inset-0 z-60 grid place-items-center bg-black/60 p-4"
               role="dialog"
               aria-modal="true"
               onMouseDown={(e) => {
@@ -6038,7 +5896,7 @@ function ControlView() {
           ) : null}
           {bridgeLinkModal ? (
             <div
-              className="fixed inset-0 z-60 grid place-items-center bg-black/50 p-4"
+              className="fixed inset-0 z-60 grid place-items-center bg-black/60 p-4"
               role="dialog"
               aria-modal="true"
               onMouseDown={(e) => {
@@ -6098,7 +5956,7 @@ function ControlView() {
           ) : null}
           {competitionNotificationModal ? (
             <div
-              className="fixed inset-0 z-60 grid place-items-center bg-black/50 p-4"
+              className="fixed inset-0 z-60 grid place-items-center bg-black/60 p-4"
               role="dialog"
               aria-modal="true"
               onMouseDown={(e) => {
@@ -6304,7 +6162,7 @@ function ControlView() {
           ) : null}
           {updateModal && firstRunSetupComplete ? (
             <div
-              className="fixed inset-0 z-60 grid place-items-center bg-black/50 p-4"
+              className="fixed inset-0 z-60 grid place-items-center bg-black/60 p-4"
               role="dialog"
               aria-modal="true"
               onMouseDown={(e) => {
@@ -6332,7 +6190,7 @@ function ControlView() {
           ) : null}
           {fundingWalletFundedModal ? (
             <div
-              className="fixed inset-0 z-60 grid place-items-center overflow-hidden bg-black/50 p-4"
+              className="fixed inset-0 z-60 grid place-items-center overflow-hidden bg-black/60 p-4"
               role="dialog"
               aria-modal="true"
               aria-labelledby="funding-wallet-funded-title"
@@ -6456,7 +6314,7 @@ function ControlView() {
           ) : null}
           {lowBalanceModal ? (
             <div
-              className="fixed inset-0 z-60 grid place-items-center bg-black/50 p-4"
+              className="fixed inset-0 z-60 grid place-items-center bg-black/60 p-4"
               role="dialog"
               aria-modal="true"
               onMouseDown={(e) => {
@@ -6620,7 +6478,7 @@ function ControlView() {
           ) : null}
           {throttleModal ? (
             <div
-              className="fixed inset-0 z-60 grid place-items-center bg-black/50 p-4"
+              className="fixed inset-0 z-60 grid place-items-center bg-black/60 p-4"
               role="dialog"
               aria-modal="true"
               onMouseDown={(e) => {

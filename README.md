@@ -109,12 +109,15 @@ name, and the wallet id is sent alongside it when available.
 
 ## First Run Wizard
 
-- Select your funding type you would like, app wallet is suggested for full automation
-- BE SURE TO WRITE DOWN YOUR RECOVERY KEYS SOMEWHERE SAFE IF YOU USE APP-WALLET. YOU NEED TO KEEP THESE IN A SAFE PLACE INCASE YOU EVER NEED TO IMPORT THE WALLET
-- next will pull your currently set up missions from the website as your targetMission. Confirm
-- Select your mission mode; manual mode with optional level 20 resets, or mission mode with level 10 reset and use rentals both locked on
-- Press the start button to start watching and claiming missions
-- If you chose app-wallet, fund it now to cover transations (0.1sol, whatever pbp)
+1. Choose how resets are handled:
+   - **Let the app do it — In-App Wallet:** generates a dedicated wallet inside the app to cover transaction costs without using your main wallet. You own it, with keys stored on your computer. Fund it with PBP and a little SOL for automatic signing.
+   - **I’ll approve each reset — Browser Wallet:** opens a signing link for each transaction. Connect your browser wallet and approve it there.
+   - **I’ll reset on PBP — Manual:** opens the PBP missions page so you can perform the reset yourself.
+2. Wait for your PBP missions to sync, review them, then confirm setup. Confirmation stays disabled until target missions load; use **Retry sync** if loading fails or times out.
+
+The In-App Wallet belongs to you. Its keys are stored on your computer; the developer does not hold them. Copy its address during setup or in Settings, and acknowledge that you need to send SOL and PBP to pay for resets. Back up its recovery phrase using **Settings → View Secret Keys**. Completing setup does not fund it.
+
+After setup, a spotlight guide explains the real mission controls, Finish Target, and optional per-card reset overrides. Its mode previews do not save settings or start the runner. Finish or skip the guide, choose a mission mode, and press **Start**. The wallet choice controls signing; the mission mode controls reset behavior.
 
 ## Features
 
