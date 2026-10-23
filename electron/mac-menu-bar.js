@@ -40,7 +40,7 @@ function createMacMenuBar({ platform, app, Tray, Menu, nativeImage, getWindow, i
     const stats = status.currentMissionStats || {};
     const snapshot = {
       runner: runnerLabel(status),
-      action: busy ? "⏳ Please wait…" : status.running ? "Stop" : "▶ Start",
+      action: busy ? "⏳ Please wait…" : status.running ? "🛑 Stop" : "▶ Start",
       busy,
       stats: status.running ? [
         ["🎯 Active", stats.active], ["💎 NFTs ready", stats.nftsAvailable],

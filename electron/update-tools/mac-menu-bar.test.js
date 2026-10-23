@@ -165,7 +165,7 @@ test("changed status retains the attached native menu and updates its existing i
   assert.equal(f.instances[0].menuAttachments, 1);
   assert.equal(f.item("stats-0").label, "🎯 Active: 3");
   assert.equal(f.item("stats-3").visible, true);
-  assert.equal(f.item("runner-action").label, "Stop");
+  assert.equal(f.item("runner-action").label, "🛑 Stop");
   f.controller.updateStatus({ running: false });
   assert.equal(f.item("stats-0").label, "Start Missions to see live stats.");
   assert.equal(f.item("stats-3").visible, false);

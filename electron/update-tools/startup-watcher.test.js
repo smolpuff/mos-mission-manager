@@ -22,10 +22,10 @@ function fixture(t, config = { autoStartWatchingEnabled: true }) {
   return { state, options };
 }
 
-test("startup watching waits two seconds and only starts once", async t => {
+test("startup watching waits 0.75 seconds and only starts once", async t => {
   const { state, options } = fixture(t);
   scheduleStartupWatching(options);
-  t.mock.timers.tick(1999);
+  t.mock.timers.tick(749);
   assert.equal(state.starts, 0);
   t.mock.timers.tick(1);
   await Promise.resolve();
@@ -38,7 +38,7 @@ test("startup watching is off by default and does not start when enabled later",
   const { state, options } = fixture(t, {});
   scheduleStartupWatching(options);
   state.config.autoStartWatchingEnabled = true;
-  t.mock.timers.tick(2000);
+  t.mock.timers.tick(750);
   assert.equal(state.starts, 0);
 });
 
@@ -50,7 +50,7 @@ for (const reason of ["disabled", "running", "quitting", "cancelled"]) {
     if (reason === "running") state.status.running = true;
     if (reason === "quitting") state.quitting = true;
     if (reason === "cancelled") cancel();
-    t.mock.timers.tick(2000);
+    t.mock.timers.tick(750);
     assert.equal(state.starts, 0);
   });
 }
@@ -60,7 +60,7 @@ test("startup watching reports a start failure without retrying", async t => {
   const error = new Error("start failed");
   options.startWatching = async () => { throw error; };
   scheduleStartupWatching(options);
-  t.mock.timers.tick(2000);
+  t.mock.timers.tick(750);
   await Promise.resolve();
   assert.deepEqual(state.errors, [error]);
 });
@@ -89,7 +89,7 @@ test("startup watching uses the existing start path and saved modes on all deskt
       scenarios.push({ platform, calls, expected: ["start", ...commands] });
     }
   }
-  t.mock.timers.tick(2000);
+  t.mock.timers.tick(750);
   await new Promise(resolve => setImmediate(resolve));
   for (const { platform, calls, expected } of scenarios) assert.deepEqual(calls, expected, platform);
 });

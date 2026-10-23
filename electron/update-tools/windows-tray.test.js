@@ -95,7 +95,7 @@ test("menu status updates Start/Stop, four mission rows, and literal ampersands"
   f.controller.updateStatus({ running: true, watcherRunning: true,
     guiMissionSlots: [{ slot: 1, missionName: "A & B", missionLevel: 15, missionActive: true, assignedNft: "nft", progress: 3, goal: 10 }] });
   assert.equal(f.item("runner-status").label, "🟢 Watching missions…");
-  assert.equal(f.item("runner-action").label, "⏹ Stop");
+  assert.equal(f.item("runner-action").label, "🛑 Stop");
   assert.match(f.item("mission-1").label, /A && B · Level 15 · Active · 3 \/ 10 \(30%\)/);
   assert.equal(f.instances[0].menu.items.filter((row) => row.id?.startsWith("mission-")).length, 4);
   await f.item("runner-action").click();

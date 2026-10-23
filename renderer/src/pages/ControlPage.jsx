@@ -445,6 +445,10 @@ function ControlView() {
   const [onboardingOpen, setOnboardingOpen] = useState(false);
   const [interfaceTourOpen, setInterfaceTourOpen] = useState(false);
   const [tourModePreview, setTourModePreview] = useState(null);
+  // Keep unrelated dialogs out of setup and the tour, even when an in-flight
+  // background request finishes after either flow has opened.
+  const popupsBlocked =
+    !startupConfigLoaded || !firstRunSetupComplete || onboardingOpen || interfaceTourOpen;
   const closeInterfaceTour = useCallback(() => {
     setInterfaceTourOpen(false);
     setTourModePreview(null);
@@ -1065,8 +1069,7 @@ function ControlView() {
 
   const checkForNewMissionCompetition = async () => {
     if (
-      !firstRunSetupComplete ||
-      onboardingOpen ||
+      popupsBlocked ||
       missionCompetitionCheckEnabled !== true
     )
       return;
@@ -1152,8 +1155,7 @@ function ControlView() {
 
   useEffect(() => {
     if (
-      !firstRunSetupComplete ||
-      onboardingOpen ||
+      popupsBlocked ||
       missionCompetitionCheckEnabled !== true
     )
       return;
@@ -1162,8 +1164,7 @@ function ControlView() {
   }, [
     bridge,
     missionCompetitionCheckEnabled,
-    firstRunSetupComplete,
-    onboardingOpen,
+    popupsBlocked,
   ]);
 
   useEffect(() => {
@@ -1423,7 +1424,7 @@ function ControlView() {
   };
   const runUpdateCheck = useCallback(
     async ({ manual = false, startup = false } = {}) => {
-      if (!startupConfigLoaded || (onboardingOpen && !startup)) return null;
+      if (!startupConfigLoaded || interfaceTourOpen || (!startup && popupsBlocked)) return null;
       if (!startup && !firstRunSetupComplete) return null;
       if (!bridge?.checkForUpdates || updateCheckBusyRef.current) return null;
       updateCheckBusyRef.current = true;
@@ -1491,7 +1492,7 @@ function ControlView() {
         setUpdateCheckBusy(false);
       }
     },
-    [bridge, startupConfigLoaded, firstRunSetupComplete, onboardingOpen],
+    [bridge, startupConfigLoaded, firstRunSetupComplete, popupsBlocked, interfaceTourOpen],
   );
 
   const finishStartupUpdateCheck = useCallback(
@@ -1521,7 +1522,7 @@ function ControlView() {
   };
 
   useEffect(() => {
-    if (!startupConfigLoaded || onboardingOpen) return;
+    if (!startupConfigLoaded || onboardingOpen || interfaceTourOpen) return;
     if (startupUpdateCheckRequestedRef.current) return;
     const timer = setTimeout(() => {
       startupUpdateCheckRequestedRef.current = true;
@@ -1534,6 +1535,7 @@ function ControlView() {
     startupConfigLoaded,
     firstRunSetupComplete,
     onboardingOpen,
+    interfaceTourOpen,
     runUpdateCheck,
     finishStartupUpdateCheck,
   ]);
@@ -1568,7 +1570,7 @@ function ControlView() {
   };
 
   useEffect(() => {
-    if (!firstRunSetupComplete || onboardingOpen) return;
+    if (popupsBlocked) return;
     if (autoUpdateCheckEnabled !== true) return;
     if (!bridge?.checkForUpdates) return;
     let cancelled = false;
@@ -1600,8 +1602,7 @@ function ControlView() {
   }, [
     autoUpdateCheckEnabled,
     bridge,
-    firstRunSetupComplete,
-    onboardingOpen,
+    popupsBlocked,
     runUpdateCheck,
   ]);
   const activateNormalMode = async () => {
@@ -2546,7 +2547,7 @@ function ControlView() {
   }, [lastEvent]);
 
   useEffect(() => {
-    if (!throttleModal) {
+    if (popupsBlocked || !throttleModal) {
       setThrottleModalCountdown(5);
       return undefined;
     }
@@ -2561,7 +2562,7 @@ function ControlView() {
       clearTimeout(closeTimer);
       clearInterval(tickTimer);
     };
-  }, [throttleModal]);
+  }, [throttleModal, popupsBlocked]);
 
   const openCliWindow = () => {
     setIsCliActive(true);
@@ -3983,7 +3984,7 @@ function ControlView() {
             </div>,
             document.body,
           ) : null}
-          {secretModalOpen ? (
+          {!popupsBlocked && secretModalOpen ? (
             <div
               className="fixed inset-0 z-60 grid place-items-center bg-black/60 p-4"
               role="dialog"
@@ -4114,7 +4115,7 @@ function ControlView() {
               </div>
             </div>
           ) : null}
-          {createWalletOpen ? (
+          {createWalletOpen && (!popupsBlocked || (onboardingOpen && createWalletOnboarding)) ? (
             <div
               className="fixed inset-0 z-60 grid place-items-center bg-black/60 p-4"
               role="dialog"
@@ -5421,7 +5422,7 @@ function ControlView() {
               </section>
             </>
           )}
-          {missionPickerSlot ? (
+          {!popupsBlocked && missionPickerSlot ? (
             <div
               className="fixed inset-0 z-60 grid place-items-center bg-black/65 p-4"
               role="dialog"
@@ -5682,7 +5683,7 @@ function ControlView() {
               </div>
             </div>
           ) : null}
-          {resetErrorModal ? (
+          {!popupsBlocked && resetErrorModal ? (
             <div
               className="fixed inset-0 z-60 grid place-items-center bg-black/60 p-4"
               role="dialog"
@@ -5785,7 +5786,7 @@ function ControlView() {
               </div>
             </div>
           ) : null}
-          {slotUnlockModalOpen ? (
+          {!popupsBlocked && slotUnlockModalOpen ? (
             <div
               className="fixed inset-0 z-60 grid place-items-center bg-black/60 p-4"
               role="dialog"
@@ -5894,7 +5895,7 @@ function ControlView() {
               </div>
             </div>
           ) : null}
-          {bridgeLinkModal ? (
+          {!popupsBlocked && bridgeLinkModal ? (
             <div
               className="fixed inset-0 z-60 grid place-items-center bg-black/60 p-4"
               role="dialog"
@@ -5954,7 +5955,7 @@ function ControlView() {
               </div>
             </div>
           ) : null}
-          {competitionNotificationModal ? (
+          {!popupsBlocked && competitionNotificationModal ? (
             <div
               className="fixed inset-0 z-60 grid place-items-center bg-black/60 p-4"
               role="dialog"
@@ -6160,7 +6161,7 @@ function ControlView() {
               </div>
             </div>
           ) : null}
-          {updateModal && firstRunSetupComplete ? (
+          {!popupsBlocked && updateModal ? (
             <div
               className="fixed inset-0 z-60 grid place-items-center bg-black/60 p-4"
               role="dialog"
@@ -6188,7 +6189,7 @@ function ControlView() {
               </div>
             </div>
           ) : null}
-          {fundingWalletFundedModal ? (
+          {!popupsBlocked && fundingWalletFundedModal ? (
             <div
               className="fixed inset-0 z-60 grid place-items-center overflow-hidden bg-black/60 p-4"
               role="dialog"
@@ -6312,7 +6313,7 @@ function ControlView() {
               </div>
             </div>
           ) : null}
-          {lowBalanceModal ? (
+          {!popupsBlocked && lowBalanceModal ? (
             <div
               className="fixed inset-0 z-60 grid place-items-center bg-black/60 p-4"
               role="dialog"
@@ -6476,7 +6477,7 @@ function ControlView() {
               </div>
             </div>
           ) : null}
-          {throttleModal ? (
+          {!popupsBlocked && throttleModal ? (
             <div
               className="fixed inset-0 z-60 grid place-items-center bg-black/60 p-4"
               role="dialog"

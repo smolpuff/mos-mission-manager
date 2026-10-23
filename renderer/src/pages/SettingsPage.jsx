@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import ToggleSwitch from "../components/ToggleSwitch/app";
+import LoadingSpinner from "../components/LoadingSpinner";
 import WalletOptionCards from "../components/WalletOptionCards";
 import solIcon from "../img/icon-sm__sol.svg";
 import pbpIcon from "../img/icon-sm__pbp.webp";
@@ -11,10 +12,10 @@ function formatLastChecked(value) {
   return new Date(ts).toLocaleString();
 }
 
-function SettingsHelp({ children }) {
+function SettingsHelp({ children, preserveLines = false }) {
   return (
     <span
-      className="control-tooltip settings-help"
+      className={`control-tooltip settings-help ${preserveLines ? "settings-help-lines" : ""}`}
       role="img"
       aria-label={children}
       tabIndex={0}
@@ -187,10 +188,13 @@ export default function SettingsPage({
             <WalletOptionCards
               value={fundingSource === "browser" ? "dapp" : "app_wallet"}
               name="funding_source"
-              onChange={(value) => void (async () => {
-                setFundingSource(value === "dapp" ? "browser" : "app_wallet");
-                await setSignerMode(value);
-              })()}
+              walletNameFirst
+              onChange={(value) =>
+                void (async () => {
+                  setFundingSource(value === "dapp" ? "browser" : "app_wallet");
+                  await setSignerMode(value);
+                })()
+              }
             />
           )}
         </div>
@@ -198,22 +202,25 @@ export default function SettingsPage({
         {fundingEnabled && fundingSource === "app_wallet" ? (
           <div className="space-y-2">
             <h3 className="flex gap-4 sm border-b border-white/20 pb-1 justify-between items-center">
-              <div>In-App Wallet Details</div>
+              <div>Wallet Details</div>
               <button
-                className="btn btn-xs bg-error font-normal border-error rounded-sm not-disabled:hover:bg-error-content transition-all opacity-70 hover:opacity-100 active:translate-y-0.5"
+                className="btn btn-xs bg-transparent text-slate-400 font-normal border-white/15 rounded-sm not-disabled:hover:bg-error/10 not-disabled:hover:text-error not-disabled:hover:border-error/40 transition-all active:translate-y-0.5"
                 onClick={() => openCreateWalletModal()}
                 type="button"
               >
                 Generate New Wallet
               </button>
             </h3>
-            <p className="text-xs text-slate-300">You own this wallet and its keys are stored on your computer. Fund it with PBP + a little SOL for automatic resets. Back up your recovery phrase using View Secret Keys.</p>
+            <p className="text-xs text-slate-300 hidden">
+              You own this local in-app wallet. Fund it with PBP + some SOL for
+              cover the transactions.
+            </p>
             <div className="flex items-center justify-between gap-2 leading-none">
               <label
                 htmlFor="user__wallet-addres"
-                className="text-xs uppercase leading-none text-slate-300"
+                className="text-xs leading-none text-slate-300"
               >
-                Wallet Address
+                Your in-app wallet address. Add SOL + PBP here to pay for resets.
               </label>
               <button
                 type="button"
@@ -236,7 +243,7 @@ export default function SettingsPage({
               </button>
             </div>
             <div className="user__wallet-addres text-lg -mt-1">
-              <div className="flex min-h-13 w-full items-center gap-3 rounded-lg border border-white/10 bg-black/10 hover:border-accent/50 hover:bg-accent/10 p-2 px-3 transition-all ">
+              <div className="wallet-funding-address flex min-h-13 w-full items-center gap-3 rounded-lg p-2 px-3 transition-all">
                 <div className="min-w-0 flex-1 truncate">
                   {appWalletAddress || "—"}
                 </div>
@@ -262,13 +269,14 @@ export default function SettingsPage({
                   </svg>
                   {copyAddressLabel}
                 </button>
+
               </div>
             </div>
             <div className="flex items-center justify-between gap-8">
               <div className="">
                 <label
                   htmlFor="user-wallet__lock-status"
-                  className="text-xs uppercase text-slate-300"
+                  className="text-xs uppercase text-slate-400"
                 >
                   Balances
                 </label>
@@ -313,6 +321,7 @@ export default function SettingsPage({
                 ) : null}
               </div>
               <div className="flex flex-wrap gap-2 self-end">
+
                 <button
                   type="button"
                   onClick={() => {
@@ -439,11 +448,16 @@ export default function SettingsPage({
                 size="tiny"
                 switchWrapClassName="settings-toggle"
                 checked={autoStartWatchingEnabled === true}
-                onChange={(event) => void setAutoStartWatchingEnabled(event.target.checked)}
+                onChange={(event) =>
+                  void setAutoStartWatchingEnabled(event.target.checked)
+                }
                 title={
                   <span className="inline-flex items-center gap-1.5">
                     Start watching missions when the app opens
-                    <SettingsHelp>Automatically starts watching missions in your saved mode, two seconds after the app window appears.</SettingsHelp>
+                    <SettingsHelp>
+                      Automatically starts watching missions in your saved mode,
+                      0.75 seconds after the app window appears.
+                    </SettingsHelp>
                   </span>
                 }
                 styling="!text-[15px] leading-tight"
@@ -480,11 +494,18 @@ export default function SettingsPage({
                   size="tiny"
                   switchWrapClassName="settings-toggle"
                   checked={macMenuBarEnabled === true}
-                  onChange={(e) => void setMacMenuBarEnabled(e.target.checked === true)}
+                  onChange={(e) =>
+                    void setMacMenuBarEnabled(e.target.checked === true)
+                  }
                   title={
                     <span className="inline-flex items-center gap-1.5">
                       Keep Running in Menu Bar
-                      <SettingsHelp>Closing the window keeps Missions running and hides its Dock icon. Click its menu bar icon to start or stop watching missions, view your four missions, show the app, or quit.</SettingsHelp>
+                      <SettingsHelp>
+                        Closing the window keeps Missions running and hides its
+                        Dock icon. Click its menu bar icon to start or stop
+                        watching missions, view your four missions, show the
+                        app, or quit.
+                      </SettingsHelp>
                     </span>
                   }
                   styling="!text-[15px] leading-tight"
@@ -528,13 +549,9 @@ export default function SettingsPage({
                   title={
                     <span className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
                       <span>Check for App Updates</span>
-                      <SettingsHelp>
-                        Automatically checks for a new version at launch and
-                        periodically there-after
+                      <SettingsHelp preserveLines>
+                        {`Automatically checks for a new version at launch and periodically thereafter.\nLast checked: ${formatLastChecked(lastUpdateCheckAt)}.`}
                       </SettingsHelp>
-                      <span className="text-[11px] font-normal text-slate-400">
-                        (Last checked: {formatLastChecked(lastUpdateCheckAt)})
-                      </span>
                     </span>
                   }
                   styling="!text-[15px] leading-tight"
@@ -640,8 +657,8 @@ export default function SettingsPage({
                   something goes wrong.
                 </div>
                 <p className="text-sm text-slate-300">
-                  Import a dedicated in-app wallet. This replaces the current in-app
-                  wallet.
+                  Import a dedicated in-app wallet. This replaces the current
+                  in-app wallet.
                 </p>
                 <label
                   htmlFor="import-wallet-key"
@@ -680,7 +697,17 @@ export default function SettingsPage({
                     className="btn btn-gradient btn-sm"
                     disabled={importBusy || !importKey.trim()}
                   >
-                    {importBusy ? "Importing and verifying..." : "Import"}
+                    {importBusy ? (
+                      <span
+                        className="inline-flex items-center gap-2"
+                        role="status"
+                      >
+                        <LoadingSpinner />
+                        <span>Importing and verifying...</span>
+                      </span>
+                    ) : (
+                      "Import"
+                    )}
                   </button>
                 </div>
               </form>

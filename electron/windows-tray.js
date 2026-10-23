@@ -38,7 +38,7 @@ function createWindowsTray({ platform, Tray, Menu, icon, getWindow, isQuitting, 
     const stats = status.currentMissionStats || {};
     const snapshot = {
       runner: runnerLabel(status),
-      action: busy ? "⏳ Please wait…" : status.running ? "⏹ Stop" : "▶ Start",
+      action: busy ? "⏳ Please wait…" : status.running ? "🛑 Stop" : "▶ Start",
       busy,
       stats: status.running ? [
         ["🎯 Active", stats.active], ["💎 NFTs ready", stats.nftsAvailable],
@@ -58,8 +58,8 @@ function createWindowsTray({ platform, Tray, Menu, icon, getWindow, isQuitting, 
       { type: "separator" },
       ...snapshot.missions.map((label, index) => ({ id: `mission-${index + 1}`, label: text(label), enabled: false })),
       { type: "separator" },
-      { id: "open", label: "🪟 Show Missions App", click: openWindow },
-      { id: "quit", label: "❌ Quit Missions App", click: quit },
+      { id: "open", label: "Show Missions App", click: openWindow },
+      { id: "quit", label: "Quit Missions App", click: quit },
     ]);
     tray.setToolTip(`Missions App — ${snapshot.runner}`);
     tray.setContextMenu(menu);

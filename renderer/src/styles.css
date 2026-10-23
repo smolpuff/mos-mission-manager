@@ -291,6 +291,10 @@
     }
   }
 
+  .settings-help-lines::after {
+    white-space: pre-line;
+  }
+
   .settings-help {
     @apply inline-flex size-3.5 shrink-0 items-center justify-center rounded-full border border-white/25 text-[10px] font-normal leading-none text-slate-400;
 
@@ -1533,11 +1537,55 @@ button.btn.btn-gradient {
   initial-value: 0deg;
 }
 
+@layer components {
+  .wallet-funding-address {
+    position: relative;
+    border: 2px solid transparent;
+    background: rgb(0 0 0 / 0.1);
+
+    &:hover {
+      background: rgb(81 158 111 / 0.12);
+    }
+
+    &::after {
+      content: "";
+      position: absolute;
+      inset: -2px;
+      padding: 2px;
+      border-radius: inherit;
+      pointer-events: none;
+      background: conic-gradient(from var(--selected-border-angle),
+          #519E6F 0deg,
+          var(--color-success) 180deg,
+          #519E6F 360deg);
+      -webkit-mask:
+        linear-gradient(#fff 0 0) content-box,
+        linear-gradient(#fff 0 0);
+      -webkit-mask-composite: xor;
+      mask-composite: exclude;
+      animation: selectedGradientShift 2s linear infinite;
+    }
+  }
+
+  .wallet-option-summary .wallet-option-art {
+    height: 48px;
+  }
+
+  .wallet-option-art {
+    width: 78px;
+    height: 66px;
+    flex: 0 0 78px;
+    align-self: center;
+    pointer-events: none;
+    filter: drop-shadow(0 4px 5px rgb(0 0 0 / 0.25));
+  }
+}
+
 .signer-type {
   @apply flex gap-3;
 
   [class*="signer-type__"] {
-    @apply rounded-lg w-full basis-1/2 relative p-4 text-xs text-gray-300 flex gap-2 cursor-pointer;
+    @apply rounded-lg w-full basis-1/2 relative p-3 text-xs text-gray-300 flex gap-2 cursor-pointer;
 
     &::after {
       content: "";

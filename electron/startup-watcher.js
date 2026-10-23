@@ -9,7 +9,7 @@ function scheduleStartupWatching({ getConfig, getStatus, isQuitting, startWatchi
     } catch (error) {
       onError(error);
     }
-  }, 2000);
+  }, 750);
   return () => clearTimeout(timer);
 }
 
