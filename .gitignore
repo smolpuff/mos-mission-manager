@@ -11,6 +11,7 @@ config.json.bak
 STARTUP_CALLS_ROLLBACK_NOTES.md
 test/
 tests/
+todo.md
 
 # macOS junk
 .DS_Store

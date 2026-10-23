@@ -5,6 +5,7 @@ const { runnerLabel, missionRows } = require("./windows-tray-state");
 
 function createMacMenuBar({ platform, app, Tray, Menu, nativeImage, getWindow, isQuitting, quit, start, stop, onError }) {
   let tray = null;
+  let menu = null;
   let status = {};
   let busy = false;
   let rendered = "";
@@ -39,7 +40,7 @@ function createMacMenuBar({ platform, app, Tray, Menu, nativeImage, getWindow, i
     const stats = status.currentMissionStats || {};
     const snapshot = {
       runner: runnerLabel(status),
-      action: busy ? "⏳ Please wait…" : status.running ? "⏹ Stop" : "▶ Start",
+      action: busy ? "⏳ Please wait…" : status.running ? "Stop" : "▶ Start",
       busy,
       stats: status.running ? [
         ["🎯 Active", stats.active], ["💎 NFTs ready", stats.nftsAvailable],
@@ -50,19 +51,32 @@ function createMacMenuBar({ platform, app, Tray, Menu, nativeImage, getWindow, i
     };
     const signature = JSON.stringify(snapshot);
     if (signature === rendered) return;
-    const menu = Menu.buildFromTemplate([
-      { id: "runner-status", label: `${!status.running ? "🔴" : status.watchLoopEnabled === false ? "🟡" : "🟢"} ${snapshot.runner}`, enabled: false },
-      { id: "runner-action", label: snapshot.action, enabled: !busy, click: toggleRunner },
-      { type: "separator" },
-      ...snapshot.stats.map((label) => ({ label, enabled: false })),
-      { type: "separator" },
-      ...snapshot.missions.map((label, index) => ({ id: `mission-${index + 1}`, label, enabled: false })),
-      { type: "separator" },
-      { id: "open", label: "🪟 Show Missions App", click: openWindow },
-      { id: "quit", label: "❌ Quit Missions App", click: quit },
-    ]);
+    if (!menu) {
+      menu = Menu.buildFromTemplate([
+        { id: "runner-status", label: "Stopped" },
+        { id: "runner-action", label: "▶ Start", click: toggleRunner },
+        { type: "separator" },
+        ...[0, 1, 2, 3].map((index) => ({ id: `stats-${index}`, label: "…" })),
+        { type: "separator" },
+        ...[1, 2, 3, 4].map((slot) => ({ id: `mission-${slot}`, label: "…" })),
+        { type: "separator" },
+        { id: "open", label: "Show Missions App", click: openWindow },
+        { id: "quit", label: "Quit Missions App", click: quit },
+      ]);
+    }
+    menu.getMenuItemById("runner-status").label = `${!status.running ? "🔴" : status.watchLoopEnabled === false ? "🟡" : "🟢"} ${snapshot.runner}`;
+    const action = menu.getMenuItemById("runner-action");
+    action.label = snapshot.action;
+    action.enabled = !busy;
+    for (let index = 0; index < 4; index++) {
+      const item = menu.getMenuItemById(`stats-${index}`);
+      item.visible = index < snapshot.stats.length;
+      item.label = snapshot.stats[index] || "…";
+      menu.getMenuItemById(`mission-${index + 1}`).label = snapshot.missions[index];
+    }
     tray.setToolTip(`Missions App — ${snapshot.runner}`);
-    tray.setContextMenu(menu);
+    // Attach once so AppKit retains menu tracking and the status-item highlight.
+    if (!rendered) tray.setContextMenu(menu);
     rendered = signature;
   }
 
@@ -73,8 +87,6 @@ function createMacMenuBar({ platform, app, Tray, Menu, nativeImage, getWindow, i
       const icon = nativeImage.createFromPath(path.join(__dirname, "icons", "menuBarTemplate.png"));
       icon.setTemplateImage(true);
       tray = new Tray(icon);
-      tray.on("mouse-down", openWindow);
-      tray.on("right-click", openWindow);
       rendered = "";
       updateStatus(status);
     } else if (tray) {
@@ -97,6 +109,7 @@ function createMacMenuBar({ platform, app, Tray, Menu, nativeImage, getWindow, i
   function destroy() {
     tray?.destroy();
     tray = null;
+    menu = null;
     rendered = "";
   }
 

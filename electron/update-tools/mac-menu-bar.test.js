@@ -31,10 +31,10 @@ function fixture(platform = "darwin", factory = createMacMenuBar) {
       constructor(icon) { this.icon = icon; this.events = {}; instances.push(this); }
       on(event, handler) { this.events[event] = handler; }
       setToolTip(value) { this.tooltip = value; }
-      setContextMenu(menu) { this.menu = menu; }
+      setContextMenu(menu) { this.menu = menu; this.menuAttachments = (this.menuAttachments || 0) + 1; }
       destroy() { calls.push("destroy"); }
     },
-    Menu: { buildFromTemplate: items => ({ items }) },
+    Menu: { buildFromTemplate: items => ({ items, getMenuItemById: id => items.find(item => item.id === id) }) },
     getWindow: () => win, isQuitting: () => quitting,
     start: () => start(), stop: async () => { calls.push("stop"); },
     quit() { quitting = true; calls.push("quit"); },
@@ -73,13 +73,17 @@ test("Mac menus match Windows controls, stats and four mission summaries", () =>
     { running: true, watchLoopEnabled: false },
     { running: false, slotUnlockSummary: { canUnlockMore: true, nextUnlockSlot: 4 } },
   ];
-  const presentation = f => f.instances[0].menu.items.map(({ id, label, enabled, type, icon }) => ({
-    id, label: label?.replace(/&&/g, "&"), enabled, type, icon,
+  const presentation = f => f.instances[0].menu.items.filter(item => item.visible !== false).map(({ id, label, enabled, type, icon }) => ({
+    id: id?.startsWith("stats-") ? undefined : id, label: label?.replace(/&&/g, "&").replace(/^(?:⏹|🪟|❌) /u, ""), enabled: id === "runner-action" ? enabled : undefined, type, icon,
   }));
   for (const status of statuses) {
     mac.controller.updateStatus(status);
     win.controller.updateStatus(status);
     assert.deepEqual(presentation(mac), presentation(win));
+    for (const item of mac.instances[0].menu.items) {
+      if (item.type === "separator" || item.id === "runner-action") continue;
+      assert.notEqual(item.enabled, false, "Mac informational text must retain normal contrast");
+    }
     assert.equal(mac.instances[0].tooltip, win.instances[0].tooltip);
     assert.equal(mac.instances[0].menu.items.filter(item => item.id?.startsWith("mission-")).length, 4);
   }
@@ -88,22 +92,20 @@ test("Mac menus match Windows controls, stats and four mission summaries", () =>
   assert.equal(mac.item("mission-1").icon, undefined);
 });
 
-test("Mac close retains the window, and single-click and Show restore the Dock and app", () => {
+test("Mac status icon leaves native menu tracking alone; Show restores the Dock and app", () => {
   const f = fixture();
   f.controller.sync(true);
   f.controller.closeWindow({ preventDefault() { f.calls.push("prevent-close"); } });
   assert.deepEqual(f.calls, ["prevent-close", "hide", "dock.hide"]);
   f.calls.length = 0;
   f.minimize();
-  f.instances[0].events["mouse-down"]();
-  assert.deepEqual(f.calls, ["dock.show", "restore", "show", "focus"]);
+  assert.equal(f.instances[0].events["mouse-down"], undefined);
+  assert.equal(f.instances[0].events["right-click"], undefined);
+  assert.deepEqual(f.calls, []);
   assert.equal(f.instances[0].events["double-click"], undefined);
   f.calls.length = 0;
   f.item("open").click();
-  assert.deepEqual(f.calls, ["dock.show", "show", "focus"]);
-  f.calls.length = 0;
-  f.instances[0].events["right-click"]();
-  assert.deepEqual(f.calls, ["dock.show", "show", "focus"]);
+  assert.deepEqual(f.calls, ["dock.show", "restore", "show", "focus"]);
 });
 
 test("disabling Mac menu bar mode restores app access before removing the icon", () => {
@@ -152,6 +154,22 @@ test("unchanged Mac status does not recreate the menu or icon", () => {
   f.controller.updateStatus({ unrelated: true });
   assert.equal(f.instances.length, 1);
   assert.equal(f.instances[0].menu, menu);
+});
+
+test("changed status retains the attached native menu and updates its existing items", () => {
+  const f = fixture();
+  f.controller.sync(true);
+  const menu = f.instances[0].menu;
+  f.controller.updateStatus({ running: true, currentMissionStats: { active: 3 } });
+  assert.equal(f.instances[0].menu, menu);
+  assert.equal(f.instances[0].menuAttachments, 1);
+  assert.equal(f.item("stats-0").label, "🎯 Active: 3");
+  assert.equal(f.item("stats-3").visible, true);
+  assert.equal(f.item("runner-action").label, "Stop");
+  f.controller.updateStatus({ running: false });
+  assert.equal(f.item("stats-0").label, "Start Missions to see live stats.");
+  assert.equal(f.item("stats-3").visible, false);
+  assert.equal(f.instances[0].menuAttachments, 1);
 });
 
 test("runner config writes preserve the Mac setting changed in Settings", t => {

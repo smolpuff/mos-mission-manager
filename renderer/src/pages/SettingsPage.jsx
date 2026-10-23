@@ -383,8 +383,8 @@ export default function SettingsPage({
       </div>
       <div className="mt-2">
         <div className="card gap-5">
-          <div className="flex flex-col gap-1.5 divide-white/10 divide-y">
-            <div className="pb-1.5">
+          <div className="flex flex-col divide-white/10 divide-y [&>div]:flex [&>div]:items-center [&>div]:py-1.5">
+            <div>
               <div
                 className={`flex flex-nowrap items-start gap-5 ${isMissionMode ? "cursor-not-allowed" : ""}`}
               >
@@ -478,7 +478,7 @@ export default function SettingsPage({
               </div>
             </div>
 
-            <div className="pb-1.5">
+            <div>
               <ToggleSwitch
                 switchID="autoStartWatchingEnabled"
                 size="tiny"
@@ -496,7 +496,7 @@ export default function SettingsPage({
             </div>
 
             {bridge?.platform === "win32" && (
-              <div className="pb-1.5">
+              <div>
                 <ToggleSwitch
                   switchID="windowsTrayEnabled"
                   size="tiny"
@@ -519,7 +519,7 @@ export default function SettingsPage({
             )}
 
             {bridge?.platform === "darwin" && (
-              <div className="pb-1.5">
+              <div>
                 <ToggleSwitch
                   switchID="macMenuBarEnabled"
                   size="tiny"
@@ -560,7 +560,7 @@ export default function SettingsPage({
               />{" "}
             </div>
 
-            <div className="flex flex-wrap items-start justify-between gap-2 pb-1.5">
+            <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="space-y-1">
                 <ToggleSwitch
                   switchID="autoUpdateCheckEnabled"
