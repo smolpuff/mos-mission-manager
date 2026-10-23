@@ -29,6 +29,7 @@ const { createWalletRefreshScheduler } = require("./wallet-refresh-scheduler");
 const { createWindowsTray } = require("./windows-tray");
 const { startFromWindowsTray } = require("./windows-tray-state");
 const { scheduleStartupWatching } = require("./startup-watcher");
+const { firstLaunchModePatch } = require("./first-launch-mode");
 const { createSignerService } = require("../src/signer");
 const { importWalletAndVerify } = require("../src/wallet-import");
 let walletOperationBusy = false;
@@ -7222,6 +7223,11 @@ app.whenReady().then(async () => {
       return { ok: false, error: String(error?.message || error) };
     }
   });
+  if (!isStandaloneCliMode()) {
+    const { config, parseFailed } = readDesktopConfigWithMeta();
+    const initialMode = !parseFailed && firstLaunchModePatch(config);
+    if (initialMode) applyDesktopConfigPatch(initialMode);
+  }
   hydrateBackendStatusFromConfig();
   publishStatus();
   if (isStandaloneCliMode()) {
