@@ -3,17 +3,10 @@
   "version": "3.3.0-beta.7",
   "downloadUrl": "https://github.com/smolpuff/mos-mission-manager/releases/tag/v3.3.0b7",
   "notes": [
-    "Fixed false login prompts across the runner and desktop: unrelated IDs or text containing 401, 403, auth, or login no longer count as authentication failures.",
-    "Permission-only 403 responses and temporary token-renewal outages, timeouts, and rate limits no longer force browser login.",
-    "Genuine credential rejection still attempts silent renewal; revoked or missing refresh credentials retain gated browser authentication.",
-    "Beta builds now use beta/version.json for numbered beta updates; production builds continue to use main/version.json.",
-    "Install b7 manually once from older betas; b7 and later can detect and install future numbered betas through the existing updater.",
-    "The original five-minute/two-minute browser popup cooldown remains in place.",
-    "Reports only when failed authorization forces a browser popup; routine calls and throttling stay quiet.",
-    "Debug tabs: PBP Authorization first and selected by default, plus Throttling.",
-    "Ten seconds between failed token renewal attempts, including between batches.",
-    "New authorization windows limited to five minutes normally or two minutes in Mission Mode.",
-    "Use Debug > PBP Authorization > Open log folder to collect logs for manual sending."
+    "3.3.0 Released - happy season 73; narwhals suck",
+    "NEW 'Keep running in system tray' so you can close the app window and keep it running in the background",
+    "NEW auto-start watching missions on app launch",
+    "Fixed annoying auth spam some users experienced"
   ],
   "artifacts": {
     "win32-x64": {
