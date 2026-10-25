@@ -199,6 +199,8 @@ function createChecksService(ctx, logger, mcp, services = {}) {
   let ownedMissionNftsCache = [];
   let ownedMissionNftsCacheAt = 0;
   let ownedMissionNftsPromise = null;
+  const recordedRentalAssignmentIds = new Set();
+  const recordedRentalUsageIds = new Set();
   let ownedMissionNftAvailabilityTimer = null;
   const ownedMissionNftAvailableAt = new WeakMap();
   // Track successful assignments for the rotation policy. A random stable
@@ -3948,6 +3950,74 @@ function createChecksService(ctx, logger, mcp, services = {}) {
     }
   }
 
+  async function recordCachedRentalAssignment({ mission, missionId, candidate, result, usedCooldownReset, reason }) {
+    const nftAccount = String(candidate?.nftAccount || candidate?.account || "").trim();
+    const current = findMissionByAssignedMissionId(normalizeMissionList(result), missionId);
+    const missionStartTimestamp = current?.missionStartTimestamp || current?.startTime || current?.start_time || null;
+    const at = Date.now();
+    const eventId = `rental:${missionId}:${nftAccount}:${candidate?.inFlightAt || missionStartTimestamp || at}`;
+    if (recordedRentalAssignmentIds.has(eventId)) return false;
+    ensureNftAssignmentUsageLoaded();
+    if (!recordedRentalUsageIds.has(eventId)) {
+      const previous = [nftAssignmentUsage, nftAssignmentSessionUsage, nftAssignmentLastUsedAt]
+        .map((map) => map.get(nftAccount));
+      nftAssignmentLastUsedAt.set(nftAccount, at);
+      nftAssignmentUsage.set(nftAccount, (previous[0] || 0) + 1);
+      nftAssignmentSessionUsage.set(nftAccount, (previous[1] || 0) + 1);
+      try {
+        persistNftAssignmentUsage();
+      } catch (error) {
+        [nftAssignmentUsage, nftAssignmentSessionUsage, nftAssignmentLastUsedAt]
+          .forEach((map, index) => {
+            if (previous[index] === undefined) map.delete(nftAccount);
+            else map.set(nftAccount, previous[index]);
+          });
+        throw error;
+      }
+      recordedRentalUsageIds.add(eventId);
+      if (recordedRentalUsageIds.size > 2000) {
+        recordedRentalUsageIds.delete(recordedRentalUsageIds.values().next().value);
+      }
+    }
+    clearRecentClaimedMissionOverride(missionId);
+    await refreshMissionHeaderStats({
+      missionsResult: result,
+      refreshNftCount: false,
+    });
+    if (ctx.guiBridge?.sendEvent) {
+      ctx.guiBridge.sendEvent("stats_assignment", {
+        at,
+        eventId,
+        missionStartTimestamp,
+        assignedMissionId: missionId,
+        missionId,
+        missionName: missionName(mission) || null,
+        slot: mission?.slot ?? null,
+        missionLevel: missionLevel(mission),
+        nftAccount,
+        nftName: candidate?.nftName || null,
+        nftLevel: candidate?.nftLevel ?? null,
+        source: "rental",
+        usedReset: usedCooldownReset,
+        reason,
+      });
+      ctx.guiBridge.sendEvent("assigned", {
+        missionId,
+        missionName: missionName(mission) || null,
+        slot: mission?.slot ?? null,
+        nftAccount,
+        reason: "rental_coordinator",
+        source: "rental",
+      });
+    }
+    if (ctx.guiBridge?.emitNow) ctx.guiBridge.emitNow();
+    recordedRentalAssignmentIds.add(eventId);
+    if (recordedRentalAssignmentIds.size > 2000) {
+      recordedRentalAssignmentIds.delete(recordedRentalAssignmentIds.values().next().value);
+    }
+    return true;
+  }
+
   async function assignCachedRentalCandidate({
     mission,
     missionKey,
@@ -3972,7 +4042,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
       return { success: false, kind: "terminal", message: "Rental candidate is missing mission, listing, or NFT identity." };
     }
 
-    let usedCooldownReset = false;
+    let usedCooldownReset = candidate?.cooldownResetSucceeded === true;
     if (candidate?.cooldownResetRequested === true) {
       if (!autoNftCooldownResetEnabled()) {
         if (assignmentBudgetToken) {
@@ -4069,49 +4139,10 @@ function createChecksService(ctx, logger, mcp, services = {}) {
       throw error;
     }
 
-    nftAssignmentLastUsedAt.set(nftAccount, Date.now());
-    ensureNftAssignmentUsageLoaded();
-    nftAssignmentUsage.set(
-      nftAccount,
-      (nftAssignmentUsage.get(nftAccount) || 0) + 1,
-    );
-    nftAssignmentSessionUsage.set(
-      nftAccount,
-      (nftAssignmentSessionUsage.get(nftAccount) || 0) + 1,
-    );
-    persistNftAssignmentUsage();
-    clearRecentClaimedMissionOverride(missionId);
-    await refreshMissionHeaderStats({
-      missionsResult: result,
-      refreshNftCount: false,
+    await recordCachedRentalAssignment({
+      mission, missionId, candidate, result, usedCooldownReset,
+      reason: boundaryRetry ? "rental_readiness_boundary_retry" : "rental_cached_assignment",
     });
-    if (ctx.guiBridge?.sendEvent) {
-      ctx.guiBridge.sendEvent("stats_assignment", {
-        at: Date.now(),
-        assignedMissionId: missionId,
-        missionId,
-        missionName: missionName(mission) || null,
-        slot: mission?.slot ?? null,
-        missionLevel: missionLevel(mission),
-        nftAccount,
-        nftName: candidate?.nftName || null,
-        nftLevel: candidate?.nftLevel ?? null,
-        source: "rental",
-        usedReset: usedCooldownReset,
-        reason: boundaryRetry
-          ? "rental_readiness_boundary_retry"
-          : "rental_cached_assignment",
-      });
-      ctx.guiBridge.sendEvent("assigned", {
-        missionId,
-        missionName: missionName(mission) || null,
-        slot: mission?.slot ?? null,
-        nftAccount,
-        reason: "rental_coordinator",
-        source: "rental",
-      });
-    }
-    if (ctx.guiBridge?.emitNow) ctx.guiBridge.emitNow();
     logWithTimestamp(
       `[RENTAL] ✅ Cached rental assigned listing=${listingId}.`,
     );
@@ -4139,6 +4170,14 @@ function createChecksService(ctx, logger, mcp, services = {}) {
       );
       const assignedAccount = missionAssignedNftAccount(current);
       if (assignedAccount && assignedAccount === candidate?.nftAccount) {
+        await recordCachedRentalAssignment({
+          mission: current,
+          missionId: assignedMissionId(current) || assignedMissionId(mission) || missionKey,
+          candidate,
+          result,
+          usedCooldownReset: candidate?.cooldownResetSucceeded === true,
+          reason: "rental_assignment_reconciled",
+        });
         return { assigned: true, missionState: result };
       }
       if (!current || missionHasAssignedNftForAssign(current, "rental_reconcile")) {

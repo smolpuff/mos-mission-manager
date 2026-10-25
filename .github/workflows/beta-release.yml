@@ -109,17 +109,11 @@ jobs:
           const base = `https://github.com/${process.env.GITHUB_REPOSITORY}/releases`;
           const output = path.join(process.env.RUNNER_TEMP, 'beta-release');
           const notes = [
-            'Fixed false login prompts across the runner and desktop: unrelated IDs or text containing 401, 403, auth, or login no longer count as authentication failures.',
-            'Permission-only 403 responses and temporary token-renewal outages, timeouts, and rate limits no longer force browser login.',
-            'Genuine credential rejection still attempts silent renewal; revoked or missing refresh credentials retain gated browser authentication.',
-            'Beta builds now use beta/version.json for numbered beta updates; production builds continue to use main/version.json.',
-            'Install b7 manually once from older betas; b7 and later can detect and install future numbered betas through the existing updater.',
-            'The original five-minute/two-minute browser popup cooldown remains in place.',
-            'Reports only when failed authorization forces a browser popup; routine calls and throttling stay quiet.',
-            'Debug tabs: PBP Authorization first and selected by default, plus Throttling.',
-            'Ten seconds between failed token renewal attempts, including between batches.',
-            'New authorization windows limited to five minutes normally or two minutes in Mission Mode.',
-            'Use Debug > PBP Authorization > Open log folder to collect logs for manual sending.',
+            'Fixed Rentals used to count recorded rental assignments for the selected stats range, including retained history.',
+            'Preserved NFT reset attribution when an assignment succeeds after a retry.',
+            'Recorded assignments recovered after an ambiguous response without counting the same assignment twice.',
+            'Combined NFT cooldown reset cost aliases so the cost breakdown includes both recorded action names.',
+            'Beta builds use beta/version.json for updates; production builds remain on main/version.json.',
           ];
           const artifacts = {};
           for (const [key, file] of [

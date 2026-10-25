@@ -453,11 +453,11 @@ export default function StatsPage({ status }) {
       : {};
   const missionResetPbp = asNumber(spendByAction.mission_reroll, 0);
   const nftResetPbp = asNumber(
-    spendByAction.nft_cooldown_reset ?? spendByAction.cooldown_reset,
+    asNumber(spendByAction.nft_cooldown_reset, 0) + asNumber(spendByAction.cooldown_reset, 0),
     0,
   );
   const missionSelectionPbp = asNumber(spendByAction.mission_swap, 0);
-  const sessionRentals = asNumber(scopedAnalytics.totalLeased, 0);
+  const sessionRentals = asNumber(scopedAnalytics.totalRentalsUsed, 0);
   const nftResetUsage =
     scopedAnalytics.nftResetUsage &&
     typeof scopedAnalytics.nftResetUsage === "object"

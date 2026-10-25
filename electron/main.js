@@ -46,6 +46,7 @@ const {
 } = require("./competitionRangeLock");
 const { checkForUpdates } = require("./update-checker");
 const { normalizeAnalyticsRange, analyticsRangeBounds, isInAnalyticsRange } = require("./analytics-ranges");
+const { countRentalAssignments, hasRecordedAssignment } = require("../src/rental-analytics");
 const { MacUpdater, acknowledgeMacUpdate } = require("./mac-updater");
 const { WindowsUpdater, acknowledgeWindowsUpdate } = require("./windows-updater");
 const { createMcpClient } = require("../src/mcp/client");
@@ -818,6 +819,7 @@ function normalizeAssignmentHistory(raw) {
         level: Number.isFinite(level) ? level : null,
         missionStartedAt,
         usedReset,
+        eventId: String(entry?.eventId || "").trim() || null,
         nft,
         nftAccount,
       };
@@ -2764,6 +2766,8 @@ function applyAnalyticsAssignmentEvent(payload = {}) {
   const current = normalizeAnalytics(
     backendStatus.analytics || loadAnalytics(),
   );
+  const eventId = String(payload?.eventId || "").trim();
+  if (hasRecordedAssignment(current.lifetime.assignmentHistory, eventId)) return false;
   if (usedReset) {
     current.lifetime.nftResetUsage[usageBucket].assigned += 1;
     current.session.nftResetUsage[usageBucket].assigned += 1;
@@ -2783,6 +2787,7 @@ function applyAnalyticsAssignmentEvent(payload = {}) {
       level: missionLevel,
       missionStartedAt,
       usedReset,
+      eventId: eventId || null,
       nft: payload?.nft || payload?.nftName,
       nftAccount: payload?.nftAccount || payload?.account || null,
     },
@@ -2802,12 +2807,17 @@ function applyAnalyticsAssignmentEvent(payload = {}) {
       level: missionLevel,
       missionStartedAt,
       usedReset,
+      eventId: eventId || null,
       nft: payload?.nft || payload?.nftName,
       nftAccount: payload?.nftAccount || payload?.account || null,
     },
   ]);
   saveAnalytics(current);
   trackFeatureUsage("mission_assignment", {
+    event_id: eventId || undefined,
+    assigned_mission_id: String(payload?.assignedMissionId || payload?.missionId || "").trim() || undefined,
+    nft_account: String(payload?.nftAccount || payload?.account || "").trim() || undefined,
+    used_reset: usedReset,
     mission_name: telemetryMissionName,
     mission_level: missionLevel ?? undefined,
     source: usageBucket,
@@ -2816,6 +2826,9 @@ function applyAnalyticsAssignmentEvent(payload = {}) {
   });
   if (usedReset) {
     trackFeatureUsage("nft_reset_assignment", {
+      event_id: eventId ? `${eventId}:reset` : undefined,
+      assigned_mission_id: String(payload?.assignedMissionId || payload?.missionId || "").trim() || undefined,
+      nft_account: String(payload?.nftAccount || payload?.account || "").trim() || undefined,
       source: usageBucket,
       mission_name: telemetryMissionName,
       mission_level: missionLevel ?? undefined,
@@ -2910,6 +2923,7 @@ function analyticsBucketFromRange(bucket = {}, rangeKey = "session") {
       0,
     ),
     totalLeased: rentalHistory.length,
+    totalRentalsUsed: countRentalAssignments(assignmentHistory),
     currencyEarned,
     missionClaims,
     claimHistory,
@@ -2980,6 +2994,7 @@ function rebuildAnalyticsBucketFromHistories(bucket = {}) {
       0,
     ),
     totalLeased: rentalHistory.length,
+    totalRentalsUsed: countRentalAssignments(assignmentHistory),
     currencyEarned,
     missionClaims,
     claimHistory,
@@ -3204,6 +3219,7 @@ function buildAnalyticsCsv(rangeKey = "session") {
     ["NFT Resets", Number(bucket?.resetTypes?.nft || 0)],
     ["Total Resets", Number(bucket.totalResets || 0)],
     ["Leases", Number(bucket.totalLeased || 0)],
+    ["Rentals Used", Number(bucket.totalRentalsUsed || 0)],
     ["PBP Earned", Number(bucket?.currencyEarned?.pbp || 0)],
     ["TC Earned", Number(bucket?.currencyEarned?.tc || 0)],
     ["CC Earned", Number(bucket?.currencyEarned?.cc || 0)],

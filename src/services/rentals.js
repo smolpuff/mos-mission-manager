@@ -320,6 +320,7 @@ function sanitizePersistedState(input) {
       readyAt: Number.isFinite(readyAt) ? readyAt : null,
       snapshotAt: Number(raw.snapshotAt || snapshotAt || 0),
       snapshotGeneration: Number(raw.snapshotGeneration || generation),
+      cooldownResetSucceeded: raw.cooldownResetSucceeded === true,
       attemptCount: Math.max(0, Math.floor(Number(raw.attemptCount || 0))),
       lastAttemptAt: Number.isFinite(Number(raw.lastAttemptAt))
         ? Number(raw.lastAttemptAt)
@@ -781,7 +782,12 @@ class RentalCoordinator {
           ...unresolved,
           ...fresh.filter(
             (candidate) => !unresolvedIdentities.has(candidateIdentity(candidate)),
-          ),
+          ).map((candidate) => ({
+            ...candidate,
+            cooldownResetSucceeded: current.candidates.some((previous) =>
+              candidateIdentity(previous) === candidateIdentity(candidate) &&
+              previous.state === "available" && previous.cooldownResetSucceeded === true),
+          })),
         ];
         return {
           ...current,
@@ -906,6 +912,7 @@ class RentalCoordinator {
         next.inFlightAt = found.inFlightAt || this.clock();
       }
       if (failure.cooldownResetSucceeded === true) {
+        next.cooldownResetSucceeded = true;
         next.readyAt = this.clock();
         next.cooldownEndAt = null;
         next.readinessSource = "cooldown_reset_succeeded";
@@ -1232,7 +1239,10 @@ class RentalCoordinator {
         const reconciliation = await this.reconcileAmbiguous({
           mission: selection.mission,
           missionKey: selection.missionKey,
-          candidate: reserved,
+          candidate: {
+            ...reserved,
+            cooldownResetSucceeded: failure.cooldownResetSucceeded === true || reserved.cooldownResetSucceeded === true,
+          },
         });
         if (reconciliation?.assigned === true) {
           successes += 1;
