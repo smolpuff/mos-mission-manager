@@ -1,6 +1,8 @@
-import React from "react";
-import ControlPage from "./pages/ControlPage";
+import React, { lazy, Suspense } from "react";
 import CliPage from "./pages/CliPage";
+
+// The CLI must not load the dashboard and all of its pages/assets.
+const ControlPage = lazy(() => import("./pages/ControlPage"));
 
 class RendererErrorBoundary extends React.Component {
   constructor(props) {
@@ -57,7 +59,11 @@ export function App() {
   const isCli = window.location.hash === "#/cli";
   return (
     <RendererErrorBoundary>
-      {isCli ? <CliPage /> : <ControlPage />}
+      {isCli ? <CliPage /> : (
+        <Suspense fallback={null}>
+          <ControlPage />
+        </Suspense>
+      )}
     </RendererErrorBoundary>
   );
 }

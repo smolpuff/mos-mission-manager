@@ -103,6 +103,7 @@ function normalizeBackendEvent(event) {
 export default function useBackendState({
   includeLogs = false,
   includeCommands = true,
+  includeStatus = true,
 } = {}) {
   const bridge = useDesktopBridge();
   const [status, setStatus] = useState({
@@ -221,17 +222,19 @@ export default function useBackendState({
       includeCommands && bridge.onBackendCommand
         ? bridge.onBackendCommand((command) => setLastCommand(command))
         : () => {};
-    const offStatus = bridge.onBackendStatus((nextStatus) => {
-      setPersistentRewardTotals((current) =>
-        mergeRewardTotalsForStatus(current, nextStatus),
-      );
-      setPersistentSpendTotals((current) =>
-        mergeSpendTotalsForStatus(current, nextStatus),
-      );
-      setStatus(nextStatus);
-    });
+    const offStatus = includeStatus
+      ? bridge.onBackendStatus((nextStatus) => {
+          setPersistentRewardTotals((current) =>
+            mergeRewardTotalsForStatus(current, nextStatus),
+          );
+          setPersistentSpendTotals((current) =>
+            mergeSpendTotalsForStatus(current, nextStatus),
+          );
+          setStatus(nextStatus);
+        })
+      : () => {};
     const offEvent =
-      bridge.onBackendEvent?.((event) => {
+      (includeStatus && bridge.onBackendEvent?.((event) => {
         const normalizedEvent = normalizeBackendEvent(event);
         if (normalizedEvent?.type === "cli_window_state") {
           setStatus((current) => ({
@@ -240,16 +243,18 @@ export default function useBackendState({
           }));
         }
         setLastEvent(normalizedEvent);
-      }) || (() => {});
-    bridge.getState({ includeLogs }).then((state) => {
+      })) || (() => {});
+    bridge.getState({ includeLogs, includeStatus }).then((state) => {
       if (!mounted) return;
-      setPersistentRewardTotals((current) =>
-        mergeRewardTotalsForStatus(current, state.status),
-      );
-      setPersistentSpendTotals((current) =>
-        mergeSpendTotalsForStatus(current, state.status),
-      );
-      setStatus(state.status);
+      if (includeStatus) {
+        setPersistentRewardTotals((current) =>
+          mergeRewardTotalsForStatus(current, state.status),
+        );
+        setPersistentSpendTotals((current) =>
+          mergeSpendTotalsForStatus(current, state.status),
+        );
+        setStatus(state.status);
+      }
       if (includeLogs) {
         const initialEntries = Array.isArray(state.logs) ? state.logs : [];
         const initialState = {
@@ -272,9 +277,10 @@ export default function useBackendState({
       offCommand();
       offEvent();
     };
-  }, [bridge, includeCommands, includeLogs]);
+  }, [bridge, includeCommands, includeLogs, includeStatus]);
 
   useEffect(() => {
+    if (!includeStatus) return;
     let cancelled = false;
     bridge.getState({ includeLogs: false }).then(async (state) => {
       if (cancelled) return;
@@ -289,7 +295,7 @@ export default function useBackendState({
     return () => {
       cancelled = true;
     };
-  }, [bridge]);
+  }, [bridge, includeStatus]);
 
   const effectiveStatus = {
     ...status,

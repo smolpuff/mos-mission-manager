@@ -973,6 +973,12 @@ async function loadWindow(win, hash = "") {
 function publish(channel, payload) {
   for (const win of [controlWindow, cliWindow]) {
     if (win && !win.isDestroyed()) {
+      // The CLI only consumes output; avoid cloning dashboard snapshots and
+      // events (including analytics/NFT data) into its renderer.
+      if (
+        win === cliWindow &&
+        (channel === "backend:status" || channel === "backend:event")
+      ) continue;
       win.webContents.send(channel, payload);
     }
   }
@@ -5775,13 +5781,14 @@ app.whenReady().then(async () => {
     sendBackendCommand(command),
   );
   handleTrustedIpc("backend:get-state", async (_event, options) => {
-    if (!backendStatus.running) {
+    const includeStatus = options?.includeStatus !== false;
+    if (includeStatus && !backendStatus.running) {
       backendStatus.nftUsageStats = loadPersistedNftUsageStats();
     }
     const includeLogs =
       options === undefined ? true : options?.includeLogs === true;
     return {
-      status: { ...backendStatus },
+      ...(includeStatus ? { status: { ...backendStatus } } : {}),
       logs: includeLogs ? logHistory : [],
     };
   });
