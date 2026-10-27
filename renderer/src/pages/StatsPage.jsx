@@ -1010,7 +1010,7 @@ export default function StatsPage({ status }) {
         <section className="card stats-competition-card grid w-full grid-cols-[minmax(0,1.15fr)_minmax(0,2.5fr)] items-center gap-4 rounded-xl px-4 py-2" aria-labelledby="reset-competition-title">
           <h2 id="reset-competition-title" className="text-xs font-semibold leading-4 text-purple-100">
             <span className="block">Reset Competition</span>
-            <span className="block">Sep 27–Nov 15, 2026</span>
+            <span className="block font-normal text-slate-400">Nov 1–15, 2026</span>
           </h2>
           <dl className="grid grid-cols-3 gap-3">
             {[
@@ -1020,7 +1020,7 @@ export default function StatsPage({ status }) {
             ].map(([label, count]) => (
               <div key={label} className="min-w-0">
                 <dt className="text-[11px] leading-3.5 text-purple-100/70">{label}</dt>
-                <dd className="text-lg font-semibold leading-6 tabular-nums text-white">
+                <dd className="text-lg font-semibold leading-6 text-white">
                   {competitionView ? formatNumber(count, 0) : "—"}
                 </dd>
               </div>

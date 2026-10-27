@@ -4407,7 +4407,7 @@ function ControlView() {
                     </div>
                   </div>
                   <div className="flex items-center justify-center">
-                    <div className="mission-stats grid grid-cols-2 gap-x-6 gap-y-1 text-base leading-6">
+                    <div className="mission-stats grid grid-cols-[max-content_max-content] gap-x-6 gap-y-1 text-base leading-6">
                       {/* <div className="w-full col-span-2 text-sm">Session</div> */}
                       <div className="flex items-center gap-1">
                         <span>🎯</span>
