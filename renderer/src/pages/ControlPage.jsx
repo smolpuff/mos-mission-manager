@@ -3511,6 +3511,22 @@ function ControlView() {
           "No update notes :(."
         )}
       </div>
+      {updateModal.downloadUrl ? (
+        <p className="text-xs text-slate-300">
+          If this update fails, please try{" "}
+          <a
+            href={updateModal.downloadUrl}
+            className="underline hover:text-slate-100"
+            onClick={(event) => {
+              event.preventDefault();
+              void openExternalUrl(updateModal.downloadUrl);
+            }}
+          >
+            downloading it manually
+          </a>
+          .
+        </p>
+      ) : null}
 
       {updateInstalling ? (
         <div className="space-y-2">
