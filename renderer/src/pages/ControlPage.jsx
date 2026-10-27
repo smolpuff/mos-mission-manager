@@ -4380,7 +4380,7 @@ function ControlView() {
           {currentPage !== "missions" ? null : (
             <>
               <div className="space-y-1.5">
-                <section className="card grid grid-cols-2 gap-4">
+                <section className="card grid grid-cols-[minmax(0,1fr)_max-content] gap-4">
                   <div className="space-y-3 w-full ">
                     {" "}
                     <div className="status-row text-2xl flex items-center gap-2">
@@ -4407,7 +4407,7 @@ function ControlView() {
                     </div>
                   </div>
                   <div className="flex items-center justify-center">
-                    <div className="mission-stats grid grid-cols-[max-content_max-content] gap-x-6 gap-y-1 text-base leading-6">
+                    <div className="mission-stats grid shrink-0 grid-cols-[max-content_max-content] gap-x-4 gap-y-1 whitespace-nowrap text-base leading-6">
                       {/* <div className="w-full col-span-2 text-sm">Session</div> */}
                       <div className="flex items-center gap-1">
                         <span>🎯</span>

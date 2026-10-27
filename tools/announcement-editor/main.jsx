@@ -4,7 +4,7 @@ import AnnouncementDialog from "../../renderer/src/components/AnnouncementDialog
 import "./style.css";
 import { visibleContent } from "./visible-content.mjs";
 
-const empty = () => ({ id: "", enabled: false, visibility: { title: false, text: false, image: false, prizes: false, info: false, link: false }, title: "", text: "", info: "", imageUrl: "", imageWidth: undefined, imageAlt: "", prizes: [], linkUrl: "", linkLabel: "", startsAt: "", endsAt: "" });
+const empty = ({ id, startsAt }) => ({ id, enabled: false, visibility: { title: false, text: false, image: false, prizes: false, info: false, link: false }, title: "", text: "", info: "", imageUrl: "", imageWidth: undefined, imageAlt: "", prizes: [], linkUrl: "", linkLabel: "", startsAt, endsAt: "" });
 function localTime(iso) { if (!iso) return ""; const date = new Date(iso); if (!Number.isFinite(+date)) return ""; return new Date(+date - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16); }
 function App() {
   const [session, setSession] = useState(null), [items, setItems] = useState([]), [selected, setSelected] = useState(-1);
@@ -28,12 +28,12 @@ function App() {
     {error || message ? <div className={`editor-status ${error ? "editor-error" : ""}`} aria-live="polite">{error ? <p role="alert" className="whitespace-pre-wrap">{error}</p> : message}</div> : null}
     <div className="editor-layout">
       <aside className="editor-sidebar" aria-label="Announcements">
-        <button className="editor-new" disabled={busy || !session || items.length >= 20} onClick={() => { setItems(old => [...old, empty()]); setSelected(items.length); setPreview(false); setTab("message"); }}>+ New announcement</button>
+        <button className="editor-new" disabled={busy || !session || items.length >= 20} onClick={() => action(async () => { const defaults = await request("new"); setItems(old => [...old, empty(defaults)]); setSelected(items.length); setPreview(false); setTab("message"); })}>+ New announcement</button>
         <div className="editor-list">{items.map((value, index) => <button key={index} className={index === selected ? "editor-selected" : ""} onClick={() => { setSelected(index); setPreview(false); }}><strong>{value.title || value.id || "Untitled"}</strong><span>{value.publishedId ? "Published" : "Local draft"}</span></button>)}{!items.length ? <p>Your drafts will appear here.</p> : null}</div>
         <details className="editor-import"><summary>Load from GitHub</summary><p>Bring published messages into the list so you can edit or remove them. Local-only drafts are kept.</p><button className="btn btn-clear btn-sm" disabled={busy || !session} onClick={() => action(async () => { const { draft } = await request("load-published"); setItems(old => [...old.filter(item => !draft.announcements.some(live => live.id === (item.publishedId || item.id))), ...draft.announcements]); setSelected(-1); setMessage("Published messages loaded. Changes stay local until you publish again."); })}>Load published messages</button></details>
       </aside>
       {item ? <section className="editor-card">
-        <nav className="editor-tabs" aria-label="Editor sections">{[["message","Message"],["extras","Prizes & rules"],["delivery","Schedule & publish"]].map(([key,label]) => <button key={key} aria-current={tab === key ? "page" : undefined} className={tab === key ? "editor-tab-active" : ""} onClick={() => setTab(key)}>{label}</button>)}</nav>
+        <nav className="editor-tabs" aria-label="Editor sections">{[["message","Message"],["extras","Prizes & rules"]].map(([key,label]) => <button key={key} aria-current={tab === key ? "page" : undefined} className={tab === key ? "editor-tab-active" : ""} onClick={() => setTab(key)}>{label}</button>)}</nav>
         <fieldset className="editor-form" key={selected} disabled={busy}>
           {tab === "message" ? <>
             {include("title", "title")}
@@ -60,13 +60,12 @@ function App() {
             {include("link", "details link")}
             <div className="editor-two">{input("Details link (optional)", "linkUrl", { type: "url" })}{input("Link label", "linkLabel", { maxLength: 100 })}</div>
           </> : null}
-          {tab === "delivery" ? <>
             <div className="editor-section-heading"><h2>When should it appear?</h2><span className="editor-hint">{Intl.DateTimeFormat().resolvedOptions().timeZone}</span></div>
             <div className="editor-two">{[["Starts", "startsAt"],["Ends", "endsAt"]].map(([label,key]) => <label className="editor-field" key={key}>{label}<input type="datetime-local" value={localTime(item[key])} onChange={event => change({ [key]: event.target.value ? new Date(event.target.value).toISOString() : "" })} /></label>)}</div>
             <p className="editor-hint">Both times are required. Apps show it only during this window, after setup. Expired messages stay hidden.</p>
             {input("Announcement ID", "id", { maxLength: 100 })}
             <p className="editor-hint">Keep this ID for corrections. Change it only for a new announcement that people should see again.</p>
-            <div className="editor-publish-box"><p><strong>Publish</strong> posts this announcement using the dates above. <strong>Remove</strong> takes this announcement off the app feed. Other announcements stay as they are.</p><div className="editor-publish-actions"><button className="btn btn-gradient" disabled={busy || !session} onClick={() => action(async () => {
+            <div className="editor-publish-box"><div className="editor-publish-actions"><button className="btn btn-gradient" disabled={busy || !session} onClick={() => action(async () => {
               await request("save");
               const result = await request("publish", { announcement: visibleContent(item), publishedId: item.publishedId || null });
               const next = items.map((value,index) => index === selected ? { ...value, publishedId: result.id } : value);
@@ -77,13 +76,12 @@ function App() {
               const next = items.filter((_,index) => index !== selected);
               await request("save", { announcements: next }); setItems(next); setSelected(-1);
               setMessage(item.publishedId ? "Removed this announcement. Apps stop showing it on their next check." : "Removed this local draft. Nothing changed on GitHub.");
-            })}>Remove</button></div><p className="editor-hint">Publish changes only this message. Removing a local draft does not contact GitHub.</p></div>
+            })}>Remove</button></div></div>
             <details className="editor-destination"><summary>Publishing destination</summary><p>{session?.destination}</p></details>
-          </> : null}
         </fieldset>
         <footer className="editor-footer"><div><button className="btn btn-clear btn-sm" disabled={busy || !session} onClick={() => action(async () => { await request("save"); setMessage("Draft saved on this computer. Nothing sent to GitHub."); })}>Save local draft</button><span>Stays on this computer.</span></div><button className="btn btn-gradient btn-sm" disabled={busy} onClick={() => setPreview(true)}>Preview popup</button></footer>
         {preview ? <AnnouncementDialog announcement={{ ...displayed, imageUrl: displayed.imageFile ? imageUrl : displayed.imageUrl, prizes: (displayed.prizes || []).filter(r => r.place || r.prize) }} onClose={() => setPreview(false)} openExternal={url => window.open(url, "_blank", "noopener,noreferrer")} /> : null}
-      </section> : <section className="editor-empty"><h2>Start with a message</h2><p>Choose <strong>+ New announcement</strong> to create a draft, or load published messages from the sidebar. Publish or remove one announcement at a time from <strong>Schedule & publish</strong>.</p></section>}
+      </section> : <section className="editor-empty"><h2>Start with a message</h2><p>Choose <strong>+ New announcement</strong> to create a draft, or load published messages from the sidebar.</p></section>}
     </div>
   </main>;
 }

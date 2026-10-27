@@ -5,6 +5,7 @@ const path = require("node:path");
 const crypto = require("node:crypto");
 const { ANNOUNCEMENTS_URL, ANNOUNCEMENTS_BRANCH } = require("../../lib/announcements");
 const { prepareFeed, publish, githubApi, IMAGE_FILE } = require("./publish.cjs");
+const { createIdAllocator } = require("./next-id.cjs");
 const dataDir = process.env.MISSIONS_ANNOUNCEMENT_EDITOR_DATA || path.join(__dirname, ".local");
 const draftFile = path.join(dataDir, "draft.json");
 const token = crypto.randomBytes(32).toString("hex");
@@ -21,6 +22,7 @@ function imageType(bytes) {
   throw new Error("Choose a PNG, JPEG, WebP or GIF image (up to 5 MB).");
 }
 async function main() {
+  const nextId = createIdAllocator(dataDir);
   const { createServer } = await import("vite");
   const { default: react } = await import("@vitejs/plugin-react");
   const { default: tailwind } = await import("@tailwindcss/vite");
@@ -70,6 +72,9 @@ async function main() {
         finally { publishing = false; }
       }
       if (!Array.isArray(body?.announcements) || body.announcements.length > 20) throw new Error("Use at most 20 announcements.");
+      if (url.pathname === "/api/new") {
+        return json({ id: await nextId(body.announcements), startsAt: new Date().toISOString() });
+      }
       if (url.pathname === "/api/save") {
         await fs.mkdir(dataDir, { recursive: true });
         await fs.writeFile(draftFile + ".next", JSON.stringify(body, null, 2) + "\n", { mode: 0o600 });

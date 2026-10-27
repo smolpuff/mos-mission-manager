@@ -10,10 +10,10 @@ Open the localhost address printed in the terminal. Keep the terminal running wh
 
 ## Create and post an announcement
 
-1. Click **+ New announcement**.
+1. Click **+ New announcement**. Its ID automatically increases (`announcement-1`, `announcement-2`, …), and Starts defaults to today's current time. The ID counter is saved locally across editor restarts and deletions.
 2. In **Message**, add an image, title and/or text. Blank sections stay hidden. Image-only announcements work. Images fill the popup width by default; use **Image URL, width & description** to choose an HTTPS image or change its width. PNG, JPEG, WebP and GIF uploads can be up to 5 MB.
 3. In **Prizes & rules**, optionally add prize rows (`1st`, `2nd`, `5th–10th`), rules and a details link. Prizes appear above rules in the popup.
-4. In **Schedule & publish**, set Starts and Ends. Times use the time zone displayed there and are converted to UTC automatically. Keep the generated ID, or edit it before publishing.
+4. Set Starts and Ends below the message fields. Scheduling, the announcement ID, and Publish / Remove are always visible in the main editor. Times use the time zone displayed there and are converted to UTC automatically. Keep the generated ID, or edit it before publishing.
 5. Click **Preview popup** to see the actual app popup, including its background, overlay and shadow. Preview ignores the schedule.
 6. Click **Publish** to post **this announcement only**. If it is already published, Publish updates it. Other published announcements stay unchanged.
 
