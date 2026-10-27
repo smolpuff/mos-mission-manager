@@ -24,6 +24,21 @@
       ],
       "linkUrl": "",
       "linkLabel": ""
+    },
+    {
+      "id": "announcement-5",
+      "enabled": true,
+      "startsAt": "2026-10-27T21:32:14.523Z",
+      "endsAt": "2026-10-30T21:32:00.000Z",
+      "title": "asdasdasd",
+      "text": "",
+      "info": "",
+      "imageUrl": "",
+      "imageWidth": 100,
+      "imageAlt": "",
+      "prizes": [],
+      "linkUrl": "",
+      "linkLabel": ""
     }
   ]
 }
