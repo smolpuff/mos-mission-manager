@@ -36,6 +36,8 @@ contextBridge.exposeInMainWorld("missionsDesktop", {
   getConfig: () => ipcRenderer.invoke("config:get"),
   updateConfig: (patch) => ipcRenderer.invoke("config:update", patch),
   checkForUpdates: (payload) => ipcRenderer.invoke("updates:check", payload),
+  checkAnnouncements: () => ipcRenderer.invoke("announcements:check"),
+  markAnnouncementSeen: (id) => ipcRenderer.invoke("announcements:seen", id),
   installUpdate: (version) => ipcRenderer.invoke("updates:install", version),
   reportUpdateUiReady: () => ipcRenderer.invoke("updates:ui-ready"),
   onUpdateStatus: (callback) => {

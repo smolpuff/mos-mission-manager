@@ -45,6 +45,7 @@ const {
   competitionRangeLockDecision,
 } = require("./competitionRangeLock");
 const { checkForUpdates } = require("./update-checker");
+const { createAnnouncementService } = require("./announcements");
 const { normalizeAnalyticsRange, analyticsRangeBounds, isInAnalyticsRange } = require("./analytics-ranges");
 const { countRentalAssignments, hasRecordedAssignment } = require("../src/rental-analytics");
 const { MacUpdater, acknowledgeMacUpdate } = require("./mac-updater");
@@ -5699,6 +5700,9 @@ if (["darwin", "win32"].includes(process.platform) && app.isPackaged && !isDeskt
 }
 
 app.whenReady().then(async () => {
+  const announcements = createAnnouncementService({ userData: app.getPath("userData") });
+  handleTrustedIpc("announcements:check", () => announcements.check(), { controlOnly: true });
+  handleTrustedIpc("announcements:seen", (_event, id) => announcements.markSeen(id), { controlOnly: true });
   rendererSecurity.installContentSecurityPolicy(session.defaultSession);
   installMinimalApplicationMenu();
   if (["darwin", "win32"].includes(process.platform) && app.isPackaged && !isDesktopDevMode()) {

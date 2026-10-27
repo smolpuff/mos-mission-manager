@@ -169,3 +169,6 @@ VERCEL_APP_AUDIT_PLAN.md
 
 # Local work files
 /work/
+
+# Private local announcement drafts and uploaded images
+/tools/announcement-editor/.local/

@@ -112,7 +112,8 @@
     @apply !cursor-pointer;
   }
 
-  a.update-download-link {
+  a.update-download-link,
+  a.announcement-link {
     cursor: pointer !important;
   }
 

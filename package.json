@@ -3,6 +3,7 @@
   "version": "3.3.0",
   "main": "electron/main.js",
   "scripts": {
+    "announcements:editor": "node tools/announcement-editor/server.cjs",
     "test": "node --test",
     "test:mac-update": "node electron/update-tools/verify-mac-app.js",
     "test:win-update": "node electron/update-tools/verify-windows-app.js",

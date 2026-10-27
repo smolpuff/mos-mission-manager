@@ -11,6 +11,8 @@ import DebugPage from "./DebugPage";
 import SettingsPage from "./SettingsPage";
 import SetupWalletStep from "../components/SetupWalletStep";
 import InterfaceTour from "../components/InterfaceTour";
+import AnnouncementDialog from "../components/AnnouncementDialog";
+import { useLiveAnnouncements } from "../use-live-announcements";
 import StatsPage from "./StatsPage";
 import RentalsPage from "./RentalsPage";
 import NftsPage from "./NftsPage";
@@ -3483,6 +3485,11 @@ function ControlView() {
     }
   };
 
+  const { announcement, dismiss: dismissAnnouncement } = useLiveAnnouncements(bridge,
+    popupsBlocked || Boolean(updateModal || competitionNotificationModal || secretModalOpen ||
+      createWalletOpen || slotUnlockModalOpen || missionPickerSlot || bridgeLinkModal ||
+      lowBalanceModal || fundingWalletFundedModal || throttleModal || resetErrorModal));
+
   const updateOfferContent = updateModal ? (
     <>
       <div className="text-sm text-slate-200">
@@ -6176,6 +6183,7 @@ function ControlView() {
               </div>
             </div>
           ) : null}
+          {announcement ? <AnnouncementDialog announcement={announcement} onClose={dismissAnnouncement} openExternal={openExternalUrl} /> : null}
           {!popupsBlocked && updateModal ? (
             <div
               className="fixed inset-0 z-60 grid place-items-center bg-black/60 p-4"
