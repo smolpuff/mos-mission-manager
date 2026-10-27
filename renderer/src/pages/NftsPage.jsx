@@ -778,9 +778,6 @@ export default function NftsPage({ bridge, signerMode = "" }) {
           className="fixed inset-0 z-60 grid place-items-center bg-black/80 p-4"
           role="dialog"
           aria-modal="true"
-          onMouseDown={(event) => {
-            if (event.target === event.currentTarget) setDetailModal(null);
-          }}
         >
           <div
             className="w-full max-w-xl overflow-hidden rounded-xl border-2 border-[#1D1C27] shadow-2xl shadow-black/95"
@@ -892,9 +889,6 @@ export default function NftsPage({ bridge, signerMode = "" }) {
           className="fixed inset-0 z-60 grid place-items-center bg-black/60 p-4"
           role="dialog"
           aria-modal="true"
-          onMouseDown={(event) => {
-            if (event.target === event.currentTarget) closeResetModal();
-          }}
         >
           <div
             className="p-4 w-full rounded-xl shadow-2xl shadow-black/95 space-y-4 z-10 border-2 border-[#1D1C27]"

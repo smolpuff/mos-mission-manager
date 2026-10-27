@@ -4,10 +4,11 @@ export function announcementIsActive(item, now = Date.now()) {
 }
 
 // No polling of the DOM, mission state, or wallet. Only the small announcement feed.
-export function createAnnouncementDisplay({ check, markSeen, onChange, now = Date.now, setTimer = setTimeout, clearTimer = clearTimeout }) {
+export function createAnnouncementDisplay({ check, markSeen, onChange, session = { seen: new Set(), checked: false }, now = Date.now, setTimer = setTimeout, clearTimer = clearTimeout }) {
   let blocked = true, disposed = false, active = null, feed = [], timer, pending = false, nextCheck = 0;
   let allowNext = true;
-  const seen = new Set();
+  const seen = session.seen;
+  let startupIds = new Set();
   function render() {
     onChange(!blocked && active && announcementIsActive(active, now()) ? active : null);
   }
@@ -27,18 +28,25 @@ export function createAnnouncementDisplay({ check, markSeen, onChange, now = Dat
         nextCheck = now() + ANNOUNCEMENT_CHECK_MS;
         allowNext = true;
         try { feed = await check(); } catch { feed = []; }
+        if (disposed) return;
         if (!Array.isArray(feed)) feed = [];
+        if (!session.checked) {
+          startupIds = new Set(feed.filter(item => announcementIsActive(item, now())).map(item => item.id));
+          session.checked = true;
+        }
         if (active && !feed.some(item => item.id === active.id)) active = null;
       }
       if (disposed) return;
       if (active && !announcementIsActive(active, now())) active = null;
       if (!blocked && !active && allowNext) {
-        active = feed.find(item => !seen.has(item.id) && announcementIsActive(item, now())) || null;
+        active = feed.find(item => !seen.has(item.id) && (!item.automaticSeen || startupIds.has(item.id)) && announcementIsActive(item, now())) || null;
         if (active) {
+          active = { ...active, canSuppress: startupIds.has(active.id) };
+          startupIds.clear();
           seen.add(active.id);
-          allowNext = false; // Never stack announcements back-to-back after Dismiss.
           const id = active.id;
-          void Promise.resolve().then(() => markSeen(id)).catch(() => {});
+          void Promise.resolve().then(() => markSeen(id, true)).catch(() => {});
+          allowNext = false; // Never stack announcements back-to-back after Dismiss.
         }
       }
       render();
@@ -51,7 +59,14 @@ export function createAnnouncementDisplay({ check, markSeen, onChange, now = Dat
       if (blocked) clearTimer(timer);
       else void tick();
     },
-    dismiss() { active = null; render(); schedule(); },
+    dismiss(permanent = false) {
+      const id = active?.id;
+      const canSuppress = active?.canSuppress;
+      active = null;
+      render();
+      schedule();
+      if (permanent === true && canSuppress && id) void Promise.resolve().then(() => markSeen(id)).catch(() => {});
+    },
     dispose() { disposed = true; clearTimer(timer); },
   };
 }

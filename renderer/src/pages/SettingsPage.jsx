@@ -599,9 +599,6 @@ export default function SettingsPage({
       {importOpen && (
         <div
           className="fixed inset-0 z-60 grid place-items-center bg-black/70 p-4"
-          onMouseDown={(event) => {
-            if (event.target === event.currentTarget) closeImport();
-          }}
           onKeyDown={(event) => {
             if (event.key === "Escape") {
               event.stopPropagation();

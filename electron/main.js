@@ -5702,7 +5702,7 @@ if (["darwin", "win32"].includes(process.platform) && app.isPackaged && !isDeskt
 app.whenReady().then(async () => {
   const announcements = createAnnouncementService({ userData: app.getPath("userData") });
   handleTrustedIpc("announcements:check", () => announcements.check(), { controlOnly: true });
-  handleTrustedIpc("announcements:seen", (_event, id) => announcements.markSeen(id), { controlOnly: true });
+  handleTrustedIpc("announcements:seen", (_event, id, automatic = false) => announcements.markSeen(id, automatic), { controlOnly: true });
   rendererSecurity.installContentSecurityPolicy(session.defaultSession);
   installMinimalApplicationMenu();
   if (["darwin", "win32"].includes(process.platform) && app.isPackaged && !isDesktopDevMode()) {

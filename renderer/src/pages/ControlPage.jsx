@@ -4011,9 +4011,6 @@ function ControlView() {
               className="fixed inset-0 z-60 grid place-items-center bg-black/60 p-4"
               role="dialog"
               aria-modal="true"
-              onMouseDown={(e) => {
-                if (e.target === e.currentTarget) secretModalController.close();
-              }}
             >
               <div
                 className="p-4  max-w-xl w-full rounded-xl shadow-2xl shadow-black/95 space-y-4 z-10 border-2 border-[#1D1C27]  transition-all duration-250 ease-out"
@@ -4142,10 +4139,6 @@ function ControlView() {
               className="fixed inset-0 z-60 grid place-items-center bg-black/60 p-4"
               role="dialog"
               aria-modal="true"
-              onMouseDown={(e) => {
-                if (e.target === e.currentTarget && !createWalletBusy)
-                  setCreateWalletOpen(false);
-              }}
             >
               <div
                 className="p-4  w-full max-w-xl  rounded-xl shadow-2xl shadow-black/95 space-y-4 z-10 border-2 border-[#1D1C27]  transition-all duration-250 ease-out"
@@ -5449,14 +5442,6 @@ function ControlView() {
               className="fixed inset-0 z-60 grid place-items-center bg-black/65 p-4"
               role="dialog"
               aria-modal="true"
-              onMouseDown={(event) => {
-                if (
-                  event.target === event.currentTarget &&
-                  !missionPickerBusy
-                ) {
-                  setMissionPickerSlot(null);
-                }
-              }}
             >
               <div
                 className="p-4 w-full rounded-xl shadow-2xl shadow-black/95 space-y-4 z-10 border-2 border-[#1D1C27]"
@@ -5710,9 +5695,6 @@ function ControlView() {
               className="fixed inset-0 z-60 grid place-items-center bg-black/60 p-4"
               role="dialog"
               aria-modal="true"
-              onMouseDown={(e) => {
-                if (e.target === e.currentTarget) setResetErrorModal(null);
-              }}
             >
               <div
                 className="p-4 w-full rounded-xl shadow-2xl shadow-black/95 space-y-4 z-10 border-2 border-[#1D1C27] transition-all duration-250 ease-out"
@@ -5813,11 +5795,6 @@ function ControlView() {
               className="fixed inset-0 z-60 grid place-items-center bg-black/60 p-4"
               role="dialog"
               aria-modal="true"
-              onMouseDown={(e) => {
-                if (e.target === e.currentTarget && !slotUnlockBusy) {
-                  setSlotUnlockModalOpen(false);
-                }
-              }}
             >
               <div
                 className="p-4 w-full rounded-xl shadow-2xl shadow-black/95 space-y-4 z-10 border-2 border-[#1D1C27] transition-all duration-250 ease-out"
@@ -5922,9 +5899,6 @@ function ControlView() {
               className="fixed inset-0 z-60 grid place-items-center bg-black/60 p-4"
               role="dialog"
               aria-modal="true"
-              onMouseDown={(e) => {
-                if (e.target === e.currentTarget) setBridgeLinkModal(null);
-              }}
             >
               <div
                 className="p-4 w-full rounded-xl shadow-2xl shadow-black/95 space-y-4 z-10 border-2 border-[#1D1C27] transition-all duration-250 ease-out"
@@ -5982,24 +5956,6 @@ function ControlView() {
               className="fixed inset-0 z-60 grid place-items-center bg-black/60 p-4"
               role="dialog"
               aria-modal="true"
-              onMouseDown={(e) => {
-                if (e.target === e.currentTarget) {
-                  void closeCompetitionNotificationModal({
-                    competitionNumber:
-                      competitionNotificationCeilingNumberRef.current,
-                    suppressCheckedRef:
-                      competitionNotificationSuppressCheckedRef,
-                    setModal: setCompetitionNotificationModal,
-                    updateConfig: applyConfigPatch,
-                    onClosed: ({ competitionNumber }) => {
-                      if (!Number.isFinite(Number(competitionNumber))) return;
-                      shownCompetitionNotificationIdsRef.current.add(
-                        Number(competitionNumber),
-                      );
-                    },
-                  });
-                }
-              }}
             >
               <div
                 className="p-4 w-full rounded-xl shadow-2xl shadow-black/95 space-y-4 z-10 border-2 border-[#1D1C27] transition-all duration-250 ease-out"
@@ -6183,17 +6139,12 @@ function ControlView() {
               </div>
             </div>
           ) : null}
-          {announcement ? <AnnouncementDialog announcement={announcement} onClose={dismissAnnouncement} openExternal={openExternalUrl} /> : null}
+          {announcement ? <AnnouncementDialog announcement={announcement} onClose={dismissAnnouncement} openExternal={openExternalUrl} wallet={String(status.currentUserWalletId || status.currentUserWalletSummary?.walletId || status.currentUserWalletSummary?.wallet_id || "").trim()} /> : null}
           {!popupsBlocked && updateModal ? (
             <div
               className="fixed inset-0 z-60 grid place-items-center bg-black/60 p-4"
               role="dialog"
               aria-modal="true"
-              onMouseDown={(e) => {
-                if (e.target === e.currentTarget && !updateInstalling) {
-                  continueAfterUpdateOffer();
-                }
-              }}
             >
               <div
                 className="p-4 w-full rounded-xl shadow-2xl shadow-black/95 space-y-4 z-10 border-2 border-[#1D1C27] transition-all duration-250 ease-out"
@@ -6218,10 +6169,6 @@ function ControlView() {
               role="dialog"
               aria-modal="true"
               aria-labelledby="funding-wallet-funded-title"
-              onMouseDown={(e) => {
-                if (e.target === e.currentTarget)
-                  setFundingWalletFundedModal(null);
-              }}
             >
               <div
                 className="pointer-events-none absolute inset-0 overflow-hidden"
@@ -6341,9 +6288,6 @@ function ControlView() {
               className="fixed inset-0 z-60 grid place-items-center bg-black/60 p-4"
               role="dialog"
               aria-modal="true"
-              onMouseDown={(e) => {
-                if (e.target === e.currentTarget) setLowBalanceModal(null);
-              }}
             >
               <div
                 className="p-4  w-full max-w-xl rounded-xl shadow-2xl shadow-black/95 space-y-4 z-10 border-2 border-[#1D1C27]  transition-all duration-250 ease-out"
@@ -6505,9 +6449,6 @@ function ControlView() {
               className="fixed inset-0 z-60 grid place-items-center bg-black/60 p-4"
               role="dialog"
               aria-modal="true"
-              onMouseDown={(e) => {
-                if (e.target === e.currentTarget) setThrottleModal(null);
-              }}
             >
               <div
                 className="p-4 w-full max-w-xl rounded-xl shadow-2xl shadow-black/95 space-y-4 z-10 border-2 border-[#1D1C27] transition-all duration-250 ease-out"

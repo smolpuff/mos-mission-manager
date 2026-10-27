@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { createAnnouncementDisplay } from "./live-announcements.mjs";
 
+// Keep session dismissals when the control page unmounts and mounts again.
+const announcementSession = { seen: new Set(), checked: false };
+
 export function useLiveAnnouncements(bridge, blocked) {
   const [announcement, setAnnouncement] = useState(null);
   const controller = useRef(null);
@@ -8,8 +11,9 @@ export function useLiveAnnouncements(bridge, blocked) {
     if (!bridge?.checkAnnouncements || !bridge?.markAnnouncementSeen) return;
     const display = createAnnouncementDisplay({
       check: () => bridge.checkAnnouncements(),
-      markSeen: id => bridge.markAnnouncementSeen(id),
+      markSeen: (id, automatic = false) => bridge.markAnnouncementSeen(id, automatic),
       onChange: setAnnouncement,
+      session: announcementSession,
     });
     controller.current = display;
     return () => { display.dispose(); controller.current = null; };
@@ -25,6 +29,6 @@ export function useLiveAnnouncements(bridge, blocked) {
       document.removeEventListener("visibilitychange", visible);
     };
   }, [bridge, blocked]);
-  const dismiss = useCallback(() => controller.current?.dismiss(), []);
+  const dismiss = useCallback((permanent = false) => controller.current?.dismiss(permanent), []);
   return { announcement: blocked ? null : announcement, dismiss };
 }

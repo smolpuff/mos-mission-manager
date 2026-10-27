@@ -1,7 +1,8 @@
 import seasons from "../../src/analytics-seasons.json" with { type: "json" };
+import competitions from "../../src/analytics-competitions.json" with { type: "json" };
 
 export function availableAnalyticsSeasons() {
-  return Object.entries(seasons);
+  return Object.entries({ ...seasons, ...competitions }).filter(([key]) => !["season70", "season71"].includes(key));
 }
 
 export function currentAnalyticsSeasonKey(now = Date.now()) {
@@ -11,7 +12,7 @@ export function currentAnalyticsSeasonKey(now = Date.now()) {
 }
 
 export function analyticsSeasonLabel(key, now = Date.now()) {
-  const season = seasons[key];
+  const season = seasons[key] || competitions[key];
   if (!season) return null;
   return key === currentAnalyticsSeasonKey(now)
     ? `This season (${key.replace(/^season/, "")})`

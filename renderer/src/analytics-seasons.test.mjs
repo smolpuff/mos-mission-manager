@@ -30,7 +30,7 @@ test("both stats views can label the current season without relabeling history",
 });
 
 test("both stats selectors include Season 73 before it starts", () => {
-  assert.deepEqual(availableAnalyticsSeasons().map(([key]) => key), ["season71", "season72", "season73"]);
+  assert.deepEqual(availableAnalyticsSeasons().map(([key]) => key), ["season72", "season73", "resetCompetition"]);
 });
 
 test("Season 73 includes October 27 through December 7 across daylight saving", () => {
@@ -60,4 +60,20 @@ test("dates outside the known schedule do not claim a current season", () => {
   for (const timestamp of ["2026-08-03T12:00:00-04:00", "2026-12-08T00:00:00-05:00"]) {
     assert.equal(currentAnalyticsSeasonKey(Date.parse(timestamp)), null);
   }
+});
+
+test("temporary Reset Competition includes Sep 27–Nov 15 Eastern across daylight saving", () => {
+  const bounds = ranges.analyticsRangeBounds("resetCompetition");
+  assert.equal(ranges.normalizeAnalyticsRange("resetCompetition"), "resetCompetition");
+  assert.equal(analyticsSeasonLabel("resetCompetition"), "Reset Competition (Sep 27–Nov 15, 2026)");
+  for (const [timestamp, included] of [
+    ["2026-09-26T23:59:59.999-04:00", false],
+    ["2026-09-27T00:00:00-04:00", true],
+    ["2026-10-24T12:00:00-04:00", true],
+    ["2026-11-01T01:30:00-04:00", true],
+    ["2026-11-01T01:30:00-05:00", true],
+    ["2026-11-15T23:59:59.999-05:00", true],
+    ["2026-11-16T00:00:00-05:00", false],
+  ]) assert.equal(ranges.isInAnalyticsRange({ at: Date.parse(timestamp) }, bounds), included, timestamp);
+  assert.equal(currentAnalyticsSeasonKey(bounds.start), "season72");
 });

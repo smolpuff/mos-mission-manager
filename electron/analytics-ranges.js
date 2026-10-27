@@ -2,7 +2,7 @@
 
 // Match dash-mock's America/New_York season boundaries, including the
 // daylight-saving transition in Season 73. End boundaries are exclusive.
-const seasons = require("../src/analytics-seasons.json");
+const seasons = { ...require("../src/analytics-seasons.json"), ...require("../src/analytics-competitions.json") };
 
 function normalizeAnalyticsRange(rangeKey) {
   return ["session", "24h", "7d", "all", ...Object.keys(seasons)].includes(rangeKey)

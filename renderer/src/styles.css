@@ -938,6 +938,11 @@
     box-shadow: 0 2px 2px rgba(0, 0, 0, 0.3)
   }
 
+  .stats-competition-card {
+    background: linear-gradient(135deg, rgba(139, 92, 246, 0.3), rgba(217, 70, 239, 0.22), rgba(236, 72, 153, 0.3));
+    box-shadow: inset 0 0 0 1px rgba(217, 70, 239, 0.55), -3px 0 16px -4px rgba(139, 92, 246, 0.24), 3px 0 16px -4px rgba(236, 72, 153, 0.24);
+  }
+
   .card::after {
     content: "";
     @apply absolute inset-0 p-0.5 pointer-events-none z-0;

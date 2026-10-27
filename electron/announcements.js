@@ -5,21 +5,25 @@ const { ANNOUNCEMENTS_URL, CHECK_INTERVAL_MS, MAX_FEED_BYTES, normalizeFeed, isA
 
 function createAnnouncementService({ userData, fetchImpl = globalThis.fetch, now = Date.now }) {
   const stateFile = path.join(userData, "announcement-history.json");
-  let feed = [], etag = "", lastChecked = -Infinity, pending, history, historyPending, writePending = Promise.resolve();
+  let feed = [], lastChecked = -Infinity, pending, history, automaticHistory, historyPending, writePending = Promise.resolve();
   async function readHistory() {
     if (!historyPending) historyPending = fs.readFile(stateFile, "utf8").then(JSON.parse).then(value => {
       history = new Set(Array.isArray(value?.seen) ? value.seen.filter(id => typeof id === "string") : []);
+      automaticHistory = new Set(Array.isArray(value?.automaticSeen) ? value.automaticSeen.filter(id => typeof id === "string") : []);
     }).catch(error => {
       // A damaged history must not turn every launch into repeated announcements.
       if (error.code !== "ENOENT") throw error;
       history = new Set();
+      automaticHistory = new Set();
     });
     await historyPending;
   }
   async function refresh() {
-    const response = await fetchImpl(ANNOUNCEMENTS_URL, { headers: etag ? { "If-None-Match": etag } : {}, signal: AbortSignal.timeout(8000), cache: "no-cache" });
-    if (response.status === 304) return;
-    if (response.status === 404) { feed = []; etag = ""; return; }
+    // A unique URL avoids replaying a deleted message from a raw GitHub/CDN cache.
+    const url = new URL(ANNOUNCEMENTS_URL);
+    url.searchParams.set("check", String(now()));
+    const response = await fetchImpl(url.href, { headers: { "Cache-Control": "no-cache" }, signal: AbortSignal.timeout(8000), cache: "no-store" });
+    if (response.status === 404) { feed = []; return; }
     if (!response.ok) throw new Error("Announcement feed unavailable.");
     let size = 0; const chunks = [];
     if (!response.body) throw new Error("Empty announcement feed.");
@@ -29,7 +33,6 @@ function createAnnouncementService({ userData, fetchImpl = globalThis.fetch, now
       chunks.push(Buffer.from(chunk));
     }
     feed = normalizeFeed(JSON.parse(Buffer.concat(chunks).toString("utf8"))).announcements;
-    etag = response.headers.get("etag") || "";
   }
   async function check() {
     try {
@@ -40,16 +43,17 @@ function createAnnouncementService({ userData, fetchImpl = globalThis.fetch, now
         pending = refresh();
         try { await pending; } finally { pending = null; }
       }
-      return feed.filter(item => item.enabled && Date.parse(item.endsAt) > now() && !history.has(item.id));
-    } catch { return []; } // Announcements never block startup or missions.
+      return feed.filter(item => item.enabled && Date.parse(item.endsAt) > now() && !history.has(item.id))
+        .map(item => ({ ...item, automaticSeen: automaticHistory.has(item.id) }));
+    } catch { feed = []; return []; } // Never reuse a stale feed after a failed refresh.
   }
-  async function markSeen(id) {
+  async function markSeen(id, automatic = false) {
     await readHistory();
     if (!feed.some(item => item.id === id && isActive(item, now()))) return false;
-    history.add(id);
+    (automatic === true ? automaticHistory : history).add(id);
     writePending = writePending.catch(() => {}).then(async () => {
       await fs.mkdir(userData, { recursive: true });
-      await fs.writeFile(stateFile + ".next", JSON.stringify({ seen: [...history] }), { mode: 0o600 });
+      await fs.writeFile(stateFile + ".next", JSON.stringify({ seen: [...history], automaticSeen: [...automaticHistory] }), { mode: 0o600 });
       await fs.rename(stateFile + ".next", stateFile);
     });
     await writePending;

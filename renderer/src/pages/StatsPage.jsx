@@ -6,11 +6,18 @@ import useDesktopBridge from "../components/useDesktopBridge";
 import { canonicalCollectionLabel } from "../collection-images";
 import {
   availableAnalyticsSeasons,
-  currentAnalyticsSeasonKey,
   analyticsSeasonLabel,
 } from "../analytics-seasons.mjs";
 
 const DETAILED_STATS_URL_BASE = "https://missions.lol/missions-analytics/";
+
+function savedStatsRange(tab) {
+  try {
+    const key = localStorage.getItem(`missions:stats-range:${tab}`);
+    if (["session", "24h", "7d", "all", ...availableAnalyticsSeasons().map(([key]) => key)].includes(key)) return key;
+  } catch {}
+  return "season73";
+}
 
 function formatNumber(value, max = 2) {
   const n = Number(value || 0);
@@ -357,9 +364,15 @@ export default function StatsPage({ status }) {
   const refreshKey = analyticsRefreshKey(safeStatus.analytics);
   const [statsTab, setStatsTab] = useState("overview");
   const [overviewRangeKey, setOverviewRangeKey] = useState(
-    () => currentAnalyticsSeasonKey() || "all",
+    () => savedStatsRange("overview"),
   );
-  const [nftRangeKey, setNftRangeKey] = useState("all");
+  const [nftRangeKey, setNftRangeKey] = useState(() => savedStatsRange("nfts"));
+  useEffect(() => {
+    try {
+      localStorage.setItem("missions:stats-range:overview", overviewRangeKey);
+      localStorage.setItem("missions:stats-range:nfts", nftRangeKey);
+    } catch {}
+  }, [overviewRangeKey, nftRangeKey]);
   const rangeKey = statsTab === "nfts" ? nftRangeKey : overviewRangeKey;
   const setRangeKey =
     statsTab === "nfts" ? setNftRangeKey : setOverviewRangeKey;
@@ -368,6 +381,7 @@ export default function StatsPage({ status }) {
     direction: "desc",
   });
   const [analyticsView, setAnalyticsView] = useState(null);
+  const [competitionView, setCompetitionView] = useState(null);
   const [loading, setLoading] = useState(false);
   const [actionBusy, setActionBusy] = useState(false);
   const [error, setError] = useState("");
@@ -393,6 +407,18 @@ export default function StatsPage({ status }) {
       mounted = false;
     };
   }, [bridge, rangeKey, refreshKey]);
+
+  useEffect(() => {
+    let mounted = true;
+    bridge.getAnalyticsView("resetCompetition")
+      .then(result => { if (mounted) setCompetitionView(result); })
+      .catch(() => { if (mounted) setCompetitionView(null); });
+    return () => { mounted = false; };
+  }, [bridge, refreshKey]);
+
+  const competitionUsage = competitionView?.analytics?.nftResetUsage;
+  const competitionOwnedResets = asNumber(competitionUsage?.owned?.resets, 0);
+  const competitionRentalResets = asNumber(competitionUsage?.rental?.resets, 0);
 
   const scopedAnalytics =
     analyticsView?.analytics && typeof analyticsView.analytics === "object"
@@ -886,8 +912,8 @@ export default function StatsPage({ status }) {
   }
 
   return (
-    <section className="h-full min-h-0 overflow-hidden">
-      <div className="grid  grid-rows-[auto_200px_auto_auto] gap-3 overflow-hidden">
+    <section className="-mx-4 h-full min-h-0 overflow-y-auto px-4">
+      <div className="grid grid-rows-[auto_auto_calc(200px-1.75rem)_auto_auto] gap-3">
         <section className="card grid grid-cols-[minmax(195px,0.28fr)_minmax(0,1fr)] items-center gap-y-2 gap-x-2">
           <div className=" col-span-full flex flex-row items-center gap-3 items-center w-full  justify-between">
             <div className="flex items-center gap-2">
@@ -979,6 +1005,27 @@ export default function StatsPage({ status }) {
               value={formatNumber(claimsPerHour)}
             />
           </div>
+        </section>
+
+        <section className="card stats-competition-card grid w-full grid-cols-[minmax(0,1.15fr)_minmax(0,2.5fr)] items-center gap-4 rounded-xl px-4 py-2" aria-labelledby="reset-competition-title">
+          <h2 id="reset-competition-title" className="text-xs font-semibold leading-4 text-purple-100">
+            <span className="block">Reset Competition</span>
+            <span className="block">Sep 27–Nov 15, 2026</span>
+          </h2>
+          <dl className="grid grid-cols-3 gap-3">
+            {[
+              ["NFT Resets", competitionOwnedResets],
+              ["Rental NFT Resets", competitionRentalResets],
+              ["Total Auto Resets", competitionOwnedResets + competitionRentalResets],
+            ].map(([label, count]) => (
+              <div key={label} className="min-w-0">
+                <dt className="text-[11px] leading-3.5 text-purple-100/70">{label}</dt>
+                <dd className="text-lg font-semibold leading-6 tabular-nums text-white">
+                  {competitionView ? formatNumber(count, 0) : "—"}
+                </dd>
+              </div>
+            ))}
+          </dl>
         </section>
 
         <div className="grid min-h-0 grid-cols-2 gap-3 overflow-hidden">
@@ -1132,7 +1179,7 @@ export default function StatsPage({ status }) {
               value={formatNumber(sessionRentals, 0)}
             />{" "}
             <DetailRow
-              label="NFT resets"
+              label="NFT rental resets"
               value={formatNumber(rentalNftResets, 0)}
             />{" "}
             <DetailRow
@@ -1169,17 +1216,11 @@ export default function StatsPage({ status }) {
           </button>
         </div>
 
-        <div
-          className={`min-h-[16px] text-xs ${
-            error
-              ? "text-error"
-              : loading
-                ? "text-slate-400"
-                : "text-transparent"
-          }`}
-        >
-          {error ? error : loading ? "Loading stats…" : "."}
-        </div>
+        {error || loading ? (
+          <div className={`min-h-[16px] text-xs ${error ? "text-error" : "text-slate-400"}`}>
+            {error || "Loading stats…"}
+          </div>
+        ) : null}
       </div>
     </section>
   );
