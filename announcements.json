@@ -1,29 +1,4 @@
 {
   "schemaVersion": 1,
-  "announcements": [
-    {
-      "id": "announcement-4",
-      "enabled": true,
-      "startsAt": "2026-10-27T20:46:23.117Z",
-      "endsAt": "2026-10-29T21:10:00.000Z",
-      "title": "",
-      "text": "",
-      "info": "",
-      "imageUrl": "https://raw.githubusercontent.com/smolpuff/mos-mission-manager/announcements/images/0238b1a905baa44ab9d3d41df209f6ab7364c197e8201d6b1927960096d52322.png",
-      "imageWidth": 100,
-      "imageAlt": "",
-      "prizes": [
-        {
-          "place": "1st",
-          "prize": "1x TKM NFT"
-        },
-        {
-          "place": "2nd",
-          "prize": "5000 PBP"
-        }
-      ],
-      "linkUrl": "",
-      "linkLabel": ""
-    }
-  ]
+  "announcements": []
 }
