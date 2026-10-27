@@ -1,20 +1,4 @@
 {
   "schemaVersion": 1,
-  "announcements": [
-    {
-      "id": "announcement-3",
-      "enabled": true,
-      "startsAt": "2026-10-27T18:08:02.779Z",
-      "endsAt": "2026-10-29T18:08:00.000Z",
-      "title": "",
-      "text": "testy",
-      "info": "",
-      "imageUrl": "https://raw.githubusercontent.com/smolpuff/mos-mission-manager/announcements/images/134b00576dfee09b264a7c80a2a1d87c4f0b81adb45eda6dd5f4daaa7febc825.png",
-      "imageWidth": 100,
-      "imageAlt": "",
-      "prizes": [],
-      "linkUrl": "",
-      "linkLabel": ""
-    }
-  ]
+  "announcements": []
 }
