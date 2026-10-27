@@ -3,20 +3,11 @@
   "version": "3.3.0-beta.8",
   "downloadUrl": "https://github.com/smolpuff/mos-mission-manager/releases/tag/v3.3.0b8",
   "notes": [
-    "Season 73 tings. no h.",
-    "NEW: HIGHLY REQUESTED - added autostart for watching missions on app launch",
-    "NEW: HIGHLY REQUESTED - added windows tray controls to keep app running in the background while closed",
-    "Faster claiming & assigning when claim is out of normal watch loop",
-    "Added auto-updater that should actually work now. oops!",
-    "Hardened security for privileged app commands, re: wallet access",
-    "Added wallet import if you like to live dangerously (no really, don't import your main wallet...)",
-    "Fixed annoying re-auth mcp spam",
-    "Fixed Level 20+ NFT selection skipping eligible collections at times",
-    "Fixed NFT cooldown reset cost totals and reset attribution after assignment retries (visual)",
-    "Fixed trying to use rental when reaching end of paged nft listing",
-    "Fixed wallet creation timing out on Windows on slower hardware",
-    "Fixed various other bugs in win. mac, linux",
-    "All new onboarding experience with guided tour"
+    "Fixed Rentals used to count recorded rental assignments for the selected stats range, including retained history.",
+    "Preserved NFT reset attribution when an assignment succeeds after a retry.",
+    "Recorded assignments recovered after an ambiguous response without counting the same assignment twice.",
+    "Combined NFT cooldown reset cost aliases so the cost breakdown includes both recorded action names.",
+    "Beta builds use beta/version.json for updates; production builds remain on main/version.json."
   ],
   "artifacts": {
     "win32-x64": {
