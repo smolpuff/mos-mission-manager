@@ -112,6 +112,10 @@
     @apply !cursor-pointer;
   }
 
+  a.update-download-link {
+    cursor: pointer !important;
+  }
+
   .btn-clear {
     @apply !border-transparent !bg-transparent !shadow-none text-inherit p-0;
   }

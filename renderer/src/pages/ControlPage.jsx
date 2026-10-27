@@ -3512,19 +3512,18 @@ function ControlView() {
         )}
       </div>
       {updateModal.downloadUrl ? (
-        <p className="text-xs text-slate-300">
-          If this update fails, please try{" "}
+        <p className="text-base leading-6 text-slate-200">
+          If this update fails, please try downloading it manually:
           <a
             href={updateModal.downloadUrl}
-            className="underline hover:text-slate-100"
+            className="update-download-link mt-1 block break-all font-semibold text-secondary underline underline-offset-2 hover:text-accent"
             onClick={(event) => {
               event.preventDefault();
               void openExternalUrl(updateModal.downloadUrl);
             }}
           >
-            downloading it manually
+            {updateModal.downloadUrl}
           </a>
-          .
         </p>
       ) : null}
 

@@ -6,16 +6,26 @@ const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
 const os = require("node:os");
-const { compareVersions, checkForUpdates } = require("../update-checker");
-const { selectArtifact, getReleaseArtifact, releaseAssetUrl } = require("../update-download");
+const { compareVersions } = require("../update-checker");
+const { selectArtifact, releaseAssetUrl } = require("../update-download");
 
 function downloadModule(metadata) {
   const module = { exports: {} };
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, "../update-download.js"), "utf8"), {
-    module,
+    module, Buffer, AbortSignal, URL,
     require: (name) => name === "../package.json" ? metadata : require(name),
   });
   return module.exports;
+}
+
+function betaModules() {
+  const download = downloadModule({ version: "3.3.0-beta.8" });
+  const module = { exports: {} };
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname, "../update-checker.js"), "utf8"), {
+    module, AbortController, setTimeout, clearTimeout,
+    require: (name) => name === "./update-download" ? download : require(name),
+  });
+  return { ...download, ...module.exports };
 }
 
 test("beta builds use beta/version.json and stable builds use main/version.json", () => {
@@ -60,6 +70,7 @@ function manifest() {
 }
 
 test("a beta offer and its artifact lookup both fetch the beta repository feed", async () => {
+  const { checkForUpdates, getReleaseArtifact } = betaModules();
   const metadata = manifest();
   const urls = [];
   const fetchImpl = async (url) => {
@@ -76,6 +87,7 @@ test("a beta offer and its artifact lookup both fetch the beta repository feed",
 });
 
 test("promoting final production metadata to the beta feed installs production and then uses main", async () => {
+  const { checkForUpdates, getReleaseArtifact } = betaModules();
   const metadata = manifest();
   metadata.version = "3.3.0";
   metadata.downloadUrl = "https://github.com/smolpuff/mos-mission-manager/releases/tag/v3.3.0";
