@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "announcements": [
+    {
+      "id": "p1",
+      "enabled": true,
+      "startsAt": "2026-10-26T05:12:00.000Z",
+      "endsAt": "2026-10-30T05:13:00.000Z",
+      "title": "",
+      "text": "Check your NFT cooldown reset count on your stats page\nhttps://www.missions.lol/missions-analytics/",
+      "info": "",
+      "imageUrl": "https://raw.githubusercontent.com/smolpuff/mos-mission-manager/announcements/images/0939256b67d1c89f45b4c3e93149297366ff701d4cdacaa3b5b1965bcf5b2fa3.png",
+      "imageWidth": 100,
+      "imageAlt": "laurenzo is a dork",
+      "prizes": [],
+      "linkUrl": "",
+      "linkLabel": ""
+    }
+  ]
+}
