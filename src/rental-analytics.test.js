@@ -46,6 +46,22 @@ function analyticsHarness() {
   return { context, telemetry, saved: () => saved };
 }
 
+test("competition mission-reset totals exclude NFT resets and events outside Nov 2–15", () => {
+  const { context } = analyticsHarness();
+  const start = Date.parse("2026-11-02T00:00:00-05:00");
+  const end = Date.parse("2026-11-16T00:00:00-05:00");
+  const result = context.analyticsBucketFromRange({ resetHistory: [
+    { at: start - 1, kind: "mission" },
+    { at: start, kind: "mission", source: "watch_reroll" },
+    { at: start + 1, kind: "nft", source: "owned" },
+    { at: start + 2, kind: "nft", source: "rental" },
+    { at: end - 1, kind: "mission", source: "assign_auto_mode_reroll" },
+    { at: end, kind: "mission" },
+  ] }, "resetCompetition");
+  assert.equal(result.resetTypes.mission, 2);
+  assert.equal(result.resetTypes.nft, 2);
+});
+
 test("rental usage is recovered from retained assignments for session, all and Season 72", () => {
   const { context } = analyticsHarness();
   const start = Date.parse("2026-09-15T00:00:00-04:00");

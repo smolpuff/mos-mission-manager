@@ -4,6 +4,7 @@ import tcIcon from "../img/icon_tc.webp";
 import { useEffect, useState } from "react";
 import useDesktopBridge from "../components/useDesktopBridge";
 import { canonicalCollectionLabel } from "../collection-images";
+import { resetCompetitionDisplayWindow, resetCompetitionIsVisible } from "../competition-visibility.mjs";
 import {
   availableAnalyticsSeasons,
   analyticsSeasonLabel,
@@ -382,6 +383,7 @@ export default function StatsPage({ status }) {
   });
   const [analyticsView, setAnalyticsView] = useState(null);
   const [competitionView, setCompetitionView] = useState(null);
+  const [competitionVisible, setCompetitionVisible] = useState(() => resetCompetitionIsVisible());
   const [loading, setLoading] = useState(false);
   const [actionBusy, setActionBusy] = useState(false);
   const [error, setError] = useState("");
@@ -409,16 +411,35 @@ export default function StatsPage({ status }) {
   }, [bridge, rangeKey, refreshKey]);
 
   useEffect(() => {
+    let timer;
+    const update = () => {
+      clearTimeout(timer);
+      setCompetitionVisible(resetCompetitionIsVisible());
+      const now = Date.now();
+      const { startsAt, hidesAt } = resetCompetitionDisplayWindow();
+      const next = [startsAt, hidesAt].find(at => at > now);
+      if (next) timer = setTimeout(update, Math.min(next - now, 2147483647));
+    };
+    update();
+    window.addEventListener("focus", update);
+    document.addEventListener("visibilitychange", update);
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener("focus", update);
+      document.removeEventListener("visibilitychange", update);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!competitionVisible) return;
     let mounted = true;
     bridge.getAnalyticsView("resetCompetition")
       .then(result => { if (mounted) setCompetitionView(result); })
       .catch(() => { if (mounted) setCompetitionView(null); });
     return () => { mounted = false; };
-  }, [bridge, refreshKey]);
+  }, [bridge, refreshKey, competitionVisible]);
 
-  const competitionUsage = competitionView?.analytics?.nftResetUsage;
-  const competitionOwnedResets = asNumber(competitionUsage?.owned?.resets, 0);
-  const competitionRentalResets = asNumber(competitionUsage?.rental?.resets, 0);
+  const competitionMissionResets = asNumber(competitionView?.analytics?.resetTypes?.mission, 0);
 
   const scopedAnalytics =
     analyticsView?.analytics && typeof analyticsView.analytics === "object"
@@ -913,7 +934,7 @@ export default function StatsPage({ status }) {
 
   return (
     <section className="-mx-4 h-full min-h-0 overflow-y-auto px-4">
-      <div className="grid grid-rows-[auto_auto_calc(200px-1.75rem)_auto_auto] gap-3">
+      <div className={`grid gap-3 ${competitionVisible ? "grid-rows-[auto_auto_calc(200px-1.75rem)_auto_auto]" : "grid-rows-[auto_calc(200px-1.75rem)_auto_auto]"}`}>
         <section className="card grid grid-cols-[minmax(195px,0.28fr)_minmax(0,1fr)] items-center gap-y-2 gap-x-2">
           <div className=" col-span-full flex flex-row items-center gap-3 items-center w-full  justify-between">
             <div className="flex items-center gap-2">
@@ -1007,16 +1028,14 @@ export default function StatsPage({ status }) {
           </div>
         </section>
 
-        <section className="card stats-competition-card grid w-full grid-cols-[minmax(0,1.15fr)_minmax(0,2.5fr)] items-center gap-4 rounded-xl px-4 py-2" aria-labelledby="reset-competition-title">
+        {competitionVisible ? <section className="card stats-competition-card grid w-full grid-cols-[minmax(0,1.15fr)_minmax(0,2.5fr)] items-center gap-4 rounded-xl px-4 py-2" aria-labelledby="reset-competition-title">
           <h2 id="reset-competition-title" className="text-xs font-semibold leading-4 text-purple-100">
             <span className="block">Reset Competition</span>
-            <span className="block font-normal text-slate-400">Nov 1–15, 2026</span>
+            <span className="block font-normal text-slate-400">Nov 2–15, 2026</span>
           </h2>
-          <dl className="grid grid-cols-3 gap-3">
+          <dl>
             {[
-              ["NFT Resets", competitionOwnedResets],
-              ["Rental NFT Resets", competitionRentalResets],
-              ["Total Auto Resets", competitionOwnedResets + competitionRentalResets],
+              ["Automatic Mission Resets", competitionMissionResets],
             ].map(([label, count]) => (
               <div key={label} className="min-w-0">
                 <dt className="text-[11px] leading-3.5 text-purple-100/70">{label}</dt>
@@ -1026,7 +1045,7 @@ export default function StatsPage({ status }) {
               </div>
             ))}
           </dl>
-        </section>
+        </section> : null}
 
         <div className="grid min-h-0 grid-cols-2 gap-3 overflow-hidden">
           <section className="card stats-live-card min-h-0 overflow-hidden">

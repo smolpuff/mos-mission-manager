@@ -62,20 +62,15 @@ test("dates outside the known schedule do not claim a current season", () => {
   }
 });
 
-test("Reset Competition includes Nov 1–15 Eastern across daylight saving", () => {
+test("Reset Competition includes Nov 2–15 Eastern", () => {
   const bounds = ranges.analyticsRangeBounds("resetCompetition");
   assert.equal(ranges.normalizeAnalyticsRange("resetCompetition"), "resetCompetition");
-  assert.equal(analyticsSeasonLabel("resetCompetition"), "Reset Competition (Nov 1–15, 2026)");
+  assert.equal(analyticsSeasonLabel("resetCompetition"), "Reset Competition (Nov 2–15, 2026)");
   for (const [timestamp, included] of [
-    ["2026-09-26T23:59:59.999-04:00", false],
-    ["2026-09-27T00:00:00-04:00", false],
-    ["2026-10-24T12:00:00-04:00", false],
-    ["2026-10-31T23:59:59.999-04:00", false],
-    ["2026-11-01T00:00:00-04:00", true],
-    ["2026-11-01T01:30:00-04:00", true],
-    ["2026-11-01T01:30:00-05:00", true],
+    ["2026-10-27T12:00:00-04:00", false],
+    ["2026-11-01T23:59:59.999-05:00", false],
+    ["2026-11-02T00:00:00-05:00", true],
     ["2026-11-15T23:59:59.999-05:00", true],
     ["2026-11-16T00:00:00-05:00", false],
   ]) assert.equal(ranges.isInAnalyticsRange({ at: Date.parse(timestamp) }, bounds), included, timestamp);
-  assert.equal(currentAnalyticsSeasonKey(bounds.start), "season73");
 });
