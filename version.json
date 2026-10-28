@@ -1,32 +1,34 @@
 {
   "schemaVersion": 1,
-  "version": "3.3.0-beta.8",
-  "downloadUrl": "https://github.com/smolpuff/mos-mission-manager/releases/tag/v3.3.0b8",
+  "version": "3.3.0-beta.9",
+  "downloadUrl": "https://github.com/smolpuff/mos-mission-manager/releases/tag/v3.3.0b9",
   "notes": [
-    "Fixed Rentals used to count recorded rental assignments for the selected stats range, including retained history.",
-    "Preserved NFT reset attribution when an assignment succeeds after a retry.",
-    "Recorded assignments recovered after an ambiguous response without counting the same assignment twice.",
-    "Combined NFT cooldown reset cost aliases so the cost breakdown includes both recorded action names.",
-    "Beta builds use beta/version.json for updates; production builds remain on main/version.json."
+    "Fixed window dragging staying attached to the mouse after release in the main and CLI windows.",
+    "Added scheduled announcements with images, links, prize details, and dismissal controls.",
+    "Updated mission reset competition scoring and scheduling, including the Nov 2–15 scoring window and results visibility through Nov 22.",
+    "Improved setup popup handling, season and competition visibility, and related stats, NFT, and settings displays.",
+    "Improved reset analytics delivery and reduced CLI memory usage.",
+    "Updated the app header and made the manual update download link clearer.",
+    "Beta prerelease only. Beta builds use beta/version.json; production builds remain on main/version.json."
   ],
   "artifacts": {
     "win32-x64": {
-      "url": "https://github.com/smolpuff/mos-mission-manager/releases/download/v3.3.0b8/missions-v3-mcp.3.3.0b8.exe",
-      "size": 104151589,
-      "sha256": "d419067c37c865745d82db19b6ee4d6d080fa3cf7b0c87071063776964692095",
-      "md5": "86efbc7c2936ee1ad88d184cdf2b46dd"
+      "url": "https://github.com/smolpuff/mos-mission-manager/releases/download/v3.3.0b9/missions-v3-mcp.3.3.0b9.exe",
+      "size": 104165460,
+      "sha256": "c54c3642d30b48b29b7a4dee0292eb0ea59c6b3f96a9c25e827ac395f731d83f",
+      "md5": "3b477779614917b89b094cc067901a05"
     },
     "darwin-arm64": {
-      "url": "https://github.com/smolpuff/mos-mission-manager/releases/download/v3.3.0b8/missions-v3-mcp-3.3.0b8-arm64-mac.zip",
-      "size": 130687536,
-      "sha256": "3feaf965be55a41f59bbc938d3cd15c7f4014d256dfaacd321de4b8e32af7904",
-      "md5": "09349ff739a4afc749dab6f8953c6c42"
+      "url": "https://github.com/smolpuff/mos-mission-manager/releases/download/v3.3.0b9/missions-v3-mcp-3.3.0b9-arm64-mac.zip",
+      "size": 130704167,
+      "sha256": "fce488a6da38dd3dddd0f27ab03a0c59e7ee90ed645501dd02fa7e7c02e9b78e",
+      "md5": "616303ec0de3f6c939e5d6e095a4d257"
     },
     "darwin-x64": {
-      "url": "https://github.com/smolpuff/mos-mission-manager/releases/download/v3.3.0b8/missions-v3-mcp-3.3.0b8-x64-mac.zip",
-      "size": 137102505,
-      "sha256": "6ad5dbf6737951c203a0226940631a0e2920136f8bda0ea4f0d04773f3b0f870",
-      "md5": "99960aef874e9151f95b892f69f5b4bf"
+      "url": "https://github.com/smolpuff/mos-mission-manager/releases/download/v3.3.0b9/missions-v3-mcp-3.3.0b9-x64-mac.zip",
+      "size": 137119130,
+      "sha256": "8ad3659b4469ccb1ee826f16241f44814f3a767f6572aac420ea5fd7a0ec46df",
+      "md5": "0b6a19085046039cdd2f7f4407f5cb8a"
     }
   }
 }
