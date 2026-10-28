@@ -449,8 +449,9 @@ function ControlView() {
   const [tourModePreview, setTourModePreview] = useState(null);
   // Keep unrelated dialogs out of setup and the tour, even when an in-flight
   // background request finishes after either flow has opened.
+  const setupActive = onboardingOpen || interfaceTourOpen;
   const popupsBlocked =
-    !startupConfigLoaded || !firstRunSetupComplete || onboardingOpen || interfaceTourOpen;
+    !startupConfigLoaded || !firstRunSetupComplete || setupActive;
   const closeInterfaceTour = useCallback(() => {
     setInterfaceTourOpen(false);
     setTourModePreview(null);
@@ -2483,7 +2484,7 @@ function ControlView() {
   }, [status.running, isWatching, status.watchLoopEnabled]);
 
   useEffect(() => {
-    if (!onboardingOpen) return undefined;
+    if (!onboardingOpen || resetErrorModal || throttleModal) return undefined;
     const dialog = document.querySelector("[data-onboarding-step]");
     const focusableElements = () =>
       [
@@ -2522,7 +2523,7 @@ function ControlView() {
       window.removeEventListener("keydown", onKeyDown, true);
       document.removeEventListener("focusin", keepFocusInSetup);
     };
-  }, [onboardingOpen]);
+  }, [onboardingOpen, resetErrorModal, throttleModal]);
 
   useEffect(() => {
     if (lastEvent?.type !== "throttle_notice" || lastEvent.source !== "mcp")
@@ -2549,7 +2550,7 @@ function ControlView() {
   }, [lastEvent]);
 
   useEffect(() => {
-    if (popupsBlocked || !throttleModal) {
+    if (!throttleModal) {
       setThrottleModalCountdown(5);
       return undefined;
     }
@@ -2564,7 +2565,7 @@ function ControlView() {
       clearTimeout(closeTimer);
       clearInterval(tickTimer);
     };
-  }, [throttleModal, popupsBlocked]);
+  }, [throttleModal]);
 
   const openCliWindow = () => {
     setIsCliActive(true);
@@ -3678,6 +3679,7 @@ function ControlView() {
               SlideNumberFormatted={SlideNumberFormatted}
               openSecretModal={openSecretModal}
               openCreateWalletModal={openCreateWalletModal}
+              setupActive={setupActive}
               autoUpdateCheckEnabled={autoUpdateCheckEnabled}
               windowsTrayEnabled={windowsTrayEnabled}
               autoStartWatchingEnabled={autoStartWatchingEnabled}
@@ -4134,7 +4136,7 @@ function ControlView() {
               </div>
             </div>
           ) : null}
-          {createWalletOpen && (!popupsBlocked || (onboardingOpen && createWalletOnboarding)) ? (
+          {!setupActive && createWalletOpen ? (
             <div
               className="fixed inset-0 z-60 grid place-items-center bg-black/60 p-4"
               role="dialog"
@@ -4374,13 +4376,13 @@ function ControlView() {
             />
           ) : null}
           <div className={currentPage === "nfts" ? "min-h-0 flex-1 overflow-hidden" : "hidden"}>
-            <NftsPage bridge={bridge} signerMode={status.signerMode} />
+            <NftsPage bridge={bridge} signerMode={status.signerMode} setupActive={setupActive} />
           </div>
           {currentPage === "rentals" ? <RentalsPage bridge={bridge} /> : null}
           {currentPage !== "missions" ? null : (
             <>
               <div className="space-y-1.5">
-                <section className="card grid grid-cols-[minmax(0,1fr)_max-content] gap-4">
+                <section className="card grid grid-cols-2 gap-4">
                   <div className="space-y-3 w-full ">
                     {" "}
                     <div className="status-row text-2xl flex items-center gap-2">
@@ -5690,9 +5692,9 @@ function ControlView() {
               </div>
             </div>
           ) : null}
-          {!popupsBlocked && resetErrorModal ? (
+          {resetErrorModal ? createPortal((
             <div
-              className="fixed inset-0 z-60 grid place-items-center bg-black/60 p-4"
+              className="fixed inset-0 z-[10020] grid place-items-center bg-black/60 p-4"
               role="dialog"
               aria-modal="true"
             >
@@ -5789,7 +5791,7 @@ function ControlView() {
                 </div>
               </div>
             </div>
-          ) : null}
+          ), document.body) : null}
           {!popupsBlocked && slotUnlockModalOpen ? (
             <div
               className="fixed inset-0 z-60 grid place-items-center bg-black/60 p-4"
@@ -6444,9 +6446,9 @@ function ControlView() {
               </div>
             </div>
           ) : null}
-          {!popupsBlocked && throttleModal ? (
+          {throttleModal ? createPortal((
             <div
-              className="fixed inset-0 z-60 grid place-items-center bg-black/60 p-4"
+              className="fixed inset-0 z-[10020] grid place-items-center bg-black/60 p-4"
               role="dialog"
               aria-modal="true"
             >
@@ -6510,7 +6512,7 @@ function ControlView() {
                 </div>
               </div>
             </div>
-          ) : null}
+          ), document.body) : null}
         </div>
       </div>
     </main>

@@ -62,6 +62,20 @@ test("competition mission-reset totals exclude NFT resets and events outside Nov
   assert.equal(result.resetTypes.nft, 2);
 });
 
+test("competition scoring retains all mission resets beyond the recent-history limit", () => {
+  const { context } = analyticsHarness();
+  const start = Date.parse("2026-11-02T00:00:00-05:00");
+  const competition = Array.from({ length: 2500 }, (_, index) => ({ at: start + index, kind: "mission" }));
+  const old = Array.from({ length: 50 }, (_, index) => ({ at: start - 1000 + index, kind: "mission" }));
+  const later = Array.from({ length: 2100 }, (_, index) => ({ at: Date.parse("2026-11-24T00:00:00-05:00") + index, kind: "mission" }));
+  const saved = context.normalizeResetHistory([...old, ...competition, ...later]);
+  assert.equal(saved.length, 4500, "Keep competition records plus the usual last 2000 other records");
+  const reloaded = context.normalizeResetHistory(JSON.parse(JSON.stringify(saved)));
+  const view = context.analyticsBucketFromRange({ resetHistory: reloaded }, "resetCompetition");
+  assert.equal(view.resetTypes.mission, 2500, "Full score survives save/reload and later resets");
+  assert.equal(context.normalizeResetHistory(later).length, 2000, "Other history keeps its existing limit");
+});
+
 test("rental usage is recovered from retained assignments for session, all and Season 72", () => {
   const { context } = analyticsHarness();
   const start = Date.parse("2026-09-15T00:00:00-04:00");

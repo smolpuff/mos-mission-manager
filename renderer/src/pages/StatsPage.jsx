@@ -539,7 +539,9 @@ export default function StatsPage({ status }) {
         ? "Last 24hrs"
         : rangeKey === "7d"
           ? "Last 7days"
-          : analyticsSeasonLabel(rangeKey) || "All Time";
+          : rangeKey === "resetCompetition"
+            ? "Nov 2–15"
+            : analyticsSeasonLabel(rangeKey) || "All Time";
   const currentUserWalletId = [
     safeStatus.currentUserWalletId,
     safeStatus.currentUserWalletSummary?.walletId,
@@ -934,7 +936,7 @@ export default function StatsPage({ status }) {
 
   return (
     <section className="-mx-4 h-full min-h-0 overflow-y-auto px-4">
-      <div className={`grid gap-3 ${competitionVisible ? "grid-rows-[auto_auto_calc(200px-1.75rem)_auto_auto]" : "grid-rows-[auto_calc(200px-1.75rem)_auto_auto]"}`}>
+      <div className={`grid gap-3 ${competitionVisible ? "grid-rows-[auto_auto_calc(200px-1.75rem)_auto_auto]" : "grid-rows-[auto_200px_auto_auto]"}`}>
         <section className="card grid grid-cols-[minmax(195px,0.28fr)_minmax(0,1fr)] items-center gap-y-2 gap-x-2">
           <div className=" col-span-full flex flex-row items-center gap-3 items-center w-full  justify-between">
             <div className="flex items-center gap-2">
@@ -1031,7 +1033,7 @@ export default function StatsPage({ status }) {
         {competitionVisible ? <section className="card stats-competition-card grid w-full grid-cols-[minmax(0,1.15fr)_minmax(0,2.5fr)] items-center gap-4 rounded-xl px-4 py-2" aria-labelledby="reset-competition-title">
           <h2 id="reset-competition-title" className="text-xs font-semibold leading-4 text-purple-100">
             <span className="block">Reset Competition</span>
-            <span className="block font-normal text-slate-400">Nov 2–15, 2026</span>
+            <span className="block font-normal text-slate-400">Nov 2–15</span>
           </h2>
           <dl>
             {[

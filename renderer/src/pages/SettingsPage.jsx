@@ -28,6 +28,7 @@ function SettingsHelp({ children, preserveLines = false }) {
 }
 
 export default function SettingsPage({
+  setupActive = false,
   fundingEnabled,
   fundingSource,
   setFundingSource,
@@ -596,7 +597,7 @@ export default function SettingsPage({
           </div>
         </div>
       </div>
-      {importOpen && (
+      {!setupActive && importOpen && (
         <div
           className="fixed inset-0 z-60 grid place-items-center bg-black/70 p-4"
           onKeyDown={(event) => {

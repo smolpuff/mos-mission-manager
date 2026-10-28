@@ -46,6 +46,7 @@ const {
 } = require("./competitionRangeLock");
 const { checkForUpdates } = require("./update-checker");
 const { createAnnouncementService } = require("./announcements");
+const { createResetTelemetryDelivery } = require("./reset-telemetry-delivery");
 const { normalizeAnalyticsRange, analyticsRangeBounds, isInAnalyticsRange } = require("./analytics-ranges");
 const { countRentalAssignments, hasRecordedAssignment } = require("../src/rental-analytics");
 const { MacUpdater, acknowledgeMacUpdate } = require("./mac-updater");
@@ -745,7 +746,7 @@ function normalizeSpendHistory(raw) {
 
 function normalizeResetHistory(raw) {
   if (!Array.isArray(raw)) return [];
-  return raw
+  const entries = raw
     .map((entry) => {
       const at = Number(entry?.at);
       const kind = String(entry?.kind || entry?.resetType || "")
@@ -760,8 +761,12 @@ function normalizeResetHistory(raw) {
         source: source === "rental" ? "rental" : "owned",
       };
     })
-    .filter((entry) => entry.at)
-    .slice(-2000);
+    .filter((entry) => entry.at);
+  const competitionBounds = analyticsRangeBounds("resetCompetition");
+  // Keep every competition mission reset so local scoring matches the website,
+  // even when a participant exceeds the usual recent-history limit.
+  return entries.filter((entry, index) => index >= entries.length - 2000 ||
+    (entry.kind === "mission" && isInAnalyticsRange(entry, competitionBounds)));
 }
 
 function normalizeRentalHistory(raw) {
@@ -1677,9 +1682,44 @@ function buildTelemetryPayload(eventType, extra = {}) {
   };
 }
 
+const resetTelemetryDelivery = createResetTelemetryDelivery({ send: postResetTelemetryPayload });
+
+async function postResetTelemetryPayload(payload, remainingMs) {
+  const config = telemetryConfigFromDesktopConfig();
+  if (!config.enabled) return { ok: false, retryable: false };
+  const startedAt = Date.now();
+  const externalIp = await externalIpForPayload();
+  const budget = remainingMs - (Date.now() - startedAt);
+  if (budget <= 0) return { ok: false, retryable: false };
+  try {
+    const response = await fetch(config.url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Missions-Track-Token": config.token },
+      body: JSON.stringify({ ...payload, ...(externalIp ? { external_ip: externalIp } : {}) }),
+      signal: AbortSignal.timeout(Math.min(MISSIONS_ANALYTICS_TIMEOUT_MS, budget)),
+    });
+    if (!response.ok) {
+      const error = new Error(`Telemetry HTTP ${response.status}`);
+      error.retryable = response.status >= 500 || [408, 429].includes(response.status);
+      throw error;
+    }
+    analyticsTelemetryFailureLogged = false;
+    return { ok: true };
+  } catch (error) {
+    if (!analyticsTelemetryFailureLogged) {
+      analyticsTelemetryFailureLogged = true;
+      pushSystemLog(`Mission analytics reporting failed: ${String(error?.message || error)}`);
+    }
+    return { ok: false, retryable: error.retryable !== false };
+  }
+}
+
 async function postTelemetryEvent(eventType, extra = {}) {
   const config = telemetryConfigFromDesktopConfig();
   if (!config.enabled) return false;
+  if (eventType === "feature_used" && extra.event_name === "reset") {
+    return resetTelemetryDelivery.deliver(buildTelemetryPayload(eventType, extra));
+  }
   const externalIp = await externalIpForPayload();
   const payload = buildTelemetryPayload(eventType, {
     ...(externalIp ? { external_ip: externalIp } : {}),
@@ -2682,6 +2722,7 @@ function applyAnalyticsSpendEvent(payload = {}) {
 }
 
 function applyAnalyticsResetEvent(payload = {}) {
+  const resetAt = Date.now();
   const kind = String(
     payload?.resetType || payload?.kind || payload?.type || "mission",
   )
@@ -2699,7 +2740,7 @@ function applyAnalyticsResetEvent(payload = {}) {
   current.lifetime.resetHistory = normalizeResetHistory([
     ...(current.lifetime.resetHistory || []),
     {
-      at: Date.now(),
+      at: resetAt,
       kind: bucket,
       source: String(payload?.resetSource || payload?.source || "").trim(),
     },
@@ -2707,7 +2748,7 @@ function applyAnalyticsResetEvent(payload = {}) {
   current.session.resetHistory = normalizeResetHistory([
     ...(current.session.resetHistory || []),
     {
-      at: Date.now(),
+      at: resetAt,
       kind: bucket,
       source: String(payload?.resetSource || payload?.source || "").trim(),
     },
@@ -2722,6 +2763,7 @@ function applyAnalyticsResetEvent(payload = {}) {
   }
   saveAnalytics(current);
   trackFeatureUsage("reset", {
+    timestamp: new Date(resetAt).toISOString(),
     reset_type: bucket,
     reset_source:
       String(payload?.resetSource || payload?.source || "").trim() || undefined,

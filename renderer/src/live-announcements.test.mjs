@@ -18,6 +18,21 @@ test("no checks or popups during setup; deferred popup after setup; normal dismi
  f.display.setBlocked(false); await settle(); assert.deepEqual(f.seen, []);
  f.display.dismiss(); t.mock.timers.tick(ANNOUNCEMENT_CHECK_MS); await settle(); assert.equal(f.shown.at(-1), null);
 });
+
+test("a setup lasting multiple check intervals never fetches, displays or marks an announcement", async t => {
+ t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: start });
+ let checks = 0; const shown = [], marked = [];
+ const display = createAnnouncementDisplay({
+   check: async () => { checks++; return [item({ endsAt: new Date(start + 10 * ANNOUNCEMENT_CHECK_MS).toISOString() })]; },
+   markSeen: (...args) => marked.push(args), onChange: value => shown.push(value),
+ });
+ t.after(() => display.dispose());
+ display.setBlocked(true);
+ for (let i = 0; i < 3; i++) { t.mock.timers.tick(ANNOUNCEMENT_CHECK_MS); await settle(); }
+ assert.equal(checks, 0); assert.ok(shown.every(value => value === null)); assert.deepEqual(marked, []);
+ display.setBlocked(false); await settle();
+ assert.equal(checks, 1); assert.equal(shown.at(-1).canSuppress, true);
+});
 test("scheduled announcement starts on time and disappears exactly at expiry", async t => {
  const f = fixture(t, [item({ startsAt: new Date(start + 1000).toISOString(), endsAt: new Date(start + 2000).toISOString() })]);
  f.display.setBlocked(false); await settle(); assert.equal(f.shown.at(-1), null);

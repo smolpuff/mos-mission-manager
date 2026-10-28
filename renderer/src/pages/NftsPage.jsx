@@ -139,7 +139,7 @@ function NftCardImage({ src, alt }) {
   );
 }
 
-export default function NftsPage({ bridge, signerMode = "" }) {
+export default function NftsPage({ bridge, signerMode = "", setupActive = false }) {
   const [loading, setLoading] = useState(false);
   const [hasLoaded, setHasLoaded] = useState(false);
   const [cacheExpiresAtMs, setCacheExpiresAtMs] = useState(null);
@@ -773,7 +773,7 @@ export default function NftsPage({ bridge, signerMode = "" }) {
           </div>
         )}
       </div>
-      {detailModal ? (
+      {!setupActive && detailModal ? (
         <div
           className="fixed inset-0 z-60 grid place-items-center bg-black/80 p-4"
           role="dialog"
@@ -884,7 +884,7 @@ export default function NftsPage({ bridge, signerMode = "" }) {
           </div>
         </div>
       ) : null}
-      {resetModal ? (
+      {!setupActive && resetModal ? (
         <div
           className="fixed inset-0 z-60 grid place-items-center bg-black/60 p-4"
           role="dialog"
