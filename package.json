@@ -1,6 +1,6 @@
 {
   "name": "missions-v3-mcp",
-  "version": "3.3.0",
+  "version": "3.3.0b9",
   "main": "electron/main.js",
   "scripts": {
     "announcements:editor": "node tools/announcement-editor/server.cjs",

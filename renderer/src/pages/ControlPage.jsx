@@ -3508,6 +3508,21 @@ function ControlView() {
           </div>
         ) : null}
       </div>
+      {updateModal.downloadUrl ? (
+        <p className="text-base leading-6 text-slate-200">
+          If the automatic update fails, download the latest release manually here:
+          <a
+            href={updateModal.downloadUrl}
+            className="update-download-link mt-1 block break-all font-semibold text-secondary underline underline-offset-2 hover:text-accent"
+            onClick={(event) => {
+              event.preventDefault();
+              void openExternalUrl(updateModal.downloadUrl);
+            }}
+          >
+            Download manually here
+          </a>
+        </p>
+      ) : null}
       <div className="rounded-md border border-white/10 bg-black/20 p-2 text-xs text-slate-100 whitespace-pre-wrap">
         {Array.isArray(updateModal.notes) && updateModal.notes.length > 0 ? (
           <ul className="list-disc pl-0 list-inside">
@@ -3519,21 +3534,7 @@ function ControlView() {
           "No update notes :(."
         )}
       </div>
-      {updateModal.downloadUrl ? (
-        <p className="text-base leading-6 text-slate-200">
-          If this update fails, please try downloading it manually:
-          <a
-            href={updateModal.downloadUrl}
-            className="update-download-link mt-1 block break-all font-semibold text-secondary underline underline-offset-2 hover:text-accent"
-            onClick={(event) => {
-              event.preventDefault();
-              void openExternalUrl(updateModal.downloadUrl);
-            }}
-          >
-            {updateModal.downloadUrl}
-          </a>
-        </p>
-      ) : null}
+
 
       {updateInstalling ? (
         <div className="space-y-2">

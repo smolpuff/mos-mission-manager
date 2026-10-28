@@ -41,6 +41,8 @@ export default function CliPage() {
   const pinnedToBottomRef = useRef(true);
   const dragStateRef = useRef({
     active: false,
+    ready: false,
+    requestId: 0,
     pointerStartX: 0,
     pointerStartY: 0,
     windowStartX: 0,
@@ -110,6 +112,11 @@ export default function CliPage() {
   const onTopBarDragMove = (event) => {
     const state = dragStateRef.current;
     if (!state.active) return;
+    if ((event.buttons & 1) === 0) {
+      onTopBarDragEnd();
+      return;
+    }
+    if (!state.ready) return;
     const dx = event.screenX - state.pointerStartX;
     const dy = event.screenY - state.pointerStartY;
     state.nextX = Math.round(state.windowStartX + dx);
@@ -144,21 +151,27 @@ export default function CliPage() {
     const topBarHeight = 56;
     if (event.clientY > topBarHeight) return;
     event.preventDefault();
+    const state = dragStateRef.current;
+    onTopBarDragEnd();
+    const requestId = ++state.requestId;
+    state.active = true;
+    state.ready = false;
+    state.pointerStartX = event.screenX;
+    state.pointerStartY = event.screenY;
+    // Observe releases before the asynchronous position lookup can complete.
+    window.addEventListener("mousemove", onTopBarDragMove, true);
+    window.addEventListener("mouseup", onTopBarDragEnd, true);
+    window.addEventListener("blur", onTopBarDragEnd, true);
     try {
       const [windowX, windowY] = await bridge.getWindowPosition();
-      const state = dragStateRef.current;
-      state.active = true;
-      state.pointerStartX = event.screenX;
-      state.pointerStartY = event.screenY;
+      if (!state.active || state.requestId !== requestId) return;
       state.windowStartX = Number(windowX) || 0;
       state.windowStartY = Number(windowY) || 0;
       state.nextX = state.windowStartX;
       state.nextY = state.windowStartY;
-      window.addEventListener("mousemove", onTopBarDragMove, true);
-      window.addEventListener("mouseup", onTopBarDragEnd, true);
-      window.addEventListener("blur", onTopBarDragEnd, true);
+      state.ready = true;
     } catch {
-      onTopBarDragEnd();
+      if (state.requestId === requestId) onTopBarDragEnd();
     }
   };
 

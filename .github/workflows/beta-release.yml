@@ -109,11 +109,13 @@ jobs:
           const base = `https://github.com/${process.env.GITHUB_REPOSITORY}/releases`;
           const output = path.join(process.env.RUNNER_TEMP, 'beta-release');
           const notes = [
-            'Fixed Rentals used to count recorded rental assignments for the selected stats range, including retained history.',
-            'Preserved NFT reset attribution when an assignment succeeds after a retry.',
-            'Recorded assignments recovered after an ambiguous response without counting the same assignment twice.',
-            'Combined NFT cooldown reset cost aliases so the cost breakdown includes both recorded action names.',
-            'Beta builds use beta/version.json for updates; production builds remain on main/version.json.',
+            'Fixed window dragging staying attached to the mouse after release in the main and CLI windows.',
+            'Added scheduled announcements with images, links, prize details, and dismissal controls.',
+            'Updated mission reset competition scoring and scheduling, including the Nov 2–15 scoring window and results visibility through Nov 22.',
+            'Improved setup popup handling, season and competition visibility, and related stats, NFT, and settings displays.',
+            'Improved reset analytics delivery and reduced CLI memory usage.',
+            'Updated the app header and made the manual update download link clearer.',
+            'Beta prerelease only. Beta builds use beta/version.json; production builds remain on main/version.json.',
           ];
           const artifacts = {};
           for (const [key, file] of [
