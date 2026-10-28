@@ -8,6 +8,7 @@ const { promisify } = require("node:util");
 const run = promisify(execFile);
 const { getReleaseArtifact, downloadArtifact, VERSION_PATTERN } = require("./update-download");
 const { extractAppZip } = require("./update-extract");
+const { tempRoot, createWorkspace, updateLock, validWorkspace, removeReceipt } = require("./update-workspace");
 
 const BUNDLE_NAME = "missions-v3-mcp.app";
 const BUNDLE_ID = "dephlect.pbp-missions.desktop";
@@ -60,9 +61,7 @@ async function readTransaction(userData, execPath) {
     const target = await getMacTarget(execPath);
     if (receipt.target !== target || !/^[a-f0-9]{32}$/.test(receipt.token) ||
         !VERSION_PATTERN.test(receipt.version) ||
-        path.dirname(receipt.directory) !== path.dirname(target) ||
-        !path.basename(receipt.directory).startsWith(`.${path.basename(target)}.update-`)) return null;
-    if (await fs.realpath(receipt.directory) !== receipt.directory) return null;
+        !(await validWorkspace(receipt.directory, target))) return null;
     const journal = JSON.parse(await fs.readFile(path.join(receipt.directory, "transaction.json"), "utf8"));
     if (JSON.stringify(journal) !== JSON.stringify(receipt)) return null;
     const state = (await fs.readFile(path.join(receipt.directory, "state"), "utf8").catch(() => "preparing")).trim();
@@ -74,7 +73,7 @@ async function cleanupPreviousTransaction(receipt) {
   if (!receipt || await exists(path.join(receipt.directory, "backup.app"))) return;
   const helperPid = Number(await fs.readFile(path.join(receipt.directory, "helper.pid"), "utf8").catch(() => "0"));
   if (processAlive(receipt.ownerPid) || processAlive(helperPid)) return;
-  const lock = path.join(path.dirname(receipt.target), `.${path.basename(receipt.target)}.update-lock`);
+  const lock = receipt.lock || path.join(path.dirname(receipt.target), `.${path.basename(receipt.target)}.update-lock`);
   // Never break a stale lock automatically: another instance could be taking ownership.
   if (await exists(lock)) return;
   if (!["preparing", "ready", "complete", "cancelled", "commit_timeout", "exit_timeout", "replace_failed", "rolled_back"].includes(receipt.state)) return;
@@ -108,7 +107,7 @@ class MacUpdater {
         throw new Error("A previous update is unfinished. Close all app copies and reinstall the latest release.");
       }
       await cleanupPreviousTransaction(previous);
-      lock = path.join(path.dirname(target), `.${path.basename(target)}.update-lock`);
+      lock = await updateLock(target);
       // Exclusive mkdir is shared by all app instances. Never break a lock we do not own.
       await fs.mkdir(lock, { mode: 0o700 }).catch((error) => {
         if (error.code === "EEXIST") throw new Error(`Another update is active or was interrupted. Quit all app copies and check ${lock} before retrying.`);
@@ -116,8 +115,8 @@ class MacUpdater {
       });
       token = crypto.randomBytes(16).toString("hex");
       await fs.writeFile(path.join(lock, "token"), token, { flag: "wx", mode: 0o600 });
-      directory = await fs.mkdtemp(path.join(path.dirname(target), `.${path.basename(target)}.update-`));
-      const receipt = { target, directory, token, version, ownerPid: process.pid };
+      directory = await createWorkspace(target);
+      const receipt = { target, directory, token, version, ownerPid: process.pid, lock };
       await fs.writeFile(path.join(directory, "transaction.json"), JSON.stringify(receipt), { mode: 0o600 });
       await fs.mkdir(this.userData, { recursive: true });
       await fs.writeFile(receiptPath(this.userData), JSON.stringify(receipt), { mode: 0o600 });
@@ -137,8 +136,8 @@ class MacUpdater {
       await fs.chmod(script, 0o700);
       const log = await fs.open(path.join(directory, "helper.log"), "wx", 0o600);
       try {
-        helper = spawn("/bin/sh", [script, target, directory, String(process.pid), token, version, lock],
-          { detached: true, stdio: ["ignore", log.fd, log.fd], cwd: directory });
+        helper = spawn("/bin/sh", [script, target, directory, String(process.pid), token, version, lock, receiptPath(this.userData), await tempRoot()],
+          { detached: true, stdio: ["ignore", log.fd, log.fd], cwd: await tempRoot() });
         await new Promise((resolve, reject) => { helper.once("spawn", resolve); helper.once("error", reject); });
         helper.unref();
       } finally { await log.close(); }
@@ -161,6 +160,7 @@ class MacUpdater {
         }
         if (!helper || helper.exitCode !== null || helper.signalCode !== null) {
           await fs.rm(directory, { recursive: true, force: true }).catch(() => {});
+          await removeReceipt(this.userData, directory, token).catch(() => {});
         }
       }
       if (!committed && lock && token && (!helper || helper.exitCode !== null || helper.signalCode !== null)) {

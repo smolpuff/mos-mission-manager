@@ -5,6 +5,7 @@ const path = require("node:path");
 const crypto = require("node:crypto");
 const { spawn } = require("node:child_process");
 const { getReleaseArtifact, downloadArtifact, VERSION_PATTERN } = require("./update-download");
+const { tempRoot, createWorkspace, updateLock, validWorkspace, removeReceipt } = require("./update-workspace");
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const exists = (file) => fs.access(file).then(() => true, () => false);
 
@@ -36,8 +37,7 @@ async function readWindowsTransaction(userData) {
     const receipt = JSON.parse(await fs.readFile(path.join(userData, "desktop-update-transaction.json"), "utf8"));
     const target = await getWindowsTarget();
     if (receipt.target !== target || !/^[a-f0-9]{32}$/.test(receipt.token) || !VERSION_PATTERN.test(receipt.version) ||
-        path.dirname(receipt.directory) !== path.dirname(target) || !path.basename(receipt.directory).startsWith(`.${path.basename(target)}.update-`) ||
-        await fs.realpath(receipt.directory) !== receipt.directory) return null;
+        !(await validWorkspace(receipt.directory, target))) return null;
     const journal = JSON.parse(await fs.readFile(path.join(receipt.directory, "transaction.json"), "utf8"));
     if (JSON.stringify(receipt) !== JSON.stringify(journal)) return null;
     return { ...receipt, state: (await fs.readFile(path.join(receipt.directory, "state"), "utf8").catch(() => "preparing")).trim() };
@@ -62,12 +62,12 @@ class WindowsUpdater {
       const target = await getWindowsTarget();
       const previous = await readWindowsTransaction(this.userData);
       if (previous && await exists(path.join(previous.directory, "backup.exe"))) throw new Error("A previous update is unfinished. Close all app copies and reinstall the latest release.");
-      lock = path.join(path.dirname(target), `.${path.basename(target)}.update-lock`);
+      lock = await updateLock(target);
       await fs.mkdir(lock).catch(() => { throw new Error(`Another update is active, or the app's folder is not writable. Check ${lock} after closing all copies.`); });
       token = crypto.randomBytes(16).toString("hex");
       await fs.writeFile(path.join(lock, "token"), token, { flag: "wx" });
-      directory = await fs.mkdtemp(path.join(path.dirname(target), `.${path.basename(target)}.update-`));
-      const receipt = { target, directory, token, version, ownerPid: process.pid };
+      directory = await createWorkspace(target);
+      const receipt = { target, directory, token, version, ownerPid: process.pid, lock };
       await fs.writeFile(path.join(directory, "transaction.json"), JSON.stringify(receipt));
       await fs.writeFile(path.join(this.userData, "desktop-update-transaction.json"), JSON.stringify(receipt));
       this.onStatus({ phase: "downloading", percent: 0 });
@@ -86,9 +86,18 @@ class WindowsUpdater {
       const powershell = path.join(process.env.SystemRoot || "C:\\Windows", "System32/WindowsPowerShell/v1.0/powershell.exe");
       const quote = (value) => `'${String(value).replace(/'/g, "''")}'`;
       const encode = (value) => Buffer.from(value, "utf16le").toString("base64");
+      const temporaryRoot = await tempRoot();
+      const receiptFile = path.join(this.userData, "desktop-update-transaction.json");
       const command = encode(
-        `& ${quote(script)} -Transaction ${quote(directory)} -ParentProcessId ${process.pid} -LauncherProcessId ${process.ppid}` +
-        ` 2>&1 | Out-File -LiteralPath ${quote(logPath)} -Encoding utf8 -Append; exit $LASTEXITCODE`,
+        `try { & ${quote(script)} -Transaction ${quote(directory)} -ParentProcessId ${process.pid} -LauncherProcessId ${process.ppid}` +
+        ` 2>&1 | Out-File -LiteralPath ${quote(logPath)} -Encoding utf8 -Append } finally { ` +
+        // Run after Out-File closes; neither helper process holds the transaction as its cwd.
+        `$dir = ${quote(directory)}; ` +
+        `if (([IO.Path]::GetDirectoryName([IO.Path]::GetFullPath($dir)) -eq ${quote(temporaryRoot)}) -and ` +
+        `!(Test-Path -LiteralPath (Join-Path $dir 'backup.exe'))) { ` +
+        `$receipt = Get-Content -LiteralPath ${quote(receiptFile)} -Raw -ErrorAction SilentlyContinue | ConvertFrom-Json; ` +
+        `if ($receipt.token -eq ${quote(token)} -and $receipt.directory -eq $dir) { Remove-Item -LiteralPath ${quote(receiptFile)} -Force }; ` +
+        `Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue } }; exit $LASTEXITCODE`,
       );
       // Detached PowerShell can exit before executing any script. A directly
       // spawned, non-detached helper instead gets killed by Node's Windows job
@@ -96,12 +105,12 @@ class WindowsUpdater {
       // console outside that job; this short-lived launcher only monitors it.
       const launch = encode(
         `$ErrorActionPreference = 'Stop'; try { ` +
-        `$child = Start-Process -FilePath ${quote(powershell)} -ArgumentList @('-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', '${command}') -WindowStyle Hidden -WorkingDirectory ${quote(directory)} -PassThru; ` +
+        `$child = Start-Process -FilePath ${quote(powershell)} -ArgumentList @('-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', '${command}') -WindowStyle Hidden -WorkingDirectory ${quote(temporaryRoot)} -PassThru; ` +
         `$child.WaitForExit(); exit $child.ExitCode ` +
         `} catch { $_ | Out-File -LiteralPath ${quote(logPath)} -Encoding utf8 -Append; exit 1 }`,
       );
       helper = spawn(powershell, ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-EncodedCommand", launch],
-        { windowsHide: true, cwd: directory, stdio: "ignore" });
+        { windowsHide: true, cwd: temporaryRoot, stdio: "ignore" });
       await new Promise((resolve, reject) => { helper.once("spawn", resolve); helper.once("error", reject); });
       helper.unref();
       const until = Date.now() + 10000;
@@ -124,9 +133,10 @@ class WindowsUpdater {
         while (helper?.pid && helper.exitCode === null && helper.signalCode === null && Date.now() < until) await sleep(100);
       }
       if (!committed && (!helper?.pid || helper.exitCode !== null || helper.signalCode !== null)) {
-        // Retain the receipt, state and helper log so a failed update is diagnosable.
-        // Only the downloaded payload needs removing before a retry.
-        if (directory) await fs.unlink(path.join(directory, "download.exe")).catch(() => {});
+        if (directory && !(await exists(path.join(directory, "backup.exe")))) {
+          await fs.rm(directory, { recursive: true, force: true }).catch(() => {});
+          await removeReceipt(this.userData, directory, token).catch(() => {});
+        }
         if (lock && token && (await fs.readFile(path.join(lock, "token"), "utf8").catch(() => "")) === token) {
           await fs.unlink(path.join(lock, "token")).catch(() => {}); await fs.rmdir(lock).catch(() => {});
         }

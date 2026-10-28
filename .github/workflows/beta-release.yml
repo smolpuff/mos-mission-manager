@@ -109,12 +109,11 @@ jobs:
           const base = `https://github.com/${process.env.GITHUB_REPOSITORY}/releases`;
           const output = path.join(process.env.RUNNER_TEMP, 'beta-release');
           const notes = [
-            'Fixed window dragging staying attached to the mouse after release in the main and CLI windows.',
-            'Added scheduled announcements with images, links, prize details, and dismissal controls.',
-            'Updated mission reset competition scoring and scheduling, including the Nov 2–15 scoring window and results visibility through Nov 22.',
-            'Improved setup popup handling, season and competition visibility, and related stats, NFT, and settings displays.',
-            'Improved reset analytics delivery and reduced CLI memory usage.',
-            'Updated the app header and made the manual update download link clearer.',
+            'Moved Windows and Mac updater downloads, helpers, and locks into the system temporary folder.',
+            'Added automatic cleanup of completed and cancelled update files, helper logs, and transaction receipts.',
+            'Failed downloads now remove their temporary files; unfinished replacements retain their backup for recovery.',
+            'Verified a complete portable Windows update, including restart, startup acknowledgement, and removal of staging folders and locks.',
+            'Updates started from beta 10 use the new cleanup. Updating from an older build still uses that older build\'s updater.',
             'Beta prerelease only. Beta builds use beta/version.json; production builds remain on main/version.json.',
           ];
           const artifacts = {};

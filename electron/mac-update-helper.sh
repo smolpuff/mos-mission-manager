@@ -1,5 +1,5 @@
 #!/bin/sh
-# Copied to a private sibling staging directory before launch. No app runtime required.
+# Copied to a private system temp directory before launch. No app runtime required.
 set -u
 umask 077
 target=$1
@@ -8,6 +8,19 @@ parent_pid=$3
 token=$4
 version=$5
 lock=$6
+receipt=$7
+temp_root=$8
+
+cleanup() {
+  # Delete only the exact transaction in the resolved system temp root.
+  [ "$(/usr/bin/dirname "$transaction")" = "$temp_root" ] || return
+  [ ! -e "$transaction/backup.app" ] || return
+  if [ -f "$receipt" ] && /usr/bin/cmp -s "$receipt" "$transaction/transaction.json"; then
+    /bin/rm -f "$receipt"
+  fi
+  /bin/rm -rf "$transaction"
+}
+trap cleanup EXIT
 
 state() {
   printf '%s\n' "$1" > "$transaction/state.next"
@@ -73,7 +86,7 @@ while [ "$(/bin/cat "$transaction/healthy" 2>/dev/null)" != "$token $version" ];
 done
 state complete
 unlock
-# Keep the small journal/log for diagnostics; remove only this transaction's owned payloads.
+# Once healthy, release the backup; the exit trap removes the full transaction.
 /bin/rm -rf "$transaction/backup.app" "$transaction/payload"
 /bin/rm -f "$transaction/update.zip" "$transaction/failed.app"
 exit 0
