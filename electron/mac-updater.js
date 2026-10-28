@@ -8,7 +8,7 @@ const { promisify } = require("node:util");
 const run = promisify(execFile);
 const { getReleaseArtifact, downloadArtifact, VERSION_PATTERN } = require("./update-download");
 const { extractAppZip } = require("./update-extract");
-const { tempRoot, createWorkspace, updateLock, validWorkspace, removeReceipt } = require("./update-workspace");
+const { tempRoot, createWorkspace, updateLock, validWorkspace, removeReceipt, scheduleCompletedUpdateCleanup } = require("./update-workspace");
 
 const BUNDLE_NAME = "missions-v3-mcp.app";
 const BUNDLE_ID = "dephlect.pbp-missions.desktop";
@@ -82,10 +82,15 @@ async function cleanupPreviousTransaction(receipt) {
 
 async function acknowledgeMacUpdate({ userData, execPath, version, argv }) {
   const receipt = await readTransaction(userData, execPath);
+  if (receipt?.version === version && receipt.state === "complete") {
+    scheduleCompletedUpdateCleanup({ userData, receipt, platform: "darwin" });
+    return;
+  }
   if (!receipt || receipt.version !== version || !argv.includes(`--missions-update-token=${receipt.token}`) ||
       !["opening", "startup_timeout"].includes(receipt.state)) return;
   await fs.writeFile(path.join(receipt.directory, "healthy.next"), `${receipt.token} ${version}`, { mode: 0o600 });
   await fs.rename(path.join(receipt.directory, "healthy.next"), path.join(receipt.directory, "healthy"));
+  scheduleCompletedUpdateCleanup({ userData, receipt, platform: "darwin" });
 }
 
 class MacUpdater {

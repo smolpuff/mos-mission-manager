@@ -9,6 +9,44 @@ const { EventEmitter } = require("node:events");
 const { promisify } = require("node:util");
 const run = promisify(require("node:child_process").execFile);
 
+for (const platform of ["win32", "darwin"]) {
+ test(`${platform} removes the completed beta 9 folder only after its helper exits`, async (t) => {
+  const root = await fs.mkdtemp(path.join(await workspace.tempRoot(), "missions-legacy-cleanup-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const target = path.join(root, platform === "win32" ? "missions.exe" : "missions.app");
+  const directory = await fs.mkdtemp(path.join(root, `.${path.basename(target)}.update-`));
+  const receipt = { target, directory, token: "a".repeat(32), version: "3.3.0-beta.10", ownerPid: 123 };
+  const receiptFile = path.join(root, "desktop-update-transaction.json");
+  await fs.writeFile(receiptFile, JSON.stringify(receipt));
+  await fs.writeFile(path.join(directory, "transaction.json"), JSON.stringify(receipt));
+  await fs.writeFile(path.join(directory, "helper.pid"), "456");
+  await fs.writeFile(path.join(directory, "helper.log"), "old beta helper log");
+  await fs.writeFile(path.join(directory, "healthy"), `${receipt.token} ${receipt.version}`);
+  await fs.writeFile(path.join(directory, "state"), "opening");
+  const unrelated = path.join(root, ".unrelated-folder");
+  await fs.mkdir(unrelated);
+  const options = { userData: root, receipt, platform, isAlive: () => false };
+  assert.equal(await workspace.cleanupCompletedUpdate(options), false);
+  await fs.writeFile(path.join(directory, "state"), "complete");
+  assert.equal(await workspace.cleanupCompletedUpdate({ ...options, isAlive: pid => pid === 456 }), false);
+  const backup = path.join(directory, platform === "win32" ? "backup.exe" : "backup.app");
+  await fs.writeFile(backup, "backup");
+  assert.equal(await workspace.cleanupCompletedUpdate(options), false);
+  await fs.unlink(backup);
+  const lock = path.join(root, `.${path.basename(target)}.update-lock`);
+  await fs.mkdir(lock);
+  assert.equal(await workspace.cleanupCompletedUpdate(options), false);
+  await fs.rmdir(lock);
+  await fs.writeFile(path.join(directory, "healthy"), "wrong acknowledgement");
+  assert.equal(await workspace.cleanupCompletedUpdate(options), false);
+  await fs.writeFile(path.join(directory, "healthy"), `${receipt.token} ${receipt.version}`);
+  assert.equal(await workspace.cleanupCompletedUpdate(options), true);
+  await assert.rejects(fs.access(directory), { code: "ENOENT" });
+  await assert.rejects(fs.access(receiptFile), { code: "ENOENT" });
+  await fs.access(unrelated);
+ });
+}
+
 for (const preserveBackup of [false, true]) {
  test(`Windows helper wrapper ${preserveBackup ? "preserves an unfinished backup" : "removes its completed transaction"}`, { skip: process.platform !== "win32" }, async (t) => {
   const root = await fs.mkdtemp(path.join(await workspace.tempRoot(), "missions update test-"));

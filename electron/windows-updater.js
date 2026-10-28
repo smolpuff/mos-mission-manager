@@ -5,7 +5,7 @@ const path = require("node:path");
 const crypto = require("node:crypto");
 const { spawn } = require("node:child_process");
 const { getReleaseArtifact, downloadArtifact, VERSION_PATTERN } = require("./update-download");
-const { tempRoot, createWorkspace, updateLock, validWorkspace, removeReceipt } = require("./update-workspace");
+const { tempRoot, createWorkspace, updateLock, validWorkspace, removeReceipt, scheduleCompletedUpdateCleanup } = require("./update-workspace");
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const exists = (file) => fs.access(file).then(() => true, () => false);
 
@@ -46,10 +46,15 @@ async function readWindowsTransaction(userData) {
 
 async function acknowledgeWindowsUpdate({ userData, version, argv }) {
   const receipt = await readWindowsTransaction(userData);
+  if (receipt?.version === version && receipt.state === "complete") {
+    scheduleCompletedUpdateCleanup({ userData, receipt, platform: "win32" });
+    return;
+  }
   if (!receipt || receipt.version !== version || !argv.includes(`--missions-update-token=${receipt.token}`) ||
       !["opening", "startup_timeout"].includes(receipt.state)) return;
   await fs.writeFile(path.join(receipt.directory, "healthy.next"), `${receipt.token} ${version}`);
   await fs.rename(path.join(receipt.directory, "healthy.next"), path.join(receipt.directory, "healthy"));
+  scheduleCompletedUpdateCleanup({ userData, receipt, platform: "win32" });
 }
 
 class WindowsUpdater {

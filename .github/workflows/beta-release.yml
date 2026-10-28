@@ -113,7 +113,7 @@ jobs:
             'Added automatic cleanup of completed and cancelled update files, helper logs, and transaction receipts.',
             'Failed downloads now remove their temporary files; unfinished replacements retain their backup for recovery.',
             'Verified a complete portable Windows update, including restart, startup acknowledgement, and removal of staging folders and locks.',
-            'Updates started from beta 10 use the new cleanup. Updating from an older build still uses that older build\'s updater.',
+            'Beta 10 also removes the completed beta 9 update folder after the old helper exits; later updates clean up automatically.',
             'Beta prerelease only. Beta builds use beta/version.json; production builds remain on main/version.json.',
           ];
           const artifacts = {};
