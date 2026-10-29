@@ -5225,6 +5225,7 @@ function ControlView() {
                                 />
                               ) : (
                                 <MissionSlotImage
+                                  key={slotLocked ? "locked" : "unlocked"}
                                   src={slotImageSrc}
                                   hasAssignedNft={hasAssignedNft}
                                   missionActive={missionActive}
