@@ -3634,7 +3634,8 @@ function createWatchService(
             !liveStateRecoveryRunning &&
             Number(ctx.missionMutationStateBlockedUntil || 0) <= Date.now() &&
             Date.now() >= nextAssignRecheckAtMs &&
-            Number(ctx.currentMissionStats?.available || 0) > 0;
+            (Number(ctx.currentMissionStats?.available || 0) > 0 ||
+              checks.needsAutoUnlockSlot4?.(updatedMissionResult) === true);
           if (shouldRecheckAssign) {
             nextAssignRecheckAtMs = Date.now() + ASSIGN_RECHECK_COOLDOWN_MS;
             Promise.resolve()
@@ -4595,7 +4596,7 @@ function createWatchService(
         } else if (
           !claimWorkPaused() &&
           !hasActiveMcpCooldown() &&
-          startupAvailable > 0
+          (startupAvailable > 0 || checks.needsAutoUnlockSlot4?.(startupActionMissionResult) === true)
         ) {
           watchStartupAssignBackoffUntil = Date.now() + startupWatchBackoffMs;
           logWithTimestamp(

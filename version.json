@@ -3,12 +3,21 @@
   "version": "3.3.0-beta.10",
   "downloadUrl": "https://github.com/smolpuff/mos-mission-manager/releases/tag/v3.3.0b10",
   "notes": [
-    "Moved Windows and Mac updater downloads, helpers, and locks into the system temporary folder.",
-    "Added automatic cleanup of completed and cancelled update files, helper logs, and transaction receipts.",
-    "Failed downloads now remove their temporary files; unfinished replacements retain their backup for recovery.",
-    "Verified a complete portable Windows update, including restart, startup acknowledgement, and removal of staging folders and locks.",
-    "Beta 10 also removes the completed beta 9 update folder after the old helper exits; later updates clean up automatically.",
-    "Beta prerelease only. Beta builds use beta/version.json; production builds remain on main/version.json."
+    "Released 3.3.0 - Season 73 Required Update",
+    "NEW: HIGHLY REQUESTED - added autostart for watching missions on app launch",
+    "NEW: HIGHLY REQUESTED - added windows tray controls to keep app running in the background while closed",
+    "Faster claiming & assigning when claim is out of normal watch loop",
+    "Added auto-updater that should actually work now. oops!",
+    "Hardened security for privileged app commands",
+    "Added wallet import button (no really, don't import your main wallet...)",
+    "Added auto unlock slot 4 so you can be even lazier. Unlock & reset back to last slot 4 mission",
+    "Fixed MCP auth spam",
+    "Fixed Level 20+ NFT selection skipping eligible collections at times",
+    "Fixed NFT cooldown reset cost totals and reset attribution after assignment retries",
+    "Fixed trying to use rental when reaching end of paged nft listing",
+    "Fixed wallet creation timing out on Windows on slower hardware",
+    "Fixed various other bugs in win. mac, linux",
+    "New onboarding experience with guided tour"
   ],
   "artifacts": {
     "win32-x64": {

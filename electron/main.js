@@ -297,6 +297,9 @@ const backendStatus = {
   missionDataLoading: false,
   nftUsageStats: [],
   slotUnlockSummary: null,
+  autoUnlockSlot4Enabled: false,
+  autoUnlockSlot4Status: null,
+  autoUnlockSlot4MissionName: "",
   currentMode: null,
   defaultMissionResetLevel: null,
   autoModeEnabled: null,
@@ -1340,7 +1343,8 @@ function updateBackendStateFromIpc(payload) {
       // snapshot can briefly contain the value from before config sync and
       // must not make the UI jump back to that stale selection.
       key === "nftAssignmentOrder" ||
-      key === "nftAssignmentCollection"
+      key === "nftAssignmentCollection" ||
+      key === "autoUnlockSlot4Enabled"
     ) {
       continue;
     }
@@ -3545,6 +3549,8 @@ function hydrateBackendStatusFromConfig() {
       4: true,
     };
   }
+  backendStatus.autoUnlockSlot4Enabled = config.autoUnlockSlot4Enabled === true;
+  backendStatus.autoUnlockSlot4MissionName = config.autoUnlockSlot4MissionName || "";
   if (typeof config.missionResetPerSlotModeEnabled === "boolean") {
     backendStatus.missionResetPerSlotModeEnabled =
       config.missionResetPerSlotModeEnabled;
@@ -4453,6 +4459,7 @@ function startBackend(options = {}) {
     silent: true,
   });
 
+  backendStatus.autoUnlockSlot4Status = null;
   backendStatus.running = true;
   backendStatus.pid = backend.pid;
   backendStatus.exitCode = null;
@@ -5933,6 +5940,8 @@ app.whenReady().then(async () => {
         ...next.missionActionEnabledBySlot,
       };
     }
+    backendStatus.autoUnlockSlot4Enabled = next.autoUnlockSlot4Enabled === true;
+    backendStatus.autoUnlockSlot4MissionName = next.autoUnlockSlot4MissionName || "";
     if (typeof next.missionResetPerSlotModeEnabled === "boolean") {
       backendStatus.missionResetPerSlotModeEnabled =
         next.missionResetPerSlotModeEnabled;
@@ -6054,7 +6063,8 @@ app.whenReady().then(async () => {
     if (
       backend &&
       backendStatus.running &&
-      (Object.prototype.hasOwnProperty.call(requestedPatch, "debugMode") ||
+      (Object.prototype.hasOwnProperty.call(requestedPatch, "autoUnlockSlot4Enabled") ||
+        Object.prototype.hasOwnProperty.call(requestedPatch, "debugMode") ||
         Object.prototype.hasOwnProperty.call(
           requestedPatch,
           "missionActionEnabledBySlot",
@@ -6101,6 +6111,11 @@ app.whenReady().then(async () => {
         ))
     ) {
       const runtimeSync = requestBackend("update_runtime_config", {
+        ...(Object.prototype.hasOwnProperty.call(requestedPatch, "autoUnlockSlot4Enabled") ? {
+          autoUnlockSlot4Enabled: next.autoUnlockSlot4Enabled,
+          autoUnlockSlot4MissionName: next.autoUnlockSlot4MissionName,
+          autoUnlockSlot4RestorePending: next.autoUnlockSlot4RestorePending,
+        } : {}),
         debugMode: next.debugMode,
         missionActionEnabledBySlot: next.missionActionEnabledBySlot,
         missionResetPerSlotModeEnabled: next.missionResetPerSlotModeEnabled,

@@ -24,6 +24,9 @@ const DESKTOP_MANAGED_KEYS = [
   "missionCompetitionCheckEnabled",
 ];
 const SALVAGE_TOP_LEVEL_KEYS = [
+  "autoUnlockSlot4Enabled",
+  "autoUnlockSlot4MissionName",
+  "autoUnlockSlot4RestorePending",
   "targetMissions",
   "autoModeEnabled",
   "level20ResetEnabled",

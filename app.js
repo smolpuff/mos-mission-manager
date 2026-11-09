@@ -133,6 +133,9 @@ function createGuiStateEmitter(ctx) {
       nftUsageStats: ctx.nftUsageStats,
       guiMissionSlots: ctx.guiMissionSlots,
       slotUnlockSummary: ctx.slotUnlockSummary,
+      autoUnlockSlot4Enabled: ctx.config.autoUnlockSlot4Enabled === true,
+      autoUnlockSlot4Status: ctx.autoUnlockSlot4Status || null,
+      autoUnlockSlot4MissionName: ctx.config.autoUnlockSlot4MissionName || "",
       currentMode: ctx.currentMode,
       autoModeEnabled: ctx.autoModeEnabled,
       level20ResetEnabled: ctx.level20ResetEnabled,
@@ -453,6 +456,15 @@ if (process.env.PBP_GUI_BRIDGE === "1" && typeof process.send === "function") {
             payload.nftAssignmentCollection || "",
           ).trim();
           ctx.config.nftAssignmentCollection = ctx.nftAssignmentCollection;
+        }
+        if (typeof payload.autoUnlockSlot4Enabled === "boolean") {
+          ctx.config.autoUnlockSlot4Enabled = payload.autoUnlockSlot4Enabled;
+          if (typeof payload.autoUnlockSlot4MissionName === "string") {
+            ctx.config.autoUnlockSlot4MissionName = payload.autoUnlockSlot4MissionName;
+          }
+          if (typeof payload.autoUnlockSlot4RestorePending === "boolean") {
+            ctx.config.autoUnlockSlot4RestorePending = payload.autoUnlockSlot4RestorePending;
+          }
         }
         if (typeof payload.missionResetPerSlotModeEnabled === "boolean") {
           ctx.missionResetPerSlotModeEnabled =

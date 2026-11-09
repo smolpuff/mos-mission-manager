@@ -435,6 +435,24 @@ function ControlView() {
   const [competitionRangeLockPollSeconds, setCompetitionRangeLockPollSeconds] =
     useState("150");
   const [configuredTargetMissions, setConfiguredTargetMissions] = useState([]);
+  const [autoUnlockSlot4Enabled, setAutoUnlockSlot4Enabled] = useState(
+    status.autoUnlockSlot4Enabled === true,
+  );
+  const [autoUnlockSlot4MissionName, setAutoUnlockSlot4MissionName] = useState(
+    status.autoUnlockSlot4MissionName || "",
+  );
+  const [autoUnlockSlot4Busy, setAutoUnlockSlot4Busy] = useState(false);
+  const [autoUnlockSlot4Error, setAutoUnlockSlot4Error] = useState(null);
+  useEffect(() => {
+    if (typeof status.autoUnlockSlot4Enabled === "boolean") {
+      setAutoUnlockSlot4Enabled(status.autoUnlockSlot4Enabled);
+    }
+  }, [status.autoUnlockSlot4Enabled]);
+  useEffect(() => {
+    if (typeof status.autoUnlockSlot4MissionName === "string") {
+      setAutoUnlockSlot4MissionName(status.autoUnlockSlot4MissionName);
+    }
+  }, [status.autoUnlockSlot4MissionName]);
   const [windowsTrayEnabled, setWindowsTrayEnabled] = useState(false);
   const [autoStartWatchingEnabled, setAutoStartWatchingEnabledState] = useState(false);
   const [macMenuBarEnabled, setMacMenuBarEnabledState] = useState(false);
@@ -649,6 +667,25 @@ function ControlView() {
   const applyConfigPatch = async (patch) => {
     if (bridge?.updateConfig) {
       await bridge.updateConfig(patch);
+    }
+  };
+  const saveAutoUnlockSlot4 = async (enabled, missionName = "") => {
+    setAutoUnlockSlot4Busy(true);
+    setAutoUnlockSlot4Error(null);
+    try {
+      await applyConfigPatch({
+        autoUnlockSlot4Enabled: enabled,
+        ...(enabled ? {
+          autoUnlockSlot4MissionName: missionName,
+          autoUnlockSlot4RestorePending: false,
+        } : {}),
+      });
+      setAutoUnlockSlot4Enabled(enabled);
+      if (enabled) setAutoUnlockSlot4MissionName(missionName);
+    } catch (error) {
+      setAutoUnlockSlot4Error(String(error?.message || error));
+    } finally {
+      setAutoUnlockSlot4Busy(false);
     }
   };
   const setSignerMode = async (mode) => {
@@ -902,6 +939,8 @@ function ControlView() {
     bridge.getConfig().then((response) => {
       if (cancelled) return;
       const config = response?.config || {};
+      setAutoUnlockSlot4Enabled(config.autoUnlockSlot4Enabled === true);
+      setAutoUnlockSlot4MissionName(config.autoUnlockSlot4MissionName || "");
       if (typeof config.level20ResetEnabled === "boolean") {
         setResetEnabled(config.level20ResetEnabled);
       }
@@ -5056,7 +5095,7 @@ function ControlView() {
                 </div>
               </section>
 
-              <section className="">
+              <section className="pt-6">
                 <div className="grid grid-cols-4 gap-2 missions__parent">
                   {missionSlotCards
                     .filter(({ previewUnlocked }) => !previewUnlocked)
@@ -5150,7 +5189,14 @@ function ControlView() {
 
                       const slotAutomationEnabled =
                         missionActionEnabledBySlot[String(slot)] !== false;
-                      const canChangeMission = status.running === true;
+                      const autoUnlockStatus = slot === 4 && status.running === true
+                        ? status.autoUnlockSlot4Status : null;
+                      const autoUnlockStatusLabel = autoUnlockStatus === "unlocking"
+                        ? "Unlocking..." : autoUnlockStatus === "resetting" ? "Resetting..." : null;
+                      const canChangeMission = status.running === true && !autoUnlockStatusLabel;
+                      const autoUnlockTarget = slotLocked
+                        ? autoUnlockSlot4MissionName
+                        : entry?.missionName || autoUnlockSlot4MissionName;
 
                       const perSlotResetEnabled =
                         missionResetPerSlotEnabledBySlot[String(slot)] === true;
@@ -5160,7 +5206,32 @@ function ControlView() {
                         String(status.currentMissionResetLevel ?? 10);
 
                       return (
-                        <div key={slot} className="flex flex-col gap-1">
+                        <div key={slot} className="relative flex flex-col gap-1">
+                          {slot === 4 ? (
+                            <div className="absolute bottom-full left-0 flex flex-col gap-1 pb-1">
+                              <label
+                                className="flex items-center gap-2 text-xs text-white cursor-pointer select-none"
+                                title={`Automatically unlock and restore ${autoUnlockTarget || "the last slot 4 mission"}. 3,000 PBP per renewal.`}
+                                onClick={(event) => event.stopPropagation()}
+                                onMouseDown={(event) => event.stopPropagation()}
+                                onKeyDown={(event) => event.stopPropagation()}
+                              >
+                                <input
+                                  type="checkbox"
+                                  className="checkbox checkbox-xs"
+                                  checked={autoUnlockSlot4Enabled}
+                                  disabled={autoUnlockSlot4Busy || Boolean(autoUnlockStatusLabel) || (!autoUnlockSlot4Enabled && !autoUnlockTarget)}
+                                  onChange={(event) => void saveAutoUnlockSlot4(
+                                    event.target.checked, autoUnlockTarget,
+                                  )}
+                                />
+                                <span>Auto Unlock</span>
+                              </label>
+                              {autoUnlockSlot4Error ? (
+                                <span className="text-xs text-error" role="status">{autoUnlockSlot4Error}</span>
+                              ) : null}
+                            </div>
+                          ) : null}
                           <div
                             className={`card-mission ${slotError ? "card-mission--error" : ""} ${
                               showRealLockedSlot4
@@ -5216,7 +5287,11 @@ function ControlView() {
                                   : ""
                               } `}
                             >
-                              {missionStateNotSynced ? (
+                              {autoUnlockStatusLabel ? (
+                                <div role="status" aria-live="polite">
+                                  <MissionSlotFallback label={autoUnlockStatusLabel} loading />
+                                </div>
+                              ) : missionStateNotSynced ? (
                                 <MissionSlotFallback label="Mission status not synced" />
                               ) : missionStateSyncing ? (
                                 <MissionSlotFallback
@@ -5391,7 +5466,7 @@ function ControlView() {
                                 </div>
                               ) : null}
 
-                              {slot === 4 && slot4UnlockConfirmed ? (
+                              {slot === 4 && slot4UnlockConfirmed && !autoUnlockStatusLabel ? (
                                 <button
                                   type="button"
                                   className="absolute inset-0 z-30 grid cursor-pointer place-items-center text-white font-semibold uppercase text-xs"
