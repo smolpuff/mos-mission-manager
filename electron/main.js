@@ -5418,11 +5418,11 @@ function syncCompetitionRangeLockScheduler() {
 async function createControlWindow() {
   controlWindow = new BrowserWindow({
     width: 800,
-    height: 800,
+    height: 744,
     minWidth: 800,
-    minHeight: 800,
+    minHeight: 744,
     maxWidth: 800,
-    maxHeight: 800,
+    maxHeight: 744,
     title: "missions-v3-mcp",
     icon: WINDOWS_WINDOW_ICON,
     backgroundColor: "#0b1116",

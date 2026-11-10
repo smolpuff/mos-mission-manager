@@ -814,7 +814,7 @@
 
   .main-wrapper,
   nav#mainNav {
-    @apply pt-4;
+    @apply pt-2;
   }
 
 
@@ -1020,7 +1020,7 @@
   }
 
   nav#mainNav {
-    @apply px-3.5 w-full max-w-24 min-h-full flex flex-col items-center gap-3 relative;
+    @apply px-3.5 w-full max-w-24 min-h-full flex flex-col items-center gap-2 relative;
 
     &::after {
       content: "";
