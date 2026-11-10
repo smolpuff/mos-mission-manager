@@ -210,6 +210,47 @@
     pointer-events: none;
   }
 
+  .auto-unlock-checkbox {
+    appearance: none;
+    position: relative;
+    flex-shrink: 0;
+    width: 0.875rem;
+    height: 0.875rem;
+    margin: 0;
+    border: 1px solid rgba(255, 255, 255, 0.25);
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.06);
+    cursor: pointer;
+    transition: background 150ms ease, border-color 150ms ease;
+
+    &:checked {
+      border-color: var(--color-primary);
+      background: var(--color-primary);
+    }
+
+    &:checked::after {
+      content: "";
+      position: absolute;
+      left: 4px;
+      top: 1px;
+      width: 4px;
+      height: 7px;
+      border: solid var(--color-base-200);
+      border-width: 0 2px 2px 0;
+      transform: rotate(45deg);
+    }
+
+    &:focus-visible {
+      outline: 2px solid var(--color-primary);
+      outline-offset: 3px;
+    }
+
+    &:disabled {
+      cursor: not-allowed;
+      opacity: 0.45;
+    }
+  }
+
   .switch-wrap {
     position: relative;
     display: inline-block;

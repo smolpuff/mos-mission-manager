@@ -443,6 +443,7 @@ function ControlView() {
   );
   const [autoUnlockSlot4Busy, setAutoUnlockSlot4Busy] = useState(false);
   const [autoUnlockSlot4Error, setAutoUnlockSlot4Error] = useState(null);
+  const [autoUnlockSlot4ConfirmTarget, setAutoUnlockSlot4ConfirmTarget] = useState(null);
   useEffect(() => {
     if (typeof status.autoUnlockSlot4Enabled === "boolean") {
       setAutoUnlockSlot4Enabled(status.autoUnlockSlot4Enabled);
@@ -682,8 +683,10 @@ function ControlView() {
       });
       setAutoUnlockSlot4Enabled(enabled);
       if (enabled) setAutoUnlockSlot4MissionName(missionName);
+      return true;
     } catch (error) {
       setAutoUnlockSlot4Error(String(error?.message || error));
+      return false;
     } finally {
       setAutoUnlockSlot4Busy(false);
     }
@@ -2118,6 +2121,9 @@ function ControlView() {
     return out;
   }, [onboardingMissionCatalog]);
   const slots = liveSlots;
+  const autoUnlockSlot4Target = isMissionSlotLocked(4)
+    ? autoUnlockSlot4MissionName
+    : slots.find((entry) => Number(entry?.slot) === 4)?.missionName || autoUnlockSlot4MissionName;
 
   useEffect(() => {
     // A rate-limit error belongs to the mission that failed, not permanently
@@ -3527,7 +3533,7 @@ function ControlView() {
 
   const { announcement, dismiss: dismissAnnouncement } = useLiveAnnouncements(bridge,
     popupsBlocked || Boolean(updateModal || competitionNotificationModal || secretModalOpen ||
-      createWalletOpen || slotUnlockModalOpen || missionPickerSlot || bridgeLinkModal ||
+      createWalletOpen || slotUnlockModalOpen || autoUnlockSlot4ConfirmTarget !== null || missionPickerSlot || bridgeLinkModal ||
       lowBalanceModal || fundingWalletFundedModal || throttleModal || resetErrorModal));
 
   const updateOfferContent = updateModal ? (
@@ -4878,7 +4884,35 @@ function ControlView() {
                       </div>
                     </div>
                   </div>
-                  <div className="flex flex-col items-center pl-8 ">
+                  <div className="relative flex flex-col items-center pl-8 ">
+                    <div className="absolute -bottom-3.5 left-[calc(50%+0.25rem)] flex flex-col items-start gap-1">
+                      <label
+                        className="flex items-center gap-2 text-xs text-white/60 cursor-pointer select-none"
+                        title={`Automatically unlock and restore ${autoUnlockSlot4Target || "the last slot 4 mission"}. ${(normalizedSlotUnlockCost + 250).toLocaleString()} PBP per renewal.`}
+                        onClick={(event) => event.stopPropagation()}
+                        onMouseDown={(event) => event.stopPropagation()}
+                        onKeyDown={(event) => event.stopPropagation()}
+                      >
+                        <input
+                          type="checkbox"
+                          className="auto-unlock-checkbox"
+                          checked={autoUnlockSlot4Enabled}
+                          disabled={autoUnlockSlot4Busy || (status.running === true && ["unlocking", "resetting"].includes(status.autoUnlockSlot4Status)) || (!autoUnlockSlot4Enabled && !autoUnlockSlot4Target)}
+                          onChange={(event) => {
+                            if (event.target.checked) {
+                              setAutoUnlockSlot4Error(null);
+                              setAutoUnlockSlot4ConfirmTarget(autoUnlockSlot4Target);
+                            } else {
+                              void saveAutoUnlockSlot4(false);
+                            }
+                          }}
+                        />
+                        <span>Auto Unlock</span>
+                      </label>
+                      {autoUnlockSlot4Error ? (
+                        <span className="text-xs text-error" role="status">{autoUnlockSlot4Error}</span>
+                      ) : null}
+                    </div>
                     <div className="flex flex-1  mx-8  user__wallet-balance h-1/2 items-center">
                       {/* make me a component */}
                       <div className="flex gap-1 flex-col w-full ">
@@ -5095,7 +5129,7 @@ function ControlView() {
                 </div>
               </section>
 
-              <section className="pt-6">
+              <section>
                 <div className="grid grid-cols-4 gap-2 missions__parent">
                   {missionSlotCards
                     .filter(({ previewUnlocked }) => !previewUnlocked)
@@ -5194,9 +5228,6 @@ function ControlView() {
                       const autoUnlockStatusLabel = autoUnlockStatus === "unlocking"
                         ? "Unlocking..." : autoUnlockStatus === "resetting" ? "Resetting..." : null;
                       const canChangeMission = status.running === true && !autoUnlockStatusLabel;
-                      const autoUnlockTarget = slotLocked
-                        ? autoUnlockSlot4MissionName
-                        : entry?.missionName || autoUnlockSlot4MissionName;
 
                       const perSlotResetEnabled =
                         missionResetPerSlotEnabledBySlot[String(slot)] === true;
@@ -5207,31 +5238,6 @@ function ControlView() {
 
                       return (
                         <div key={slot} className="relative flex flex-col gap-1">
-                          {slot === 4 ? (
-                            <div className="absolute bottom-full left-0 flex flex-col gap-1 pb-1">
-                              <label
-                                className="flex items-center gap-2 text-xs text-white cursor-pointer select-none"
-                                title={`Automatically unlock and restore ${autoUnlockTarget || "the last slot 4 mission"}. 3,000 PBP per renewal.`}
-                                onClick={(event) => event.stopPropagation()}
-                                onMouseDown={(event) => event.stopPropagation()}
-                                onKeyDown={(event) => event.stopPropagation()}
-                              >
-                                <input
-                                  type="checkbox"
-                                  className="checkbox checkbox-xs"
-                                  checked={autoUnlockSlot4Enabled}
-                                  disabled={autoUnlockSlot4Busy || Boolean(autoUnlockStatusLabel) || (!autoUnlockSlot4Enabled && !autoUnlockTarget)}
-                                  onChange={(event) => void saveAutoUnlockSlot4(
-                                    event.target.checked, autoUnlockTarget,
-                                  )}
-                                />
-                                <span>Auto Unlock</span>
-                              </label>
-                              {autoUnlockSlot4Error ? (
-                                <span className="text-xs text-error" role="status">{autoUnlockSlot4Error}</span>
-                              ) : null}
-                            </div>
-                          ) : null}
                           <div
                             className={`card-mission ${slotError ? "card-mission--error" : ""} ${
                               showRealLockedSlot4
@@ -5869,6 +5875,71 @@ function ControlView() {
               </div>
             </div>
           ), document.body) : null}
+          {!popupsBlocked && autoUnlockSlot4ConfirmTarget !== null ? (
+            <div
+              className="fixed inset-0 z-60 grid place-items-center bg-black/60 p-4"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="auto-unlock-confirm-title"
+              aria-describedby="auto-unlock-confirm-description"
+              onKeyDown={(event) => {
+                if (event.key === "Escape" && !autoUnlockSlot4Busy) {
+                  setAutoUnlockSlot4ConfirmTarget(null);
+                }
+              }}
+            >
+              <div
+                className="p-4 w-full max-w-xs rounded-xl shadow-2xl shadow-black/95 space-y-3 border-2 border-[#1D1C27]"
+                style={{
+                  backgroundImage: `url(${backImg})`,
+                  backgroundSize: "cover",
+                  backgroundPosition: "center",
+                }}
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <h2 id="auto-unlock-confirm-title" className="text-sm font-semibold text-white">
+                    Auto Unlock
+                  </h2>
+                  <button
+                    type="button"
+                    className="text-sm text-white/60 hover:text-white cursor-pointer disabled:opacity-45"
+                    aria-label="Close without enabling Auto Unlock"
+                    disabled={autoUnlockSlot4Busy}
+                    onClick={() => setAutoUnlockSlot4ConfirmTarget(null)}
+                  >
+                    ✕
+                  </button>
+                </div>
+                <p id="auto-unlock-confirm-description" className="text-xs leading-relaxed text-slate-200">
+                  Each time slot 4 expires, Auto Unlock will spend{" "}
+                  <span className="font-semibold text-white">{normalizedSlotUnlockCost.toLocaleString()} PBP</span>{" "}
+                  to unlock it, plus <span className="font-semibold text-white">250 PBP</span>{" "}
+                  to restore the last mission used in slot 4 if needed.
+                </p>
+                {autoUnlockSlot4Error ? (
+                  <div className="rounded-md border border-error/40 bg-error/10 p-3 text-sm text-slate-100" role="status">
+                    {autoUnlockSlot4Error}
+                  </div>
+                ) : null}
+                <label className="flex items-start gap-2 text-xs leading-relaxed text-white/80 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    className="auto-unlock-checkbox mt-0.5"
+                    autoFocus
+                    checked={autoUnlockSlot4Busy}
+                    disabled={autoUnlockSlot4Busy}
+                    onChange={async (event) => {
+                      if (!event.target.checked) return;
+                      if (await saveAutoUnlockSlot4(true, autoUnlockSlot4ConfirmTarget)) {
+                        setAutoUnlockSlot4ConfirmTarget(null);
+                      }
+                    }}
+                  />
+                  <span>I understand and allow these charges on each renewal.</span>
+                </label>
+              </div>
+            </div>
+          ) : null}
           {!popupsBlocked && slotUnlockModalOpen ? (
             <div
               className="fixed inset-0 z-60 grid place-items-center bg-black/60 p-4"
