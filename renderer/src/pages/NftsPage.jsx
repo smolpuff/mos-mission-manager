@@ -1,6 +1,5 @@
 import LoadingSpinner from "../components/LoadingSpinner";
 import { useEffect, useMemo, useState } from "react";
-import backImg from "../img/back.png";
 import {
   canonicalCollectionLabel,
   localCollectionImage,
@@ -775,17 +774,12 @@ export default function NftsPage({ bridge, signerMode = "", setupActive = false 
       </div>
       {!setupActive && detailModal ? (
         <div
-          className="fixed inset-0 z-60 grid place-items-center bg-black/80 p-4"
+          className="app-dialog-backdrop fixed inset-0 z-60 grid place-items-center p-4"
           role="dialog"
           aria-modal="true"
         >
           <div
-            className="w-full max-w-xl overflow-hidden rounded-xl border-2 border-[#1D1C27] shadow-2xl shadow-black/95"
-            style={{
-              backgroundImage: `url(${backImg})`,
-              backgroundSize: "cover",
-              backgroundPosition: "center",
-            }}
+            className="app-dialog-surface w-full max-w-xl overflow-hidden"
           >
             <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
               <div className="min-w-0">
@@ -886,17 +880,14 @@ export default function NftsPage({ bridge, signerMode = "", setupActive = false 
       ) : null}
       {!setupActive && resetModal ? (
         <div
-          className="fixed inset-0 z-60 grid place-items-center bg-black/60 p-4"
+          className="app-dialog-backdrop fixed inset-0 z-60 grid place-items-center p-4"
           role="dialog"
           aria-modal="true"
         >
           <div
-            className="p-4 w-full rounded-xl shadow-2xl shadow-black/95 space-y-4 z-10 border-2 border-[#1D1C27]"
+            className="app-dialog-surface p-4 w-full space-y-4 z-10"
             style={{
               maxWidth: "600px",
-              backgroundImage: `url(${backImg})`,
-              backgroundSize: "cover",
-              backgroundPosition: "center",
             }}
           >
             <div className="flex items-center justify-between gap-3">

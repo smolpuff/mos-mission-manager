@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import backImg from "../img/back.png";
 import { announcementLinkUrl, announcementTextParts } from "../announcement-links.mjs";
 
 export default function AnnouncementDialog({ announcement, onClose, openExternal, wallet = "" }) {
@@ -35,10 +34,10 @@ export default function AnnouncementDialog({ announcement, onClose, openExternal
     ? <a key={index} href={part.href} className="announcement-link text-secondary underline underline-offset-2 hover:text-accent" onClick={event => { event.preventDefault(); void openExternal?.(part.href); }}>{part.text}</a>
     : part.text);
   const content = (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4"
+    <div className="app-dialog-backdrop fixed inset-0 z-50 grid place-items-center p-4"
       role="dialog" aria-modal="true" aria-label={announcement.title || "Announcement"}>
-      <div ref={panel} className="p-4 w-full rounded-xl shadow-2xl shadow-black/95 space-y-4 z-10 border-2 border-[#1D1C27] overflow-y-auto"
-        style={{ maxWidth: "640px", maxHeight: "calc(100dvh - 32px)", backgroundImage: `url(${backImg})`, backgroundSize: "cover", backgroundPosition: "center" }}>
+      <div ref={panel} className="app-dialog-surface p-4 w-full space-y-4 z-10 overflow-y-auto"
+        style={{ maxWidth: "640px", maxHeight: "calc(100dvh - 32px)" }}>
         {announcement.imageUrl && !imageFailed ? <img src={announcement.imageUrl} alt={announcement.imageAlt || ""} referrerPolicy="no-referrer" onError={() => setImageFailed(true)} className="mx-auto block h-auto max-w-full rounded-lg" style={{ width: `${announcement.imageWidth ?? 100}%` }} /> : null}
         {announcement.title ? <h2 className="text-lg font-semibold">{announcement.title}</h2> : null}
         {announcement.text ? <p className="text-sm text-slate-200 whitespace-pre-wrap break-words">{richText(announcement.text)}</p> : null}

@@ -1,7 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import "./InterfaceTour.css";
-import backImg from "../img/back.png";
 
 const modeButton = index => document.querySelectorAll('.mission-modes button')[index];
 const toggleRow = id => document.getElementById(id)?.parentElement?.parentElement;
@@ -120,7 +119,7 @@ export default function InterfaceTour({ onClose, onModePreview, topInset = 0 }) 
         <div className="onboarding-spotlight" style={{ left: rect.left, top: rect.top, width: rect.width, height: rect.height }} />
       </>}
     </div>
-    <section ref={card} className="onboarding-tour onboarding-tour-spotlight" style={{ ...position, backgroundImage: `url(${backImg})`, backgroundSize: "cover", backgroundPosition: "center" }} role="dialog" aria-modal="true" aria-labelledby="interface-tour-title">
+    <section ref={card} className="app-dialog-surface onboarding-tour onboarding-tour-spotlight" style={{ ...position }} role="dialog" aria-modal="true" aria-labelledby="interface-tour-title">
       <div className="onboarding-tour-heading"><span>{String(index + 1).padStart(2, '0')} / {String(steps.length).padStart(2, '0')} <b>·</b> {current.label}</span><button className="onboarding-dismiss" onClick={onClose} aria-label="Close tour">×</button></div>
       <div className="onboarding-copy" key={index} aria-live="polite" aria-atomic="true">
         <h2 id="interface-tour-title">{current.title}</h2><p>{current.text}</p><div className="onboarding-detail">{current.detail}</div>

@@ -33,7 +33,6 @@ import pbpIcon from "../img/icon_pbp.webp";
 import solIcon from "../img/icon-sm__sol.svg";
 import ccIcon from "../img/icon_cc.webp";
 import tcIcon from "../img/icon_tc.webp";
-import backImg from "../img/back.png";
 import koreaTakeitImg from "../img/korea-takeit.webp";
 import {
   localCollectionImage,
@@ -3770,18 +3769,15 @@ function ControlView() {
             <div
               data-onboarding-step={onboardingStep}
               tabIndex={-1}
-              className="setup-wizard-overlay fixed inset-0 z-[10000] grid place-items-center overflow-hidden bg-black/60 p-4"
+              className="app-dialog-backdrop setup-wizard-overlay fixed inset-0 z-[10000] grid place-items-center overflow-hidden p-4"
               role="dialog"
               aria-modal="true"
               aria-labelledby="setup-wizard-title"
             >
               <div
-                className="setup-wizard p-4 w-full min-w-0 rounded-xl shadow-2xl shadow-black/95 z-10 border-2 border-[#1D1C27] flex flex-col gap-4 overflow-hidden max-h-[calc(100dvh-32px)]"
+                className="app-dialog-surface setup-wizard p-4 w-full min-w-0 z-10 flex flex-col gap-4 overflow-hidden max-h-[calc(100dvh-32px)]"
                 style={{
                   maxWidth: "680px",
-                  backgroundImage: `url(${backImg})`,
-                  backgroundSize: "cover",
-                  backgroundPosition: "center",
                 }}
               >
                 <div className="space-y-3 shrink-0">
@@ -4056,17 +4052,12 @@ function ControlView() {
           ) : null}
           {!popupsBlocked && secretModalOpen ? (
             <div
-              className="fixed inset-0 z-60 grid place-items-center bg-black/60 p-4"
+              className="app-dialog-backdrop fixed inset-0 z-60 grid place-items-center p-4"
               role="dialog"
               aria-modal="true"
             >
               <div
-                className="p-4  max-w-xl w-full rounded-xl shadow-2xl shadow-black/95 space-y-4 z-10 border-2 border-[#1D1C27]  transition-all duration-250 ease-out"
-                style={{
-                  backgroundImage: `url(${backImg})`,
-                  backgroundSize: "cover",
-                  backgroundPosition: "center",
-                }}
+                className="app-dialog-surface p-4 max-w-xl w-full space-y-4 z-10 transition-all duration-250 ease-out"
               >
                 {" "}
                 <div className="flex items-center justify-between gap-3">
@@ -4184,17 +4175,12 @@ function ControlView() {
           ) : null}
           {!setupActive && createWalletOpen ? (
             <div
-              className="fixed inset-0 z-60 grid place-items-center bg-black/60 p-4"
+              className="app-dialog-backdrop fixed inset-0 z-60 grid place-items-center p-4"
               role="dialog"
               aria-modal="true"
             >
               <div
-                className="p-4  w-full max-w-xl  rounded-xl shadow-2xl shadow-black/95 space-y-4 z-10 border-2 border-[#1D1C27]  transition-all duration-250 ease-out"
-                style={{
-                  backgroundImage: `url(${backImg})`,
-                  backgroundSize: "cover",
-                  backgroundPosition: "center",
-                }}
+                className="app-dialog-surface p-4 w-full max-w-xl space-y-4 z-10 transition-all duration-250 ease-out"
               >
                 {" "}
                 <div className="flex items-center justify-between gap-3">
@@ -5524,17 +5510,14 @@ function ControlView() {
           )}
           {!popupsBlocked && missionPickerSlot ? (
             <div
-              className="fixed inset-0 z-60 grid place-items-center bg-black/65 p-4"
+              className="app-dialog-backdrop fixed inset-0 z-60 grid place-items-center p-4"
               role="dialog"
               aria-modal="true"
             >
               <div
-                className="p-4 w-full rounded-xl shadow-2xl shadow-black/95 space-y-4 z-10 border-2 border-[#1D1C27]"
+                className="app-dialog-surface p-4 w-full space-y-4 z-10"
                 style={{
                   maxWidth: "680px",
-                  backgroundImage: `url(${backImg})`,
-                  backgroundSize: "cover",
-                  backgroundPosition: "center",
                 }}
               >
                 <div className="flex items-center justify-between gap-3">
@@ -5777,17 +5760,14 @@ function ControlView() {
           ) : null}
           {resetErrorModal ? createPortal((
             <div
-              className="fixed inset-0 z-[10020] grid place-items-center bg-black/60 p-4"
+              className="app-dialog-backdrop fixed inset-0 z-[10020] grid place-items-center p-4"
               role="dialog"
               aria-modal="true"
             >
               <div
-                className="p-4 w-full rounded-xl shadow-2xl shadow-black/95 space-y-4 z-10 border-2 border-[#1D1C27] transition-all duration-250 ease-out"
+                className="app-dialog-surface p-4 w-full space-y-4 z-10 transition-all duration-250 ease-out"
                 style={{
                   maxWidth: "680px",
-                  backgroundImage: `url(${backImg})`,
-                  backgroundSize: "cover",
-                  backgroundPosition: "center",
                 }}
               >
                 <div className="flex items-center justify-between gap-3">
@@ -5877,7 +5857,7 @@ function ControlView() {
           ), document.body) : null}
           {!popupsBlocked && autoUnlockSlot4ConfirmTarget !== null ? (
             <div
-              className="fixed inset-0 z-60 grid place-items-center bg-black/60 p-4"
+              className="app-dialog-backdrop fixed inset-0 z-60 grid place-items-center p-4"
               role="dialog"
               aria-modal="true"
               aria-labelledby="auto-unlock-confirm-title"
@@ -5889,15 +5869,10 @@ function ControlView() {
               }}
             >
               <div
-                className="p-4 w-full max-w-xs rounded-xl shadow-2xl shadow-black/95 space-y-3 border-2 border-[#1D1C27]"
-                style={{
-                  backgroundImage: `url(${backImg})`,
-                  backgroundSize: "cover",
-                  backgroundPosition: "center",
-                }}
+                className="app-dialog-surface p-4 w-full max-w-lg space-y-3"
               >
                 <div className="flex items-center justify-between gap-3">
-                  <h2 id="auto-unlock-confirm-title" className="text-sm font-semibold text-white">
+                  <h2 id="auto-unlock-confirm-title" className="text-lg font-semibold text-white">
                     Auto Unlock
                   </h2>
                   <button
@@ -5910,7 +5885,7 @@ function ControlView() {
                     ✕
                   </button>
                 </div>
-                <p id="auto-unlock-confirm-description" className="text-xs leading-relaxed text-slate-200">
+                <p id="auto-unlock-confirm-description" className="text-sm leading-relaxed text-slate-200">
                   Each time slot 4 expires, Auto Unlock will spend{" "}
                   <span className="font-semibold text-white">{normalizedSlotUnlockCost.toLocaleString()} PBP</span>{" "}
                   to unlock it, plus <span className="font-semibold text-white">250 PBP</span>{" "}
@@ -5921,38 +5896,37 @@ function ControlView() {
                     {autoUnlockSlot4Error}
                   </div>
                 ) : null}
-                <label className="flex items-start gap-2 text-xs leading-relaxed text-white/80 cursor-pointer select-none">
-                  <input
-                    type="checkbox"
-                    className="auto-unlock-checkbox mt-0.5"
+                <p className="text-sm text-white/80">
+                  By continuing, you allow these charges on each renewal.
+                </p>
+                <div className="flex justify-end">
+                  <button
+                    type="button"
+                    className="btn btn-gradient btn-sm"
                     autoFocus
-                    checked={autoUnlockSlot4Busy}
                     disabled={autoUnlockSlot4Busy}
-                    onChange={async (event) => {
-                      if (!event.target.checked) return;
+                    onClick={async () => {
                       if (await saveAutoUnlockSlot4(true, autoUnlockSlot4ConfirmTarget)) {
                         setAutoUnlockSlot4ConfirmTarget(null);
                       }
                     }}
-                  />
-                  <span>I understand and allow these charges on each renewal.</span>
-                </label>
+                  >
+                    {autoUnlockSlot4Busy ? "Enabling..." : "I understand"}
+                  </button>
+                </div>
               </div>
             </div>
           ) : null}
           {!popupsBlocked && slotUnlockModalOpen ? (
             <div
-              className="fixed inset-0 z-60 grid place-items-center bg-black/60 p-4"
+              className="app-dialog-backdrop fixed inset-0 z-60 grid place-items-center p-4"
               role="dialog"
               aria-modal="true"
             >
               <div
-                className="p-4 w-full rounded-xl shadow-2xl shadow-black/95 space-y-4 z-10 border-2 border-[#1D1C27] transition-all duration-250 ease-out"
+                className="app-dialog-surface p-4 w-full space-y-4 z-10 transition-all duration-250 ease-out"
                 style={{
                   maxWidth: "600px",
-                  backgroundImage: `url(${backImg})`,
-                  backgroundSize: "cover",
-                  backgroundPosition: "center",
                 }}
               >
                 <div className="flex items-center justify-between gap-3">
@@ -6046,17 +6020,14 @@ function ControlView() {
           ) : null}
           {!popupsBlocked && bridgeLinkModal ? (
             <div
-              className="fixed inset-0 z-60 grid place-items-center bg-black/60 p-4"
+              className="app-dialog-backdrop fixed inset-0 z-60 grid place-items-center p-4"
               role="dialog"
               aria-modal="true"
             >
               <div
-                className="p-4 w-full rounded-xl shadow-2xl shadow-black/95 space-y-4 z-10 border-2 border-[#1D1C27] transition-all duration-250 ease-out"
+                className="app-dialog-surface p-4 w-full space-y-4 z-10 transition-all duration-250 ease-out"
                 style={{
                   maxWidth: "680px",
-                  backgroundImage: `url(${backImg})`,
-                  backgroundSize: "cover",
-                  backgroundPosition: "center",
                 }}
               >
                 <div className="flex items-center justify-between gap-3">
@@ -6103,17 +6074,14 @@ function ControlView() {
           ) : null}
           {!popupsBlocked && competitionNotificationModal ? (
             <div
-              className="fixed inset-0 z-60 grid place-items-center bg-black/60 p-4"
+              className="app-dialog-backdrop fixed inset-0 z-60 grid place-items-center p-4"
               role="dialog"
               aria-modal="true"
             >
               <div
-                className="p-4 w-full rounded-xl shadow-2xl shadow-black/95 space-y-4 z-10 border-2 border-[#1D1C27] transition-all duration-250 ease-out"
+                className="app-dialog-surface p-4 w-full space-y-4 z-10 transition-all duration-250 ease-out"
                 style={{
                   maxWidth: "680px",
-                  backgroundImage: `url(${backImg})`,
-                  backgroundSize: "cover",
-                  backgroundPosition: "center",
                 }}
               >
                 <div className="relative pr-12">
@@ -6292,17 +6260,14 @@ function ControlView() {
           {announcement ? <AnnouncementDialog announcement={announcement} onClose={dismissAnnouncement} openExternal={openExternalUrl} wallet={String(status.currentUserWalletId || status.currentUserWalletSummary?.walletId || status.currentUserWalletSummary?.wallet_id || "").trim()} /> : null}
           {!popupsBlocked && updateModal ? (
             <div
-              className="fixed inset-0 z-60 grid place-items-center bg-black/60 p-4"
+              className="app-dialog-backdrop fixed inset-0 z-60 grid place-items-center p-4"
               role="dialog"
               aria-modal="true"
             >
               <div
-                className="p-4 w-full rounded-xl shadow-2xl shadow-black/95 space-y-4 z-10 border-2 border-[#1D1C27] transition-all duration-250 ease-out"
+                className="app-dialog-surface p-4 w-full space-y-4 z-10 transition-all duration-250 ease-out"
                 style={{
                   maxWidth: "640px",
-                  backgroundImage: `url(${backImg})`,
-                  backgroundSize: "cover",
-                  backgroundPosition: "center",
                 }}
               >
                 <div className="flex items-center justify-between gap-3">
@@ -6315,7 +6280,7 @@ function ControlView() {
           ) : null}
           {!popupsBlocked && fundingWalletFundedModal ? (
             <div
-              className="fixed inset-0 z-60 grid place-items-center overflow-hidden bg-black/60 p-4"
+              className="app-dialog-backdrop fixed inset-0 z-60 grid place-items-center overflow-hidden p-4"
               role="dialog"
               aria-modal="true"
               aria-labelledby="funding-wallet-funded-title"
@@ -6345,12 +6310,7 @@ function ControlView() {
                 ))}
               </div>
               <div
-                className="relative z-10 w-full max-w-xl space-y-4 rounded-xl border-2 border-[#1D1C27] p-4 shadow-2xl shadow-black/95"
-                style={{
-                  backgroundImage: `url(${backImg})`,
-                  backgroundSize: "cover",
-                  backgroundPosition: "center",
-                }}
+                className="app-dialog-surface relative z-10 w-full max-w-xl space-y-4 p-4"
               >
                 <div className="flex items-center justify-between gap-3">
                   <div
@@ -6435,17 +6395,12 @@ function ControlView() {
           ) : null}
           {!popupsBlocked && lowBalanceModal ? (
             <div
-              className="fixed inset-0 z-60 grid place-items-center bg-black/60 p-4"
+              className="app-dialog-backdrop fixed inset-0 z-60 grid place-items-center p-4"
               role="dialog"
               aria-modal="true"
             >
               <div
-                className="p-4  w-full max-w-xl rounded-xl shadow-2xl shadow-black/95 space-y-4 z-10 border-2 border-[#1D1C27]  transition-all duration-250 ease-out"
-                style={{
-                  backgroundImage: `url(${backImg})`,
-                  backgroundSize: "cover",
-                  backgroundPosition: "center",
-                }}
+                className="app-dialog-surface p-4 w-full max-w-xl space-y-4 z-10 transition-all duration-250 ease-out"
               >
                 {/* <div className="card w-full max-w-140 space-y-4 !bg-[#0b1116] border border-warning/50 z-10"> */}
                 <div className="flex items-center justify-between gap-3">
@@ -6596,17 +6551,12 @@ function ControlView() {
           ) : null}
           {throttleModal ? createPortal((
             <div
-              className="fixed inset-0 z-[10020] grid place-items-center bg-black/60 p-4"
+              className="app-dialog-backdrop fixed inset-0 z-[10020] grid place-items-center p-4"
               role="dialog"
               aria-modal="true"
             >
               <div
-                className="p-4 w-full max-w-xl rounded-xl shadow-2xl shadow-black/95 space-y-4 z-10 border-2 border-[#1D1C27] transition-all duration-250 ease-out"
-                style={{
-                  backgroundImage: `url(${backImg})`,
-                  backgroundSize: "cover",
-                  backgroundPosition: "center",
-                }}
+                className="app-dialog-surface p-4 w-full max-w-xl space-y-4 z-10 transition-all duration-250 ease-out"
               >
                 <div className="flex items-center justify-between gap-3">
                   <div className="text-lg font-semibold text-warning">

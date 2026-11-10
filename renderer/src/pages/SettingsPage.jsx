@@ -599,7 +599,7 @@ export default function SettingsPage({
       </div>
       {!setupActive && importOpen && (
         <div
-          className="fixed inset-0 z-60 grid place-items-center bg-black/70 p-4"
+          className="app-dialog-backdrop fixed inset-0 z-60 grid place-items-center p-4"
           onKeyDown={(event) => {
             if (event.key === "Escape") {
               event.stopPropagation();
@@ -612,7 +612,7 @@ export default function SettingsPage({
             aria-modal="true"
             aria-labelledby="import-wallet-title"
             aria-busy={importBusy}
-            className="w-full max-w-lg rounded-xl border-2 border-[#1D1C27] bg-[#24222e] p-4 shadow-2xl space-y-4"
+            className="app-dialog-surface w-full max-w-lg p-4 space-y-4"
           >
             <div className="flex items-center justify-between gap-3">
               <h2 id="import-wallet-title" className="text-lg font-semibold">
