@@ -17,5 +17,24 @@
     "Fixed various other bugs in win. mac, linux",
     "New onboarding experience with guided tour"
   ],
-  "artifacts": {}
+  "artifacts": {
+    "darwin-arm64": {
+      "url": "https://github.com/smolpuff/mos-mission-manager/releases/download/v3.3.0/missions-v3-mcp-arm64-mac.zip",
+      "size": 130710129,
+      "sha256": "291339df1bdc1c8fbc27c380b20b76e1ed48423b017d87dd13def1086d121d2f",
+      "md5": "359142e86225ed46b2d82504a33bc7f6"
+    },
+    "darwin-x64": {
+      "url": "https://github.com/smolpuff/mos-mission-manager/releases/download/v3.3.0/missions-v3-mcp-x64-mac.zip",
+      "size": 137125016,
+      "sha256": "9983bcbc1bd6745e89449aec44b8c91a3b998e94b5f74bb01b6e687bcd045328",
+      "md5": "fd99d22906b634553b61e5b5c212dc52"
+    },
+    "win32-x64": {
+      "url": "https://github.com/smolpuff/mos-mission-manager/releases/download/v3.3.0/missions-v3-mcp.3.3.0.exe",
+      "size": 104167349,
+      "sha256": "66fc171951aa600cbd9d4957a6ae077c22913480cb3b24d1bdb6e9ae7d672c40",
+      "md5": "3fa761daa7ff7ee89d3862bd5a64eb11"
+    }
+  }
 }
