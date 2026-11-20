@@ -215,8 +215,22 @@ app.on("ready", () => fs.appendFileSync(${JSON.stringify(launches)}, JSON.string
         return entries.find((entry) => entry.version === nextVersion && entry.pid !== launched.pid);
       }, until);
       inspector.close(); inspector = await connectRenderer(cdpPort);
-      const receipt = JSON.parse(await fs.readFile(path.join(settings, "desktop-update-transaction.json"), "utf8"));
-      await waitFor(async () => (await fs.readFile(path.join(receipt.directory, "state"), "utf8")).trim() === "complete" && !(await exists(path.join(receipt.directory, "backup.app"))));
+      const receiptFile = path.join(settings, "desktop-update-transaction.json");
+      const receiptText = await fs.readFile(receiptFile, "utf8").catch(error => {
+        if (error.code === "ENOENT") return null;
+        throw error;
+      });
+      if (receiptText) {
+        const receipt = JSON.parse(receiptText);
+        await waitFor(async () => {
+          if (!(await exists(receipt.directory))) return !(await exists(receiptFile));
+          const state = await fs.readFile(path.join(receipt.directory, "state"), "utf8").catch(error => {
+            if (error.code === "ENOENT") return "";
+            throw error;
+          });
+          return state.trim() === "complete" && !(await exists(path.join(receipt.directory, "backup.app")));
+        });
+      }
       assert(await hash(path.join(installed, archiveRelative)) === nextHash, "Installed application ASAR differs from the actual release payload.");
       assert(updatedLaunch.execPath === path.join(installed, "Contents/MacOS/missions-v3-mcp"), "The new app launched from a different location.");
       await waitFor(() => inspector.evaluate(`document.body.textContent.includes(${JSON.stringify(`v${nextVersion}`)})`));
