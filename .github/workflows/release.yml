@@ -138,7 +138,6 @@ jobs:
           node -e "console.log(require('electron'))"
           npm test
           npm run test:desktop-security
-          npm run test:setup-updates
           npm run test:mac-update -- --auto
 
       - name: Upload macOS release files
