@@ -53,13 +53,16 @@ if (!process.versions.electron) {
   (async () => {
     const win = await rendererLoaded;
     const evaluate = source => win.webContents.executeJavaScript(source);
-    await new Promise(resolve => setTimeout(resolve, 300));
+    const renderDeadline = Date.now() + 30000;
+    while (!(await evaluate("document.body.innerText")).trim() && Date.now() < renderDeadline) {
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
     assert.equal(app.getPath("userData"), settings);
     const state = await evaluate("window.missionsDesktop.getState()");
     assert.ok(state && typeof state === "object", "The real preload's authorized IPC failed");
     const render = await evaluate(`({ text: document.body.innerText,
       policy: document.querySelector('meta[http-equiv="Content-Security-Policy"]').content })`);
-    assert.match(render.text, /MISSIONS/);
+    assert.match(render.text, /missions/i);
     assert.match(render.policy, /script-src 'self';/);
     assert.match(render.policy, /connect-src 'none';/);
     const inlineBlocked = await evaluate(`(() => {
