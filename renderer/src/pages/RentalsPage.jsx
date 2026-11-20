@@ -1,16 +1,18 @@
-import { useEffect, useState } from "react";
+import LoadingSpinner from "../components/LoadingSpinner";
+import { useState } from "react";
 
 export default function RentalsPage({ bridge }) {
   const [loading, setLoading] = useState(false);
+  const [hasLoaded, setHasLoaded] = useState(false);
   const [error, setError] = useState(null);
   const [data, setData] = useState({
-    rentableCount: 0,
+    rentableCount: null,
     rentable: [],
     activeRentals: [],
   });
 
   const load = async () => {
-    if (!bridge?.getRentalsPreview) return;
+    if (loading || !bridge?.getRentalsPreview) return;
     setLoading(true);
     setError(null);
     try {
@@ -29,16 +31,13 @@ export default function RentalsPage({ bridge }) {
       setError(String(err?.message || err));
     } finally {
       setLoading(false);
+      setHasLoaded(true);
     }
   };
 
-  useEffect(() => {
-    void load();
-  }, [bridge]);
-
   return (
-    <section className="space-y-4">
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+    <section className="min-h-0 flex-1 flex flex-col gap-4 overflow-hidden">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 shrink-0">
         <div className="card p-4 border border-white/10 bg-black/30 relative">
           <button
             type="button"
@@ -59,7 +58,7 @@ export default function RentalsPage({ bridge }) {
             Rentable Pool
           </div>
           <div className="text-2xl font-semibold text-slate-100 mt-1">
-            {Number(data.rentableCount || 0).toLocaleString()}
+            {data.rentableCount === null ? "—" : Number(data.rentableCount || 0).toLocaleString()}
           </div>
         </div>
         <div className="card p-4 border border-white/10 bg-black/30">
@@ -67,31 +66,50 @@ export default function RentalsPage({ bridge }) {
             Active Rental NFTs
           </div>
           <div className="text-2xl font-semibold text-slate-100 mt-1">
-            {data.activeRentals.length}
+            {data.rentableCount === null ? "—" : data.activeRentals.length}
           </div>
         </div>
       </div>
       {error ? (
-        <div className="card p-4 border border-error/40 bg-error/10 text-error">
+        <div className="card p-4 border border-error/40 bg-error/10 text-error shrink-0">
           {error}
         </div>
       ) : null}
 
-      <div className="card p-4 border border-white/10 bg-black/30 space-y-3">
-        <div className="text-sm font-semibold text-slate-200">
+      <div className="card p-4 border border-white/10 bg-black/30 min-h-0 flex-1 flex flex-col gap-3 overflow-hidden">
+        <div className="text-sm font-semibold text-slate-200 shrink-0">
           Current Active Rental Missions
         </div>
         {loading ? (
           <div className="text-sm text-slate-400 mt-3 flex items-center gap-2">
-            <span className="loading loading-spinner loading-sm text-success" />
+            <LoadingSpinner />
             <span>Loading rentals...</span>
+          </div>
+        ) : !hasLoaded ? (
+          <div className="flex min-h-0 items-start justify-start">
+            <div className="text-left">
+              <div className="text-lg text-slate-100">
+                Click load to fetch your rentals.
+              </div>
+              <div className="mt-3 text-xs text-slate-400">
+                This avoids a server call until you explicitly open the list.
+              </div>
+              <button
+                type="button"
+                className="btn btn-gradient btn-sm mt-4"
+                onClick={() => void load()}
+                disabled={loading}
+              >
+                Load Rentals
+              </button>
+            </div>
           </div>
         ) : data.activeRentals.length === 0 ? (
           <div className="text-sm text-slate-400">
             No active rental-backed missions detected.
           </div>
         ) : (
-          <div className="space-y-2">
+          <div className="space-y-2 min-h-0 flex-1 overflow-y-auto">
             {data.activeRentals.map((item) => (
               <div
                 key={item.id}

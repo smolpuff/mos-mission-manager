@@ -8,7 +8,7 @@ const path = require("node:path");
 const os = require("node:os");
 const crypto = require("node:crypto");
 const http = require("node:http");
-const { spawn } = require("node:child_process");
+const { spawn, execFileSync } = require("node:child_process");
 const { Transform } = require("node:stream");
 const { pipeline } = require("node:stream/promises");
 const asar = require("@electron/asar");
@@ -39,12 +39,16 @@ async function waitFor(check, timeout = 120000) {
 async function main() {
   assert(process.platform === "win32", "Run this rehearsal on Windows.");
   const args = process.argv.slice(2);
-  assert(args.length <= 1 && args.every(arg => /^--from-version=\d+\.\d+\.\d+$/.test(arg)), "Option: --from-version=X.Y.Z");
-  const version = args.length ? args[0].split("=")[1] : repositoryVersion;
+  assert(args.length <= 2 && args.every(arg => /^--from-version=\d+\.\d+\.\d+(?:-beta\.\d+)?$/.test(arg) || /^--from-updater-tag=v\d+\.\d+\.\d+b\d+$/.test(arg)), "Options: --from-version=X.Y.Z[-beta.N] --from-updater-tag=vX.Y.ZbN");
+  const fromVersion = args.find(arg => arg.startsWith("--from-version="))?.split("=")[1];
+  const legacyUpdaterTag = args.find(arg => arg.startsWith("--from-updater-tag="))?.split("=")[1];
+  assert(!legacyUpdaterTag || fromVersion, "An older updater tag requires --from-version");
+  const version = fromVersion || repositoryVersion;
   if (args.length) assert(compareVersions(repositoryVersion, version) > 0, "The starting version must be older than the repository version.");
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "missions-windows-update-"));
   console.log(`Private update rehearsal: ${root}`);
-  const nextVersion = args.length ? repositoryVersion : version.replace(/\d+$/, (patch) => String(Number(patch) + 1));
+  const nextVersion = (args.length ? repositoryVersion : version.replace(/\d+$/, (patch) => String(Number(patch) + 1)))
+    .replace(/b(\d+)$/, "-beta.$1");
   const appData = path.join(root, "appData");
   const settings = path.join(appData, "missions-v3-mcp");
   const installed = path.join(root, "installed", "Missions Update Test.exe");
@@ -54,6 +58,8 @@ async function main() {
   const requests = { version: 0, executable: 0, bytes: 0 };
   const states = [];
   let manifest, launched, receipt, result;
+  const temporaryRoot = await fs.realpath(os.tmpdir());
+  const existingTempEntries = new Set(await fs.readdir(temporaryRoot));
   const server = http.createServer(async (request, response) => {
     try {
       if (!request.url.startsWith(`/${token}/`)) { response.writeHead(404).end(); return; }
@@ -81,6 +87,7 @@ async function main() {
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   const origin = `http://127.0.0.1:${server.address().port}/${token}`;
   const routes = { [UPDATE_JSON_URL]: `${origin}/version`,
+    [UPDATE_JSON_URL.replace("/beta/", "/main/")]: `${origin}/version`,
     [releaseAssetUrl(nextVersion, path.basename(candidate))]: `${origin}/executable` };
   const bootstrap = `"use strict";
 const { app } = require('electron');
@@ -106,6 +113,15 @@ app.on('ready', () => fs.appendFileSync(${JSON.stringify(launchesFile)}, JSON.st
   pid: process.pid, version: app.getVersion(), portable: process.env.PORTABLE_EXECUTABLE_FILE,
   userData: app.getPath('userData'), argv: process.argv
 }) + '\\n'));
+// Record the real renderer acknowledgement before the helper deletes its journal.
+const originalWrite = require('node:fs/promises').writeFile;
+require('node:fs/promises').writeFile = async function(file, data, ...args) {
+  const result = await originalWrite.call(this, file, data, ...args);
+  if (require('node:path').basename(String(file)) === 'healthy.next') {
+    fs.appendFileSync(${JSON.stringify(path.join(root, "acknowledgements.jsonl"))}, JSON.stringify({ data: String(data), version: app.getVersion() }) + '\\n');
+  }
+  return result;
+};
 `;
   const buildLog = await fs.open(path.join(root, "build.log"), "w");
   const command = async (args, cwd = repository) => {
@@ -119,10 +135,13 @@ app.on('ready', () => fs.appendFileSync(${JSON.stringify(launchesFile)}, JSON.st
     const sourceApp = path.join(repository, "release/win-unpacked");
     const originalArchive = path.join(sourceApp, "resources/app.asar");
     assert(await exists(originalArchive), "Build the Windows app first: npm run desktop:dist:win");
-    assert(asar.extractFile(originalArchive, path.join("electron", "windows-updater.js")).equals(
-      await fs.readFile(path.join(repository, "electron/windows-updater.js"))), "Rebuild the Windows app first; its updater differs from source.");
     const tree = path.join(root, "packaged-source");
     asar.extractAll(originalArchive, tree);
+    // Reuse the existing Electron runtime, but test current source without changing release output.
+    for (const name of ["electron", "lib", "src"]) {
+      await fs.cp(path.join(repository, name), path.join(tree, name), { recursive: true });
+    }
+    await fs.copyFile(path.join(repository, "package.json"), path.join(tree, "package.json"));
     await fs.writeFile(path.join(tree, "electron/local-update-verification.cjs"), bootstrap);
     const mainPath = path.join(tree, "electron/main.js");
     await fs.writeFile(mainPath, 'require("./local-update-verification.cjs");\n' + await fs.readFile(mainPath, "utf8"));
@@ -142,6 +161,12 @@ app.on('ready', () => fs.appendFileSync(${JSON.stringify(launchesFile)}, JSON.st
       console.log(`Packaging real portable test app ${buildVersion}...`);
       const bundle = path.join(root, `${label}-unpacked`);
       await fs.cp(sourceApp, bundle, { recursive: true });
+      for (const name of ["windows-updater.js", "windows-update-helper.ps1"]) {
+        const contents = label === "current" && legacyUpdaterTag
+          ? execFileSync("git", ["show", `${legacyUpdaterTag}:electron/${name}`], { cwd: repository })
+          : await fs.readFile(path.join(repository, "electron", name));
+        await fs.writeFile(path.join(tree, "electron", name), contents);
+      }
       if (label === "next" || args.length) {
         await fs.writeFile(path.join(nextRenderer, "package.json"), JSON.stringify({ ...require("../../package.json"), version: buildVersion }));
         await command([path.join(repository, "node_modules/vite/bin/vite.js"), "build", "--outDir", path.join(tree, "dist")], nextRenderer);
@@ -191,7 +216,7 @@ app.on('ready', () => fs.appendFileSync(${JSON.stringify(launchesFile)}, JSON.st
     console.log(`It will download the real test EXE and reopen at the same path as v${nextVersion}.`);
     await fs.writeFile(path.join(root, "ready.json"), JSON.stringify({ root, installed, version, nextVersion, settings }));
     await waitFor(async () => {
-      receipt = JSON.parse(await fs.readFile(path.join(settings, "desktop-update-transaction.json"), "utf8").catch(() => "null"));
+      receipt = JSON.parse(await fs.readFile(path.join(settings, "desktop-update-transaction.json"), "utf8").catch(() => "null")) || receipt;
       if (!receipt) return false;
       const state = (await fs.readFile(path.join(receipt.directory, "state"), "utf8")
         .catch(() => states.at(-1)?.state || "preparing")).trim();
@@ -202,9 +227,9 @@ app.on('ready', () => fs.appendFileSync(${JSON.stringify(launchesFile)}, JSON.st
       if (["recovery_required", "replace_failed", "rolled_back", "startup_timeout", "exit_timeout", "cancelled", "commit_timeout"].includes(state)) {
         throw new Error(`Update failed: ${state}. Inspect ${receipt.directory}`);
       }
-      return state === "complete";
+      return state === "complete" || (await exists(path.join(root, "acknowledgements.jsonl")) && !(await exists(receipt.directory)));
     }, 30 * 60 * 1000);
-    await waitFor(async () => !(await exists(path.join(receipt.directory, "backup.exe"))));
+    await waitFor(async () => !(await exists(receipt.directory)) && !(await exists(path.join(settings, "desktop-update-transaction.json"))));
     const launches = (await fs.readFile(launchesFile, "utf8")).trim().split("\n").map(JSON.parse);
     const before = launches.find(entry => entry.version === version);
     const after = launches.find(entry => entry.version === nextVersion);
@@ -213,12 +238,20 @@ app.on('ready', () => fs.appendFileSync(${JSON.stringify(launchesFile)}, JSON.st
     assert(after.argv.includes(`--missions-update-token=${receipt.token}`), "The replacement did not receive its acknowledgement token");
     assert(await hash(installed) === expected.sha256, "Installed EXE differs from downloaded release");
     assert(oldHash !== expected.sha256, "The test release did not change the EXE");
-    assert(await fs.readFile(path.join(receipt.directory, "healthy"), "utf8") === `${receipt.token} ${nextVersion}`, "The real renderer did not acknowledge startup");
+    const acknowledgements = (await fs.readFile(path.join(root, "acknowledgements.jsonl"), "utf8")).trim().split("\n").map(JSON.parse);
+    assert(acknowledgements.some(entry => entry.data === `${receipt.token} ${nextVersion}`), "The real renderer did not acknowledge startup");
+    assert(path.dirname(receipt.directory) === (legacyUpdaterTag ? path.dirname(installed) : temporaryRoot), "Update staging was not in the expected location");
+    const updateLock = receipt.lock || path.join(path.dirname(installed), `.${path.basename(installed)}.update-lock`);
+    assert(!(await exists(updateLock)), "Update lock was left behind");
+    assert(JSON.stringify(await fs.readdir(path.dirname(installed))) === JSON.stringify([path.basename(installed)]), "Update files were left beside the app");
+    const leftoverTempEntries = (await fs.readdir(temporaryRoot)).filter(name => !existingTempEntries.has(name) &&
+      (name.startsWith(`.${path.basename(installed)}.update-`) || name === path.basename(updateLock)));
+    assert(leftoverTempEntries.length === 0, `Updater left temp files: ${leftoverTempEntries.join(", ")}`);
     assert(requests.executable === 1 && requests.bytes === expected.size, "The complete EXE was not downloaded exactly once");
     assert(JSON.parse(await fs.readFile(path.join(settings, "config.json"), "utf8")).appUpdateVerification === token, "Settings were lost");
     result = { passed: true, actualApplication: true, beforeVersion: version, afterVersion: nextVersion,
       installed, settings, originalExeSha256: oldHash, installedExeSha256: expected.sha256,
-      requests, states, before, after, receipt, completed: new Date().toISOString() };
+      requests, states, before, after, receipt, legacyUpdaterTag, cleanup: { stagingRemoved: true, receiptRemoved: true, lockRemoved: true, appFolderClean: true, leftoverTempEntries }, completed: new Date().toISOString() };
     console.log(`PASS: downloaded ${requests.bytes} bytes, replaced the real portable EXE, reopened ${nextVersion}, and received the real renderer's healthy acknowledgement.`);
     console.log(`The updated test app stays open. Proof: ${path.join(root, "result.json")}`);
   } catch (error) {

@@ -1,3 +1,4 @@
+import LoadingSpinner from "../LoadingSpinner";
 import solIcon from "../../img/icon-sm__sol.svg";
 import pbpIcon from "../../img/icon-sm__pbp.webp";
 import StatusBadge from "../StatusBadge/app";
@@ -62,9 +63,16 @@ export default function HeaderUser({
 
   const mainSol = findBalance("sol");
   const mainPbp = findBalance("pbp");
-  const displayName = String(status.currentUserDisplayName || "").trim();
-  const walletId = String(status.currentUserWalletId || "").trim();
-  const username = displayName || walletId || "Unknown";
+  const username = [
+    status.currentUserDisplayName,
+    status.currentUserWalletSummary?.displayName,
+    status.currentUserWalletSummary?.display_name,
+    status.currentUserWalletSummary?.username,
+    status.currentUserWalletId,
+    status.currentUserWalletSummary?.walletId,
+    status.currentUserWalletSummary?.wallet_id,
+  ].map((value) => String(value || "").trim())
+    .find((value) => value && !["unknown", "null", "undefined"].includes(value.toLowerCase())) || "Unknown";
   return (
     <section className="space-y-0 grid grid-cols-[70%_auto]" id="app__header">
       <div className="left">
@@ -139,7 +147,7 @@ export default function HeaderUser({
                   aria-label="Refresh funding wallet balance"
                   title="Refresh funding wallet balance"
                 >
-                  <span className={balanceRefreshBusy ? "inline-block animate-spin" : ""}>↻</span>
+                  {balanceRefreshBusy ? <LoadingSpinner /> : <span>↻</span>}
                 </button>
               ) : null}
             </div>
@@ -174,14 +182,16 @@ export default function HeaderUser({
               onClick={() => onManualClaim()}
               disabled={!status.running}
             >
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                viewBox="0 0 640 640"
-                className={`w-4 h-4 ${manualCheckBusy ? "animate-spin" : ""}`}
-                fill="currentColor"
-              >
-                <path d="M320 96c123.7 0 224 100.3 224 224s-100.3 224-224 224S96 443.7 96 320c0-34.1 7.6-66.5 21.3-95.5l44.9 22.4C151.2 268 144 293.4 144 320c0 97.2 78.8 176 176 176s176-78.8 176-176S417.2 144 320 144c-47.4 0-90.4 18.7-122.1 49.2l58.1 58.1L112 304V160l51.8 51.8C203.2 163.2 258.3 96 320 96z" />
-              </svg>
+              {manualCheckBusy ? <LoadingSpinner /> : (
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  viewBox="0 0 640 640"
+                  className="w-4 h-4"
+                  fill="currentColor"
+                >
+                  <path d="M320 96c123.7 0 224 100.3 224 224s-100.3 224-224 224S96 443.7 96 320c0-34.1 7.6-66.5 21.3-95.5l44.9 22.4C151.2 268 144 293.4 144 320c0 97.2 78.8 176 176 176s176-78.8 176-176S417.2 144 320 144c-47.4 0-90.4 18.7-122.1 49.2l58.1 58.1L112 304V160l51.8 51.8C203.2 163.2 258.3 96 320 96z" />
+                </svg>
+              )}
             </button>
           ) : null}
         </div>

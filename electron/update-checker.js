@@ -8,6 +8,11 @@ const UPDATE_CHECK_TIMEOUT_MS = 8000;
 function normalizeVersionParts(value) {
   const text = String(value || "").trim();
   if (!text) return [];
+  const beta = text.replace(/^v/i, "").match(/^(\d+)\.(\d+)\.(\d+)(?:b(\d+)|-beta\.(\d+))?$/);
+  if (beta) {
+    return [Number(beta[1]), Number(beta[2]), Number(beta[3]),
+      beta[4] || beta[5] ? 0 : 1, Number(beta[4] || beta[5] || 0)];
+  }
   return text
     .replace(/^v/i, "")
     .split(".")

@@ -1,6 +1,9 @@
 #!/usr/bin/env node
 "use strict";
 
+// TEMP_AUTH_DIAGNOSTICS: remove after the renewal incident is diagnosed.
+const { authRuntime, authEvent } = require("../lib/auth-diagnostics");
+
 const {
   DEFAULT_TOKEN_FILE,
   discover,
@@ -73,10 +76,12 @@ function parseJsonObject(raw, flagName = "--args") {
     }
 
     const cmd = rest[0];
+    authRuntime(tokenFile, { role: "pbp-mcp-cli", version: require("../package.json").version });
+    authEvent(tokenFile, "cli.command", { command: cmd });
 
     if (cmd === "tools") {
       const asJson = rest.includes("--json");
-      const discovered = await discover({ url, timeoutMs });
+      const discovered = await discover({ url, timeoutMs, tokenFile });
       const tools = Array.isArray(discovered?.tools) ? discovered.tools : [];
       if (asJson) {
         console.log(JSON.stringify({ tools }, null, 2));

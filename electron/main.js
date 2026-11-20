@@ -11,6 +11,11 @@ const {
   BrowserWindow,
   dialog,
   Menu,
+  Tray,
+  nativeImage,
+//   Tray,
+//   nativeImage,
+//   net: electronNet,
   ipcMain,
   clipboard,
   shell,
@@ -18,6 +23,13 @@ const {
 } = require("electron");
 const { createRendererSecurity } = require("./security");
 const { createWalletGenerationRequest } = require("./wallet-generation");
+const { createMacMenuBar } = require("./mac-menu-bar");
+// const { startFromMenuBar } = require("./menu-bar-state");
+const { createWalletRefreshScheduler } = require("./wallet-refresh-scheduler");
+const { createWindowsTray } = require("./windows-tray");
+const { startFromWindowsTray } = require("./windows-tray-state");
+const { scheduleStartupWatching } = require("./startup-watcher");
+const { firstLaunchModePatch } = require("./first-launch-mode");
 const { createSignerService } = require("../src/signer");
 const { importWalletAndVerify } = require("../src/wallet-import");
 let walletOperationBusy = false;
@@ -33,10 +45,14 @@ const {
   competitionRangeLockDecision,
 } = require("./competitionRangeLock");
 const { checkForUpdates } = require("./update-checker");
+const { createAnnouncementService } = require("./announcements");
+const { createResetTelemetryDelivery } = require("./reset-telemetry-delivery");
 const { normalizeAnalyticsRange, analyticsRangeBounds, isInAnalyticsRange } = require("./analytics-ranges");
+const { countRentalAssignments, hasRecordedAssignment } = require("../src/rental-analytics");
 const { MacUpdater, acknowledgeMacUpdate } = require("./mac-updater");
 const { WindowsUpdater, acknowledgeWindowsUpdate } = require("./windows-updater");
 const { createMcpClient } = require("../src/mcp/client");
+const { isAuthenticationError } = require("../lib/auth-errors");
 const {
   normalizeMissionList,
   normalizeMissionCatalogList,
@@ -150,8 +166,30 @@ function desktopWindowFrameOptions() {
 }
 
 let controlWindow = null;
+let cancelStartupWatching = () => {};
 let cliWindow = null;
 let splashWindow = null;
+let windowsTrayRunnerActions = null;
+const windowsTray = createWindowsTray({
+  platform: process.platform,
+  Tray, Menu, icon: WINDOWS_WINDOW_ICON,
+  getWindow: () => controlWindow,
+  isQuitting: () => appQuitInFlight || telemetryQuitInProgress,
+  start: () => windowsTrayRunnerActions.start(),
+  stop: () => windowsTrayRunnerActions.stop(),
+  quit: () => requestAppQuit("windows_tray_quit"),
+  onError: (error) => pushSystemLog(`Tray action failed: ${String(error?.message || error)}`),
+});
+const macMenuBar = createMacMenuBar({
+  platform: process.platform,
+  app, Tray, Menu, nativeImage,
+  getWindow: () => controlWindow,
+  start: () => windowsTrayRunnerActions.start(),
+  stop: () => windowsTrayRunnerActions.stop(),
+  onError: (error) => pushSystemLog(`Menu bar action failed: ${String(error?.message || error)}`),
+  isQuitting: () => appQuitInFlight || telemetryQuitInProgress,
+  quit: () => requestAppQuit("menu_bar_quit"),
+});
 const rendererSecurity = createRendererSecurity({
   rendererPath: rendererIndexPath,
   devServerUrl: RENDERER_DEV_URL,
@@ -179,7 +217,7 @@ const maxLogHistory = 1200;
 const maxLogHistoryBytes = 4 * 1024 * 1024;
 let fundingWalletSummaryRefreshPromise = null;
 let fundingWalletSummaryLastAttemptAt = 0;
-let fundingWalletRefreshTimer = null;
+let fundingWalletRefreshScheduler = null;
 let bootstrapWalletSummaryPromise = null;
 let bootstrapWalletSummaryLastAttemptAt = 0;
 let startupMissionBootstrapPromise = null;
@@ -212,7 +250,6 @@ let desktopUpdater = null;
 let desktopUpdateOffer = null;
 let updateUiReadyReported = false;
 const FUNDING_WALLET_REFRESH_MIN_INTERVAL_MS = 30000;
-const FUNDING_WALLET_PERIODIC_REFRESH_MS = 30 * 60 * 1000;
 const BOOTSTRAP_WALLET_REFRESH_MIN_INTERVAL_MS = 30000;
 const PAGE_PREVIEW_CACHE_TTL_MS = 2000;
 const RENTALS_PREVIEW_CACHE_TTL_MS = 120000;
@@ -260,6 +297,9 @@ const backendStatus = {
   missionDataLoading: false,
   nftUsageStats: [],
   slotUnlockSummary: null,
+  autoUnlockSlot4Enabled: false,
+  autoUnlockSlot4Status: null,
+  autoUnlockSlot4MissionName: "",
   currentMode: null,
   defaultMissionResetLevel: null,
   autoModeEnabled: null,
@@ -295,6 +335,18 @@ const desktopMcpCtx = {
   MCP_URL: "https://pixelbypixel.studio/mcp",
   MCP_PROTOCOL_VERSION: "2025-03-26",
   tokenFilePath: path.join(os.homedir(), ".pbp-mcp", "token.json"),
+  // TEMP_AUTH_DIAGNOSTICS: share the runner's diagnostic log location.
+  authDiagnosticRole: "desktop",
+  getDebugLogContext() {
+    return { ...backendStatus, signerConfig: readDesktopConfig().signer,
+      resourceUsage: readResourceUsageSnapshot() };
+  },
+  configPath: path.join(getBackendWorkingDirectory(), "config.json"),
+  get missionModeEnabled() {
+    return backendStatus.running
+      ? backendStatus.missionModeEnabled === true
+      : readDesktopConfig().missionModeEnabled === true;
+  },
   mcpCooldownStatePath: path.join(
     getBackendWorkingDirectory(),
     "data",
@@ -697,7 +749,7 @@ function normalizeSpendHistory(raw) {
 
 function normalizeResetHistory(raw) {
   if (!Array.isArray(raw)) return [];
-  return raw
+  const entries = raw
     .map((entry) => {
       const at = Number(entry?.at);
       const kind = String(entry?.kind || entry?.resetType || "")
@@ -712,8 +764,12 @@ function normalizeResetHistory(raw) {
         source: source === "rental" ? "rental" : "owned",
       };
     })
-    .filter((entry) => entry.at)
-    .slice(-2000);
+    .filter((entry) => entry.at);
+  const competitionBounds = analyticsRangeBounds("resetCompetition");
+  // Keep every competition mission reset so local scoring matches the website,
+  // even when a participant exceeds the usual recent-history limit.
+  return entries.filter((entry, index) => index >= entries.length - 2000 ||
+    (entry.kind === "mission" && isInAnalyticsRange(entry, competitionBounds)));
 }
 
 function normalizeRentalHistory(raw) {
@@ -772,6 +828,7 @@ function normalizeAssignmentHistory(raw) {
         level: Number.isFinite(level) ? level : null,
         missionStartedAt,
         usedReset,
+        eventId: String(entry?.eventId || "").trim() || null,
         nft,
         nftAccount,
       };
@@ -925,6 +982,12 @@ async function loadWindow(win, hash = "") {
 function publish(channel, payload) {
   for (const win of [controlWindow, cliWindow]) {
     if (win && !win.isDestroyed()) {
+      // The CLI only consumes output; avoid cloning dashboard snapshots and
+      // events (including analytics/NFT data) into its renderer.
+      if (
+        win === cliWindow &&
+        (channel === "backend:status" || channel === "backend:event")
+      ) continue;
       win.webContents.send(channel, payload);
     }
   }
@@ -1042,6 +1105,8 @@ function logConfigPatch(source, patch = {}) {
 }
 
 function publishStatus() {
+  windowsTray.updateStatus(backendStatus);
+  macMenuBar.updateStatus(backendStatus);
   publish("backend:status", { ...backendStatus });
 }
 
@@ -1194,7 +1259,7 @@ async function bootstrapStartupMissionSlots() {
           { url: "https://pixelbypixel.studio/mcp" },
         );
       } catch (error) {
-        if (!isAuthFailureMessage(error?.message)) throw error;
+        if (!isAuthenticationError(error)) throw error;
         pushSystemLog("Startup mission sync skipped until login is available.");
         backendStatus.isAuthenticated = false;
         return { ok: false, skipped: "auth_required" };
@@ -1278,7 +1343,8 @@ function updateBackendStateFromIpc(payload) {
       // snapshot can briefly contain the value from before config sync and
       // must not make the UI jump back to that stale selection.
       key === "nftAssignmentOrder" ||
-      key === "nftAssignmentCollection"
+      key === "nftAssignmentCollection" ||
+      key === "autoUnlockSlot4Enabled"
     ) {
       continue;
     }
@@ -1302,6 +1368,13 @@ function updateBackendStateFromIpc(payload) {
         if (
           hasUsableFundingSummary(currentSummary) &&
           !hasUsableFundingSummary(nextSummary)
+        ) {
+          continue;
+        }
+        // A manual desktop refresh can be newer than the runner's cached balance.
+        if (
+          currentSummary?.address === nextSummary?.address &&
+          Number(currentSummary?.checkedAt || 0) > Number(nextSummary?.checkedAt || 0)
         ) {
           continue;
         }
@@ -1342,8 +1415,7 @@ function throttleDebugLogPath() {
   return path.join(getBackendWorkingDirectory(), "mcp-throttle-debug.log");
 }
 
-function readThrottleDebugLog() {
-  const filePath = throttleDebugLogPath();
+function readThrottleDebugLog(filePath = throttleDebugLogPath()) {
   try {
     if (!fs.existsSync(filePath)) {
       return { ok: true, path: filePath, text: "", exists: false };
@@ -1365,8 +1437,7 @@ function readThrottleDebugLog() {
   }
 }
 
-function deleteThrottleDebugLog() {
-  const filePath = throttleDebugLogPath();
+function deleteThrottleDebugLog(filePath = throttleDebugLogPath()) {
   try {
     if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
     return { ok: true, path: filePath, deleted: true };
@@ -1584,19 +1655,15 @@ function currentAnalyticsIdentity() {
       ? backendStatus.currentUserWalletSummary
       : {};
   return {
-    walletId: normalizeTelemetryIdentityValue(
-      backendStatus.currentUserWalletId ||
-        summary.walletId ||
-        summary.wallet_id ||
-        null,
-    ),
-    nickname: normalizeTelemetryIdentityValue(
-      backendStatus.currentUserDisplayName ||
-        summary.displayName ||
-        summary.display_name ||
-        summary.username ||
-        null,
-    ),
+    walletId:
+      normalizeTelemetryIdentityValue(backendStatus.currentUserWalletId) ||
+      normalizeTelemetryIdentityValue(summary.walletId) ||
+      normalizeTelemetryIdentityValue(summary.wallet_id),
+    nickname:
+      normalizeTelemetryIdentityValue(backendStatus.currentUserDisplayName) ||
+      normalizeTelemetryIdentityValue(summary.displayName) ||
+      normalizeTelemetryIdentityValue(summary.display_name) ||
+      normalizeTelemetryIdentityValue(summary.username),
   };
 }
 
@@ -1619,9 +1686,44 @@ function buildTelemetryPayload(eventType, extra = {}) {
   };
 }
 
+const resetTelemetryDelivery = createResetTelemetryDelivery({ send: postResetTelemetryPayload });
+
+async function postResetTelemetryPayload(payload, remainingMs) {
+  const config = telemetryConfigFromDesktopConfig();
+  if (!config.enabled) return { ok: false, retryable: false };
+  const startedAt = Date.now();
+  const externalIp = await externalIpForPayload();
+  const budget = remainingMs - (Date.now() - startedAt);
+  if (budget <= 0) return { ok: false, retryable: false };
+  try {
+    const response = await fetch(config.url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Missions-Track-Token": config.token },
+      body: JSON.stringify({ ...payload, ...(externalIp ? { external_ip: externalIp } : {}) }),
+      signal: AbortSignal.timeout(Math.min(MISSIONS_ANALYTICS_TIMEOUT_MS, budget)),
+    });
+    if (!response.ok) {
+      const error = new Error(`Telemetry HTTP ${response.status}`);
+      error.retryable = response.status >= 500 || [408, 429].includes(response.status);
+      throw error;
+    }
+    analyticsTelemetryFailureLogged = false;
+    return { ok: true };
+  } catch (error) {
+    if (!analyticsTelemetryFailureLogged) {
+      analyticsTelemetryFailureLogged = true;
+      pushSystemLog(`Mission analytics reporting failed: ${String(error?.message || error)}`);
+    }
+    return { ok: false, retryable: error.retryable !== false };
+  }
+}
+
 async function postTelemetryEvent(eventType, extra = {}) {
   const config = telemetryConfigFromDesktopConfig();
   if (!config.enabled) return false;
+  if (eventType === "feature_used" && extra.event_name === "reset") {
+    return resetTelemetryDelivery.deliver(buildTelemetryPayload(eventType, extra));
+  }
   const externalIp = await externalIpForPayload();
   const payload = buildTelemetryPayload(eventType, {
     ...(externalIp ? { external_ip: externalIp } : {}),
@@ -2624,6 +2726,7 @@ function applyAnalyticsSpendEvent(payload = {}) {
 }
 
 function applyAnalyticsResetEvent(payload = {}) {
+  const resetAt = Date.now();
   const kind = String(
     payload?.resetType || payload?.kind || payload?.type || "mission",
   )
@@ -2641,7 +2744,7 @@ function applyAnalyticsResetEvent(payload = {}) {
   current.lifetime.resetHistory = normalizeResetHistory([
     ...(current.lifetime.resetHistory || []),
     {
-      at: Date.now(),
+      at: resetAt,
       kind: bucket,
       source: String(payload?.resetSource || payload?.source || "").trim(),
     },
@@ -2649,7 +2752,7 @@ function applyAnalyticsResetEvent(payload = {}) {
   current.session.resetHistory = normalizeResetHistory([
     ...(current.session.resetHistory || []),
     {
-      at: Date.now(),
+      at: resetAt,
       kind: bucket,
       source: String(payload?.resetSource || payload?.source || "").trim(),
     },
@@ -2664,6 +2767,7 @@ function applyAnalyticsResetEvent(payload = {}) {
   }
   saveAnalytics(current);
   trackFeatureUsage("reset", {
+    timestamp: new Date(resetAt).toISOString(),
     reset_type: bucket,
     reset_source:
       String(payload?.resetSource || payload?.source || "").trim() || undefined,
@@ -2715,6 +2819,8 @@ function applyAnalyticsAssignmentEvent(payload = {}) {
   const current = normalizeAnalytics(
     backendStatus.analytics || loadAnalytics(),
   );
+  const eventId = String(payload?.eventId || "").trim();
+  if (hasRecordedAssignment(current.lifetime.assignmentHistory, eventId)) return false;
   if (usedReset) {
     current.lifetime.nftResetUsage[usageBucket].assigned += 1;
     current.session.nftResetUsage[usageBucket].assigned += 1;
@@ -2734,6 +2840,7 @@ function applyAnalyticsAssignmentEvent(payload = {}) {
       level: missionLevel,
       missionStartedAt,
       usedReset,
+      eventId: eventId || null,
       nft: payload?.nft || payload?.nftName,
       nftAccount: payload?.nftAccount || payload?.account || null,
     },
@@ -2753,12 +2860,17 @@ function applyAnalyticsAssignmentEvent(payload = {}) {
       level: missionLevel,
       missionStartedAt,
       usedReset,
+      eventId: eventId || null,
       nft: payload?.nft || payload?.nftName,
       nftAccount: payload?.nftAccount || payload?.account || null,
     },
   ]);
   saveAnalytics(current);
   trackFeatureUsage("mission_assignment", {
+    event_id: eventId || undefined,
+    assigned_mission_id: String(payload?.assignedMissionId || payload?.missionId || "").trim() || undefined,
+    nft_account: String(payload?.nftAccount || payload?.account || "").trim() || undefined,
+    used_reset: usedReset,
     mission_name: telemetryMissionName,
     mission_level: missionLevel ?? undefined,
     source: usageBucket,
@@ -2767,6 +2879,9 @@ function applyAnalyticsAssignmentEvent(payload = {}) {
   });
   if (usedReset) {
     trackFeatureUsage("nft_reset_assignment", {
+      event_id: eventId ? `${eventId}:reset` : undefined,
+      assigned_mission_id: String(payload?.assignedMissionId || payload?.missionId || "").trim() || undefined,
+      nft_account: String(payload?.nftAccount || payload?.account || "").trim() || undefined,
       source: usageBucket,
       mission_name: telemetryMissionName,
       mission_level: missionLevel ?? undefined,
@@ -2861,6 +2976,7 @@ function analyticsBucketFromRange(bucket = {}, rangeKey = "session") {
       0,
     ),
     totalLeased: rentalHistory.length,
+    totalRentalsUsed: countRentalAssignments(assignmentHistory),
     currencyEarned,
     missionClaims,
     claimHistory,
@@ -2931,6 +3047,7 @@ function rebuildAnalyticsBucketFromHistories(bucket = {}) {
       0,
     ),
     totalLeased: rentalHistory.length,
+    totalRentalsUsed: countRentalAssignments(assignmentHistory),
     currencyEarned,
     missionClaims,
     claimHistory,
@@ -3155,6 +3272,7 @@ function buildAnalyticsCsv(rangeKey = "session") {
     ["NFT Resets", Number(bucket?.resetTypes?.nft || 0)],
     ["Total Resets", Number(bucket.totalResets || 0)],
     ["Leases", Number(bucket.totalLeased || 0)],
+    ["Rentals Used", Number(bucket.totalRentalsUsed || 0)],
     ["PBP Earned", Number(bucket?.currencyEarned?.pbp || 0)],
     ["TC Earned", Number(bucket?.currencyEarned?.tc || 0)],
     ["CC Earned", Number(bucket?.currencyEarned?.cc || 0)],
@@ -3431,6 +3549,8 @@ function hydrateBackendStatusFromConfig() {
       4: true,
     };
   }
+  backendStatus.autoUnlockSlot4Enabled = config.autoUnlockSlot4Enabled === true;
+  backendStatus.autoUnlockSlot4MissionName = config.autoUnlockSlot4MissionName || "";
   if (typeof config.missionResetPerSlotModeEnabled === "boolean") {
     backendStatus.missionResetPerSlotModeEnabled =
       config.missionResetPerSlotModeEnabled;
@@ -4133,16 +4253,11 @@ function missionCollectionEntries(mission = {}) {
   return out;
 }
 
-function isAuthFailureMessage(message) {
-  return /401|403|unauthorized|forbidden|missing token|invalid token/i.test(
-    String(message || ""),
-  );
-}
-
 async function runOnboardingPopupLogin({} = {}) {
   const ok = await desktopMcp.runLoginFlow({
     forceInteractive: true,
     forceBrowser: true,
+    automatic: true,
   });
   if (!ok) throw new Error("login_failed");
 }
@@ -4344,6 +4459,7 @@ function startBackend(options = {}) {
     silent: true,
   });
 
+  backendStatus.autoUnlockSlot4Status = null;
   backendStatus.running = true;
   backendStatus.pid = backend.pid;
   backendStatus.exitCode = null;
@@ -5291,6 +5407,14 @@ function syncCompetitionRangeLockScheduler() {
   scheduleCompetitionRangeLockTick(0);
 }
 
+// async function loadMenuBarImage(url) {
+//   const response = await electronNet.fetch(url, { signal: AbortSignal.timeout(15000) });
+//   if (!response.ok) throw new Error(`NFT image request failed: HTTP ${response.status}`);
+//   const icon = nativeImage.createFromBuffer(Buffer.from(await response.arrayBuffer()));
+//   if (icon.isEmpty()) throw new Error("NFT image could not be decoded");
+//   return icon.resize({ width: 32, height: 32, quality: "best" });
+// }
+//
 async function createControlWindow() {
   controlWindow = new BrowserWindow({
     width: 800,
@@ -5318,6 +5442,9 @@ async function createControlWindow() {
     },
   });
 
+  controlWindow.on("close", (event) => {
+    if (!windowsTray.closeWindow(event)) macMenuBar.closeWindow(event);
+  });
   controlWindow.on("closed", () => {
     controlWindow = null;
   });
@@ -5608,12 +5735,23 @@ async function createCliWindow() {
 if (["darwin", "win32"].includes(process.platform) && app.isPackaged && !isDesktopDevMode()) {
   if (!app.requestSingleInstanceLock()) app.exit(0);
   app.on("second-instance", () => {
+    if (windowsTray.isEnabled()) {
+      windowsTray.openWindow();
+      return;
+    }
+    if (macMenuBar.isEnabled()) {
+      macMenuBar.openWindow();
+      return;
+    }
     const window = controlWindow || cliWindow;
     if (window && !window.isDestroyed()) { window.show(); window.focus(); }
   });
 }
 
 app.whenReady().then(async () => {
+  const announcements = createAnnouncementService({ userData: app.getPath("userData") });
+  handleTrustedIpc("announcements:check", () => announcements.check(), { controlOnly: true });
+  handleTrustedIpc("announcements:seen", (_event, id, automatic = false) => announcements.markSeen(id, automatic), { controlOnly: true });
   rendererSecurity.installContentSecurityPolicy(session.defaultSession);
   installMinimalApplicationMenu();
   if (["darwin", "win32"].includes(process.platform) && app.isPackaged && !isDesktopDevMode()) {
@@ -5622,7 +5760,7 @@ app.whenReady().then(async () => {
       arch: process.arch, onStatus: (status) => publish("updates:status", status) });
   }
   backendStatus.nftUsageStats = loadPersistedNftUsageStats();
-  handleTrustedIpc("backend:start", async (_event, options = {}) => {
+  const startDesktopBackend = async (options = {}) => {
     const actionBackend = temporarySlotUnlockBackend;
     const isTemporarySlotUnlockBackend =
       actionBackend &&
@@ -5641,8 +5779,9 @@ app.whenReady().then(async () => {
       return { ...backendStatus };
     }
     return startBackend(options);
-  });
-  handleTrustedIpc("backend:stop", async () => {
+  };
+  handleTrustedIpc("backend:start", async (_event, options = {}) => startDesktopBackend(options));
+  const stopDesktopBackend = async () => {
     const actionBackend = temporarySlotUnlockBackend;
     if (
       actionBackend &&
@@ -5653,7 +5792,24 @@ app.whenReady().then(async () => {
       pushSystemLog("Queued runner start cancelled.");
     }
     return stopBackend();
-  });
+  };
+  handleTrustedIpc("backend:stop", async () => stopDesktopBackend());
+  windowsTrayRunnerActions = {
+    start: () => startFromWindowsTray({
+      getConfig: async () => ({ config: readDesktopConfig() }),
+      startBackend: startDesktopBackend,
+      sendCommand: sendBackendCommand,
+    }, backendStatus),
+    stop: stopDesktopBackend,
+  };
+//   menuBarRunnerActions = {
+//     start: () => startFromMenuBar({
+//       getConfig: async () => ({ config: readDesktopConfig() }),
+//       startBackend: startDesktopBackend,
+//       sendCommand: sendBackendCommand,
+//     }, backendStatus),
+//     stop: stopDesktopBackend,
+//   };
   handleTrustedIpc("backend:restart", async () => {
     const actionBackend = temporarySlotUnlockBackend;
     if (
@@ -5678,17 +5834,36 @@ app.whenReady().then(async () => {
     sendBackendCommand(command),
   );
   handleTrustedIpc("backend:get-state", async (_event, options) => {
-    if (!backendStatus.running) {
+    const includeStatus = options?.includeStatus !== false;
+    if (includeStatus && !backendStatus.running) {
       backendStatus.nftUsageStats = loadPersistedNftUsageStats();
     }
     const includeLogs =
       options === undefined ? true : options?.includeLogs === true;
     return {
-      status: { ...backendStatus },
+      ...(includeStatus ? { status: { ...backendStatus } } : {}),
       logs: includeLogs ? logHistory : [],
     };
   });
   handleTrustedIpc("debug:get-throttle-log", async () => readThrottleDebugLog());
+  handleTrustedIpc("debug:get-auth-log", async () => {
+    return readThrottleDebugLog(path.join(getBackendWorkingDirectory(), "pbp-auth-debug.log"));
+  });
+  handleTrustedIpc("debug:delete-auth-log", async () => {
+    const file = path.join(getBackendWorkingDirectory(), "pbp-auth-debug.log");
+    for (const suffix of [".1", ".2"]) deleteThrottleDebugLog(file + suffix);
+    return deleteThrottleDebugLog(file);
+  });
+  handleTrustedIpc("debug:open-auth-log-folder", async () => {
+    const directory = getBackendWorkingDirectory();
+    const file = path.join(directory, "pbp-auth-debug.log");
+    if (fs.existsSync(file)) shell.showItemInFolder(file);
+    else {
+      const error = await shell.openPath(directory);
+      if (error) throw new Error(error);
+    }
+    return { ok: true, path: directory };
+  });
   handleTrustedIpc("debug:delete-throttle-log", async () =>
     deleteThrottleDebugLog(),
   );
@@ -5740,6 +5915,8 @@ app.whenReady().then(async () => {
       currentMode: backendStatus.currentMode,
     };
     const next = applyDesktopConfigPatch(patch || {});
+    if (!isStandaloneCliMode()) windowsTray.sync(next.windowsTrayEnabled === true);
+    if (!isStandaloneCliMode()) macMenuBar.sync(next.macMenuBarEnabled === true);
     if (typeof next.autoModeEnabled === "boolean") {
       backendStatus.autoModeEnabled = next.autoModeEnabled;
     }
@@ -5763,6 +5940,8 @@ app.whenReady().then(async () => {
         ...next.missionActionEnabledBySlot,
       };
     }
+    backendStatus.autoUnlockSlot4Enabled = next.autoUnlockSlot4Enabled === true;
+    backendStatus.autoUnlockSlot4MissionName = next.autoUnlockSlot4MissionName || "";
     if (typeof next.missionResetPerSlotModeEnabled === "boolean") {
       backendStatus.missionResetPerSlotModeEnabled =
         next.missionResetPerSlotModeEnabled;
@@ -5884,7 +6063,8 @@ app.whenReady().then(async () => {
     if (
       backend &&
       backendStatus.running &&
-      (Object.prototype.hasOwnProperty.call(requestedPatch, "debugMode") ||
+      (Object.prototype.hasOwnProperty.call(requestedPatch, "autoUnlockSlot4Enabled") ||
+        Object.prototype.hasOwnProperty.call(requestedPatch, "debugMode") ||
         Object.prototype.hasOwnProperty.call(
           requestedPatch,
           "missionActionEnabledBySlot",
@@ -5931,6 +6111,11 @@ app.whenReady().then(async () => {
         ))
     ) {
       const runtimeSync = requestBackend("update_runtime_config", {
+        ...(Object.prototype.hasOwnProperty.call(requestedPatch, "autoUnlockSlot4Enabled") ? {
+          autoUnlockSlot4Enabled: next.autoUnlockSlot4Enabled,
+          autoUnlockSlot4MissionName: next.autoUnlockSlot4MissionName,
+          autoUnlockSlot4RestorePending: next.autoUnlockSlot4RestorePending,
+        } : {}),
         debugMode: next.debugMode,
         missionActionEnabledBySlot: next.missionActionEnabledBySlot,
         missionResetPerSlotModeEnabled: next.missionResetPerSlotModeEnabled,
@@ -6065,6 +6250,7 @@ app.whenReady().then(async () => {
     if (!walletAddress) {
       backendStatus.fundingWalletSummary = null;
       backendStatus.signerMode = config.signerMode || backendStatus.signerMode;
+      fundingWalletRefreshScheduler?.schedule();
       publishStatus();
       return { walletId: null, displayName: null, fundingWalletSummary: null };
     }
@@ -6080,6 +6266,7 @@ app.whenReady().then(async () => {
         backendStatus.signerMode =
           config.signerMode || backendStatus.signerMode;
         backendStatus.fundingWalletSummary = summary.fundingWalletSummary;
+        fundingWalletRefreshScheduler?.schedule();
         pushSystemLog(`Funding wallet summary refresh complete (${reason}).`);
         publishStatus();
         return summary;
@@ -6087,6 +6274,7 @@ app.whenReady().then(async () => {
         // Don't crash the renderer on RPC rate limits; keep the last known good summary.
         const message = String(error?.message || error);
         pushSystemLog(`Funding wallet summary refresh failed: ${message}`);
+        fundingWalletRefreshScheduler?.schedule(true);
         publishStatus();
         return {
           walletId: null,
@@ -6100,6 +6288,12 @@ app.whenReady().then(async () => {
     })();
     return fundingWalletSummaryRefreshPromise;
   };
+
+  if (!isStandaloneCliMode()) {
+    fundingWalletRefreshScheduler = createWalletRefreshScheduler({
+      refresh: (reason) => refreshFundingWalletSummary({ force: true, reason }),
+    });
+  }
 
   handleTrustedIpc("wallet:refresh-summary", async () => {
     return await refreshFundingWalletSummary({ force: true, reason: "manual" });
@@ -6168,7 +6362,7 @@ app.whenReady().then(async () => {
         pushSystemLog("Bootstrap wallet summary complete.");
         return result;
       } catch (error) {
-        if (!isAuthFailureMessage(error?.message)) {
+        if (!isAuthenticationError(error)) {
           pushSystemLog(
             `Bootstrap wallet summary failed: ${String(error?.message || error)}`,
           );
@@ -6247,7 +6441,7 @@ app.whenReady().then(async () => {
     try {
       loaded = await loadAccount();
     } catch (error) {
-      if (!isAuthFailureMessage(error?.message)) throw error;
+      if (!isAuthenticationError(error)) throw error;
       pushSystemLog("Onboarding sync requires login. Opening browser login.");
       emitProgress(20, "login", "Login required");
       await runOnboardingPopupLogin({
@@ -6759,7 +6953,7 @@ app.whenReady().then(async () => {
         );
         return result;
       } catch (error) {
-        if (!isAuthFailureMessage(error?.message)) {
+        if (!isAuthenticationError(error)) {
           pushSystemLog(
             `Rentals page refresh failed: ${String(error?.message || error)}`,
           );
@@ -6899,7 +7093,7 @@ app.whenReady().then(async () => {
         );
         return hydrateCachedNftList(nftListCache, nftListCacheAt);
       } catch (error) {
-        if (!isAuthFailureMessage(error?.message)) {
+        if (!isAuthenticationError(error)) {
           pushSystemLog(
             `NFT page refresh failed: ${String(error?.message || error)}`,
           );
@@ -7088,7 +7282,8 @@ app.whenReady().then(async () => {
         !controlWindow.isDestroyed() &&
         win === controlWindow
       ) {
-        requestAppQuit("window_close");
+        if (windowsTray.isEnabled() || macMenuBar.isEnabled()) win.close();
+        else requestAppQuit("window_close");
       } else {
         win.close();
       }
@@ -7112,6 +7307,11 @@ app.whenReady().then(async () => {
       return { ok: false, error: String(error?.message || error) };
     }
   });
+  if (!isStandaloneCliMode()) {
+    const { config, parseFailed } = readDesktopConfigWithMeta();
+    const initialMode = !parseFailed && firstLaunchModePatch(config);
+    if (initialMode) applyDesktopConfigPatch(initialMode);
+  }
   hydrateBackendStatusFromConfig();
   publishStatus();
   if (isStandaloneCliMode()) {
@@ -7119,6 +7319,17 @@ app.whenReady().then(async () => {
   } else {
     createSplashWindow();
     await createControlWindow();
+    controlWindow.once("show", () => {
+      cancelStartupWatching = scheduleStartupWatching({
+        getConfig: readDesktopConfig,
+        getStatus: () => backendStatus,
+        isQuitting: () => appQuitInFlight || telemetryQuitInProgress || updateShutdownInProgress,
+        startWatching: () => windowsTrayRunnerActions.start(),
+        onError: error => pushSystemLog(`Automatic mission watching failed: ${String(error?.message || error)}`),
+      });
+    });
+    windowsTray.sync(readDesktopConfig().windowsTrayEnabled === true);
+    macMenuBar.sync(readDesktopConfig().macMenuBarEnabled === true);
   }
   if (!isStandaloneCliMode()) await bootstrapStartupMissionSlots();
   try {
@@ -7140,21 +7351,19 @@ app.whenReady().then(async () => {
       try {
         backendStatus.fundingWalletSummary =
           await fetchOnchainFundingWalletSummary(walletAddress);
+        fundingWalletRefreshScheduler?.schedule();
       } catch {
-        // Keep it null; the user can trigger refresh later (or it will refresh
-        // after token-affecting actions).
+        // Retry the first failed retrieval in five minutes, then use the normal delay.
         backendStatus.fundingWalletSummary = null;
+        fundingWalletRefreshScheduler?.schedule(true);
       }
     } else {
       backendStatus.fundingWalletSummary = null;
+      fundingWalletRefreshScheduler?.schedule();
     }
     publishStatus();
-  } catch {}
-  if (!isStandaloneCliMode() && !fundingWalletRefreshTimer) {
-    fundingWalletRefreshTimer = setInterval(() => {
-      void refreshFundingWalletSummary({ reason: "periodic_30m" });
-    }, FUNDING_WALLET_PERIODIC_REFRESH_MS);
-    fundingWalletRefreshTimer.unref?.();
+  } catch {
+    fundingWalletRefreshScheduler?.schedule(true);
   }
   if (!isStandaloneCliMode()) {
     const closeSplash = () => {
@@ -7173,6 +7382,14 @@ app.whenReady().then(async () => {
   }
 
   app.on("activate", async () => {
+    if (windowsTray.isEnabled()) {
+      windowsTray.openWindow();
+      return;
+    }
+    if (macMenuBar.isEnabled()) {
+      macMenuBar.openWindow();
+      return;
+    }
     if (BrowserWindow.getAllWindows().length === 0) {
       if (isStandaloneCliMode()) await createCliWindow();
       else await createControlWindow();
@@ -7187,10 +7404,10 @@ app.on("window-all-closed", () => {
 });
 
 app.on("before-quit", (event) => {
-  if (fundingWalletRefreshTimer) {
-    clearInterval(fundingWalletRefreshTimer);
-    fundingWalletRefreshTimer = null;
-  }
+  cancelStartupWatching();
+  windowsTray.destroy();
+  macMenuBar.destroy();
+  fundingWalletRefreshScheduler?.stop();
   if (telemetryQuitInProgress) {
     return;
   }

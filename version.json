@@ -1,32 +1,21 @@
 {
-  "version": "3.2.18",
-  "downloadUrl": "https://github.com/smolpuff/mos-mission-manager/releases/latest",
-  "notes": [
-    "Faster assigning when claim is out of normal watch loop",
-    "Fixed season stats dates. lol",
-    "First first-run + update available bug",
-    "Fixed trying to use rental when reaching end of paged nft listing instead of looping through all pages",
-    "Require the latest app before first-time setup to stay compatible with MCP changes."
-  ],
   "schemaVersion": 1,
-  "artifacts": {
-    "darwin-arm64": {
-      "url": "https://github.com/smolpuff/mos-mission-manager/releases/download/v3.2.18/missions-v3-mcp-arm64-mac.zip",
-      "size": 129909438,
-      "sha256": "7b2a8c9ab86e483fce3e414b3a3e01bdb80de1119b453b0b0618315eb7993a00",
-      "md5": "83d11b40e189ee3f4b80d12d7a97f318"
-    },
-    "darwin-x64": {
-      "url": "https://github.com/smolpuff/mos-mission-manager/releases/download/v3.2.18/missions-v3-mcp-x64-mac.zip",
-      "size": 136324327,
-      "sha256": "81b8b31bfce321ed543ced5a238aafebace2ccddab147a2a36b3344a30a95bf5",
-      "md5": "df875690b3e23950d68fdcfadefe38ba"
-    },
-    "win32-x64": {
-      "url": "https://github.com/smolpuff/mos-mission-manager/releases/download/v3.2.18/missions-v3-mcp.3.2.18.exe",
-      "size": 103384054,
-      "sha256": "f054fcb8432f7d1977a12cf8d2f9f23673551a2ba2c61ff690cbbe2757095707",
-      "md5": "f01e13f5c8fd3e501015147d0641a5a9"
-    }
-  }
+  "version": "3.3.0",
+  "downloadUrl": "https://github.com/smolpuff/mos-mission-manager/releases/tag/v3.3.0",
+  "notes": [
+    "Released 3.3.0 - Required Update",
+    "NEW: added autostart for watching missions on app launch",
+    "NEW: added windows tray controls to keep app running in the background while closed",
+    "Faster claiming & assigning when claim is out of normal watch loop",
+    "Added auto-updater that should actually work now. oops!",
+    "Hardened security for privileged app commands",
+    "Added wallet import button (no really, don't import your main wallet...)",
+    "Added auto-unlock slot 4 so you can be even lazier. Unlock & resets back to last slot 4 mission",
+    "Fixed MCP auth spam",
+    "Fixed Level 20+ NFT selection skipping eligible collections at times",
+    "Fixed wallet creation timing out on Windows on slower hardware",
+    "Fixed various other bugs in win. mac, linux",
+    "New onboarding experience with guided tour"
+  ],
+  "artifacts": {}
 }

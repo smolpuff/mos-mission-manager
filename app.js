@@ -133,6 +133,9 @@ function createGuiStateEmitter(ctx) {
       nftUsageStats: ctx.nftUsageStats,
       guiMissionSlots: ctx.guiMissionSlots,
       slotUnlockSummary: ctx.slotUnlockSummary,
+      autoUnlockSlot4Enabled: ctx.config.autoUnlockSlot4Enabled === true,
+      autoUnlockSlot4Status: ctx.autoUnlockSlot4Status || null,
+      autoUnlockSlot4MissionName: ctx.config.autoUnlockSlot4MissionName || "",
       currentMode: ctx.currentMode,
       autoModeEnabled: ctx.autoModeEnabled,
       level20ResetEnabled: ctx.level20ResetEnabled,
@@ -454,6 +457,15 @@ if (process.env.PBP_GUI_BRIDGE === "1" && typeof process.send === "function") {
           ).trim();
           ctx.config.nftAssignmentCollection = ctx.nftAssignmentCollection;
         }
+        if (typeof payload.autoUnlockSlot4Enabled === "boolean") {
+          ctx.config.autoUnlockSlot4Enabled = payload.autoUnlockSlot4Enabled;
+          if (typeof payload.autoUnlockSlot4MissionName === "string") {
+            ctx.config.autoUnlockSlot4MissionName = payload.autoUnlockSlot4MissionName;
+          }
+          if (typeof payload.autoUnlockSlot4RestorePending === "boolean") {
+            ctx.config.autoUnlockSlot4RestorePending = payload.autoUnlockSlot4RestorePending;
+          }
+        }
         if (typeof payload.missionResetPerSlotModeEnabled === "boolean") {
           ctx.missionResetPerSlotModeEnabled =
             payload.missionResetPerSlotModeEnabled;
@@ -734,7 +746,7 @@ async function runStartupSequence() {
       );
       ctx.startupFxProgress = 35;
       loginOk = await runWithProgressPulse(
-        () => mcp.runLoginFlow({ forceInteractive: true }),
+        () => mcp.runLoginFlow({ forceInteractive: true, automatic: true }),
         ctx,
         { floor: 35, ceiling: 54, step: 1 },
       );
@@ -744,7 +756,7 @@ async function runStartupSequence() {
         logger.formatTaggedLog("STARTUP", "🔐", "Running required login..."),
       );
       ctx.startupFxProgress = 35;
-      loginOk = await runWithProgressPulse(() => mcp.runLoginFlow(), ctx, {
+      loginOk = await runWithProgressPulse(() => mcp.runLoginFlow({ automatic: true }), ctx, {
         floor: 35,
         ceiling: 54,
         step: 1,
@@ -764,7 +776,7 @@ async function runStartupSequence() {
         );
         ctx.startupFxProgress = 35;
         loginOk = await runWithProgressPulse(
-          () => mcp.runLoginFlow({ forceInteractive: true }),
+          () => mcp.runLoginFlow({ forceInteractive: true, automatic: true }),
           ctx,
           { floor: 35, ceiling: 54, step: 1 },
         );
@@ -802,7 +814,7 @@ async function runStartupSequence() {
         );
         ctx.startupFxProgress = 90;
         const fallbackOk = await runWithProgressPulse(
-          () => mcp.runLoginFlow({ forceInteractive: true }),
+          () => mcp.runLoginFlow({ forceInteractive: true, automatic: true }),
           ctx,
           { floor: 90, ceiling: 96, step: 1 },
         );

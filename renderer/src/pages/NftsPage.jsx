@@ -1,5 +1,5 @@
+import LoadingSpinner from "../components/LoadingSpinner";
 import { useEffect, useMemo, useState } from "react";
-import backImg from "../img/back.png";
 import {
   canonicalCollectionLabel,
   localCollectionImage,
@@ -138,7 +138,7 @@ function NftCardImage({ src, alt }) {
   );
 }
 
-export default function NftsPage({ bridge, signerMode = "" }) {
+export default function NftsPage({ bridge, signerMode = "", setupActive = false }) {
   const [loading, setLoading] = useState(false);
   const [hasLoaded, setHasLoaded] = useState(false);
   const [cacheExpiresAtMs, setCacheExpiresAtMs] = useState(null);
@@ -149,9 +149,10 @@ export default function NftsPage({ bridge, signerMode = "" }) {
   const [resetError, setResetError] = useState(null);
   const [nowMs, setNowMs] = useState(Date.now());
   const [selectedCollection, setSelectedCollection] = useState("all");
+  const [availabilityFilter, setAvailabilityFilter] = useState("all");
   const [sortBy, setSortBy] = useState("cooldown_remaining");
   const [data, setData] = useState({
-    total: 0,
+    total: null,
     nfts: [],
   });
   const normalizedSignerMode =
@@ -224,7 +225,7 @@ export default function NftsPage({ bridge, signerMode = "" }) {
     }
     const remainingMs = cacheExpiresAtMs - Date.now();
     if (remainingMs <= 0) {
-      setData({ total: 0, nfts: [] });
+      setData({ total: null, nfts: [] });
       setHasLoaded(false);
       setCacheExpiresAtMs(null);
       setDetailModal(null);
@@ -232,7 +233,7 @@ export default function NftsPage({ bridge, signerMode = "" }) {
       return undefined;
     }
     const timer = setTimeout(() => {
-      setData({ total: 0, nfts: [] });
+      setData({ total: null, nfts: [] });
       setHasLoaded(false);
       setCacheExpiresAtMs(null);
       setDetailModal(null);
@@ -508,14 +509,22 @@ export default function NftsPage({ bridge, signerMode = "" }) {
   const filteredNfts = useMemo(
     () =>
       data.nfts.filter((item) => {
-        if (selectedCollection === "all") return true;
-        return (
+        if (
+          selectedCollection !== "all" &&
           canonicalCollectionLabel(
             String(item?.collection || "unknown").trim() || "unknown",
-          ) === selectedCollection
-        );
+          ) !== selectedCollection
+        ) return false;
+        const cooldownSeconds = remainingCooldownSeconds(item, nowMs);
+        if (availabilityFilter === "ready") {
+          return isNftReady({ ...item, cooldownSeconds });
+        }
+        if (availabilityFilter === "cooldown") {
+          return item.onCooldown === true || cooldownSeconds > 0;
+        }
+        return true;
       }),
-    [data.nfts, selectedCollection],
+    [data.nfts, selectedCollection, availabilityFilter, nowMs],
   );
   const visibleNfts = useMemo(
     () => {
@@ -546,11 +555,11 @@ export default function NftsPage({ bridge, signerMode = "" }) {
       <div className="grid grid-cols-1 md:grid-cols-[200px_auto] gap-4 shrink-0">
         <div className="card p-4 border border-white/10 bg-black/30 relative">
           <div className="text-sm uppercase text-slate-300 ">My NFTs</div>
-          <div className="text-3xl font-semibold text-slate-100 mt-1">
-            {Number(data.total || 0).toLocaleString()}
+          <div className="text-2xl font-semibold text-slate-100 mt-1">
+            {data.total === null ? "—" : Number(data.total || 0).toLocaleString()}
           </div>
           <div className="text-sm text-success mt-1">
-            {readyNftCount.toLocaleString()} ready
+            {data.total === null ? "—" : readyNftCount.toLocaleString()} ready
           </div>
 
           <button
@@ -591,7 +600,7 @@ export default function NftsPage({ bridge, signerMode = "" }) {
               </select>
             </label>
           </div>
-          <div className="mt-3 flex flex-wrap gap-2">
+          <div className="mt-3 flex flex-wrap gap-1.5">
             <button
               type="button"
               className={`h-6 px-1 rounded-md border text-xs inline-flex items-center gap-1 ${
@@ -603,7 +612,7 @@ export default function NftsPage({ bridge, signerMode = "" }) {
             >
               <span>All</span>
               <span className="text-slate-40 text-[10px]">
-                {data.nfts.length}
+                {data.total === null ? "—" : data.nfts.length}
               </span>
             </button>
             {collectionOptions.map((option) => (
@@ -645,19 +654,39 @@ export default function NftsPage({ bridge, signerMode = "" }) {
         </div>
       ) : null}
 
-      <div className="card !pr-2 border border-white/10 bg-black/30 h-120 flex flex-col overflow-hidden">
+      <div className="card !pr-2 border border-white/10 bg-black/30 min-h-0 flex-1 flex flex-col overflow-hidden">
+        <div className="mb-3 flex shrink-0">
+          <div className="join rounded-sm overflow-hidden border border-white/10" role="group" aria-label="NFT availability">
+            {[
+              ["all", "All"],
+              ["ready", "Ready"],
+              ["cooldown", "On cooldown"],
+            ].map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                aria-pressed={availabilityFilter === value}
+                className={`btn btn-xs join-item rounded-none border-0 px-2 font-normal ${
+                  availabilityFilter === value
+                    ? "bg-violet-600 text-white hover:bg-violet-500"
+                    : "btn-black"
+                }`}
+                onClick={() => setAvailabilityFilter(value)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
         {loading ? (
           <div className="text-sm text-slate-400 mt-3 flex items-center gap-2">
-            <span className="loading loading-spinner loading-sm text-success" />
+            <LoadingSpinner />
             <span>Loading NFTs...</span>
           </div>
         ) : !hasLoaded ? (
-          <div className="flex h-full min-h-0 items-center justify-center">
-            <div className="max-w-sm rounded-xl border border-white/10 bg-black/30 p-5 text-center">
-              <div className="text-sm uppercase tracking-[0.22em] text-slate-400">
-                NFT inventory
-              </div>
-              <div className="mt-2 text-lg text-slate-100">
+          <div className="flex h-full min-h-0 items-start justify-start">
+            <div className="text-left">
+              <div className="text-lg text-slate-100">
                 Click load to fetch your NFTs.
               </div>
               <div className="mt-3 text-xs text-slate-400">
@@ -675,6 +704,8 @@ export default function NftsPage({ bridge, signerMode = "" }) {
           </div>
         ) : data.nfts.length === 0 ? (
           <div className="text-sm text-slate-400 mt-3">No NFTs found.</div>
+        ) : visibleNfts.length === 0 ? (
+          <div className="text-sm text-slate-400 mt-3">No NFTs match these filters.</div>
         ) : (
           <div className="nft-grid-scrollw-full min-h-0 flex-1 overflow-y-auto overflow-x-hidden pr-1">
             <div className="grid grid-cols-5 gap-3 pb-3">
@@ -741,22 +772,14 @@ export default function NftsPage({ bridge, signerMode = "" }) {
           </div>
         )}
       </div>
-      {detailModal ? (
+      {!setupActive && detailModal ? (
         <div
-          className="fixed inset-0 z-60 grid place-items-center bg-black/70 p-4"
+          className="app-dialog-backdrop fixed inset-0 z-60 grid place-items-center p-4"
           role="dialog"
           aria-modal="true"
-          onMouseDown={(event) => {
-            if (event.target === event.currentTarget) setDetailModal(null);
-          }}
         >
           <div
-            className="w-full max-w-xl overflow-hidden rounded-xl border-2 border-[#1D1C27] shadow-2xl shadow-black/95"
-            style={{
-              backgroundImage: `url(${backImg})`,
-              backgroundSize: "cover",
-              backgroundPosition: "center",
-            }}
+            className="app-dialog-surface w-full max-w-xl overflow-hidden"
           >
             <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
               <div className="min-w-0">
@@ -855,22 +878,16 @@ export default function NftsPage({ bridge, signerMode = "" }) {
           </div>
         </div>
       ) : null}
-      {resetModal ? (
+      {!setupActive && resetModal ? (
         <div
-          className="fixed inset-0 z-60 grid place-items-center bg-black/50 p-4"
+          className="app-dialog-backdrop fixed inset-0 z-60 grid place-items-center p-4"
           role="dialog"
           aria-modal="true"
-          onMouseDown={(event) => {
-            if (event.target === event.currentTarget) closeResetModal();
-          }}
         >
           <div
-            className="p-4 w-full rounded-xl shadow-2xl shadow-black/95 space-y-4 z-10 border-2 border-[#1D1C27]"
+            className="app-dialog-surface p-4 w-full space-y-4 z-10"
             style={{
               maxWidth: "600px",
-              backgroundImage: `url(${backImg})`,
-              backgroundSize: "cover",
-              backgroundPosition: "center",
             }}
           >
             <div className="flex items-center justify-between gap-3">

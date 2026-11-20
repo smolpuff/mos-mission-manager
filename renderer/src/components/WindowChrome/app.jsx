@@ -7,6 +7,8 @@ export default function WindowChrome({ title, styling }) {
   const useNativeDrag = bridge?.platform === "linux";
   const dragStateRef = useRef({
     active: false,
+    ready: false,
+    requestId: 0,
     pointerStartX: 0,
     pointerStartY: 0,
     windowStartX: 0,
@@ -40,6 +42,11 @@ export default function WindowChrome({ title, styling }) {
   const onMove = (moveEvent) => {
     const state = dragStateRef.current;
     if (!state.active) return;
+    if ((moveEvent.buttons & 1) === 0) {
+      onUp();
+      return;
+    }
+    if (!state.ready) return;
     const dx = moveEvent.screenX - state.pointerStartX;
     const dy = moveEvent.screenY - state.pointerStartY;
     state.nextX = Math.round(state.windowStartX + dx);
@@ -69,21 +76,27 @@ export default function WindowChrome({ title, styling }) {
     if (interactive) return;
     if (!bridge?.getWindowPosition || !bridge?.setWindowPosition) return;
     event.preventDefault();
+    const state = dragStateRef.current;
+    onUp();
+    const requestId = ++state.requestId;
+    state.active = true;
+    state.ready = false;
+    state.pointerStartX = event.screenX;
+    state.pointerStartY = event.screenY;
+    // Observe releases before the asynchronous position lookup can complete.
+    window.addEventListener("mousemove", onMove, true);
+    window.addEventListener("mouseup", onUp, true);
+    window.addEventListener("blur", onUp, true);
     try {
       const [startX, startY] = await bridge.getWindowPosition();
-      const state = dragStateRef.current;
-      state.active = true;
-      state.pointerStartX = event.screenX;
-      state.pointerStartY = event.screenY;
+      if (!state.active || state.requestId !== requestId) return;
       state.windowStartX = Number(startX) || 0;
       state.windowStartY = Number(startY) || 0;
       state.nextX = state.windowStartX;
       state.nextY = state.windowStartY;
-      window.addEventListener("mousemove", onMove, true);
-      window.addEventListener("mouseup", onUp, true);
-      window.addEventListener("blur", onUp, true);
+      state.ready = true;
     } catch {
-      onUp();
+      if (state.requestId === requestId) onUp();
     }
   };
 

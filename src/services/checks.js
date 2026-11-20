@@ -199,6 +199,8 @@ function createChecksService(ctx, logger, mcp, services = {}) {
   let ownedMissionNftsCache = [];
   let ownedMissionNftsCacheAt = 0;
   let ownedMissionNftsPromise = null;
+  const recordedRentalAssignmentIds = new Set();
+  const recordedRentalUsageIds = new Set();
   let ownedMissionNftAvailabilityTimer = null;
   const ownedMissionNftAvailableAt = new WeakMap();
   // Track successful assignments for the rotation policy. A random stable
@@ -3241,6 +3243,62 @@ function createChecksService(ctx, logger, mcp, services = {}) {
     return result;
   }
 
+  function needsAutoUnlockSlot4(missionsResult) {
+    const summary = extractSlotUnlockSummary(missionsResult);
+    return ctx.config.autoUnlockSlot4Enabled === true &&
+      Boolean(ctx.config.autoUnlockSlot4MissionName) && missionActionEnabledForSlot(ctx, 4) &&
+      (ctx.config.autoUnlockSlot4RestorePending === true ||
+        (summary?.canUnlockMore === true && Number(summary.nextUnlockSlot) === 4));
+  }
+
+  async function autoUnlockSlot4(missionsResult, reason) {
+    if (ctx.config.autoUnlockSlot4Enabled !== true ||
+        !missionActionEnabledForSlot(ctx, 4)) return missionsResult;
+    const targetName = String(ctx.config.autoUnlockSlot4MissionName || "").trim();
+    if (!targetName) return missionsResult;
+    let summary = extractSlotUnlockSummary(missionsResult);
+    // Automatic spending uses the existing local signer, never browser prompts.
+    if (ctx.signerMode === "manual" || usesBrowserBridgeSigning() || !signer) return missionsResult;
+    if (summary?.canUnlockMore === true && Number(summary.nextUnlockSlot) === 4) {
+      missionsResult = await mcp.getUserMissions({ forceFresh: true, reason: "auto_slot4_pre_unlock" });
+      summary = extractSlotUnlockSummary(missionsResult);
+    }
+    if (summary?.canUnlockMore === true && Number(summary.nextUnlockSlot) === 4) {
+      ctx.config.autoUnlockSlot4RestorePending = true;
+      flushConfig(ctx, logDebug);
+      ctx.autoUnlockSlot4Status = "unlocking";
+      if (ctx.guiBridge?.emitNow) ctx.guiBridge.emitNow();
+      const unlocked = await tryUnlockNextMissionSlot({ reason: `${reason}_auto_unlock`, missionsResult });
+      if (!unlocked?.unlocked) return missionsResult;
+      missionsResult = await mcp.getUserMissions({ forceFresh: true, reason: "auto_slot4_unlock_refresh" });
+    }
+    if (ctx.config.autoUnlockSlot4RestorePending !== true) return missionsResult;
+    const refreshedSummary = extractSlotUnlockSummary(missionsResult);
+    if (refreshedSummary?.canUnlockMore === true && Number(refreshedSummary.nextUnlockSlot) <= 4) return missionsResult;
+    const current = normalizeMissionList(missionsResult).find((mission) => Number(mission.slot) === 4);
+    if (!current || !assignedMissionId(current)) return missionsResult;
+    if (canonicalNameKey(missionName(current)) !== canonicalNameKey(targetName)) {
+      ctx.autoUnlockSlot4Status = "resetting";
+      if (ctx.guiBridge?.emitNow) ctx.guiBridge.emitNow();
+      const restored = await applyMissionSelection({
+        slot: 4,
+        missionName: targetName,
+        missionsResult,
+        publishMissionState: false,
+      });
+      if (!restored?.ok || restored.pending || !restored.swapped) return missionsResult;
+      missionsResult = restored.missionResult || await mcp.getUserMissions({
+        forceFresh: true, reason: "auto_slot4_restore_refresh",
+      });
+      const restoredSlot = normalizeMissionList(missionsResult).find((mission) => Number(mission.slot) === 4);
+      if (canonicalNameKey(missionName(restoredSlot)) !== canonicalNameKey(targetName)) return missionsResult;
+    }
+    ctx.config.autoUnlockSlot4RestorePending = false;
+    flushConfig(ctx, logDebug);
+    await refreshMissionHeaderStats({ missionsResult, refreshNftCount: false, hydrateAssignedMetadata: false });
+    return missionsResult;
+  }
+
   function findCatalogMission({ missionId = "", missionName: wantedName = "" } = {}) {
     const idKey = String(missionId || "").trim().toLowerCase();
     const nameKey = canonicalNameKey(wantedName);
@@ -3318,6 +3376,9 @@ function createChecksService(ctx, logger, mcp, services = {}) {
   function applyTargetMissionForSlot(slot, selectedName, missions = []) {
     const cleaned = buildTargetMissionList(slot, selectedName, missions);
     ctx.config.targetMissions = Array.from(new Set(cleaned));
+    if (Number(slot) === 4 && ctx.config.autoUnlockSlot4Enabled === true) {
+      ctx.config.autoUnlockSlot4MissionName = selectedName;
+    }
     flushConfig(ctx, logDebug);
     logWithTimestamp(
       `[CONFIG] Mission targets updated: ${summarizeNamesForUser(ctx.config.targetMissions)}`,
@@ -3663,6 +3724,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
       const selectedByName = key ? resolved.targetNames.has(key) : false;
       return (
         (selectedById || selectedByName) &&
+        !(Number(m.slot) === 4 && ctx.config.autoUnlockSlot4Enabled === true && ctx.config.autoUnlockSlot4RestorePending === true) &&
         !missionBlockedByDisabledSlot(m) &&
         !missionHasAssignedNftForAssign(m, reason) &&
         !missionBlockedByResetThreshold(m) &&
@@ -3948,6 +4010,74 @@ function createChecksService(ctx, logger, mcp, services = {}) {
     }
   }
 
+  async function recordCachedRentalAssignment({ mission, missionId, candidate, result, usedCooldownReset, reason }) {
+    const nftAccount = String(candidate?.nftAccount || candidate?.account || "").trim();
+    const current = findMissionByAssignedMissionId(normalizeMissionList(result), missionId);
+    const missionStartTimestamp = current?.missionStartTimestamp || current?.startTime || current?.start_time || null;
+    const at = Date.now();
+    const eventId = `rental:${missionId}:${nftAccount}:${candidate?.inFlightAt || missionStartTimestamp || at}`;
+    if (recordedRentalAssignmentIds.has(eventId)) return false;
+    ensureNftAssignmentUsageLoaded();
+    if (!recordedRentalUsageIds.has(eventId)) {
+      const previous = [nftAssignmentUsage, nftAssignmentSessionUsage, nftAssignmentLastUsedAt]
+        .map((map) => map.get(nftAccount));
+      nftAssignmentLastUsedAt.set(nftAccount, at);
+      nftAssignmentUsage.set(nftAccount, (previous[0] || 0) + 1);
+      nftAssignmentSessionUsage.set(nftAccount, (previous[1] || 0) + 1);
+      try {
+        persistNftAssignmentUsage();
+      } catch (error) {
+        [nftAssignmentUsage, nftAssignmentSessionUsage, nftAssignmentLastUsedAt]
+          .forEach((map, index) => {
+            if (previous[index] === undefined) map.delete(nftAccount);
+            else map.set(nftAccount, previous[index]);
+          });
+        throw error;
+      }
+      recordedRentalUsageIds.add(eventId);
+      if (recordedRentalUsageIds.size > 2000) {
+        recordedRentalUsageIds.delete(recordedRentalUsageIds.values().next().value);
+      }
+    }
+    clearRecentClaimedMissionOverride(missionId);
+    await refreshMissionHeaderStats({
+      missionsResult: result,
+      refreshNftCount: false,
+    });
+    if (ctx.guiBridge?.sendEvent) {
+      ctx.guiBridge.sendEvent("stats_assignment", {
+        at,
+        eventId,
+        missionStartTimestamp,
+        assignedMissionId: missionId,
+        missionId,
+        missionName: missionName(mission) || null,
+        slot: mission?.slot ?? null,
+        missionLevel: missionLevel(mission),
+        nftAccount,
+        nftName: candidate?.nftName || null,
+        nftLevel: candidate?.nftLevel ?? null,
+        source: "rental",
+        usedReset: usedCooldownReset,
+        reason,
+      });
+      ctx.guiBridge.sendEvent("assigned", {
+        missionId,
+        missionName: missionName(mission) || null,
+        slot: mission?.slot ?? null,
+        nftAccount,
+        reason: "rental_coordinator",
+        source: "rental",
+      });
+    }
+    if (ctx.guiBridge?.emitNow) ctx.guiBridge.emitNow();
+    recordedRentalAssignmentIds.add(eventId);
+    if (recordedRentalAssignmentIds.size > 2000) {
+      recordedRentalAssignmentIds.delete(recordedRentalAssignmentIds.values().next().value);
+    }
+    return true;
+  }
+
   async function assignCachedRentalCandidate({
     mission,
     missionKey,
@@ -3972,7 +4102,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
       return { success: false, kind: "terminal", message: "Rental candidate is missing mission, listing, or NFT identity." };
     }
 
-    let usedCooldownReset = false;
+    let usedCooldownReset = candidate?.cooldownResetSucceeded === true;
     if (candidate?.cooldownResetRequested === true) {
       if (!autoNftCooldownResetEnabled()) {
         if (assignmentBudgetToken) {
@@ -4069,49 +4199,10 @@ function createChecksService(ctx, logger, mcp, services = {}) {
       throw error;
     }
 
-    nftAssignmentLastUsedAt.set(nftAccount, Date.now());
-    ensureNftAssignmentUsageLoaded();
-    nftAssignmentUsage.set(
-      nftAccount,
-      (nftAssignmentUsage.get(nftAccount) || 0) + 1,
-    );
-    nftAssignmentSessionUsage.set(
-      nftAccount,
-      (nftAssignmentSessionUsage.get(nftAccount) || 0) + 1,
-    );
-    persistNftAssignmentUsage();
-    clearRecentClaimedMissionOverride(missionId);
-    await refreshMissionHeaderStats({
-      missionsResult: result,
-      refreshNftCount: false,
+    await recordCachedRentalAssignment({
+      mission, missionId, candidate, result, usedCooldownReset,
+      reason: boundaryRetry ? "rental_readiness_boundary_retry" : "rental_cached_assignment",
     });
-    if (ctx.guiBridge?.sendEvent) {
-      ctx.guiBridge.sendEvent("stats_assignment", {
-        at: Date.now(),
-        assignedMissionId: missionId,
-        missionId,
-        missionName: missionName(mission) || null,
-        slot: mission?.slot ?? null,
-        missionLevel: missionLevel(mission),
-        nftAccount,
-        nftName: candidate?.nftName || null,
-        nftLevel: candidate?.nftLevel ?? null,
-        source: "rental",
-        usedReset: usedCooldownReset,
-        reason: boundaryRetry
-          ? "rental_readiness_boundary_retry"
-          : "rental_cached_assignment",
-      });
-      ctx.guiBridge.sendEvent("assigned", {
-        missionId,
-        missionName: missionName(mission) || null,
-        slot: mission?.slot ?? null,
-        nftAccount,
-        reason: "rental_coordinator",
-        source: "rental",
-      });
-    }
-    if (ctx.guiBridge?.emitNow) ctx.guiBridge.emitNow();
     logWithTimestamp(
       `[RENTAL] ✅ Cached rental assigned listing=${listingId}.`,
     );
@@ -4139,6 +4230,14 @@ function createChecksService(ctx, logger, mcp, services = {}) {
       );
       const assignedAccount = missionAssignedNftAccount(current);
       if (assignedAccount && assignedAccount === candidate?.nftAccount) {
+        await recordCachedRentalAssignment({
+          mission: current,
+          missionId: assignedMissionId(current) || assignedMissionId(mission) || missionKey,
+          candidate,
+          result,
+          usedCooldownReset: candidate?.cooldownResetSucceeded === true,
+          reason: "rental_assignment_reconciled",
+        });
         return { assigned: true, missionState: result };
       }
       if (!current || missionHasAssignedNftForAssign(current, "rental_reconcile")) {
@@ -4456,7 +4555,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
     missionsResult = null,
     skipRentalCoordinator = false,
   } = {}) {
-    const resolved = resolveConfiguredTargets();
+    let resolved = resolveConfiguredTargets();
     logDebug("assign", "check", {
       reason,
       configured: resolved.configured.length,
@@ -4489,7 +4588,8 @@ function createChecksService(ctx, logger, mcp, services = {}) {
       });
       return { ok: true, attempted: 0, assigned: 0, skipped: true };
     }
-    if (resolved.targetIds.size === 0 && resolved.targetNames.size === 0) {
+    if (resolved.targetIds.size === 0 && resolved.targetNames.size === 0 &&
+        !needsAutoUnlockSlot4(missionsResult || ctx.lastUserMissionsResult)) {
       rentalDemandMissionKeys = new Set();
       if (rentals) rentals.setDemand(false, { reason: "no_configured_targets" });
       return { ok: true, attempted: 0, assigned: 0 };
@@ -4498,11 +4598,24 @@ function createChecksService(ctx, logger, mcp, services = {}) {
     let assigningStarted = false;
     let assignedCountForEvent = null;
     try {
-      let {
-        result: currentMissionResult,
-        missions,
-        candidates,
-      } = await loadAssignableCandidates(reason, resolved, missionsResult);
+      const initialMissions = missionsResult || await mcp.getUserMissions({ reason });
+      let currentMissionResult = initialMissions;
+      try {
+        currentMissionResult = await autoUnlockSlot4(initialMissions, reason);
+      } catch (error) {
+        logWithTimestamp(`[UNLOCK] ❌ Auto Unlock slot 4: ${error.message}`);
+        // Do not assign using a snapshot captured before a possibly successful unlock.
+        return { ok: false, attempted: 0, assigned: 0, missionResult: ctx.lastUserMissionsResult || initialMissions };
+      } finally {
+        if (ctx.autoUnlockSlot4Status) {
+          ctx.autoUnlockSlot4Status = null;
+          if (ctx.guiBridge?.emitNow) ctx.guiBridge.emitNow();
+        }
+      }
+      resolved = resolveConfiguredTargets();
+      let { missions, candidates } = await loadAssignableCandidates(
+        reason, resolved, currentMissionResult,
+      );
 
       if (nftAssignmentOrderMode() === "rotate_least_used") {
         ensureNftAssignmentUsageLoaded();
@@ -4543,7 +4656,9 @@ function createChecksService(ctx, logger, mcp, services = {}) {
             summarizeSelectedMissionState(missions, resolved, reason),
           ),
         });
-        return { ok: true, attempted: 0, assigned: 0 };
+        return { ok: true, attempted: 0, assigned: 0,
+          ...(currentMissionResult !== initialMissions ? { missionResult: currentMissionResult } : {}),
+        };
       }
 
       if (ctx.guiBridge?.sendEvent) {
@@ -6039,6 +6154,16 @@ function createChecksService(ctx, logger, mcp, services = {}) {
       if (!preserveMissionState) {
         updateMissionLookupCache(result, missions);
       }
+      if (!preserveMissionState && ctx.config.autoUnlockSlot4Enabled === true &&
+          ctx.config.autoUnlockSlot4RestorePending !== true &&
+          !missionBlockedByLockedSlot({ slot: 4 }, extractSlotUnlockSummary(result))) {
+        const slot4 = missions.find((mission) => Number(mission.slot) === 4);
+        const name = missionName(slot4);
+        if (name && name !== ctx.config.autoUnlockSlot4MissionName) {
+          ctx.config.autoUnlockSlot4MissionName = name;
+          flushConfig(ctx, logDebug);
+        }
+      }
       if (!preserveMissionState && syncTargetsFromAssigned) {
         syncConfiguredTargetMissionsFromAssigned(missions, syncReason);
       }
@@ -6272,6 +6397,7 @@ function createChecksService(ctx, logger, mcp, services = {}) {
     reconcileAmbiguousRentalAssignment,
     logSelectedWatchTargetsAtStartup,
     autoAssignConfiguredMissions,
+    needsAutoUnlockSlot4,
     stopRentalCoordinator,
     prepareUnlockSlot4,
     applyMissionSelection,

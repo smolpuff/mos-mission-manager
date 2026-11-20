@@ -9,8 +9,10 @@ scripts/
 releases/
 config.json.bak
 STARTUP_CALLS_ROLLBACK_NOTES.md
+/MCP-AGENT-IDENTITY-PLAN.md
 test/
 tests/
+todo.md
 
 # macOS junk
 .DS_Store
@@ -162,3 +164,12 @@ release/
 missions-analytics/
 PAYLOAD_NOTES.md
 VERCEL_APP_AUDIT_PLAN.md
+
+# Local diagnostic build output
+/release-auth-debug/
+
+# Local work files
+/work/
+
+# Private local announcement drafts and uploaded images
+/tools/announcement-editor/.local/

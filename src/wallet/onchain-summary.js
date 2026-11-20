@@ -50,6 +50,7 @@ function parseBalanceNumber(value) {
 async function fetchOnchainFundingWalletSummary(walletAddress) {
   const address = String(walletAddress || "").trim();
   if (!address) throw new Error("walletAddress is required");
+  const checkedAt = Date.now();
   const [solResult, tokenResult] = await Promise.all([
     rpcJsonCall("getBalance", [address, { commitment: "confirmed" }]),
     rpcJsonCall("getTokenAccountsByOwner", [
@@ -70,6 +71,7 @@ async function fetchOnchainFundingWalletSummary(walletAddress) {
   }
   return {
     address,
+    checkedAt,
     sol: lamports === null ? null : lamports / 1_000_000_000,
     pbp,
     status: "ok",

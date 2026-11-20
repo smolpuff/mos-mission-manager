@@ -20,6 +20,9 @@ contextBridge.exposeInMainWorld("missionsDesktop", {
   getState: (options) => ipcRenderer.invoke("backend:get-state", options),
   getThrottleDebugLog: () => ipcRenderer.invoke("debug:get-throttle-log"),
   deleteThrottleDebugLog: () => ipcRenderer.invoke("debug:delete-throttle-log"),
+  getAuthDebugLog: () => ipcRenderer.invoke("debug:get-auth-log"),
+  deleteAuthDebugLog: () => ipcRenderer.invoke("debug:delete-auth-log"),
+  openAuthLogFolder: () => ipcRenderer.invoke("debug:open-auth-log-folder"),
   getResourceUsage: () => ipcRenderer.invoke("debug:get-resource-usage"),
   getAnalyticsView: (rangeKey) => ipcRenderer.invoke("analytics:get-view", rangeKey),
   resetAnalyticsRange: (rangeKey) =>
@@ -33,6 +36,8 @@ contextBridge.exposeInMainWorld("missionsDesktop", {
   getConfig: () => ipcRenderer.invoke("config:get"),
   updateConfig: (patch) => ipcRenderer.invoke("config:update", patch),
   checkForUpdates: (payload) => ipcRenderer.invoke("updates:check", payload),
+  checkAnnouncements: () => ipcRenderer.invoke("announcements:check"),
+  markAnnouncementSeen: (id, automatic = false) => ipcRenderer.invoke("announcements:seen", id, automatic),
   installUpdate: (version) => ipcRenderer.invoke("updates:install", version),
   reportUpdateUiReady: () => ipcRenderer.invoke("updates:ui-ready"),
   onUpdateStatus: (callback) => {

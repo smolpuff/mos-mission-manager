@@ -2,6 +2,11 @@
 
 const fs = require("fs");
 const path = require("path");
+const { debugLogContext, formatDebugLogContext } = require("../../lib/debug-log-context");
+// TEMP_AUTH_DIAGNOSTICS: remove after the renewal incident is diagnosed.
+const { authEvent, authFetch, authResponse, authRuntime, tokenSummary, tokenFileSummary } = require("../../lib/auth-diagnostics");
+const { createAuthPopupPolicy } = require("../../lib/auth-popup");
+const { isAuthenticationError, authenticationRequired } = require("../../lib/auth-errors");
 const { normalizeMissionList, extractMissionReward } = require("../missions/normalize");
 const {
   login: mcpLogin,
@@ -9,13 +14,27 @@ const {
   clearTokenFile,
 } = require("../../lib/mcp");
 
-function createMcpClient(ctx, logger) {
+function createMcpClient(ctx, logger, dependencies = {}) {
   const { logWithTimestamp, logDebug } = logger;
+  const login = dependencies.login || mcpLogin;
+  const popupPolicy = createAuthPopupPolicy(ctx);
+  let recoveryPromise = null;
+  let loginPromise = null;
+  let nextRefreshAttemptAt = 0;
+  let lastRefreshFailure = null;
+  const getDebugLogContext = () => debugLogContext(ctx.getDebugLogContext ? ctx.getDebugLogContext() : ctx);
+  authRuntime(ctx.tokenFilePath, { version: ctx.APP_VERSION, role: ctx.authDiagnosticRole || "runner",
+    getDebugLogContext,
+    logFile: path.join(path.dirname(ctx.configPath || ctx.tokenFilePath), "pbp-auth-debug.log") });
+  function trace(event, details = {}, options) {
+    authEvent(ctx.tokenFilePath, event, { missionMode: ctx.missionModeEnabled === true,
+      authenticated: ctx.isAuthenticated, connection: ctx.mcpConnection?.state, ...details }, options);
+  }
   const LOGIN_TIMEOUT_MS = 180000;
   const AUTH_REQUEST_TIMEOUT_MS = 30000;
   const MCP_REQUEST_TIMEOUT_MS = 30000;
   const REFRESH_RETRY_ATTEMPTS = 3;
-  const REFRESH_RETRY_DELAY_MS = 1000;
+  const REFRESH_RETRY_DELAY_MS = 10000;
   // The deployed service refreshes passive mission data once per minute.
   const USER_MISSIONS_CACHE_TTL_MS = 60_000;
   const THROTTLE_SAFETY_BUFFER_MS = 2_000;
@@ -302,6 +321,7 @@ function createMcpClient(ctx, logger) {
       `THROTTLE EVENT #${seq}`,
       "=".repeat(88),
       `timestamp: ${new Date(now).toISOString()}`,
+      ...formatDebugLogContext(getDebugLogContext()),
       `type: ${event.type || "unknown"}`,
       `requestedTool: ${event.requestedTool || "unknown"}`,
       `triggerTool: ${event.triggerTool || "unknown"}`,
@@ -377,8 +397,18 @@ function createMcpClient(ctx, logger) {
   }
 
   function tokenRecord() {
-    if (!fs.existsSync(ctx.tokenFilePath)) return null;
-    return parseJsonOutput(fs.readFileSync(ctx.tokenFilePath, "utf8"));
+    if (!fs.existsSync(ctx.tokenFilePath)) {
+      trace("client.token.read.missing");
+      return null;
+    }
+    try {
+      const record = parseJsonOutput(fs.readFileSync(ctx.tokenFilePath, "utf8"));
+      trace("client.token.read", { credentials: tokenSummary(record, ctx.tokenFilePath) }, { failure: !record });
+      return record;
+    } catch (error) {
+      trace("client.token.read.error", { error }, { failure: true });
+      throw error;
+    }
   }
 
   function bearerToken() {
@@ -394,13 +424,6 @@ function createMcpClient(ctx, logger) {
     const ts = Date.parse(exp);
     if (!Number.isFinite(ts)) return false;
     return ts - Date.now() <= skewMs;
-  }
-
-  function isAuthHttpError(message) {
-    const msg = String(message || "");
-    return /HTTP 401|HTTP 403|unauthorized|forbidden|invalid token|missing token/i.test(
-      msg,
-    );
   }
 
   function sleep(ms) {
@@ -916,7 +939,12 @@ function createMcpClient(ctx, logger) {
 
   async function tryRefresh(reason = "proactive") {
     const record = tokenRecord();
-    if (!record?.refresh_token) return false;
+    trace("client.refresh.begin", { reason, credentials: tokenSummary(record, ctx.tokenFilePath) });
+    if (!record?.refresh_token) {
+      lastRefreshFailure = authenticationRequired("No refresh token available.");
+      trace("client.refresh.unavailable", { reason: "missing_refresh_token" }, { failure: true });
+      return false;
+    }
     try {
       setMcpConnection("reconnecting");
       logDebug("auth", "refresh_start", { reason });
@@ -926,6 +954,9 @@ function createMcpClient(ctx, logger) {
         timeoutMs: AUTH_REQUEST_TIMEOUT_MS,
       });
       ctx.authRefreshSignal = Number(ctx.authRefreshSignal || 0) + 1;
+      lastRefreshFailure = null;
+      ctx.isAuthenticated = true;
+      trace("client.refresh.complete", { reason, credentials: tokenFileSummary(ctx.tokenFilePath) });
       logWithTimestamp("[AUTH] 🔐 Token refreshed.");
       logDebug("auth", "refresh_ok", { reason });
       setMcpConnection("connected");
@@ -945,6 +976,8 @@ function createMcpClient(ctx, logger) {
       }
       return true;
     } catch (error) {
+      trace("client.refresh.failed", { reason, error, credentials: tokenFileSummary(ctx.tokenFilePath) }, { failure: true });
+      lastRefreshFailure = error;
       logDebug("auth", "refresh_failed", { reason, error: error.message });
       setMcpConnection("expired", { error: error.message });
       return false;
@@ -952,26 +985,49 @@ function createMcpClient(ctx, logger) {
   }
 
   async function recoverAuthAfterRefreshFailure(reason = "proactive") {
+    if (recoveryPromise) {
+      trace("client.recovery.join", { reason });
+      return recoveryPromise;
+    }
+    recoveryPromise = performAuthRecovery(reason);
+    try { return await recoveryPromise; }
+    finally { recoveryPromise = null; }
+  }
+
+  async function performAuthRecovery(reason) {
+    trace("client.recovery.begin", { reason });
     setMcpConnection("reconnecting");
     for (let attempt = 1; attempt <= REFRESH_RETRY_ATTEMPTS; attempt += 1) {
+      const waitMs = Math.max(0, nextRefreshAttemptAt - Date.now());
+      if (waitMs > 0) {
+        trace("client.refresh.retry_wait", { reason, attempt, waitMs });
+        await new Promise((resolve) => setTimeout(resolve, waitMs));
+      }
       const refreshed = await tryRefresh(`${reason}_retry_${attempt}`);
+      nextRefreshAttemptAt = refreshed ? 0 : Date.now() + REFRESH_RETRY_DELAY_MS;
       if (refreshed) return true;
       logWithTimestamp(
         `[AUTH] ❌ Token refresh failed (${attempt}/${REFRESH_RETRY_ATTEMPTS}).`,
       );
-      if (attempt < REFRESH_RETRY_ATTEMPTS) {
-        await new Promise((resolve) =>
-          setTimeout(resolve, REFRESH_RETRY_DELAY_MS),
-        );
-      }
+    }
+
+    if (!isAuthenticationError(lastRefreshFailure)) {
+      trace("client.recovery.deferred", { reason, error: lastRefreshFailure }, { failure: true });
+      setMcpConnection("disconnected", { error: lastRefreshFailure?.message || "refresh_failed" });
+      return false;
     }
 
     logWithTimestamp(
-      "[AUTH] 🔄 Refresh failed 3 times. Starting popup login...",
+      "[AUTH] 🔄 Refresh failed 3 times. Checking authorization window availability...",
     );
+    trace("client.recovery.refreshes_exhausted", { attempts: REFRESH_RETRY_ATTEMPTS, nextWindowDelayMs: popupPolicy.remainingMs() }, { failure: true });
     const loginOk = await runLoginFlow({
       forceInteractive: true,
       forceBrowser: true,
+      automatic: true,
+      background: true,
+      reason: "renewal_failed",
+      recoveryReason: reason,
     });
     if (!loginOk) {
       setMcpConnection("expired", { error: "login_failed" });
@@ -1021,14 +1077,15 @@ function createMcpClient(ctx, logger) {
     }
     const timeout = setTimeout(() => controller.abort(), effectiveTimeoutMs);
     try {
-      const response = await fetch(ctx.MCP_URL, {
+      const response = await authFetch(ctx.MCP_URL, {
         method: "POST",
         headers,
         body: JSON.stringify(body),
         signal: controller.signal,
         ...(noStore ? { cache: "no-store" } : {}),
-      });
+      }, { tokenFile: ctx.tokenFilePath, step: `mcp.${body?.method || "request"}` });
       const text = await response.text();
+      authResponse(response, text);
       const contentType = String(response.headers.get("content-type") || "")
         .trim()
         .toLowerCase();
@@ -1046,6 +1103,7 @@ function createMcpClient(ctx, logger) {
         retryAfter: response.headers.get("retry-after") || null,
       };
     } catch (error) {
+      trace("client.mcp.request_error", { rpcMethod: body?.method, tool: body?.params?.name, error }, { failure: true });
       if (error?.name === "AbortError") {
         if (externalSignal?.aborted) {
           throw new Error("request aborted");
@@ -1095,7 +1153,9 @@ function createMcpClient(ctx, logger) {
           bodyError: init.json?.error || null,
         });
       }
-      throw new Error(`initialize failed: HTTP ${init.status}`);
+      throw Object.assign(new Error(`initialize failed: HTTP ${init.status}`), {
+        status: init.status, code: init.json?.error?.code || init.json?.error,
+      });
     }
 
     if (!init.sessionId) {
@@ -1210,21 +1270,32 @@ function createMcpClient(ctx, logger) {
     });
     const toolCallEntry = recordToolCallStart(toolName, args);
     const record = tokenRecord();
+    trace("client.tool.credentials_check", { callId: callTrace.callId, toolName, expiresSoon: tokenExpiresSoon(record),
+      popupWaitMs: popupPolicy.remainingMs(), credentials: tokenSummary(record, ctx.tokenFilePath) });
     if (!record?.access_token) {
       releaseToolWindowReservation(pendingToolWindowReservation);
       pendingToolWindowReservation = "";
       finalizeToolCallEntry(toolCallEntry, "missing_token");
       setMcpConnection("expired", { error: "missing_token" });
-      throw new Error("Missing token. Run login.");
+      throw authenticationRequired("Missing token. Run login.");
     }
     if (tokenExpiresSoon(record)) {
-      const refreshed = await recoverAuthAfterRefreshFailure("expires_soon");
+      let refreshed;
+      try {
+        refreshed = await recoverAuthAfterRefreshFailure("expires_soon");
+      } catch (error) {
+        releaseToolWindowReservation(pendingToolWindowReservation);
+        pendingToolWindowReservation = "";
+        finalizeToolCallEntry(toolCallEntry, "auth_recovery_error", error);
+        throw error;
+      }
       if (!refreshed) {
         releaseToolWindowReservation(pendingToolWindowReservation);
         pendingToolWindowReservation = "";
         finalizeToolCallEntry(toolCallEntry, "auth_expired");
         setMcpConnection("expired", { error: "refresh_failed" });
-        throw new Error("Authentication expired. Login required.");
+        if (lastRefreshFailure && !isAuthenticationError(lastRefreshFailure)) throw lastRefreshFailure;
+        throw authenticationRequired("Authentication expired. Login required.");
       }
     }
 
@@ -1255,9 +1326,10 @@ function createMcpClient(ctx, logger) {
         );
       }
       const token = bearerToken();
+      trace("client.tool.dispatch", { callId: callTrace.callId, toolName, credentials: tokenFileSummary(ctx.tokenFilePath) });
       if (!token) {
         setMcpConnection("expired", { error: "missing_token" });
-        throw new Error("Missing token. Run login.");
+        throw authenticationRequired("Missing token. Run login.");
       }
       const sessionId = await mcpInitialize(token, callTrace);
       if (hasReservedWindowCapacity) {
@@ -1335,10 +1407,14 @@ function createMcpClient(ctx, logger) {
             bodyError: call.json?.error || null,
           });
         }
-        throw new Error(`tool call failed: HTTP ${call.status}`);
+        throw Object.assign(new Error(`tool call failed: HTTP ${call.status}`), {
+          status: call.status, code: call.json?.error?.code || call.json?.error,
+        });
       }
       if (call.json?.error)
-        throw new Error(`RPC error: ${JSON.stringify(call.json.error)}`);
+        throw Object.assign(new Error(`RPC error: ${JSON.stringify(call.json.error)}`), {
+          code: call.json.error.code, authMessage: call.json.error.message,
+        });
       const extracted = extractToolResultPayload(call.json);
       if (
         extracted.result?.isError === true ||
@@ -1352,9 +1428,12 @@ function createMcpClient(ctx, logger) {
               .filter(Boolean)
               .join("\n")
           : "";
-        throw new Error(
+        throw Object.assign(new Error(
           text || `MCP tool ${toolName} returned an error result`,
-        );
+        ), {
+          code: errorPayload?.structuredContent?.error?.code || errorPayload?.structuredContent?.code,
+          authMessage: text || errorPayload?.structuredContent?.error?.message,
+        });
       }
       writeRawPayloadDebugLog({
         toolName,
@@ -1432,6 +1511,7 @@ function createMcpClient(ctx, logger) {
           }
         }
         finalizeToolCallEntry(toolCallEntry, "ok");
+        trace("client.tool.complete", { callId: callTrace.callId, toolName }, { resolved: true });
         const minIntervalMs = Number(TOOL_MIN_INTERVAL_MS.get(toolName) || 0);
         // Watch and rental deadlines are already reserved at dispatch.
         // Extending them after a successful response adds the request's
@@ -1535,6 +1615,8 @@ function createMcpClient(ctx, logger) {
           throw error;
         }
         finalizeToolCallEntry(toolCallEntry, "error", error);
+        trace("client.tool.failed", { callId: callTrace.callId, toolName, error,
+          credentials: tokenFileSummary(ctx.tokenFilePath) }, { failure: true });
         logDebug("tool", "call_failed_summary", {
           callId: callTrace.callId,
           toolName,
@@ -1543,12 +1625,15 @@ function createMcpClient(ctx, logger) {
           durationMs: Math.max(0, Date.now() - callTrace.startedAt),
           error: error.message,
         });
-        if (!isAuthHttpError(error?.message || "")) {
+        if (!isAuthenticationError(error)) {
           setMcpConnection("disconnected", { error: error.message });
           throw error;
         }
         const refreshed = await recoverAuthAfterRefreshFailure("auth_failure");
-        if (!refreshed) throw error;
+        if (!refreshed) {
+          if (lastRefreshFailure && !isAuthenticationError(lastRefreshFailure)) throw lastRefreshFailure;
+          throw error;
+        }
         const result = await runOnce();
         if (
           toolName === "get_user_missions" &&
@@ -1582,6 +1667,7 @@ function createMcpClient(ctx, logger) {
           }
         }
         finalizeToolCallEntry(toolCallEntry, "ok_after_refresh");
+        trace("client.tool.complete_after_refresh", { callId: callTrace.callId, toolName }, { resolved: true });
         logDebug("tool", "call_ok_after_refresh", { toolName });
         setMcpConnection("connected");
         return toolName === "get_user_missions"
@@ -1621,7 +1707,32 @@ function createMcpClient(ctx, logger) {
   }
 
   async function runLoginFlow(opts = {}) {
+    if (loginPromise) {
+      trace("client.login.pending", { automatic: opts.automatic === true, background: opts.background === true });
+      return opts.background ? false : loginPromise;
+    }
+    const wouldOpenBrowser = Boolean(opts.forceBrowser || ctx.interactiveAuth || ctx.debugMode);
+    if (wouldOpenBrowser && popupPolicy.remainingMs() > 0) {
+      trace("client.login.window_suppressed", { waitMs: popupPolicy.remainingMs() });
+      return false;
+    }
+    const pending = performLoginFlow(opts);
+    loginPromise = pending;
+    void pending.then(
+      () => { if (loginPromise === pending) loginPromise = null; },
+      error => { trace("client.login.unexpected_error", { error }, { failure: true }); if (loginPromise === pending) loginPromise = null; },
+    );
+    return opts.background ? false : pending;
+  }
+
+  async function performLoginFlow(opts = {}) {
     const { forceInteractive = false, forceBrowser = false } = opts;
+    const credentialsAtStart = tokenFileSummary(ctx.tokenFilePath);
+    const refreshSignalAtStart = Number(ctx.authRefreshSignal || 0);
+    const loginTrigger = { forceInteractive, forceBrowser, automatic: opts.automatic === true,
+      reason: opts.reason || "startup_or_requested_login", recoveryReason: opts.recoveryReason,
+      triggerError: opts.triggerError, caller: new Error().stack, credentials: credentialsAtStart };
+    trace("client.login.begin", loginTrigger);
     const canInteractive = ctx.interactiveAuth || forceInteractive;
 
     logWithTimestamp("[AUTH] Starting login flow...");
@@ -1641,13 +1752,23 @@ function createMcpClient(ctx, logger) {
 
     try {
       setMcpConnection("reconnecting");
-      await mcpLogin({
+      await login({
         url: ctx.MCP_URL,
         tokenFile: ctx.tokenFilePath,
         timeoutMs: AUTH_REQUEST_TIMEOUT_MS,
         loginTimeoutMs,
         noBrowser: !openBrowser,
         printAuthUrl: false,
+        beforeOpenBrowser: () => {
+          const permit = popupPolicy.claimWindow();
+          const forcedReauthorization = opts.automatic === true && (
+            opts.reason === "renewal_failed" || opts.reason === "watch_auth_error" || credentialsAtStart.present === true
+          );
+          trace("client.login.window_claim", { ...permit, trigger: loginTrigger }, {
+            reauthorization: permit.allowed === true && forcedReauthorization,
+          });
+          return permit;
+        },
         onAuthUrl: (url) => {
           logDebug("auth", "oauth_url", { url });
         },
@@ -1657,10 +1778,23 @@ function createMcpClient(ctx, logger) {
         },
       });
       logWithTimestamp("[AUTH] ✅ Login completed.");
+      trace("client.login.complete", { credentials: tokenFileSummary(ctx.tokenFilePath) });
       ctx.isAuthenticated = true;
       setMcpConnection("connected");
       return true;
     } catch (error) {
+      if (error.popupSuppressed) {
+        trace("client.login.window_suppressed", { waitMs: error.waitMs });
+        return false;
+      }
+      const currentCredentials = tokenFileSummary(ctx.tokenFilePath);
+      if (currentCredentials.accessFingerprint !== credentialsAtStart.accessFingerprint &&
+          Date.parse(currentCredentials.expiresAt) > Date.now() &&
+          (Number(ctx.authRefreshSignal || 0) > refreshSignalAtStart || ctx.mcpConnection?.state === "connected")) {
+        trace("client.login.ended_after_renewal", { error, credentials: currentCredentials });
+        return true;
+      }
+      trace("client.login.failed", { error, nextWindowDelayMs: popupPolicy.remainingMs(), credentials: tokenFileSummary(ctx.tokenFilePath) }, { failure: true });
       logWithTimestamp(`[AUTH] ❌ Login failed: ${error.message}`);
       logDebug("auth", "login_failed", {
         error: error.message,
@@ -1673,6 +1807,7 @@ function createMcpClient(ctx, logger) {
   }
 
   function logout() {
+    trace("client.logout");
     clearTokenFile(ctx.tokenFilePath);
     invalidateUserMissionsSnapshot("logout");
     ctx.isAuthenticated = false;
@@ -1684,6 +1819,7 @@ function createMcpClient(ctx, logger) {
   }
 
   return {
+    getAuthPopupDelayMs: popupPolicy.remainingMs,
     bearerToken,
     getUserMissions,
     getUserMissionsGeneration,

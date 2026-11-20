@@ -4,6 +4,7 @@ on:
   push:
     tags:
       - "v*"
+      - "!v*b*"
 
 permissions:
   contents: write
@@ -20,7 +21,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version: 26.12.1
           cache: npm
 
       - name: Configure npm retries
@@ -95,7 +96,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version: 26.12.1
           cache: npm
 
       - name: Configure npm retries
@@ -154,14 +155,14 @@ jobs:
           if-no-files-found: error
 
   publish-update-metadata:
-    name: Publish version.json metadata
+    name: Publish version.json to main and beta
     needs: [build-mac, build-windows]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version: 26.12.1
       - uses: actions/download-artifact@v4
         with:
           pattern: version-metadata-*
@@ -174,6 +175,7 @@ jobs:
         with:
           script: |
             const fs = require('fs');
+            const { compareVersions } = require('./electron/update-checker');
             const manifest = JSON.parse(fs.readFileSync('version.json', 'utf8'));
             const version = JSON.parse(fs.readFileSync('version.json', 'utf8'));
             const tag = context.ref.replace('refs/tags/', '');
@@ -200,13 +202,22 @@ jobs:
                 await github.rest.repos.deleteReleaseAsset({ ...context.repo, asset_id: asset.id });
               }
             }
+            const feeds = [];
+            for (const branch of ['main', 'beta']) {
+              const current = await github.rest.repos.getContent({ ...context.repo, path: 'version.json', ref: branch });
+              const currentVersion = JSON.parse(Buffer.from(current.data.content, 'base64').toString('utf8'));
+              if ((branch === 'main' && currentVersion.version !== manifest.version) ||
+                  compareVersions(currentVersion.version, manifest.version) > 0) {
+                throw new Error(`${branch} version.json changed during release`);
+              }
+              feeds.push({ branch, sha: current.data.sha });
+            }
             await github.rest.repos.updateRelease({ ...context.repo, release_id: release.id,
               draft: false, make_latest: 'true', name: tag,
               body: version.notes.map(note => `- ${note}`).join('\n') +
                 '\n\n**Windows:** If your current build says the update helper could not start, download this release manually once. Wallet storage and fonts are unchanged.\n' });
-            const current = await github.rest.repos.getContent({ ...context.repo, path: 'version.json', ref: 'main' });
-            const currentVersion = JSON.parse(Buffer.from(current.data.content, 'base64').toString('utf8'));
-            if (currentVersion.version !== manifest.version) throw new Error('main version.json changed during release');
-            await github.rest.repos.createOrUpdateFileContents({ ...context.repo, path: 'version.json', branch: 'main',
-              sha: current.data.sha, message: `Update version.json artifact checksums for ${tag}`,
-              content: Buffer.from(JSON.stringify(manifest, null, 2) + '\n').toString('base64') });
+            for (const { branch, sha } of feeds) {
+              await github.rest.repos.createOrUpdateFileContents({ ...context.repo, path: 'version.json', branch,
+                sha, message: `Publish verified ${tag} update metadata to ${branch}`,
+                content: Buffer.from(JSON.stringify(manifest, null, 2) + '\n').toString('base64') });
+            }

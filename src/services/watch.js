@@ -1,5 +1,9 @@
 "use strict";
 
+// TEMP_AUTH_DIAGNOSTICS: remove after the renewal incident is diagnosed.
+const { authEvent } = require("../../lib/auth-diagnostics");
+const { isAuthenticationError } = require("../../lib/auth-errors");
+
 const {
   normalizeMissionList,
   latestMissionResultFromClaims,
@@ -3630,7 +3634,8 @@ function createWatchService(
             !liveStateRecoveryRunning &&
             Number(ctx.missionMutationStateBlockedUntil || 0) <= Date.now() &&
             Date.now() >= nextAssignRecheckAtMs &&
-            Number(ctx.currentMissionStats?.available || 0) > 0;
+            (Number(ctx.currentMissionStats?.available || 0) > 0 ||
+              checks.needsAutoUnlockSlot4?.(updatedMissionResult) === true);
           if (shouldRecheckAssign) {
             nextAssignRecheckAtMs = Date.now() + ASSIGN_RECHECK_COOLDOWN_MS;
             Promise.resolve()
@@ -4591,7 +4596,7 @@ function createWatchService(
         } else if (
           !claimWorkPaused() &&
           !hasActiveMcpCooldown() &&
-          startupAvailable > 0
+          (startupAvailable > 0 || checks.needsAutoUnlockSlot4?.(startupActionMissionResult) === true)
         ) {
           watchStartupAssignBackoffUntil = Date.now() + startupWatchBackoffMs;
           logWithTimestamp(
@@ -4756,8 +4761,9 @@ function createWatchService(
           logDebug("watch", "⏹️ cycle_aborted", { message: msg });
           break;
         }
-        const isAuthError =
-          /missing token|401|403|unauthorized|forbidden|auth|login/i.test(msg);
+        const isAuthError = isAuthenticationError(error);
+        authEvent(ctx.tokenFilePath, "watch.cycle.error", { error, missionMode: ctx.missionModeEnabled === true,
+          authenticated: ctx.isAuthenticated, popupWaitMs: mcp.getAuthPopupDelayMs?.() || 0 }, { failure: isAuthError });
         if (isAuthError) {
           ctx.isAuthenticated = false;
           logWithTimestamp(`[AUTH] ❌ Session/auth error during watch: ${msg}`);
@@ -4766,6 +4772,10 @@ function createWatchService(
             const loginOk = await mcp.runLoginFlow({
               forceInteractive: true,
               forceBrowser: true,
+              automatic: true,
+              background: true,
+              reason: "watch_auth_error",
+              triggerError: msg,
             });
             if (loginOk) {
               const checksOk = await checks.runInitialChecks();
@@ -4806,13 +4816,14 @@ function createWatchService(
             ) || 3,
           ),
         );
-        const retryDelayMs =
-          error?.rateLimited === true
+        const retryDelayMs = error?.rateLimited === true
             ? baseRetryAfterSeconds * 1000 + 250
             : 3000;
         logWithTimestamp(
           `[WATCH] ❌ Cycle failed: ${displayMessage}. Retrying in ${Math.ceil(retryDelayMs / 1000)}s.`,
         );
+        authEvent(ctx.tokenFilePath, "watch.retry.scheduled", { delayMs: retryDelayMs,
+          popupWaitMs: mcp.getAuthPopupDelayMs?.() || 0, missionMode: ctx.missionModeEnabled === true });
         logDebug("watch", "❌ cycle_error", {
           error: error.message,
           stack: error.stack,

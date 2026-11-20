@@ -1,5 +1,7 @@
+import LoadingSpinner from "../components/LoadingSpinner";
 import NavMain from "../components/nav/app";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import WindowChrome from "../components/WindowChrome/app";
 import HeaderUser from "../components/HeaderUser/app";
 import useBackendState from "../components/useBackendState/app";
@@ -7,6 +9,10 @@ import ToggleSwitch from "../components/ToggleSwitch/app";
 import CompetitionPage from "./CompetitionPage";
 import DebugPage from "./DebugPage";
 import SettingsPage from "./SettingsPage";
+import SetupWalletStep from "../components/SetupWalletStep";
+import InterfaceTour from "../components/InterfaceTour";
+import AnnouncementDialog from "../components/AnnouncementDialog";
+import { useLiveAnnouncements } from "../use-live-announcements";
 import StatsPage from "./StatsPage";
 import RentalsPage from "./RentalsPage";
 import NftsPage from "./NftsPage";
@@ -27,7 +33,6 @@ import pbpIcon from "../img/icon_pbp.webp";
 import solIcon from "../img/icon-sm__sol.svg";
 import ccIcon from "../img/icon_cc.webp";
 import tcIcon from "../img/icon_tc.webp";
-import backImg from "../img/back.png";
 import koreaTakeitImg from "../img/korea-takeit.webp";
 import {
   localCollectionImage,
@@ -140,12 +145,12 @@ function MissionSlotFallback({ label, loading = false, assigning = false }) {
     <div className="mission-image-placeholder">
       {loading ? (
         <span className="inline-flex flex-col items-center gap-2 text-center text-white/70">
-          <span className="loading loading-spinner loading-md text-white/40" />
+          <LoadingSpinner />
           {label ? <span>{label}</span> : null}
         </span>
       ) : assigning ? (
         <span className="inline-flex items-center gap-2 text-white/80">
-          <span className="loading loading-spinner loading-sm text-white/50" />
+          <LoadingSpinner />
           <span>Assigning...</span>
         </span>
       ) : (
@@ -239,7 +244,7 @@ function MissionSlotImage({
         <div className="mission-image-placeholder">{placeholderLabel}</div>
       ) : null}
       {showSpinner && activeSrc ? (
-        <span className="loading loading-spinner loading-xs text-white/30 absolute top-2 right-2 z-20" />
+        <LoadingSpinner className="absolute top-2 right-2 z-20" />
       ) : null}
     </>
   );
@@ -429,6 +434,28 @@ function ControlView() {
   const [competitionRangeLockPollSeconds, setCompetitionRangeLockPollSeconds] =
     useState("150");
   const [configuredTargetMissions, setConfiguredTargetMissions] = useState([]);
+  const [autoUnlockSlot4Enabled, setAutoUnlockSlot4Enabled] = useState(
+    status.autoUnlockSlot4Enabled === true,
+  );
+  const [autoUnlockSlot4MissionName, setAutoUnlockSlot4MissionName] = useState(
+    status.autoUnlockSlot4MissionName || "",
+  );
+  const [autoUnlockSlot4Busy, setAutoUnlockSlot4Busy] = useState(false);
+  const [autoUnlockSlot4Error, setAutoUnlockSlot4Error] = useState(null);
+  const [autoUnlockSlot4ConfirmTarget, setAutoUnlockSlot4ConfirmTarget] = useState(null);
+  useEffect(() => {
+    if (typeof status.autoUnlockSlot4Enabled === "boolean") {
+      setAutoUnlockSlot4Enabled(status.autoUnlockSlot4Enabled);
+    }
+  }, [status.autoUnlockSlot4Enabled]);
+  useEffect(() => {
+    if (typeof status.autoUnlockSlot4MissionName === "string") {
+      setAutoUnlockSlot4MissionName(status.autoUnlockSlot4MissionName);
+    }
+  }, [status.autoUnlockSlot4MissionName]);
+  const [windowsTrayEnabled, setWindowsTrayEnabled] = useState(false);
+  const [autoStartWatchingEnabled, setAutoStartWatchingEnabledState] = useState(false);
+  const [macMenuBarEnabled, setMacMenuBarEnabledState] = useState(false);
   const [autoUpdateCheckEnabled, setAutoUpdateCheckEnabledState] =
     useState(true);
   // Check for updates before opening setup on a fresh install.
@@ -436,6 +463,17 @@ function ControlView() {
   const [startupUpdateCheckError, setStartupUpdateCheckError] = useState(null);
   const [firstRunSetupComplete, setFirstRunSetupComplete] = useState(false);
   const [onboardingOpen, setOnboardingOpen] = useState(false);
+  const [interfaceTourOpen, setInterfaceTourOpen] = useState(false);
+  const [tourModePreview, setTourModePreview] = useState(null);
+  // Keep unrelated dialogs out of setup and the tour, even when an in-flight
+  // background request finishes after either flow has opened.
+  const setupActive = onboardingOpen || interfaceTourOpen;
+  const popupsBlocked =
+    !startupConfigLoaded || !firstRunSetupComplete || setupActive;
+  const closeInterfaceTour = useCallback(() => {
+    setInterfaceTourOpen(false);
+    setTourModePreview(null);
+  }, []);
   const [lastUpdateCheckAt, setLastUpdateCheckAt] = useState(null);
   const [
     missionCompetitionCheckEnabled,
@@ -488,7 +526,7 @@ function ControlView() {
   const [missionModeButtonLevel, setMissionModeButtonLevel] = useState(
     resolveResetLevelInput(status, "mission"),
   );
-  const [resetLevelInput, setResetLevelInput] = useState(
+  const [resetLevelInputState, setResetLevelInput] = useState(
     resolveResetLevelInput(
       status,
       status.autoModeEnabled === true
@@ -498,6 +536,9 @@ function ControlView() {
           : "normal",
     ),
   );
+  const resetLevelInput = tourModePreview
+    ? resolveResetLevelInput(status, tourModePreview)
+    : resetLevelInputState;
   const [missionModeButtonLevelEditing, setMissionModeButtonLevelEditing] =
     useState(false);
   const [missionActionEnabledBySlot, setMissionActionEnabledBySlot] = useState(
@@ -575,10 +616,11 @@ function ControlView() {
   const currentModeSelectionRef = useRef(modeSelection);
   const modeTransitionActiveRef = useRef(false);
   const latestBackendModeRef = useRef("normal");
-  const isMissionMode = modeSelection === "mission";
-  const isAutoMode = modeSelection === "auto";
+  const visibleModeSelection = tourModePreview || modeSelection;
+  const isMissionMode = visibleModeSelection === "mission";
+  const isAutoMode = visibleModeSelection === "auto";
   const isMissionLikeMode = isMissionMode || isAutoMode;
-  const isNormalMode = modeSelection === "normal";
+  const isNormalMode = visibleModeSelection === "normal";
   const debugPageVisible = debug === true;
   const competitionRangeLockDisabled = !isMissionMode;
   const competitionRangeLockInputsDisabled =
@@ -625,6 +667,27 @@ function ControlView() {
   const applyConfigPatch = async (patch) => {
     if (bridge?.updateConfig) {
       await bridge.updateConfig(patch);
+    }
+  };
+  const saveAutoUnlockSlot4 = async (enabled, missionName = "") => {
+    setAutoUnlockSlot4Busy(true);
+    setAutoUnlockSlot4Error(null);
+    try {
+      await applyConfigPatch({
+        autoUnlockSlot4Enabled: enabled,
+        ...(enabled ? {
+          autoUnlockSlot4MissionName: missionName,
+          autoUnlockSlot4RestorePending: false,
+        } : {}),
+      });
+      setAutoUnlockSlot4Enabled(enabled);
+      if (enabled) setAutoUnlockSlot4MissionName(missionName);
+      return true;
+    } catch (error) {
+      setAutoUnlockSlot4Error(String(error?.message || error));
+      return false;
+    } finally {
+      setAutoUnlockSlot4Busy(false);
     }
   };
   const setSignerMode = async (mode) => {
@@ -878,6 +941,8 @@ function ControlView() {
     bridge.getConfig().then((response) => {
       if (cancelled) return;
       const config = response?.config || {};
+      setAutoUnlockSlot4Enabled(config.autoUnlockSlot4Enabled === true);
+      setAutoUnlockSlot4MissionName(config.autoUnlockSlot4MissionName || "");
       if (typeof config.level20ResetEnabled === "boolean") {
         setResetEnabled(config.level20ResetEnabled);
       }
@@ -950,6 +1015,9 @@ function ControlView() {
       } else {
         setAutoUpdateCheckEnabledState(true);
       }
+      setMacMenuBarEnabledState(config.macMenuBarEnabled === true);
+      setWindowsTrayEnabled(config.windowsTrayEnabled === true);
+      setAutoStartWatchingEnabledState(config.autoStartWatchingEnabled === true);
       if (typeof config.missionCompetitionCheckEnabled === "boolean") {
         setMissionCompetitionCheckEnabledState(
           config.missionCompetitionCheckEnabled,
@@ -1044,7 +1112,11 @@ function ControlView() {
   };
 
   const checkForNewMissionCompetition = async () => {
-    if (!firstRunSetupComplete || onboardingOpen || missionCompetitionCheckEnabled !== true) return;
+    if (
+      popupsBlocked ||
+      missionCompetitionCheckEnabled !== true
+    )
+      return;
     if (!bridge?.getCompetitionCount) return;
     if (missionCompetitionCheckActiveRef.current) return;
     missionCompetitionCheckActiveRef.current = true;
@@ -1126,10 +1198,18 @@ function ControlView() {
   };
 
   useEffect(() => {
-    if (!firstRunSetupComplete || onboardingOpen || missionCompetitionCheckEnabled !== true) return;
+    if (
+      popupsBlocked ||
+      missionCompetitionCheckEnabled !== true
+    )
+      return;
     if (!bridge?.getCompetitionCount) return;
     return startCompetitionChecks(checkForNewMissionCompetition);
-  }, [bridge, missionCompetitionCheckEnabled, firstRunSetupComplete, onboardingOpen]);
+  }, [
+    bridge,
+    missionCompetitionCheckEnabled,
+    popupsBlocked,
+  ]);
 
   useEffect(() => {
     if (currentPage !== "mish_tish") return;
@@ -1319,8 +1399,23 @@ function ControlView() {
     setAutoUpdateCheckEnabledState(next);
     await applyConfigPatch({ autoUpdateCheckEnabled: next });
   };
+  const setMacMenuBarEnabled = async (enabled) => {
+    const next = enabled === true;
+    await applyConfigPatch({ macMenuBarEnabled: next });
+    setMacMenuBarEnabledState(next);
+  };
   const clearUpdateCheckMessage = () => {
     setUpdateCheckMessage(null);
+  };
+  const changeWindowsTrayEnabled = async (enabled) => {
+    const next = enabled === true;
+    await applyConfigPatch({ windowsTrayEnabled: next });
+    setWindowsTrayEnabled(next);
+  };
+  const setAutoStartWatchingEnabled = async (enabled) => {
+    const next = enabled === true;
+    await applyConfigPatch({ autoStartWatchingEnabled: next });
+    setAutoStartWatchingEnabledState(next);
   };
   const setMissionCompetitionCheckEnabled = async (enabled) => {
     const next = enabled === true;
@@ -1373,7 +1468,7 @@ function ControlView() {
   };
   const runUpdateCheck = useCallback(
     async ({ manual = false, startup = false } = {}) => {
-      if (!startupConfigLoaded || (onboardingOpen && !startup)) return null;
+      if (!startupConfigLoaded || interfaceTourOpen || (!startup && popupsBlocked)) return null;
       if (!startup && !firstRunSetupComplete) return null;
       if (!bridge?.checkForUpdates || updateCheckBusyRef.current) return null;
       updateCheckBusyRef.current = true;
@@ -1386,7 +1481,15 @@ function ControlView() {
         const result = await Promise.race([
           bridge.checkForUpdates({ manual }),
           new Promise((resolve) => {
-            timeout = setTimeout(() => resolve({ ok: false, updateAvailable: false, reason: "timeout" }), 8000);
+            timeout = setTimeout(
+              () =>
+                resolve({
+                  ok: false,
+                  updateAvailable: false,
+                  reason: "timeout",
+                }),
+              8000,
+            );
           }),
         ]);
         if (result?.skipped !== true) {
@@ -1433,23 +1536,29 @@ function ControlView() {
         setUpdateCheckBusy(false);
       }
     },
-    [bridge, startupConfigLoaded, firstRunSetupComplete, onboardingOpen],
+    [bridge, startupConfigLoaded, firstRunSetupComplete, popupsBlocked, interfaceTourOpen],
   );
 
-  const finishStartupUpdateCheck = useCallback((result) => {
-    if (firstRunSetupComplete) return;
-    if (result?.ok && !result.updateAvailable) {
-      setStartupUpdateCheckError(null);
-      setOnboardingUpdateIncluded(false);
-      setOnboardingStep(1);
-    } else {
-      setOnboardingStep("update");
-      setOnboardingUpdateIncluded(true);
-      setStartupUpdateCheckError(result?.updateAvailable ? null :
-        "Unable to verify the latest version. Check your connection and try again.");
-    }
-    setOnboardingOpen(true);
-  }, [firstRunSetupComplete]);
+  const finishStartupUpdateCheck = useCallback(
+    (result) => {
+      if (firstRunSetupComplete) return;
+      if (result?.ok && !result.updateAvailable) {
+        setStartupUpdateCheckError(null);
+        setOnboardingUpdateIncluded(false);
+        setOnboardingStep(1);
+      } else {
+        setOnboardingStep("update");
+        setOnboardingUpdateIncluded(true);
+        setStartupUpdateCheckError(
+          result?.updateAvailable
+            ? null
+            : "Unable to verify the latest version. Check your connection and try again.",
+        );
+      }
+      setOnboardingOpen(true);
+    },
+    [firstRunSetupComplete],
+  );
 
   const retryStartupUpdateCheck = async () => {
     setStartupUpdateCheckError(null);
@@ -1457,7 +1566,7 @@ function ControlView() {
   };
 
   useEffect(() => {
-    if (!startupConfigLoaded || onboardingOpen) return;
+    if (!startupConfigLoaded || onboardingOpen || interfaceTourOpen) return;
     if (startupUpdateCheckRequestedRef.current) return;
     const timer = setTimeout(() => {
       startupUpdateCheckRequestedRef.current = true;
@@ -1466,7 +1575,14 @@ function ControlView() {
       });
     }, 300);
     return () => clearTimeout(timer);
-  }, [startupConfigLoaded, firstRunSetupComplete, onboardingOpen, runUpdateCheck, finishStartupUpdateCheck]);
+  }, [
+    startupConfigLoaded,
+    firstRunSetupComplete,
+    onboardingOpen,
+    interfaceTourOpen,
+    runUpdateCheck,
+    finishStartupUpdateCheck,
+  ]);
 
   useEffect(() => bridge?.onUpdateStatus?.(setUpdateInstallStatus), [bridge]);
   useEffect(() => {
@@ -1474,7 +1590,13 @@ function ControlView() {
   }, [bridge]);
 
   const installOfferedUpdate = async () => {
-    if (!startupConfigLoaded || (onboardingOpen && onboardingStep !== "update") || updateInstalling || !updateModal) return;
+    if (
+      !startupConfigLoaded ||
+      (onboardingOpen && onboardingStep !== "update") ||
+      updateInstalling ||
+      !updateModal
+    )
+      return;
     setUpdateInstallStatus({ phase: "downloading", percent: 0 });
     try {
       const result = await bridge.installUpdate(updateModal.latestVersion);
@@ -1492,7 +1614,7 @@ function ControlView() {
   };
 
   useEffect(() => {
-    if (!firstRunSetupComplete || onboardingOpen) return;
+    if (popupsBlocked) return;
     if (autoUpdateCheckEnabled !== true) return;
     if (!bridge?.checkForUpdates) return;
     let cancelled = false;
@@ -1521,7 +1643,12 @@ function ControlView() {
       cancelled = true;
       if (timer) clearTimeout(timer);
     };
-  }, [autoUpdateCheckEnabled, bridge, firstRunSetupComplete, onboardingOpen, runUpdateCheck]);
+  }, [
+    autoUpdateCheckEnabled,
+    bridge,
+    popupsBlocked,
+    runUpdateCheck,
+  ]);
   const activateNormalMode = async () => {
     if (!beginModeTransition("normal")) return;
     let succeeded = false;
@@ -1585,20 +1712,14 @@ function ControlView() {
     setMissionModeButtonLevel(resetLevel);
     setResetLevelInput(resetLevel);
     const cooldownMaxPbp = Number(nftResetMaxPbp);
-    let restoredNftResetEnabled = true;
-    try {
-      const response = await bridge?.getConfig?.();
-      const stored = response?.config?.nftCooldownResetMissionModeEnabled;
-      if (typeof stored === "boolean") restoredNftResetEnabled = stored;
-    } catch {}
-    setNftResetEnabled(restoredNftResetEnabled);
+    setNftResetEnabled(true);
     try {
       await applyConfigPatch({
         autoModeEnabled: false,
         missionModeEnabled: true,
         missionModeResetLevel: resetLevel,
-        nftCooldownResetEnabled: restoredNftResetEnabled,
-        nftCooldownResetMissionModeEnabled: restoredNftResetEnabled,
+        nftCooldownResetEnabled: true,
+        nftCooldownResetMissionModeEnabled: true,
         nftCooldownResetMaxPbp:
           Number.isFinite(cooldownMaxPbp) && cooldownMaxPbp >= 0
             ? cooldownMaxPbp
@@ -1667,6 +1788,9 @@ function ControlView() {
     if (!Number.isFinite(next) || next <= 0) return;
     setMissionModeButtonLevel(String(Math.floor(next)));
   }, [lastCommand, missionModeButtonLevelEditing]);
+  const walletDataLoading = !Array.isArray(
+    status.currentUserWalletSummary?.balances,
+  );
   const walletTiles = useMemo(() => {
     const balances = Array.isArray(status.currentUserWalletSummary?.balances)
       ? status.currentUserWalletSummary.balances
@@ -1896,24 +2020,41 @@ function ControlView() {
   const isStarting = status.running && !isWatching;
   const manualCheckPendingRef = useRef(false);
   const [copiedLabel, setCopiedLabel] = useState(null);
-  const [secretModalState, setSecretModalState] = useState(emptyRecoveryPhraseState);
-  const secretModalController = useMemo(() => createRecoveryPhraseController({
-    fetchBackup: () => {
-      if (!bridge?.revealSignerBackup) throw new Error("Secret key view is not available in this build.");
-      return bridge.revealSignerBackup();
-    },
-    onChange: setSecretModalState,
-  }), [bridge]);
-  useEffect(() => () => secretModalController.dispose(), [secretModalController]);
-  const { open: secretModalOpen, busy: secretModalBusy, error: secretModalError,
-    backup: secretModalBackup, revealed: secretModalRevealed } = secretModalState;
+  const [secretModalState, setSecretModalState] = useState(
+    emptyRecoveryPhraseState,
+  );
+  const secretModalController = useMemo(
+    () =>
+      createRecoveryPhraseController({
+        fetchBackup: () => {
+          if (!bridge?.revealSignerBackup)
+            throw new Error("Secret key view is not available in this build.");
+          return bridge.revealSignerBackup();
+        },
+        onChange: setSecretModalState,
+      }),
+    [bridge],
+  );
+  useEffect(
+    () => () => secretModalController.dispose(),
+    [secretModalController],
+  );
+  const {
+    open: secretModalOpen,
+    busy: secretModalBusy,
+    error: secretModalError,
+    backup: secretModalBackup,
+    revealed: secretModalRevealed,
+  } = secretModalState;
   const [secretCopiedPhraseLabel, setSecretCopiedPhraseLabel] = useState(null);
   const [secretCopiedAddrLabel, setSecretCopiedAddrLabel] = useState(null);
   const [onboardingStep, setOnboardingStep] = useState(1);
-  const [onboardingUpdateIncluded, setOnboardingUpdateIncluded] = useState(false);
+  const [onboardingUpdateIncluded, setOnboardingUpdateIncluded] =
+    useState(false);
   const [onboardingBusy, setOnboardingBusy] = useState(false);
   const [onboardingError, setOnboardingError] = useState(null);
   const [onboardingSignerMode, setOnboardingSignerMode] = useState("");
+  const [onboardingWalletFundingAcknowledged, setOnboardingWalletFundingAcknowledged] = useState(false);
   const [onboardingAppWalletBusy, setOnboardingAppWalletBusy] = useState(false);
   const [onboardingAppWalletError, setOnboardingAppWalletError] =
     useState(null);
@@ -1946,8 +2087,6 @@ function ControlView() {
     useState(false);
   const [missionPickerError, setMissionPickerError] = useState(null);
   const [collectionImageByKey, setCollectionImageByKey] = useState({});
-  const [onboardingBodyHeight, setOnboardingBodyHeight] = useState(null);
-  const onboardingBodyRef = useRef(null);
   const autoFundingRefreshAttemptedRef = useRef(false);
   const onboardingCatalogByName = useMemo(() => {
     const map = new Map();
@@ -1981,6 +2120,9 @@ function ControlView() {
     return out;
   }, [onboardingMissionCatalog]);
   const slots = liveSlots;
+  const autoUnlockSlot4Target = isMissionSlotLocked(4)
+    ? autoUnlockSlot4MissionName
+    : slots.find((entry) => Number(entry?.slot) === 4)?.missionName || autoUnlockSlot4MissionName;
 
   useEffect(() => {
     // A rate-limit error belongs to the mission that failed, not permanently
@@ -2386,11 +2528,14 @@ function ControlView() {
   }, [status.running, isWatching, status.watchLoopEnabled]);
 
   useEffect(() => {
-    if (!onboardingOpen) return undefined;
-    const dialog = document.querySelector('[data-onboarding-step]');
-    const focusableElements = () => [...dialog.querySelectorAll(
-      'button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), a[href], [tabindex="0"]',
-    )].filter(element => element.getClientRects().length > 0);
+    if (!onboardingOpen || resetErrorModal || throttleModal) return undefined;
+    const dialog = document.querySelector("[data-onboarding-step]");
+    const focusableElements = () =>
+      [
+        ...dialog.querySelectorAll(
+          'button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), a[href], [tabindex="0"]',
+        ),
+      ].filter((element) => element.getClientRects().length > 0);
     const onKeyDown = (event) => {
       if (event.key === "Escape") {
         event.preventDefault();
@@ -2400,8 +2545,13 @@ function ControlView() {
         const elements = focusableElements();
         const first = elements[0] || dialog;
         const last = elements[elements.length - 1] || dialog;
-        if (!dialog.contains(document.activeElement) || document.activeElement === dialog ||
-            (event.shiftKey ? document.activeElement === first : document.activeElement === last)) {
+        if (
+          !dialog.contains(document.activeElement) ||
+          document.activeElement === dialog ||
+          (event.shiftKey
+            ? document.activeElement === first
+            : document.activeElement === last)
+        ) {
           event.preventDefault();
           (event.shiftKey ? last : first).focus();
         }
@@ -2417,10 +2567,11 @@ function ControlView() {
       window.removeEventListener("keydown", onKeyDown, true);
       document.removeEventListener("focusin", keepFocusInSetup);
     };
-  }, [onboardingOpen]);
+  }, [onboardingOpen, resetErrorModal, throttleModal]);
 
   useEffect(() => {
-    if (lastEvent?.type !== "throttle_notice" || lastEvent.source !== "mcp") return;
+    if (lastEvent?.type !== "throttle_notice" || lastEvent.source !== "mcp")
+      return;
     const waitSeconds = Number(lastEvent.waitSeconds || 0) || null;
     const retryAt = Number(lastEvent.retryAt || 0) || null;
     const modalKey = [
@@ -2459,42 +2610,6 @@ function ControlView() {
       clearInterval(tickTimer);
     };
   }, [throttleModal]);
-
-  useEffect(() => {
-    if (!onboardingOpen) {
-      setOnboardingBodyHeight(null);
-      return;
-    }
-    const body = onboardingBodyRef.current;
-    if (!body) return;
-    const next = body.scrollHeight;
-    setOnboardingBodyHeight((prev) => (prev == null ? next : prev));
-    const raf = requestAnimationFrame(() => {
-      setOnboardingBodyHeight(next);
-    });
-    return () => cancelAnimationFrame(raf);
-  }, [
-    onboardingOpen,
-    onboardingStep,
-    onboardingBusy,
-    onboardingDataLoading,
-    onboardingError,
-    updateInstallStatus?.phase,
-    startupUpdateCheckError,
-    onboardingMissionCatalog.length,
-    onboardingMissions.length,
-  ]);
-
-  useEffect(() => {
-    if (!onboardingOpen) return undefined;
-    const body = onboardingBodyRef.current;
-    if (!body || typeof ResizeObserver === "undefined") return undefined;
-    const observer = new ResizeObserver(() => {
-      setOnboardingBodyHeight(body.scrollHeight);
-    });
-    observer.observe(body);
-    return () => observer.disconnect();
-  }, [onboardingOpen]);
 
   const openCliWindow = () => {
     setIsCliActive(true);
@@ -2769,7 +2884,11 @@ function ControlView() {
     const selectedFromCatalog = selectedName
       ? onboardingCatalogByName.get(missionKey(selectedName))
       : null;
-    return resolveOnboardingMissionCard(selectedName, selectedFromCatalog, assigned);
+    return resolveOnboardingMissionCard(
+      selectedName,
+      selectedFromCatalog,
+      assigned,
+    );
   };
 
   const seedMissionSelectionState = (missions = [], targetMissions = []) => {
@@ -3238,14 +3357,23 @@ function ControlView() {
   };
 
   const continueOnboarding = async () => {
-    if (onboardingBusy || onboardingDataLoading || ![1, 2].includes(onboardingStep)) return;
+    if (
+      onboardingBusy ||
+      onboardingDataLoading ||
+      ![1, 2].includes(onboardingStep)
+    )
+      return;
     if (onboardingStep === 1) {
       const selectedMode = String(onboardingSignerMode || "").trim();
       if (!["app_wallet", "dapp", "manual"].includes(selectedMode)) {
-        setOnboardingError("Select a funding type to continue.");
+        setOnboardingError("Choose a wallet option to continue.");
         return;
       }
       if (selectedMode === "app_wallet") {
+        if (!onboardingWalletFundingAcknowledged) {
+          setOnboardingError("Confirm that you understand the In-App Wallet needs SOL and PBP for resets.");
+          return;
+        }
         const ok = await ensureOnboardingAppWallet({ generateIfMissing: true });
         if (!ok) return;
       }
@@ -3298,7 +3426,12 @@ function ControlView() {
         ),
       );
       setOnboardingSelectionState(missions);
-      setOnboardingMissionStateReady(missions.length > 0);
+      const hasSyncedTargets = missions.some((mission) => {
+        const slot = Number(mission?.slot);
+        return Number.isInteger(slot) && slot >= 1 && slot <= 4 && isLikelyRealMissionName(mission?.name);
+      });
+      if (!hasSyncedTargets) throw new Error("No target missions were synced. Retry sync to continue.");
+      setOnboardingMissionStateReady(true);
       setOnboardingStep(2);
     } catch (error) {
       setOnboardingMissionStateReady(false);
@@ -3313,7 +3446,7 @@ function ControlView() {
   const applyOnboarding = async () => {
     if (onboardingBusy || onboardingDataLoading || onboardingStep !== 2) return;
     if (!["app_wallet", "dapp", "manual"].includes(onboardingSignerMode)) {
-      setOnboardingError("Select a funding type to continue.");
+      setOnboardingError("Choose a wallet option to continue.");
       return;
     }
     if (!onboardingMissionStateReady) {
@@ -3388,6 +3521,8 @@ function ControlView() {
       await applyConfigPatch({ firstRunOnboardingCompleted: true });
       setFirstRunSetupComplete(true);
       setOnboardingOpen(false);
+      setCurrentPage("missions");
+      setInterfaceTourOpen(true);
     } catch (error) {
       setOnboardingError(String(error?.message || error));
     } finally {
@@ -3395,106 +3530,139 @@ function ControlView() {
     }
   };
 
+  const { announcement, dismiss: dismissAnnouncement } = useLiveAnnouncements(bridge,
+    popupsBlocked || Boolean(updateModal || competitionNotificationModal || secretModalOpen ||
+      createWalletOpen || slotUnlockModalOpen || autoUnlockSlot4ConfirmTarget !== null || missionPickerSlot || bridgeLinkModal ||
+      lowBalanceModal || fundingWalletFundedModal || throttleModal || resetErrorModal));
+
   const updateOfferContent = updateModal ? (
     <>
-                <div className="text-sm text-slate-200">
-                  <div>
-                    Version{" "}
-                    <span className="font-semibold">
-                      {updateModal.latestVersion || "unknown"}
-                    </span>{" "}
-                    is available for download.
-                  </div>
-                  {!firstRunSetupComplete ? (
-                    <div className="mt-2">The latest version is required to continue. MCP changes can make older versions incompatible.</div>
-                  ) : null}
-                </div>
-                <div className="rounded-md border border-white/10 bg-black/20 p-2 text-xs text-slate-100 whitespace-pre-wrap">
-                  {Array.isArray(updateModal.notes) &&
-                  updateModal.notes.length > 0 ? (
-                    <ul className="list-disc pl-0 list-inside">
-                      {updateModal.notes.map((note, index) => (
-                        <li key={index}>{note}</li>
-                      ))}
-                    </ul>
-                  ) : (
-                    "No update notes :(."
-                  )}
-                </div>
+      <div className="text-sm text-slate-200">
+        <div>
+          Version{" "}
+          <span className="font-semibold">
+            {updateModal.latestVersion || "unknown"}
+          </span>{" "}
+          is available for download.
+        </div>
+        {!firstRunSetupComplete ? (
+          <div className="mt-2">
+            The latest version is required to continue. MCP changes can make
+            older versions incompatible.
+          </div>
+        ) : null}
+      </div>
+      {updateModal.downloadUrl ? (
+        <p className="text-base leading-6 text-slate-200">
+          If the automatic update fails, download the latest release manually here:
+          <a
+            href={updateModal.downloadUrl}
+            className="update-download-link mt-1 block break-all font-semibold text-secondary underline underline-offset-2 hover:text-accent"
+            onClick={(event) => {
+              event.preventDefault();
+              void openExternalUrl(updateModal.downloadUrl);
+            }}
+          >
+            Download manually here
+          </a>
+        </p>
+      ) : null}
+      <div className="rounded-md border border-white/10 bg-black/20 p-2 text-xs text-slate-100 whitespace-pre-wrap">
+        {Array.isArray(updateModal.notes) && updateModal.notes.length > 0 ? (
+          <ul className="list-disc pl-0 list-inside">
+            {updateModal.notes.map((note, index) => (
+              <li key={index}>{note}</li>
+            ))}
+          </ul>
+        ) : (
+          "No update notes :(."
+        )}
+      </div>
 
-                {updateInstalling ? (
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between gap-2 text-xs text-slate-200">
-                      <span role="status">
-                        {updateInstallStatus.phase === "downloading"
-                          ? "Downloading update…"
-                          : updateInstallStatus.phase === "verifying"
-                            ? "Verifying download…"
-                            : updateInstallStatus.phase === "preparing"
-                              ? "Preparing update…"
-                              : "Restarting…"}
-                      </span>
-                      <span>
-                        {updateInstallStatus.phase === "downloading"
-                          ? updateDownloadPercent
-                          : 100}
-                        %
-                      </span>
-                    </div>
-                    <div
-                      role="progressbar"
-                      aria-label="Update download"
-                      aria-valuemin={0}
-                      aria-valuemax={100}
-                      aria-valuenow={
-                        updateInstallStatus.phase === "downloading"
-                          ? updateDownloadPercent
-                          : 100
-                      }
-                      className="h-2 overflow-hidden rounded-full bg-white/10"
-                    >
-                      <div
-                        className="h-full rounded-full bg-gradient-to-r from-emerald-300 to-fuchsia-300 transition-[width] duration-200"
-                        style={{
-                          width: `${updateInstallStatus.phase === "downloading" ? updateDownloadPercent : 100}%`,
-                        }}
-                      />
-                    </div>
-                  </div>
-                ) : null}
-                {updateInstallStatus?.phase === "error" ? (
-                  <div role="alert" className="rounded-md border border-error/40 bg-error/10 p-3 text-sm">
-                    {updateInstallStatus.error || "Unable to install the update."} {firstRunSetupComplete ? "You can retry or continue for now." : "Update required before setup can continue. Please retry."}
-                  </div>
-                ) : null}
-                <div className="flex items-center justify-end gap-2">
-                  {firstRunSetupComplete ? <button
-                    type="button"
-                    className="btn btn-clear btn-sm"
-                    disabled={updateInstalling}
-                    onClick={continueAfterUpdateOffer}
-                  >
-                    Cancel
-                  </button> : null}
-                  <button
-                    type="button"
-                    className="btn btn-gradient btn-sm text-shadow-sm text-shadow-black/40"
-                    disabled={updateInstalling}
-                    onClick={installOfferedUpdate}
-                  >
-                    {updateInstallStatus?.phase === "downloading"
-                      ? `Downloading… ${updateInstallStatus.percent || 0}%`
-                      : updateInstallStatus?.phase === "verifying"
-                        ? "Verifying…"
-                        : updateInstallStatus?.phase === "preparing"
-                          ? "Preparing…"
-                          : updateInstallStatus?.phase === "restarting"
-                            ? "Restarting…"
-                            : updateInstallStatus?.phase === "error"
-                              ? "Retry update"
-                              : firstRunSetupComplete ? "Download and restart" : "Update now"}
-                  </button>
-                </div>
+
+      {updateInstalling ? (
+        <div className="space-y-2">
+          <div className="flex items-center justify-between gap-2 text-xs text-slate-200">
+            <span role="status">
+              {updateInstallStatus.phase === "downloading"
+                ? "Downloading update…"
+                : updateInstallStatus.phase === "verifying"
+                  ? "Verifying download…"
+                  : updateInstallStatus.phase === "preparing"
+                    ? "Preparing update…"
+                    : "Restarting…"}
+            </span>
+            <span>
+              {updateInstallStatus.phase === "downloading"
+                ? updateDownloadPercent
+                : 100}
+              %
+            </span>
+          </div>
+          <div
+            role="progressbar"
+            aria-label="Update download"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={
+              updateInstallStatus.phase === "downloading"
+                ? updateDownloadPercent
+                : 100
+            }
+            className="h-2 overflow-hidden rounded-full bg-white/10"
+          >
+            <div
+              className="h-full rounded-full bg-gradient-to-r from-emerald-300 to-fuchsia-300 transition-[width] duration-200"
+              style={{
+                width: `${updateInstallStatus.phase === "downloading" ? updateDownloadPercent : 100}%`,
+              }}
+            />
+          </div>
+        </div>
+      ) : null}
+      {updateInstallStatus?.phase === "error" ? (
+        <div
+          role="alert"
+          className="rounded-md border border-error/40 bg-error/10 p-3 text-sm"
+        >
+          {updateInstallStatus.error || "Unable to install the update."}{" "}
+          {firstRunSetupComplete
+            ? "You can retry or continue for now."
+            : "Update required before setup can continue. Please retry."}
+        </div>
+      ) : null}
+      <div className="flex items-center justify-end gap-2">
+        {firstRunSetupComplete ? (
+          <button
+            type="button"
+            className="btn btn-clear btn-sm"
+            disabled={updateInstalling}
+            onClick={continueAfterUpdateOffer}
+          >
+            Cancel
+          </button>
+        ) : null}
+        <button
+          type="button"
+          className="btn btn-gradient btn-sm text-shadow-sm text-shadow-black/40"
+          disabled={updateInstalling}
+          onClick={installOfferedUpdate}
+        >
+          {updateInstallStatus?.phase === "downloading"
+            ? `Downloading… ${updateInstallStatus.percent || 0}%`
+            : updateInstallStatus?.phase === "verifying"
+              ? "Verifying…"
+              : updateInstallStatus?.phase === "preparing"
+                ? "Preparing…"
+                : updateInstallStatus?.phase === "restarting"
+                  ? "Restarting…"
+                  : updateInstallStatus?.phase === "error"
+                    ? "Retry update"
+                    : firstRunSetupComplete
+                      ? "Download and restart"
+                      : "Update now"}
+        </button>
+      </div>
     </>
   ) : null;
 
@@ -3556,7 +3724,14 @@ function ControlView() {
               SlideNumberFormatted={SlideNumberFormatted}
               openSecretModal={openSecretModal}
               openCreateWalletModal={openCreateWalletModal}
+              setupActive={setupActive}
               autoUpdateCheckEnabled={autoUpdateCheckEnabled}
+              windowsTrayEnabled={windowsTrayEnabled}
+              autoStartWatchingEnabled={autoStartWatchingEnabled}
+              setAutoStartWatchingEnabled={setAutoStartWatchingEnabled}
+              setWindowsTrayEnabled={changeWindowsTrayEnabled}
+              macMenuBarEnabled={macMenuBarEnabled}
+              setMacMenuBarEnabled={setMacMenuBarEnabled}
               lastUpdateCheckAt={lastUpdateCheckAt}
               setAutoUpdateCheckEnabled={setAutoUpdateCheckEnabled}
               clearUpdateCheckMessage={clearUpdateCheckMessage}
@@ -3587,241 +3762,165 @@ function ControlView() {
               />
             </div>
           ) : null}
-          {onboardingOpen ? (
+          {interfaceTourOpen && !onboardingOpen ? (
+            <InterfaceTour onClose={closeInterfaceTour} onModePreview={setTourModePreview} />
+          ) : null}
+          {onboardingOpen ? createPortal(
             <div
               data-onboarding-step={onboardingStep}
               tabIndex={-1}
-              className="fixed inset-0 z-[10000] grid place-items-center bg-black/50 p-4"
+              className="app-dialog-backdrop setup-wizard-overlay fixed inset-0 z-[10000] grid place-items-center overflow-hidden p-4"
               role="dialog"
               aria-modal="true"
+              aria-labelledby="setup-wizard-title"
             >
               <div
-                className="p-4  w-full rounded-xl shadow-2xl shadow-black/95 space-y-4 z-10 border-2 border-[#1D1C27]  transition-all duration-250 ease-out"
+                className="app-dialog-surface setup-wizard p-4 w-full min-w-0 z-10 flex flex-col gap-4 overflow-hidden max-h-[calc(100dvh-32px)]"
                 style={{
-                  maxWidth: onboardingStep === 2 ? "680px" : "680px",
-                  backgroundImage: `url(${backImg})`,
-                  backgroundSize: "cover",
-                  backgroundPosition: "center",
+                  maxWidth: "680px",
                 }}
               >
-                <div className="flex items-center justify-between gap-3">
-                  <div className="text-lg font-semibold">
+                <div className="space-y-3 shrink-0">
+                  <ol className="flex items-center gap-4 text-xs text-slate-400" aria-label="Setup progress">
+                    {[
+                      ...(onboardingUpdateIncluded ? [{ step: "update", label: "Update" }] : []),
+                      { step: 1, label: "Wallet" },
+                      { step: 2, label: "Missions" },
+                    ].map((item, index) => (
+                      <li key={item.step} className="flex items-center gap-2" aria-current={onboardingStep === item.step ? "step" : undefined}>
+                        <span className={`flex h-5 w-5 items-center justify-center rounded-full ${onboardingStep === item.step ? "bg-success text-black" : "border border-white/20"}`}>{index + 1}</span>
+                        <span className={onboardingStep === item.step ? "text-white" : undefined}>{item.label}</span>
+                      </li>
+                    ))}
+                  </ol>
+                  <h2 id="setup-wizard-title" className="text-lg font-semibold">
                     {onboardingStep === "update"
                       ? "Update required"
                       : onboardingStep === 2
-                        ? "Select your Target Missions"
-                        : "Select your Funding Wallet/Source"}
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <div className="text-xs text-slate-400">
-                      Step {onboardingStep === "update" ? 1 : onboardingStep + (onboardingUpdateIncluded ? 1 : 0)}/{onboardingUpdateIncluded ? 3 : 2}
-                    </div>
-                  </div>
+                        ? "Review your missions"
+                        : "Wallets & approvals"}
+                  </h2>
                 </div>
-                <div
-                  className="overflow-hidden transition-[height] duration-250 ease-out"
-                  style={{
-                    height:
-                      onboardingBodyHeight == null
-                        ? "auto"
-                        : `${onboardingBodyHeight}px`,
-                  }}
-                >
-                  <div ref={onboardingBodyRef} className="space-y-3">
-                    {onboardingStep === "update" ? updateModal ? updateOfferContent : (
-                      <div className="space-y-3">
-                        <div className="text-sm text-slate-200">The latest version is required to continue. MCP changes can make older versions incompatible.</div>
-                        {startupUpdateCheckError ? <div role="alert" className="text-sm text-error">{startupUpdateCheckError}</div> : null}
-                        <div className="flex justify-end">
-                          <button className="btn btn-gradient btn-sm" disabled={updateCheckBusy} onClick={retryStartupUpdateCheck}>
-                            {updateCheckBusy ? "Checking…" : "Retry check"}
-                          </button>
+                {/* Reserve space for the native buttons’ 8px glow without creating scrollbars. */}
+                <div className="setup-wizard-content -m-2 min-h-0 min-w-0 overflow-x-hidden overflow-y-auto overscroll-contain p-2">
+                  <div className="min-w-0 space-y-3">
+                    {onboardingStep === "update" ? (
+                      updateModal ? (
+                        updateOfferContent
+                      ) : (
+                        <div className="space-y-3">
+                          <div className="text-sm text-slate-200">
+                            The latest version is required to continue. MCP
+                            changes can make older versions incompatible.
+                          </div>
+                          {startupUpdateCheckError ? (
+                            <div role="alert" className="text-sm text-error">
+                              {startupUpdateCheckError}
+                            </div>
+                          ) : null}
+                          <div className="flex justify-end">
+                            <button
+                              className="btn btn-gradient btn-sm"
+                              disabled={updateCheckBusy}
+                              onClick={retryStartupUpdateCheck}
+                            >
+                              {updateCheckBusy ? "Checking…" : "Retry check"}
+                            </button>
+                          </div>
                         </div>
-                      </div>
+                      )
                     ) : null}
                     {onboardingStep === 1 ? (
                       <div className="space-y-4">
-                        <div className="text-sm text-slate-300">
-                          Choose wallet funding type.
-                        </div>
-                        <div className="signer-type flex-col">
-                          {[
-                            [
-                              "app_wallet",
-                              "App Wallet",
-                              "A dedicated, self-custodial in-app burner wallet for automated signing.",
-                            ],
-
-                            [
-                              "dapp",
-                              "Browse Wallet",
-                              "You must approve each transaction in your browser when the browser window opens.",
-                            ],
-                            [
-                              "manual",
-                              "Manual",
-                              "A browser window will open for you to mauanlly reset.",
-                            ],
-                          ].map(([value, title, desc]) => (
-                            <label
-                              key={value}
-                              className="signer-type__app items-start"
-                            >
-                              <input
-                                type="radio"
-                                name="onboarding_signer_mode"
-                                value={value}
-                                className="fake-checkbox-radio"
-                                checked={onboardingSignerMode === value}
-                                onChange={() => {
-                                  setOnboardingSignerMode(value);
-                                  setOnboardingError(null);
-                                  if (value === "app_wallet") {
-                                    void ensureOnboardingAppWallet({
-                                      generateIfMissing: true,
-                                    });
-                                  } else {
-                                    setOnboardingAppWalletError(null);
-                                    setOnboardingAppWalletAddress("");
-                                  }
-                                }}
-                              />
-                              <div className="space-y-1 w-full">
-                                <div className="flex gap-2 items-center w-full justify-between">
-                                  <div className="text-base text-white">
-                                    {title}
-                                  </div>
-                                  {value === "app_wallet" ? (
-                                    <span className="badge h-min uppercase border-transparent bg-white text-black text-[11px] place-self-center ">
-                                      Full Automation
-                                    </span>
-                                  ) : null}
-                                </div>
-                                <div className="text-xs text-slate-300">
-                                  {desc}
-                                </div>
-                                {value === "app_wallet" ? (
-                                  <div className="flex font-semibold gap-2 mt-3  text-slate-300">
-                                    <img
-                                      src={solIcon}
-                                      className="w-4 h-4"
-                                      alt="Solana logo"
-                                    />{" "}
-                                    Requires PBP & small SOL amount for
-                                    transactions. Address found in settings.
-                                  </div>
-                                ) : null}
-                                {value === "app_wallet" &&
-                                onboardingSignerMode === "app_wallet" ? (
-                                  <div className="rounded-md border border-white/10 bg-black/30 p-3 space-y-0.5 mt-2">
-                                    <div className="flex items-center gap-2 text-xs text-slate-300" role={onboardingAppWalletBusy ? "status" : undefined}>
-                                      {onboardingAppWalletBusy ? (
-                                        <span className="loading loading-spinner loading-sm shrink-0" aria-hidden="true" />
-                                      ) : null}
-                                      <span>
-                                      {onboardingAppWalletBusy
-                                        ? walletGenerationSlow
-                                          ? "Taking longer than expected. Still checking wallet creation; please keep the app open."
-                                          : "Creating and securely storing your wallet. Please keep the app open; this can take up to a minute."
-                                        : onboardingAppWalletAddress
-                                          ? "Wallet Address"
-                                          : "Wallet will be generated when you continue."}
-                                      </span>
-                                    </div>
-                                    {onboardingAppWalletAddress ? (
-                                      <div className="flex items-center gap-4 flex-wrap">
-                                        <div className=" break-all flex min-h-13 w-full items-center gap-3 rounded-lg border border-accent/50 bg-accent/10 p-2 px-3">
-                                          {onboardingAppWalletAddress}
-                                        </div>
-                                        <button
-                                          type="button"
-                                          className="fill-white flex items-center gap-1 font-normal text-xs px-0 py-0 h-min btn btn-clear hover:fill-accent hover:text-accent hover:cursor-pointer"
-                                          onClick={() => {
-                                            const value =
-                                              onboardingAppWalletAddress;
-                                            if (!value) return;
-                                            void copyText(value).then((ok) => {
-                                              setCopiedLabel(
-                                                ok ? "Copied" : "Copy failed",
-                                              );
-                                              setTimeout(
-                                                () => setCopiedLabel(null),
-                                                1200,
-                                              );
-                                            });
-                                          }}
-                                        >
-                                          <svg
-                                            xmlns="http://www.w3.org/2000/svg"
-                                            viewBox="0 0 640 640"
-                                            className="w-4 h-4"
-                                          >
-                                            <path d="M352 544L128 544C110.3 544 96 529.7 96 512L96 288C96 270.3 110.3 256 128 256L176 256L176 224L128 224C92.7 224 64 252.7 64 288L64 512C64 547.3 92.7 576 128 576L352 576C387.3 576 416 547.3 416 512L416 464L384 464L384 512C384 529.7 369.7 544 352 544zM288 384C270.3 384 256 369.7 256 352L256 128C256 110.3 270.3 96 288 96L512 96C529.7 96 544 110.3 544 128L544 352C544 369.7 529.7 384 512 384L288 384zM224 352C224 387.3 252.7 416 288 416L512 416C547.3 416 576 387.3 576 352L576 128C576 92.7 547.3 64 512 64L288 64C252.7 64 224 92.7 224 128L224 352z" />
-                                          </svg>
-                                          Copy
-                                        </button>
-                                      </div>
-                                    ) : null}
-                                    <div className="text-[11px] text-slate-400">
-                                      Your recovery keys can also be found in
-                                      the Settings.
-                                    </div>
-                                    {onboardingAppWalletError ? (
-                                      <div className="text-xs text-error">
-                                        {onboardingAppWalletError}
-                                      </div>
-                                    ) : null}
-                                  </div>
-                                ) : null}
-                              </div>
-                            </label>
-                          ))}
-                        </div>
-
-                        <div className="flex justify-end">
-                          <button
-                            type="button"
-                            className="btn btn-gradient btn-sm text-shadow-sm text-shadow-black/40"
-                            onClick={() => void continueOnboarding()}
-                            disabled={
-                              onboardingBusy ||
-                              !String(onboardingSignerMode || "").trim()
+                        <p className="text-sm text-slate-300">Choose how resets are handled.</p>
+                        <SetupWalletStep
+                          value={onboardingSignerMode}
+                          fundingAcknowledged={onboardingWalletFundingAcknowledged}
+                          onFundingAcknowledgedChange={setOnboardingWalletFundingAcknowledged}
+                          onSelect={(value) => {
+                            if (value !== onboardingSignerMode) setOnboardingWalletFundingAcknowledged(false);
+                            setOnboardingSignerMode(value);
+                            setOnboardingError(null);
+                            if (value === "app_wallet") {
+                              void ensureOnboardingAppWallet({ generateIfMissing: true });
+                            } else {
+                              setOnboardingAppWalletError(null);
+                              setOnboardingAppWalletAddress("");
                             }
-                          >
-                            {onboardingSignerMode === "app_wallet" && onboardingAppWalletError ? "Retry" : "Continue"}
-                          </button>
-                        </div>
+                          }}
+                          onContinue={() => void continueOnboarding()}
+                          busy={onboardingBusy}
+                          walletBusy={onboardingAppWalletBusy}
+                          walletSlow={walletGenerationSlow}
+                          address={onboardingAppWalletAddress}
+                          walletError={onboardingAppWalletError}
+                          copiedLabel={copiedLabel}
+                          onCopy={() => {
+                            if (!onboardingAppWalletAddress) return;
+                            void copyText(onboardingAppWalletAddress).then((ok) => {
+                              setCopiedLabel(ok ? "Copied" : "Copy failed");
+                              setTimeout(() => setCopiedLabel(null), 1200);
+                            });
+                          }}
+                        />
                       </div>
                     ) : null}
                     {onboardingStep === 2 ? (
-                      <div className="space-y-4">
-                        <div className="rounded-md border border-warning/30 bg-warning/10 p-3 text-sm text-slate-200 flex gap-2">
-                          <div>
-                            First-time setup syncs your missions from PBP. Check
-                            they’re correct, or change them on
-                            the{" "}
-                            <a
-                              href="https://www.pixelbypixel.studio"
-                              className="text-accent underline"
-                              onClick={(event) => {
-                                event.preventDefault();
-                                void openExternalUrl(
-                                  "https://www.pixelbypixel.studio",
-                                );
-                              }}
-                            >
-                              PBP website
-                            </a>
-                            , then click{" "}
-                            <span className="font-semibold">
-                              Refresh mission status
-                            </span>
-                            . You can also change them in this app after funding
-                            the wallet selected in the previous step.
+                      <section className="min-w-0 space-y-4">
+                        <div className="rounded-md border border-white/10 bg-black/20 p-3">
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2 text-sm text-white">
+                              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="h-4 w-4 shrink-0 text-accent" aria-label="Marble" role="img">
+                                <circle cx="12" cy="12" r="9" />
+                                <path d="M7 4.5c7 1 1 7 6 9s5 3 3 6M4 10c3 5 8-1 9-6" />
+                              </svg>
+                              <span className="truncate">{onboardingWalletSummary?.displayName || status.currentUserDisplayName || "Your PBP account"}</span>
+                            </div>
+                            <div className="text-xs text-slate-400">PBP account</div>
                           </div>
+                            <button
+                              type="button"
+                              className="btn btn-clear btn-sm"
+                              onClick={() => void continueOnboarding()}
+                              disabled={onboardingBusy || onboardingDataLoading}
+                            >
+                              <span className="inline-flex items-center gap-1.5">
+                                {onboardingDataLoading ? <LoadingSpinner /> : (
+                                  <svg
+                                    xmlns="http://www.w3.org/2000/svg"
+                                    viewBox="0 0 640 640"
+                                    className="w-4 h-4"
+                                    fill="currentColor"
+                                    aria-hidden="true"
+                                  >
+                                    <path d="M320 96c123.7 0 224 100.3 224 224s-100.3 224-224 224S96 443.7 96 320c0-34.1 7.6-66.5 21.3-95.5l44.9 22.4C151.2 268 144 293.4 144 320c0 97.2 78.8 176 176 176s176-78.8 176-176S417.2 144 320 144c-47.4 0-90.4 18.7-122.1 49.2l58.1 58.1L112 304V160l51.8 51.8C203.2 163.2 258.3 96 320 96z" />
+                                  </svg>
+                                )}
+                                <span>
+                                  {onboardingDataLoading
+                                    ? "Refreshing..."
+                                    : onboardingError
+                                      ? "Retry sync"
+                                      : "Refresh mission status"}
+                                </span>
+                              </span>
+                            </button>
                         </div>
-
-                        <div className="grid grid-cols-4 gap-2">
+                        </div>
+                        <p className="text-sm text-slate-300">
+                          First-time setup syncs your missions from PBP. Check they’re correct, or change them on the{" "}
+                          <a
+                            href="https://www.pixelbypixel.studio"
+                            className="text-accent underline"
+                            onClick={(event) => {
+                              event.preventDefault();
+                              void openExternalUrl("https://www.pixelbypixel.studio");
+                            }}
+                          >PBP website</a>, then click <span className="font-semibold">Refresh mission status</span>.
+                          You can also change them in the app.
+                        </p>
+                        <div className="grid min-w-0 grid-cols-4 gap-2">
                           {[1, 2, 3, 4].map((slot) => {
                             const assigned =
                               onboardingMissions.find(
@@ -3852,54 +3951,62 @@ function ControlView() {
                                     ? "opacity-70"
                                     : ""
                                 }`}
-
                               >
-                                <div className={`card-mission__header transition-all ${!slotAutomationEnabled ? "card-mission__header--disabled" : ""}`}>
+                                <div
+                                  className={`card-mission__header transition-all ${!slotAutomationEnabled ? "card-mission__header--disabled" : ""}`}
+                                >
                                   <MissionSlotImage
                                     src={loadingSlot ? null : imgSrc}
-                                    hasAssignedNft={Boolean(selectedCard?.hasAssignedNft)}
-                                    missionActive={Boolean(selectedCard?.hasAssignedNft && selectedCard?.isActive)}
+                                    hasAssignedNft={Boolean(
+                                      selectedCard?.hasAssignedNft,
+                                    )}
+                                    missionActive={Boolean(
+                                      selectedCard?.hasAssignedNft &&
+                                      selectedCard?.isActive,
+                                    )}
                                     loading={loadingSlot}
                                   />
-                                <div className="relative z-20 flex items-start gap-2 justify-between">
-                                  <div
-                                    onClick={(event) => event.stopPropagation()}
-                                    onMouseDown={(event) =>
-                                      event.stopPropagation()
-                                    }
-                                    onKeyDown={(event) =>
-                                      event.stopPropagation()
-                                    }
-                                  >
-                                    <ToggleSwitch
-                                      switchID={`onboarding-slot-action-enabled-${slot}`}
-                                      checked={slotAutomationEnabled}
-                                      title=""
-                                      styling="hidden"
-                                      size="tiny"
-                                      tinyStateText
-                                      switchWrapClassName="slot-card-toggle-muted"
-                                      disabled={onboardingBusy}
-                                      onChange={(event) =>
-                                        setOnboardingMissionActionEnabledBySlot(
-                                          (current) => ({
-                                            ...current,
-                                            [String(slot)]:
-                                              event.target.checked,
-                                          }),
-                                        )
+                                  <div className="relative z-20 flex items-start gap-2 justify-between">
+                                    <div
+                                      onClick={(event) =>
+                                        event.stopPropagation()
                                       }
-                                    />
-                                  </div>
-                                  <div className="card-mission__status flex flex-col items-end gap-1">
-                                    <div className="card-mission__level z-10 text-[11px] flex items-center rounded-[4px] justify-center px-1.5 h-6 whitespace-nowrap opacity-100 self-end shadow-md shadow-black/20 bg-amber-500 border-orange-200 border-2 text-white text-shadow-amber-600 text-shadow-md">
-                                      {selectedCard?.currentLevel !== null &&
-                                      selectedCard?.currentLevel !== undefined
-                                        ? `Level ${selectedCard.currentLevel}`
-                                        : "Level —"}
+                                      onMouseDown={(event) =>
+                                        event.stopPropagation()
+                                      }
+                                      onKeyDown={(event) =>
+                                        event.stopPropagation()
+                                      }
+                                    >
+                                      <ToggleSwitch
+                                        switchID={`onboarding-slot-action-enabled-${slot}`}
+                                        checked={slotAutomationEnabled}
+                                        title=""
+                                        styling="hidden"
+                                        size="tiny"
+                                        tinyStateText
+                                        switchWrapClassName="slot-card-toggle-muted"
+                                        disabled={onboardingBusy}
+                                        onChange={(event) =>
+                                          setOnboardingMissionActionEnabledBySlot(
+                                            (current) => ({
+                                              ...current,
+                                              [String(slot)]:
+                                                event.target.checked,
+                                            }),
+                                          )
+                                        }
+                                      />
+                                    </div>
+                                    <div className="card-mission__status flex flex-col items-end gap-1">
+                                      <div className="card-mission__level z-10 text-[11px] flex items-center rounded-[4px] justify-center px-1.5 h-6 whitespace-nowrap opacity-100 self-end shadow-md shadow-black/20 bg-amber-500 border-orange-200 border-2 text-white text-shadow-amber-600 text-shadow-md">
+                                        {selectedCard?.currentLevel !== null &&
+                                        selectedCard?.currentLevel !== undefined
+                                          ? `Level ${selectedCard.currentLevel}`
+                                          : "Level —"}
+                                      </div>
                                     </div>
                                   </div>
-                                </div>
                                 </div>
                                 <div className="card-mission__meta">
                                   <div className="card-mission__title mt-0.5">
@@ -3910,39 +4017,13 @@ function ControlView() {
                             );
                           })}
                         </div>
-                        <div className="flex justify-between">
+                        <div className="flex items-center justify-between gap-3">
                           <button
                             type="button"
                             className="btn btn-clear btn-sm px-0"
                             onClick={() => setOnboardingStep(1)}
                             disabled={onboardingBusy}
-                          >
-                            Back
-                          </button>
-                          <div class="flex gap-2">
-                            <button
-                              type="button"
-                              className="btn btn-clear btn-sm"
-                              onClick={() => void continueOnboarding()}
-                              disabled={onboardingBusy || onboardingDataLoading}
-                            >
-                              <span className="inline-flex items-center gap-1.5">
-                                <svg
-                                  xmlns="http://www.w3.org/2000/svg"
-                                  viewBox="0 0 640 640"
-                                  className={`w-4 h-4 ${onboardingDataLoading ? "animate-spin" : ""}`}
-                                  fill="currentColor"
-                                  aria-hidden="true"
-                                >
-                                  <path d="M320 96c123.7 0 224 100.3 224 224s-100.3 224-224 224S96 443.7 96 320c0-34.1 7.6-66.5 21.3-95.5l44.9 22.4C151.2 268 144 293.4 144 320c0 97.2 78.8 176 176 176s176-78.8 176-176S417.2 144 320 144c-47.4 0-90.4 18.7-122.1 49.2l58.1 58.1L112 304V160l51.8 51.8C203.2 163.2 258.3 96 320 96z" />
-                                </svg>
-                                <span>
-                                  {onboardingDataLoading
-                                    ? "Refreshing..."
-                                    : "Refresh mission status"}
-                                </span>
-                              </span>
-                            </button>
+                          >Back</button>
                             <button
                               type="button"
                               className="btn btn-gradient btn-sm text-shadow-sm text-shadow-black/40"
@@ -3953,39 +4034,30 @@ function ControlView() {
                                 !onboardingMissionStateReady
                               }
                             >
-                              {onboardingBusy ? "Applying..." : "Apply"}
+                              {onboardingBusy && !onboardingDataLoading ? "Saving..." : "Confirm & finish"}
                             </button>
-                          </div>
                         </div>
-                      </div>
+                      </section>
                     ) : null}
                     {onboardingError ? (
                       <div className="rounded-md border border-error/40 bg-error/10 p-2 text-sm text-slate-100">
                         {onboardingError}
                       </div>
                     ) : null}
-
                   </div>
                 </div>
               </div>
-            </div>
+            </div>,
+            document.body,
           ) : null}
-          {secretModalOpen ? (
+          {!popupsBlocked && secretModalOpen ? (
             <div
-              className="fixed inset-0 z-60 grid place-items-center bg-black/50 p-4"
+              className="app-dialog-backdrop fixed inset-0 z-60 grid place-items-center p-4"
               role="dialog"
               aria-modal="true"
-              onMouseDown={(e) => {
-                if (e.target === e.currentTarget) secretModalController.close();
-              }}
             >
               <div
-                className="p-4  max-w-xl w-full rounded-xl shadow-2xl shadow-black/95 space-y-4 z-10 border-2 border-[#1D1C27]  transition-all duration-250 ease-out"
-                style={{
-                  backgroundImage: `url(${backImg})`,
-                  backgroundSize: "cover",
-                  backgroundPosition: "center",
-                }}
+                className="app-dialog-surface p-4 max-w-xl w-full space-y-4 z-10 transition-all duration-250 ease-out"
               >
                 {" "}
                 <div className="flex items-center justify-between gap-3">
@@ -4015,7 +4087,9 @@ function ControlView() {
                       <button
                         type="button"
                         className="btn btn-clear btn-xs"
-                        onClick={() => void secretModalController.toggleReveal()}
+                        onClick={() =>
+                          void secretModalController.toggleReveal()
+                        }
                         disabled={secretModalBusy}
                         title={secretModalRevealed ? "Hide" : "Reveal"}
                       >
@@ -4033,15 +4107,15 @@ function ControlView() {
                           </svg>
                         ) : (
                           <svg
-                            xmlns="http://www.w3.org/2000/svg"
-                            viewBox="0 0 640 640"
-                            className="w-4 h-4"
-                            fill="currentColor"
-                            aria-hidden="true"
-                          >
-                            <path d="M320 224c-53 0-96 43-96 96s43 96 96 96 96-43 96-96-43-96-96-96zm0 48c26.5 0 48 21.5 48 48s-21.5 48-48 48-48-21.5-48-48 21.5-48 48-48z" />
-                            <path d="M320 144C199.6 144 108.8 214.9 64 320c44.8 105.1 135.6 176 256 176s211.2-70.9 256-176c-44.8-105.1-135.6-176-256-176zm0 304c-93.9 0-169.9-52.3-210.7-128C150.1 244.3 226.1 192 320 192s169.9 52.3 210.7 128C489.9 395.7 413.9 448 320 448z" />
-                          </svg>
+                              xmlns="http://www.w3.org/2000/svg"
+                              viewBox="0 0 640 640"
+                              className="w-4 h-4"
+                              fill="currentColor"
+                              aria-hidden="true"
+                            >
+                              <path d="M320 224c-53 0-96 43-96 96s43 96 96 96 96-43 96-96-43-96-96-96zm0 48c26.5 0 48 21.5 48 48s-21.5 48-48 48-48-21.5-48-48 21.5-48 48-48z" />
+                              <path d="M320 144C199.6 144 108.8 214.9 64 320c44.8 105.1 135.6 176 256 176s211.2-70.9 256-176c-44.8-105.1-135.6-176-256-176zm0 304c-93.9 0-169.9-52.3-210.7-128C150.1 244.3 226.1 192 320 192s169.9 52.3 210.7 128C489.9 395.7 413.9 448 320 448z" />
+                            </svg>
                         )}
                       </button>
                       <button
@@ -4099,22 +4173,14 @@ function ControlView() {
               </div>
             </div>
           ) : null}
-          {createWalletOpen ? (
+          {!setupActive && createWalletOpen ? (
             <div
-              className="fixed inset-0 z-60 grid place-items-center bg-black/50 p-4"
+              className="app-dialog-backdrop fixed inset-0 z-60 grid place-items-center p-4"
               role="dialog"
               aria-modal="true"
-              onMouseDown={(e) => {
-                if (e.target === e.currentTarget && !createWalletBusy) setCreateWalletOpen(false);
-              }}
             >
               <div
-                className="p-4  w-full max-w-xl  rounded-xl shadow-2xl shadow-black/95 space-y-4 z-10 border-2 border-[#1D1C27]  transition-all duration-250 ease-out"
-                style={{
-                  backgroundImage: `url(${backImg})`,
-                  backgroundSize: "cover",
-                  backgroundPosition: "center",
-                }}
+                className="app-dialog-surface p-4 w-full max-w-xl space-y-4 z-10 transition-all duration-250 ease-out"
               >
                 {" "}
                 <div className="flex items-center justify-between gap-3">
@@ -4294,9 +4360,13 @@ function ControlView() {
                       onClick={() => void runCreateWallet()}
                     >
                       {createWalletBusy ? (
-                        <span className="loading loading-spinner loading-sm" aria-hidden="true" />
+                        <LoadingSpinner />
                       ) : null}
-                      {createWalletBusy ? "Generating..." : createWalletError ? "Retry" : "Generate Wallet"}
+                      {createWalletBusy
+                        ? "Generating..."
+                        : createWalletError
+                          ? "Retry"
+                          : "Generate Wallet"}
                     </button>
                   ) : (
                     <button
@@ -4337,8 +4407,8 @@ function ControlView() {
               sessionStartedAtMs={sessionStartedAtRef.current}
             />
           ) : null}
-          <div className={currentPage === "nfts" ? "h-full" : "hidden"}>
-            <NftsPage bridge={bridge} signerMode={status.signerMode} />
+          <div className={currentPage === "nfts" ? "min-h-0 flex-1 overflow-hidden" : "hidden"}>
+            <NftsPage bridge={bridge} signerMode={status.signerMode} setupActive={setupActive} />
           </div>
           {currentPage === "rentals" ? <RentalsPage bridge={bridge} /> : null}
           {currentPage !== "missions" ? null : (
@@ -4371,37 +4441,37 @@ function ControlView() {
                     </div>
                   </div>
                   <div className="flex items-center justify-center">
-                    <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-base ">
+                    <div className="mission-stats grid shrink-0 grid-cols-[max-content_max-content] gap-x-4 gap-y-1 whitespace-nowrap text-base leading-6">
                       {/* <div className="w-full col-span-2 text-sm">Session</div> */}
-                      <div>
-                        🎯{" "}
-                        <strong>
+                      <div className="flex items-center gap-1">
+                        <span>🎯</span>
+                        <strong className="flex items-center">
                           <SlideNumber value={missionStats.active || 0} />
-                        </strong>{" "}
-                        Active
+                        </strong>
+                        <span>Active</span>
                       </div>
-                      <div>
-                        💎{" "}
-                        <strong>
+                      <div className="flex items-center gap-1">
+                        <span>💎</span>
+                        <strong className="flex items-center">
                           <SlideNumber
                             value={missionStats.nftsAvailable || 0}
                           />
-                        </strong>{" "}
-                        NFTs ready
+                        </strong>
+                        <span>NFTs ready</span>
                       </div>
-                      <div>
-                        🥞{" "}
-                        <strong>
+                      <div className="flex items-center gap-1">
+                        <span>🥞</span>
+                        <strong className="flex items-center">
                           <SlideNumber value={missionStats.claimable || 0} />
-                        </strong>{" "}
-                        Claimable
+                        </strong>
+                        <span>Claimable</span>
                       </div>
-                      <div>
-                        🤑{" "}
-                        <strong>
+                      <div className="flex items-center gap-1">
+                        <span>🤑</span>
+                        <strong className="flex items-center">
                           <SlideNumber value={missionStats.claimed || 0} />
-                        </strong>{" "}
-                        Claimed
+                        </strong>
+                        <span>Claimed</span>
                       </div>
                     </div>
                   </div>
@@ -4410,16 +4480,17 @@ function ControlView() {
 
               <section className=" flex-1">
                 <div className="grid grid-cols-2 gap-2 h-full">
-                  <div className="h-full flex gap-2 flex-col  mission-modes ">
-                    <div className="grid grid-rows-auto gap-2 h-full transition-all ">
+                  <div className="h-full min-h-0 flex flex-col mission-modes">
+                    <div className="grid grid-rows-3 gap-2 min-h-0 flex-1">
                       <button
-                        className={` w-full card  h-auto flex-1 @container items-center justify-center overflow-hidden transition-all transition-size !p-4 ${isAutoMode ? "active" : ""}`}
+                        className={` w-full card  h-auto flex-1 @container items-center justify-center overflow-hidden transition-all !p-4 ${isAutoMode ? "active" : ""}`}
                         onClick={() => void activateAutoMode()}
                         disabled={modeTransitionBusy}
                         type="button"
                       >
+                        {isAutoMode ? <span className="mode-selected-pill">Selected</span> : null}
                         <div className="mission-mode-copy space-y-1">
-                          <div className="mode__name font-bold text-lg leading-4">
+                          <div className="mode__name font-semibold text-lg leading-4">
                             Auto Mode
                           </div>
                           <div className="text-xs">
@@ -4433,8 +4504,9 @@ function ControlView() {
                         disabled={modeTransitionBusy}
                         type="button"
                       >
-                        <div className="space-y-1 text-shadow-md text-shadow-black/15">
-                          <div className="z-10 mode__name font-bold text-lg leading-4">
+                        {isNormalMode ? <span className="mode-selected-pill">Selected</span> : null}
+                        <div className="mission-mode-copy space-y-1">
+                          <div className="z-10 mode__name font-semibold text-lg leading-4">
                             Manual Mode
                           </div>
                           <div className="text-xs">
@@ -4451,8 +4523,9 @@ function ControlView() {
                         type="button"
                         id="mission-mode-mm_button"
                       >
+                        {isMissionMode ? <span className="mode-selected-pill">Selected</span> : null}
                         <div className="mission-mode-copy space-y-1">
-                          <div className="mode__name font-bold text-lg leading-4">
+                          <div className="mode__name font-semibold text-lg leading-4">
                             Mission Mode
                           </div>
                           <div className="text-xs">
@@ -4743,52 +4816,89 @@ function ControlView() {
                       </button>
                     </div>
                     <div
-                      className={`w-full flex h-auto justify-between !p-0 items-center ${competitionRangeLockDisabled ? "hidden grayscale opacity-60" : ""}`}
+                      className="finish-target-reveal"
+                      data-open={!competitionRangeLockDisabled}
+                      aria-hidden={competitionRangeLockDisabled}
+                      inert={competitionRangeLockDisabled}
                     >
-                      <div className="relative z-20 w-full">
-                        <ToggleSwitch
-                          switchID="enableCompetitionRangeLock"
-                          checked={competitionRangeLockEnabled}
-                          title="Finish Target"
-                          tooltip="Stops claiming new missions while your competition rank is inside the target range. Mission Mode only."
-                          styling="text-xs flex !flex-row"
-                          disabled={competitionRangeLockDisabled}
-                          onChange={(event) =>
-                            void setCompetitionRangeLock(event.target.checked)
-                          }
-                        />
-                      </div>
-                      <div className="relative z-20 w-full m-0 flex gap-3 items-center text-xs -translate-y-0.5">
-                        <div class="flex items-center rounded-full border border-white/15 px-0 py-1">
-                          <input
-                            type="text"
-                            value={competitionRangeLockMinRank}
-                            onChange={(event) =>
-                              void setCompetitionRangeLockMin(
-                                event.target.value,
-                              )
-                            }
-                            disabled={competitionRangeLockInputsDisabled}
-                            class="w-7.5 border-0 bg-transparent p-0 text-center text-xs !text-white outline-none disabled:opacity-50"
-                          />
-                          <span class=" text-xs text-white/70">-</span>
-                          <input
-                            type="text"
-                            value={competitionRangeLockMaxRank}
-                            onChange={(event) =>
-                              void setCompetitionRangeLockMax(
-                                event.target.value,
-                              )
-                            }
-                            disabled={competitionRangeLockInputsDisabled}
-                            class="w-7.5 border-0 bg-transparent p-0 text-center text-xs !text-white outline-none disabled:opacity-50"
-                          />
+                      <div className="finish-target-reveal-content">
+                        <div
+                          className="w-full flex h-auto justify-between !p-0 items-center"
+                        >
+                          <div className="relative z-20 w-full">
+                            <ToggleSwitch
+                              switchID="enableCompetitionRangeLock"
+                              checked={competitionRangeLockEnabled}
+                              title="Finish Target"
+                              tooltip="Stops claiming new missions while your competition rank is inside the target range. Mission Mode only."
+                              styling="text-xs flex !flex-row"
+                              disabled={competitionRangeLockDisabled}
+                              onChange={(event) =>
+                                void setCompetitionRangeLock(event.target.checked)
+                              }
+                            />
+                          </div>
+                          <div className="relative z-20 w-full m-0 flex gap-3 items-center text-xs -translate-y-0.5">
+                            <div class="flex items-center rounded-full border border-white/15 px-0 py-1">
+                              <input
+                                type="text"
+                                value={competitionRangeLockMinRank}
+                                onChange={(event) =>
+                                  void setCompetitionRangeLockMin(
+                                    event.target.value,
+                                  )
+                                }
+                                disabled={competitionRangeLockInputsDisabled}
+                                class="w-7.5 border-0 bg-transparent p-0 text-center text-xs !text-white outline-none disabled:opacity-50"
+                              />
+                              <span class=" text-xs text-white/70">-</span>
+                              <input
+                                type="text"
+                                value={competitionRangeLockMaxRank}
+                                onChange={(event) =>
+                                  void setCompetitionRangeLockMax(
+                                    event.target.value,
+                                  )
+                                }
+                                disabled={competitionRangeLockInputsDisabled}
+                                class="w-7.5 border-0 bg-transparent p-0 text-center text-xs !text-white outline-none disabled:opacity-50"
+                              />
+                            </div>
+                            Range
+                          </div>
                         </div>
-                        Range
                       </div>
                     </div>
                   </div>
-                  <div className="flex flex-col items-center pl-8 ">
+                  <div className="relative flex flex-col items-center pl-8 ">
+                    <div className="absolute -bottom-3.5 left-[calc(50%+0.25rem)] flex flex-col items-start gap-1">
+                      <label
+                        className="flex items-center gap-2 text-xs text-white/60 cursor-pointer select-none"
+                        title={`Automatically unlock and restore ${autoUnlockSlot4Target || "the last slot 4 mission"}. ${(normalizedSlotUnlockCost + 250).toLocaleString()} PBP per renewal.`}
+                        onClick={(event) => event.stopPropagation()}
+                        onMouseDown={(event) => event.stopPropagation()}
+                        onKeyDown={(event) => event.stopPropagation()}
+                      >
+                        <input
+                          type="checkbox"
+                          className="auto-unlock-checkbox"
+                          checked={autoUnlockSlot4Enabled}
+                          disabled={autoUnlockSlot4Busy || (status.running === true && ["unlocking", "resetting"].includes(status.autoUnlockSlot4Status)) || (!autoUnlockSlot4Enabled && !autoUnlockSlot4Target)}
+                          onChange={(event) => {
+                            if (event.target.checked) {
+                              setAutoUnlockSlot4Error(null);
+                              setAutoUnlockSlot4ConfirmTarget(autoUnlockSlot4Target);
+                            } else {
+                              void saveAutoUnlockSlot4(false);
+                            }
+                          }}
+                        />
+                        <span>Auto Unlock</span>
+                      </label>
+                      {autoUnlockSlot4Error ? (
+                        <span className="text-xs text-error" role="status">{autoUnlockSlot4Error}</span>
+                      ) : null}
+                    </div>
                     <div className="flex flex-1  mx-8  user__wallet-balance h-1/2 items-center">
                       {/* make me a component */}
                       <div className="flex gap-1 flex-col w-full ">
@@ -4875,7 +4985,7 @@ function ControlView() {
                               />
                             </div>
                             <span className="flex flex-col gap-0 text-sm">
-                              Custom mission reset level
+                              Mission reset level
                               <span className="text-[11px] text-slate-400 leading-tight font-normal  ">
                                 {isMissionMode
                                   ? "Will reset missions at this level"
@@ -4887,11 +4997,12 @@ function ControlView() {
                           </div>
                         </>
                         <div
-                          className={`mt-1 w-full flex items-center  gap-3 ${!isMissionMode ? "grayscale opacity-60" : ""}`}
+                          className="mt-1 w-full flex items-center gap-3"
                         >
                           <div className="flex-1 items-center">
                             <ToggleSwitch
                               switchID="enableNFTReset"
+                              switchWrapClassName={!isMissionMode ? "grayscale opacity-60" : ""}
                               checked={isMissionMode ? nftResetEnabled : false}
                               title="NFT CD resets"
                               styling=" flex  leading-4"
@@ -4911,7 +5022,7 @@ function ControlView() {
                             />
                           </div>
                           <div
-                            className={` w-26 flex items-center text-xs ${!isMissionMode ? "grayscale opacity-60" : ""}`}
+                            className={` w-26 flex items-center text-xs ${!isMissionMode ? "grayscale opacity-[0.36]" : ""}`}
                           >
                             <label className=" -translate-y-0.5  flex items-center gap-2  text-[11px] leading-none">
                               <div className="relative flex items-center">
@@ -4937,11 +5048,15 @@ function ControlView() {
                         </div>
                       </div>
                     </div>
-                    <div className="grid  grid-cols-2 gap-x-2 gap-y-1 mx-8  mb-5 user__wallet-balance  mt-auto items-center">
+                    <div
+                      className="relative grid grid-cols-2 gap-x-2 gap-y-1 mx-8 mb-5 user__wallet-balance mt-auto items-center"
+                      aria-busy={walletDataLoading}
+                    >
                       {walletTiles.map((tile) => (
                         <div
                           key={tile.key}
-                          className="flex gap-2 items-center user__wallet-balance-item"
+                          className={`flex gap-2 items-center user__wallet-balance-item ${walletDataLoading ? "opacity-20" : ""}`}
+                          aria-hidden={walletDataLoading || undefined}
                         >
                           <img
                             src={tile.icon}
@@ -4986,12 +5101,21 @@ function ControlView() {
                           </div>
                         </div>
                       ))}
+                      {walletDataLoading ? (
+                        <div
+                          className="absolute inset-0 flex flex-col items-center justify-center gap-1.5 text-xs text-slate-100"
+                          role="status"
+                        >
+                          <LoadingSpinner />
+                          <span>Loading wallet balances…</span>
+                        </div>
+                      ) : null}
                     </div>
                   </div>
                 </div>
               </section>
 
-              <section className="">
+              <section>
                 <div className="grid grid-cols-4 gap-2 missions__parent">
                   {missionSlotCards
                     .filter(({ previewUnlocked }) => !previewUnlocked)
@@ -5085,7 +5209,11 @@ function ControlView() {
 
                       const slotAutomationEnabled =
                         missionActionEnabledBySlot[String(slot)] !== false;
-                      const canChangeMission = status.running === true;
+                      const autoUnlockStatus = slot === 4 && status.running === true
+                        ? status.autoUnlockSlot4Status : null;
+                      const autoUnlockStatusLabel = autoUnlockStatus === "unlocking"
+                        ? "Unlocking..." : autoUnlockStatus === "resetting" ? "Resetting..." : null;
+                      const canChangeMission = status.running === true && !autoUnlockStatusLabel;
 
                       const perSlotResetEnabled =
                         missionResetPerSlotEnabledBySlot[String(slot)] === true;
@@ -5095,7 +5223,7 @@ function ControlView() {
                         String(status.currentMissionResetLevel ?? 10);
 
                       return (
-                        <div key={slot} className="flex flex-col gap-1">
+                        <div key={slot} className="relative flex flex-col gap-1">
                           <div
                             className={`card-mission ${slotError ? "card-mission--error" : ""} ${
                               showRealLockedSlot4
@@ -5151,7 +5279,11 @@ function ControlView() {
                                   : ""
                               } `}
                             >
-                              {missionStateNotSynced ? (
+                              {autoUnlockStatusLabel ? (
+                                <div role="status" aria-live="polite">
+                                  <MissionSlotFallback label={autoUnlockStatusLabel} loading />
+                                </div>
+                              ) : missionStateNotSynced ? (
                                 <MissionSlotFallback label="Mission status not synced" />
                               ) : missionStateSyncing ? (
                                 <MissionSlotFallback
@@ -5160,6 +5292,7 @@ function ControlView() {
                                 />
                               ) : (
                                 <MissionSlotImage
+                                  key={slotLocked ? "locked" : "unlocked"}
                                   src={slotImageSrc}
                                   hasAssignedNft={hasAssignedNft}
                                   missionActive={missionActive}
@@ -5325,7 +5458,7 @@ function ControlView() {
                                 </div>
                               ) : null}
 
-                              {slot === 4 && slot4UnlockConfirmed ? (
+                              {slot === 4 && slot4UnlockConfirmed && !autoUnlockStatusLabel ? (
                                 <button
                                   type="button"
                                   className="absolute inset-0 z-30 grid cursor-pointer place-items-center text-white font-semibold uppercase text-xs"
@@ -5375,27 +5508,16 @@ function ControlView() {
               </section>
             </>
           )}
-          {missionPickerSlot ? (
+          {!popupsBlocked && missionPickerSlot ? (
             <div
-              className="fixed inset-0 z-60 grid place-items-center bg-black/55 p-4"
+              className="app-dialog-backdrop fixed inset-0 z-60 grid place-items-center p-4"
               role="dialog"
               aria-modal="true"
-              onMouseDown={(event) => {
-                if (
-                  event.target === event.currentTarget &&
-                  !missionPickerBusy
-                ) {
-                  setMissionPickerSlot(null);
-                }
-              }}
             >
               <div
-                className="p-4 w-full rounded-xl shadow-2xl shadow-black/95 space-y-4 z-10 border-2 border-[#1D1C27]"
+                className="app-dialog-surface p-4 w-full space-y-4 z-10"
                 style={{
                   maxWidth: "680px",
-                  backgroundImage: `url(${backImg})`,
-                  backgroundSize: "cover",
-                  backgroundPosition: "center",
                 }}
               >
                 <div className="flex items-center justify-between gap-3">
@@ -5438,7 +5560,7 @@ function ControlView() {
                 ) : null}
                 {missionPickerBusy ? (
                   <div className="grid h-48 place-items-center">
-                    <span className="loading loading-spinner loading-md text-success" />
+                    <LoadingSpinner />
                   </div>
                 ) : (
                   <div className="grid grid-cols-2 gap-2  overflow-y-auto pr-1">
@@ -5636,22 +5758,16 @@ function ControlView() {
               </div>
             </div>
           ) : null}
-          {resetErrorModal ? (
+          {resetErrorModal ? createPortal((
             <div
-              className="fixed inset-0 z-60 grid place-items-center bg-black/50 p-4"
+              className="app-dialog-backdrop fixed inset-0 z-[10020] grid place-items-center p-4"
               role="dialog"
               aria-modal="true"
-              onMouseDown={(e) => {
-                if (e.target === e.currentTarget) setResetErrorModal(null);
-              }}
             >
               <div
-                className="p-4 w-full rounded-xl shadow-2xl shadow-black/95 space-y-4 z-10 border-2 border-[#1D1C27] transition-all duration-250 ease-out"
+                className="app-dialog-surface p-4 w-full space-y-4 z-10 transition-all duration-250 ease-out"
                 style={{
                   maxWidth: "680px",
-                  backgroundImage: `url(${backImg})`,
-                  backgroundSize: "cover",
-                  backgroundPosition: "center",
                 }}
               >
                 <div className="flex items-center justify-between gap-3">
@@ -5738,25 +5854,79 @@ function ControlView() {
                 </div>
               </div>
             </div>
-          ) : null}
-          {slotUnlockModalOpen ? (
+          ), document.body) : null}
+          {!popupsBlocked && autoUnlockSlot4ConfirmTarget !== null ? (
             <div
-              className="fixed inset-0 z-60 grid place-items-center bg-black/50 p-4"
+              className="app-dialog-backdrop fixed inset-0 z-60 grid place-items-center p-4"
               role="dialog"
               aria-modal="true"
-              onMouseDown={(e) => {
-                if (e.target === e.currentTarget && !slotUnlockBusy) {
-                  setSlotUnlockModalOpen(false);
+              aria-labelledby="auto-unlock-confirm-title"
+              aria-describedby="auto-unlock-confirm-description"
+              onKeyDown={(event) => {
+                if (event.key === "Escape" && !autoUnlockSlot4Busy) {
+                  setAutoUnlockSlot4ConfirmTarget(null);
                 }
               }}
             >
               <div
-                className="p-4 w-full rounded-xl shadow-2xl shadow-black/95 space-y-4 z-10 border-2 border-[#1D1C27] transition-all duration-250 ease-out"
+                className="app-dialog-surface p-4 w-full max-w-lg space-y-3"
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <h2 id="auto-unlock-confirm-title" className="text-lg font-semibold text-white">
+                    Auto Unlock
+                  </h2>
+                  <button
+                    type="button"
+                    className="text-sm text-white/60 hover:text-white cursor-pointer disabled:opacity-45"
+                    aria-label="Close without enabling Auto Unlock"
+                    disabled={autoUnlockSlot4Busy}
+                    onClick={() => setAutoUnlockSlot4ConfirmTarget(null)}
+                  >
+                    ✕
+                  </button>
+                </div>
+                <p id="auto-unlock-confirm-description" className="text-sm leading-relaxed text-slate-200">
+                  Each time slot 4 expires, Auto Unlock will spend{" "}
+                  <span className="font-semibold text-white">{normalizedSlotUnlockCost.toLocaleString()} PBP</span>{" "}
+                  to unlock it, plus <span className="font-semibold text-white">250 PBP</span>{" "}
+                  to restore the last mission used in slot 4 if needed.
+                </p>
+                {autoUnlockSlot4Error ? (
+                  <div className="rounded-md border border-error/40 bg-error/10 p-3 text-sm text-slate-100" role="status">
+                    {autoUnlockSlot4Error}
+                  </div>
+                ) : null}
+                <p className="text-sm text-white/80">
+                  By continuing, you allow these charges on each renewal.
+                </p>
+                <div className="flex justify-end">
+                  <button
+                    type="button"
+                    className="btn btn-gradient btn-sm"
+                    autoFocus
+                    disabled={autoUnlockSlot4Busy}
+                    onClick={async () => {
+                      if (await saveAutoUnlockSlot4(true, autoUnlockSlot4ConfirmTarget)) {
+                        setAutoUnlockSlot4ConfirmTarget(null);
+                      }
+                    }}
+                  >
+                    {autoUnlockSlot4Busy ? "Enabling..." : "I understand"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : null}
+          {!popupsBlocked && slotUnlockModalOpen ? (
+            <div
+              className="app-dialog-backdrop fixed inset-0 z-60 grid place-items-center p-4"
+              role="dialog"
+              aria-modal="true"
+            >
+              <div
+                className="app-dialog-surface p-4 w-full space-y-4 z-10 transition-all duration-250 ease-out"
                 style={{
                   maxWidth: "600px",
-                  backgroundImage: `url(${backImg})`,
-                  backgroundSize: "cover",
-                  backgroundPosition: "center",
                 }}
               >
                 <div className="flex items-center justify-between gap-3">
@@ -5848,22 +6018,16 @@ function ControlView() {
               </div>
             </div>
           ) : null}
-          {bridgeLinkModal ? (
+          {!popupsBlocked && bridgeLinkModal ? (
             <div
-              className="fixed inset-0 z-60 grid place-items-center bg-black/50 p-4"
+              className="app-dialog-backdrop fixed inset-0 z-60 grid place-items-center p-4"
               role="dialog"
               aria-modal="true"
-              onMouseDown={(e) => {
-                if (e.target === e.currentTarget) setBridgeLinkModal(null);
-              }}
             >
               <div
-                className="p-4 w-full rounded-xl shadow-2xl shadow-black/95 space-y-4 z-10 border-2 border-[#1D1C27] transition-all duration-250 ease-out"
+                className="app-dialog-surface p-4 w-full space-y-4 z-10 transition-all duration-250 ease-out"
                 style={{
                   maxWidth: "680px",
-                  backgroundImage: `url(${backImg})`,
-                  backgroundSize: "cover",
-                  backgroundPosition: "center",
                 }}
               >
                 <div className="flex items-center justify-between gap-3">
@@ -5908,37 +6072,16 @@ function ControlView() {
               </div>
             </div>
           ) : null}
-          {competitionNotificationModal ? (
+          {!popupsBlocked && competitionNotificationModal ? (
             <div
-              className="fixed inset-0 z-60 grid place-items-center bg-black/50 p-4"
+              className="app-dialog-backdrop fixed inset-0 z-60 grid place-items-center p-4"
               role="dialog"
               aria-modal="true"
-              onMouseDown={(e) => {
-                if (e.target === e.currentTarget) {
-                  void closeCompetitionNotificationModal({
-                    competitionNumber:
-                      competitionNotificationCeilingNumberRef.current,
-                    suppressCheckedRef:
-                      competitionNotificationSuppressCheckedRef,
-                    setModal: setCompetitionNotificationModal,
-                    updateConfig: applyConfigPatch,
-                    onClosed: ({ competitionNumber }) => {
-                      if (!Number.isFinite(Number(competitionNumber))) return;
-                      shownCompetitionNotificationIdsRef.current.add(
-                        Number(competitionNumber),
-                      );
-                    },
-                  });
-                }
-              }}
             >
               <div
-                className="p-4 w-full rounded-xl shadow-2xl shadow-black/95 space-y-4 z-10 border-2 border-[#1D1C27] transition-all duration-250 ease-out"
+                className="app-dialog-surface p-4 w-full space-y-4 z-10 transition-all duration-250 ease-out"
                 style={{
                   maxWidth: "680px",
-                  backgroundImage: `url(${backImg})`,
-                  backgroundSize: "cover",
-                  backgroundPosition: "center",
                 }}
               >
                 <div className="relative pr-12">
@@ -5960,12 +6103,14 @@ function ControlView() {
                     </div>
                     <div className="space-y-1 text-xs text-slate-200 mt-2">
                       <div className="text-xs text-slate-300">
-                        Start: {formatCompetitionDateTime(
+                        Start:{" "}
+                        {formatCompetitionDateTime(
                           competitionNotificationModal.start || "Unknown",
                         )}
                       </div>
                       <div className="text-xs text-slate-300">
-                        End: {formatCompetitionDateTime(
+                        End:{" "}
+                        {formatCompetitionDateTime(
                           competitionNotificationModal.end || "Unknown",
                         )}
                       </div>
@@ -6112,24 +6257,17 @@ function ControlView() {
               </div>
             </div>
           ) : null}
-          {updateModal && firstRunSetupComplete ? (
+          {announcement ? <AnnouncementDialog announcement={announcement} onClose={dismissAnnouncement} openExternal={openExternalUrl} wallet={String(status.currentUserWalletId || status.currentUserWalletSummary?.walletId || status.currentUserWalletSummary?.wallet_id || "").trim()} /> : null}
+          {!popupsBlocked && updateModal ? (
             <div
-              className="fixed inset-0 z-60 grid place-items-center bg-black/50 p-4"
+              className="app-dialog-backdrop fixed inset-0 z-60 grid place-items-center p-4"
               role="dialog"
               aria-modal="true"
-              onMouseDown={(e) => {
-                if (e.target === e.currentTarget && !updateInstalling) {
-                  continueAfterUpdateOffer();
-                }
-              }}
             >
               <div
-                className="p-4 w-full rounded-xl shadow-2xl shadow-black/95 space-y-4 z-10 border-2 border-[#1D1C27] transition-all duration-250 ease-out"
+                className="app-dialog-surface p-4 w-full space-y-4 z-10 transition-all duration-250 ease-out"
                 style={{
                   maxWidth: "640px",
-                  backgroundImage: `url(${backImg})`,
-                  backgroundSize: "cover",
-                  backgroundPosition: "center",
                 }}
               >
                 <div className="flex items-center justify-between gap-3">
@@ -6140,16 +6278,12 @@ function ControlView() {
               </div>
             </div>
           ) : null}
-          {fundingWalletFundedModal ? (
+          {!popupsBlocked && fundingWalletFundedModal ? (
             <div
-              className="fixed inset-0 z-60 grid place-items-center overflow-hidden bg-black/50 p-4"
+              className="app-dialog-backdrop fixed inset-0 z-60 grid place-items-center overflow-hidden p-4"
               role="dialog"
               aria-modal="true"
               aria-labelledby="funding-wallet-funded-title"
-              onMouseDown={(e) => {
-                if (e.target === e.currentTarget)
-                  setFundingWalletFundedModal(null);
-              }}
             >
               <div
                 className="pointer-events-none absolute inset-0 overflow-hidden"
@@ -6176,12 +6310,7 @@ function ControlView() {
                 ))}
               </div>
               <div
-                className="relative z-10 w-full max-w-xl space-y-4 rounded-xl border-2 border-[#1D1C27] p-4 shadow-2xl shadow-black/95"
-                style={{
-                  backgroundImage: `url(${backImg})`,
-                  backgroundSize: "cover",
-                  backgroundPosition: "center",
-                }}
+                className="app-dialog-surface relative z-10 w-full max-w-xl space-y-4 p-4"
               >
                 <div className="flex items-center justify-between gap-3">
                   <div
@@ -6264,22 +6393,14 @@ function ControlView() {
               </div>
             </div>
           ) : null}
-          {lowBalanceModal ? (
+          {!popupsBlocked && lowBalanceModal ? (
             <div
-              className="fixed inset-0 z-60 grid place-items-center bg-black/50 p-4"
+              className="app-dialog-backdrop fixed inset-0 z-60 grid place-items-center p-4"
               role="dialog"
               aria-modal="true"
-              onMouseDown={(e) => {
-                if (e.target === e.currentTarget) setLowBalanceModal(null);
-              }}
             >
               <div
-                className="p-4  w-full max-w-xl rounded-xl shadow-2xl shadow-black/95 space-y-4 z-10 border-2 border-[#1D1C27]  transition-all duration-250 ease-out"
-                style={{
-                  backgroundImage: `url(${backImg})`,
-                  backgroundSize: "cover",
-                  backgroundPosition: "center",
-                }}
+                className="app-dialog-surface p-4 w-full max-w-xl space-y-4 z-10 transition-all duration-250 ease-out"
               >
                 {/* <div className="card w-full max-w-140 space-y-4 !bg-[#0b1116] border border-warning/50 z-10"> */}
                 <div className="flex items-center justify-between gap-3">
@@ -6428,22 +6549,14 @@ function ControlView() {
               </div>
             </div>
           ) : null}
-          {throttleModal ? (
+          {throttleModal ? createPortal((
             <div
-              className="fixed inset-0 z-60 grid place-items-center bg-black/50 p-4"
+              className="app-dialog-backdrop fixed inset-0 z-[10020] grid place-items-center p-4"
               role="dialog"
               aria-modal="true"
-              onMouseDown={(e) => {
-                if (e.target === e.currentTarget) setThrottleModal(null);
-              }}
             >
               <div
-                className="p-4 w-full max-w-xl rounded-xl shadow-2xl shadow-black/95 space-y-4 z-10 border-2 border-[#1D1C27] transition-all duration-250 ease-out"
-                style={{
-                  backgroundImage: `url(${backImg})`,
-                  backgroundSize: "cover",
-                  backgroundPosition: "center",
-                }}
+                className="app-dialog-surface p-4 w-full max-w-xl space-y-4 z-10 transition-all duration-250 ease-out"
               >
                 <div className="flex items-center justify-between gap-3">
                   <div className="text-lg font-semibold text-warning">
@@ -6497,7 +6610,7 @@ function ControlView() {
                 </div>
               </div>
             </div>
-          ) : null}
+          ), document.body) : null}
         </div>
       </div>
     </main>

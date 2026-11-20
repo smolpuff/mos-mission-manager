@@ -16,11 +16,17 @@ const SAVE_DEBOUNCE_MS = 350;
 const pendingSaves = new WeakMap();
 const DEFAULT_TARGET_MISSIONS = ["Do it All!", "Race!"];
 const DESKTOP_MANAGED_KEYS = [
+  "windowsTrayEnabled",
+  "macMenuBarEnabled",
+  "autoStartWatchingEnabled",
   "missionCompetitionPopupSuppressedThroughNumber",
   "missionCompetitionLastObservedNumber",
   "missionCompetitionCheckEnabled",
 ];
 const SALVAGE_TOP_LEVEL_KEYS = [
+  "autoUnlockSlot4Enabled",
+  "autoUnlockSlot4MissionName",
+  "autoUnlockSlot4RestorePending",
   "targetMissions",
   "autoModeEnabled",
   "level20ResetEnabled",
