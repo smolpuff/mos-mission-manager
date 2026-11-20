@@ -79,7 +79,7 @@ test("delivery preserves the exact timestamp already used for local reset counti
 
 test("the actual HTTP sender retries transient failures but stops on permanent rejections", async () => {
   const fs = require("node:fs"), path = require("node:path"), vm = require("node:vm");
-  const source = fs.readFileSync(path.join(__dirname, "main.js"), "utf8");
+  const source = fs.readFileSync(path.join(__dirname, "main.js"), "utf8").replace(/\r\n/g, "\n");
   const start = source.indexOf("async function postResetTelemetryPayload(");
   assert.ok(start > 0);
   const text = source.slice(start, source.indexOf("\n}\n", start) + 2);

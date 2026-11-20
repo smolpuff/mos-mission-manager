@@ -119,7 +119,7 @@ test("beta artifact validation retains version, repository and checksum checks",
 for (const platform of ["win32", "darwin"]) {
  for (const location of ["legacy", "temp"]) {
   test(`${platform} accepts the installed beta version in ${location} update acknowledgement`, async (t) => {
-    const base = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "beta-update-receipt-")));
+    const base = await fs.promises.realpath(fs.mkdtempSync(path.join(os.tmpdir(), "beta-update-receipt-")));
     t.after(() => fs.rmSync(base, { recursive: true, force: true }));
     const userData = path.join(base, "user-data");
     fs.mkdirSync(userData);
@@ -127,7 +127,7 @@ for (const platform of ["win32", "darwin"]) {
     const execPath = platform === "win32" ? target : path.join(target, "Contents/MacOS/missions");
     fs.mkdirSync(path.dirname(execPath), { recursive: true });
     fs.writeFileSync(execPath, "offline fixture");
-    const directory = fs.mkdtempSync(path.join(location === "temp" ? fs.realpathSync(os.tmpdir()) : base, `.${path.basename(target)}.update-`));
+    const directory = fs.mkdtempSync(path.join(location === "temp" ? await fs.promises.realpath(os.tmpdir()) : base, `.${path.basename(target)}.update-`));
     t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
     const receipt = { target, directory, token: "a".repeat(32), version: "3.3.0-beta.8", ownerPid: process.pid };
     fs.writeFileSync(path.join(userData, "desktop-update-transaction.json"), JSON.stringify(receipt));

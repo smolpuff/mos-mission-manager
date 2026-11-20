@@ -3,13 +3,14 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
 import { createRequire } from "node:module";
+import { fileURLToPath } from "node:url";
 import { parseSync } from "rolldown/experimental";
 
 const require = createRequire(import.meta.url);
 const { createMissionActionExecutor } = require("./mission-actions.js");
 
 function actualFunction(file, name) {
-  const path = new URL(file, import.meta.url).pathname;
+  const path = fileURLToPath(new URL(file, import.meta.url));
   const source = fs.readFileSync(path, "utf8");
   const { program, errors } = parseSync(path, source);
   assert.equal(errors.length, 0);
