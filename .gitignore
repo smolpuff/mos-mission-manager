@@ -9,6 +9,7 @@ scripts/
 releases/
 config.json.bak
 STARTUP_CALLS_ROLLBACK_NOTES.md
+/MCP-AGENT-IDENTITY-PLAN.md
 test/
 tests/
 todo.md
